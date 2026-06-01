@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genericagent-tui"
+version = "0.1.0"
+description = "Standalone curses TUI launcher for GenericAgent"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyNaCl>=1.5.0",
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+    "urllib3>=1.26",
+]
+
+[project.scripts]
+ga-tui = "ga_tui.app:main"
+ga-tui-check = "ga_tui.integration:doctor_main"
+ga-tui-install-core-shim = "ga_tui.integration:install_core_shim_main"
+ga-tui-integration = "ga_tui.integration:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

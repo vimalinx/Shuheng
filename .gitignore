@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local agent/dev workflow state. Keep public releases source-only.
+.agents/
+.codex/
+.trellis/
+goal-*/
+memory/
+temp/
+tmp/
+
+# Local secrets and runtime noise.
+.env
+.env.*
+*.secret
+*.log
+*.pem
+*.key
