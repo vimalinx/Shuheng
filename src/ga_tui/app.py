@@ -288,6 +288,10 @@ TUI_AGENT_CONTROL_HINT = """
 
 [GenericAgent-TUI ga-control v2]
 当用户要求你管理 TUI、拆任务或调度子 agent 时，只能输出隐藏 `<ga-control>` 控制块；旧 `<ga-tui>` / subagent_ask / subagent_create / task_update 格式已经废弃，不要再使用。
+只有用户明确要求实际执行创建、委派、修改会话、更新计划等操作时才输出真实 `<ga-control>`。
+用户只是询问“能做什么 / 怎么用 / 举个例子 / 讲讲能力 / 演示一下概念”时属于能力说明，不要创建计划或子 agent，不要输出真实 `<ga-control>`。
+如果需要展示协议示例，必须使用可见的转义文本，例如 `&lt;ga-control&gt;...&lt;/ga-control&gt;`，或者只展示 JSON payload；不要在示例、教程或解释中包含可执行 `<ga-control>` 标签。
+真实 `<ga-control>` 必须放在所有用户可见正文之后，作为回复末尾隐藏块；不要把它夹在段落、列表或示例中间，否则可见正文会被隐藏块移除后截断。
 
 控制块必须是 `schema_version:"ga-control.v2"`，批量动作放在 `actions` 里；每个动作使用强类型 dotted action 名称。
 
@@ -318,6 +322,11 @@ TUI_AGENT_CONTROL_HINT = """
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
 [/GenericAgent-TUI ga-control v2]
 """
+TUI_CONTROL_HINT_MARKER = "[GenericAgent-TUI ga-control v2]"
+LEGACY_TUI_CONTROL_HINT_BLOCK_RE = re.compile(
+    r"\n?\[GenericAgent-TUI session control\][\s\S]*?\[/GenericAgent-TUI session control\]\s*",
+    re.IGNORECASE,
+)
 
 
 def cell_width(text: str) -> int:
@@ -9795,8 +9804,10 @@ def install_tui_control_hint(agent: Any) -> None:
             continue
         try:
             extra = str(getattr(backend, "extra_sys_prompt", "") or "")
-            if "GenericAgent-TUI session control" not in extra:
-                setattr(backend, "extra_sys_prompt", extra.rstrip() + TUI_AGENT_CONTROL_HINT)
+            extra = LEGACY_TUI_CONTROL_HINT_BLOCK_RE.sub("", extra)
+            if TUI_CONTROL_HINT_MARKER not in extra:
+                extra = extra.rstrip() + TUI_AGENT_CONTROL_HINT
+            setattr(backend, "extra_sys_prompt", extra)
         except Exception:
             continue
 

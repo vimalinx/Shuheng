@@ -1454,9 +1454,23 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     assert exact_reuse_score >= 40, exact_reuse_score
     assert "schema_version:\"ga-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
     assert "delegate.create" in a.TUI_AGENT_CONTROL_HINT
+    assert "能力说明" in a.TUI_AGENT_CONTROL_HINT
+    assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
+    assert "回复末尾隐藏块" in a.TUI_AGENT_CONTROL_HINT
     assert '<ga-tui>{"action":"subagent_ask"' not in a.TUI_AGENT_CONTROL_HINT
     assert "secret_subagents" in a.TUI_AGENT_CONTROL_HINT
     assert "memory/subagents/" in a.TUI_AGENT_CONTROL_HINT
+    hint_agent = FakeLLMAgent()
+    for client in hint_agent.llmclients:
+        client.backend.extra_sys_prompt = "prefix\n[GenericAgent-TUI session control]\nold\n[/GenericAgent-TUI session control]\n"
+    a.install_tui_control_hint(hint_agent)
+    a.install_tui_control_hint(hint_agent)
+    for client in hint_agent.llmclients:
+        prompt = client.backend.extra_sys_prompt
+        assert "prefix" in prompt, prompt
+        assert "GenericAgent-TUI session control" not in prompt, prompt
+        assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
+        assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in prompt, prompt
     fenced_control = (
         "现在重新发送：\n"
         "```json\n"
