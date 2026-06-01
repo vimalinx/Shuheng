@@ -125,6 +125,8 @@ for path in (ROOT_DIR, FRONTENDS_DIR):
     if path not in sys.path:
         sys.path.insert(0, path)
 
+import agentmain
+from agent_loop import StepOutcome
 from agentmain import GenericAgent
 from continue_cmd import (
     _format_response_segment,
@@ -293,6 +295,8 @@ TUI_AGENT_CONTROL_HINT = """
 如果需要展示协议示例，必须使用可见的转义文本，例如 `&lt;ga-control&gt;...&lt;/ga-control&gt;`，或者只展示 JSON payload；不要在示例、教程或解释中包含可执行 `<ga-control>` 标签。
 真实 `<ga-control>` 必须放在所有用户可见正文之后，作为回复末尾隐藏块；不要把它夹在段落、列表或示例中间，否则可见正文会被隐藏块移除后截断。
 
+在决定创建、复用、停止、委派子 agent 或更新任务前，优先调用只读查询工具获取当前事实：`agent_list`、`agent_get`、`agent_match`、`task_list`、`task_get`、`approval_list`、`artifact_list`、`capability_list`。这些工具只读取 TUI 仪表盘/账本，不会修改状态；查清后才在回复末尾输出真实 `<ga-control>`。
+
 控制块必须是 `schema_version:"ga-control.v2"`，批量动作放在 `actions` 里；每个动作使用强类型 dotted action 名称。
 
 会话控制示例：
@@ -327,6 +331,130 @@ LEGACY_TUI_CONTROL_HINT_BLOCK_RE = re.compile(
     r"\n?\[GenericAgent-TUI session control\][\s\S]*?\[/GenericAgent-TUI session control\]\s*",
     re.IGNORECASE,
 )
+TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_list",
+            "description": "Read-only TUI dashboard query. Lists current GenericAgent-TUI subagents before deciding whether to create, reuse, stop, or delegate. User-facing name: agent.list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "description": "Optional role filter, e.g. researcher/coder/reviewer."},
+                    "status": {"type": "string", "description": "Optional status filter, e.g. idle/running/aborting."},
+                    "include_ephemeral": {"type": "boolean", "description": "Include temporary agents.", "default": True},
+                    "limit": {"type": "integer", "description": "Maximum agents to return.", "default": 50},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_get",
+            "description": "Read-only TUI dashboard query. Gets one subagent's profile, permissions, queues, current task refs, and bounded memory/profile summaries. User-facing name: agent.get.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Subagent id, exact name, or unique name/id prefix."},
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_match",
+            "description": "Read-only TUI dashboard query. Scores reusable subagents for an objective and recommends reuse vs create-new before emitting ga-control. User-facing name: agent.match.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {"type": "string", "description": "Bounded task objective to route."},
+                    "role": {"type": "string", "description": "Desired role, e.g. researcher/coder/reviewer."},
+                    "capabilities_required": {"type": "array", "items": {"type": "string"}, "description": "Capabilities the worker should have."},
+                    "reuse_policy": {"type": "string", "enum": ["prefer_existing", "force_new", "reuse_only"], "description": "Routing preference.", "default": "prefer_existing"},
+                    "security_context": {"type": "string", "enum": ["standard", "secret"], "description": "Security context to match.", "default": "standard"},
+                    "limit": {"type": "integer", "description": "Maximum candidates to return.", "default": 5},
+                },
+                "required": ["objective"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "task_list",
+            "description": "Read-only TUI dashboard query. Lists the shared task ledger with status/agent filters before updating plans or delegating. User-facing name: task.list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Optional status filter."},
+                    "assigned_agent": {"type": "string", "description": "Optional assigned agent id/name filter."},
+                    "include_completed": {"type": "boolean", "description": "Include terminal tasks.", "default": False},
+                    "limit": {"type": "integer", "description": "Maximum tasks to return.", "default": 20},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "task_get",
+            "description": "Read-only TUI dashboard query. Gets one task with latest ledger row, recent history, child tasks, traces, artifacts, and approval refs. User-facing name: task.get.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task id from the shared task ledger."},
+                    "history_limit": {"type": "integer", "description": "Maximum history rows to return.", "default": 20},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approval_list",
+            "description": "Read-only TUI dashboard query. Lists pending approval gates without executing decisions. User-facing name: approval.list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_all": {"type": "boolean", "description": "Include non-pending approvals.", "default": False},
+                    "limit": {"type": "integer", "description": "Maximum approvals to return.", "default": 20},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "artifact_list",
+            "description": "Read-only TUI dashboard query. Lists artifact refs and metadata; does not inline artifact contents. User-facing name: artifact.list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_task_id": {"type": "string", "description": "Optional source task id filter."},
+                    "artifact_type": {"type": "string", "description": "Optional artifact type filter."},
+                    "limit": {"type": "integer", "description": "Maximum artifacts to return.", "default": 20},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capability_list",
+            "description": "Read-only TUI dashboard query. Lists role templates, capabilities, write policies, and currently registered agents. User-facing name: capability.list.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+TUI_QUERY_TOOL_NAMES = {
+    str(tool.get("function", {}).get("name") or "")
+    for tool in TUI_QUERY_TOOL_SCHEMAS
+    if tool.get("function")
+}
 
 
 def cell_width(text: str) -> int:
@@ -8998,6 +9126,423 @@ def find_reusable_subagent(
     return scored[0][2]
 
 
+def tui_query_limit(value: Any, default: int, *, minimum: int = 1, maximum: int = 100) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def tui_query_error(message: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.query.v1",
+        "status": "error",
+        "error": message,
+        **extra,
+    }
+
+
+def tui_query_ok(kind: str, **payload: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.query.v1",
+        "kind": kind,
+        "status": "ok",
+        "generated_at": now_iso(),
+        **payload,
+    }
+
+
+def tui_query_json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): tui_query_json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [tui_query_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [tui_query_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def tui_query_refresh_subagents(state: State) -> None:
+    vault = getattr(state, "secret_vault", None)
+    try:
+        if vault is not None and bool(getattr(vault, "unlocked", False)):
+            load_secret_subagents(state)
+        else:
+            load_subagents(state)
+    except Exception:
+        return
+
+
+def tui_query_text_summary(text: str, limit: int = 220) -> str:
+    return truncate_cells(re.sub(r"\s+", " ", clean_text(text or "")).strip(), limit)
+
+
+def tui_query_agent_lifecycle(sub: SubAgentRuntime) -> str:
+    return "persistent" if sub.persistent else "ephemeral"
+
+
+def tui_query_agent_busy_reason(sub: SubAgentRuntime) -> str:
+    if sub.status in {"running", "aborting"}:
+        return sub.status
+    if sub.pending_interaction:
+        return "waiting_for_user"
+    if sub.task_queue:
+        return f"task_queue:{len(sub.task_queue)}"
+    if sub.chat_queue:
+        return f"chat_queue:{len(sub.chat_queue)}"
+    if sub.agent is not None and agent_has_unfinished_task(sub.agent):
+        return "runtime_unfinished"
+    return "idle"
+
+
+def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dict[str, Any]:
+    permissions = permissions_for_role(sub.role, security_context=sub.security_context)
+    record: dict[str, Any] = {
+        "agent_id": sub.agent_id,
+        "name": sub.name,
+        "role": normalized_role(sub.role),
+        "lifecycle": tui_query_agent_lifecycle(sub),
+        "persistent": bool(sub.persistent),
+        "status": sub.status,
+        "busy_reason": tui_query_agent_busy_reason(sub),
+        "security_context": sub.security_context,
+        "capabilities": role_tools_allowed(sub.role),
+        "write_policy": role_write_policy(sub.role),
+        "permissions": permissions,
+        "default_model": sub.default_model,
+        "queue_length": len(sub.task_queue),
+        "chat_queue_length": len(sub.chat_queue),
+        "pending_interaction": bool(sub.pending_interaction),
+        "active_task_id": sub.active_task_id,
+        "active_bus_task_id": sub.active_bus_task_id,
+        "runtime_loaded": sub.agent is not None,
+        "runtime_running": bool(sub.agent is not None and agent_has_unfinished_task(sub.agent)),
+        "owner_session": sub.owner_session,
+        "home": sub.home,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(sub.updated_at)),
+        "updated_age": rel_age(sub.updated_at),
+        "profile_summary": tui_query_text_summary(subagent_profile_text(sub), 260),
+    }
+    if detail:
+        latest = latest_task_records()
+        assigned = [
+            row for row in latest.values()
+            if str(row.get("assigned_agent") or "") == sub.agent_id
+        ]
+        assigned.sort(key=row_timestamp, reverse=True)
+        record.update({
+            "profile": truncate_cells(clean_text(subagent_profile_text(sub)), 1600),
+            "memory_summary": tui_query_text_summary(subagent_memory_text(sub), 420),
+            "output_contract": role_output_contract(sub.role),
+            "task_queue_preview": [
+                {
+                    "prompt": tui_query_text_summary(item[0], 160) if item else "",
+                    "source": item[1] if len(item) > 1 else "",
+                    "task_id": item[3] if len(item) > 3 else "",
+                    "parent_task_id": item[4] if len(item) > 4 else "",
+                }
+                for item in sub.task_queue[:5]
+            ],
+            "chat_queue_preview": [tui_query_text_summary(item, 160) for item in sub.chat_queue[:5]],
+            "recent_tasks": [
+                {
+                    "task_id": row.get("task_id", ""),
+                    "status": row.get("status", ""),
+                    "kind": row.get("kind", ""),
+                    "objective": tui_query_text_summary(str(row.get("objective") or row.get("summary") or ""), 180),
+                    "artifact_refs": row.get("artifact_refs") or [],
+                    "timestamp": row.get("timestamp", ""),
+                }
+                for row in assigned[:8]
+            ],
+        })
+    return tui_query_json_safe(record)
+
+
+def tui_tool_agent_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+    tui_query_refresh_subagents(state)
+    role_filter = (args.get("role") or "").strip()
+    status_filter = (args.get("status") or "").strip().lower()
+    include_ephemeral = bool(args.get("include_ephemeral", True))
+    limit = tui_query_limit(args.get("limit"), 50)
+    agents = list(state.subagents.values())
+    if role_filter:
+        role = normalized_role(role_filter)
+        agents = [sub for sub in agents if normalized_role(sub.role) == role]
+    if status_filter:
+        agents = [sub for sub in agents if sub.status.lower() == status_filter]
+    if not include_ephemeral:
+        agents = [sub for sub in agents if sub.persistent]
+    agents.sort(key=lambda item: item.updated_at, reverse=True)
+    records = [tui_query_agent_record(sub) for sub in agents[:limit]]
+    return tui_query_ok(
+        "agent.list",
+        total=len(agents),
+        returned=len(records),
+        agents=records,
+        note="Read-only snapshot. Use agent_match before creating new workers when reuse is acceptable.",
+    )
+
+
+def tui_tool_agent_get(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+    tui_query_refresh_subagents(state)
+    target = str(args.get("target") or "").strip()
+    sub = resolve_subagent(state, target)
+    if sub is None:
+        return tui_query_error("Subagent not found or selector is ambiguous.", target=target)
+    return tui_query_ok("agent.get", agent=tui_query_agent_record(sub, detail=True))
+
+
+def tui_query_capability_matches(required: str, available: list[str]) -> bool:
+    req = (required or "").strip().lower().replace("_", ".")
+    if not req:
+        return True
+    tokens: set[str] = set()
+    for item in available:
+        raw = str(item or "").strip().lower().replace("_", ".")
+        if not raw:
+            continue
+        tokens.add(raw)
+        tokens.add(raw.split(".", 1)[0])
+    return req in tokens or req.split(".", 1)[0] in tokens
+
+
+def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+    tui_query_refresh_subagents(state)
+    objective = str(args.get("objective") or "").strip()
+    if not objective:
+        return tui_query_error("objective is required.")
+    requested_role = normalized_role(str(args.get("role") or "specialist"))
+    reuse_policy = str(args.get("reuse_policy") or "prefer_existing").strip().lower()
+    security_context = normalized_security_context(str(args.get("security_context") or "standard"))
+    required_caps = [str(item) for item in (args.get("capabilities_required") or []) if str(item).strip()]
+    limit = tui_query_limit(args.get("limit"), 5, maximum=20)
+    candidates: list[tuple[int, SubAgentRuntime, list[str]]] = []
+    for sub in state.subagents.values():
+        reasons: list[str] = []
+        score = reusable_subagent_score(sub, objective, objective, requested_role)
+        if sub.security_context == security_context:
+            score += 20
+            reasons.append(f"security_context={security_context}")
+        else:
+            score -= 80
+            reasons.append(f"security_context_mismatch:{sub.security_context}")
+        if requested_role != "specialist":
+            if normalized_role(sub.role) == requested_role:
+                score += 30
+                reasons.append(f"role_match:{requested_role}")
+            else:
+                score -= 10
+                reasons.append(f"role_mismatch:{sub.role}")
+        available_caps = role_tools_allowed(sub.role)
+        for cap in required_caps:
+            if tui_query_capability_matches(cap, available_caps):
+                score += 12
+                reasons.append(f"capability_match:{cap}")
+            else:
+                score -= 8
+                reasons.append(f"capability_missing:{cap}")
+        busy = tui_query_agent_busy_reason(sub)
+        if busy == "idle":
+            score += 12
+            reasons.append("idle")
+        else:
+            score -= 8
+            reasons.append(f"busy:{busy}")
+        if sub.persistent:
+            score += 4
+            reasons.append("persistent")
+        if score > -40:
+            candidates.append((score, sub, reasons))
+    candidates.sort(key=lambda item: (item[0], item[1].updated_at), reverse=True)
+    rows = [
+        {
+            "score": score,
+            "reason": reasons,
+            "agent": tui_query_agent_record(sub),
+        }
+        for score, sub, reasons in candidates[:limit]
+    ]
+    top = rows[0] if rows else None
+    if reuse_policy == "force_new":
+        recommended_action = "create_new"
+        recommended_agent = None
+        reason = "reuse_policy=force_new"
+    elif top and int(top["score"]) >= 35:
+        recommended_action = "reuse_existing"
+        recommended_agent = top["agent"]
+        reason = f"best_score={top['score']}"
+    elif reuse_policy == "reuse_only":
+        recommended_action = "none"
+        recommended_agent = None
+        reason = "reuse_only but no candidate reached score threshold"
+    else:
+        recommended_action = "create_new"
+        recommended_agent = None
+        reason = "no candidate reached score threshold"
+    return tui_query_ok(
+        "agent.match",
+        objective=tui_query_text_summary(objective, 300),
+        reuse_policy=reuse_policy,
+        requested_role=requested_role,
+        capabilities_required=required_caps,
+        recommended_action=recommended_action,
+        recommended_agent=recommended_agent,
+        recommendation_reason=reason,
+        candidates=rows,
+    )
+
+
+def tui_tool_task_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is not None:
+        tui_query_refresh_subagents(state)
+    status_filter = str(args.get("status") or "").strip().lower()
+    assigned_filter = str(args.get("assigned_agent") or "").strip()
+    assigned_id = ""
+    if state is not None and assigned_filter:
+        sub = resolve_subagent(state, assigned_filter)
+        assigned_id = sub.agent_id if sub is not None else assigned_filter
+    elif assigned_filter:
+        assigned_id = assigned_filter
+    include_completed = bool(args.get("include_completed", False))
+    limit = tui_query_limit(args.get("limit"), 20)
+    rows = list(latest_task_records().values())
+    if status_filter:
+        rows = [row for row in rows if str(row.get("status") or "").lower() == status_filter]
+    if assigned_id:
+        rows = [
+            row for row in rows
+            if str(row.get("assigned_agent") or "") == assigned_id
+            or assigned_id.lower() in str(row.get("assigned_agent") or "").lower()
+        ]
+    if not include_completed:
+        rows = [row for row in rows if not terminal_task_status(str(row.get("status") or ""))]
+    rows.sort(key=row_timestamp, reverse=True)
+    items = [
+        {
+            "task_id": row.get("task_id", ""),
+            "parent_task_id": row.get("parent_task_id", ""),
+            "kind": row.get("kind", ""),
+            "status": row.get("status", ""),
+            "assigned_agent": row.get("assigned_agent", ""),
+            "objective": tui_query_text_summary(str(row.get("objective") or row.get("summary") or row.get("title") or ""), 220),
+            "artifact_refs": row.get("artifact_refs") or [],
+            "approval": row.get("approval") or {},
+            "timestamp": row.get("timestamp", ""),
+        }
+        for row in rows[:limit]
+    ]
+    return tui_query_ok("task.list", total=len(rows), returned=len(items), tasks=tui_query_json_safe(items))
+
+
+def tui_tool_task_get(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    del state
+    task_id = str(args.get("task_id") or "").strip()
+    if not task_id:
+        return tui_query_error("task_id is required.")
+    history_limit = tui_query_limit(args.get("history_limit"), 20, maximum=80)
+    latest = latest_task_records()
+    row = latest.get(task_id)
+    if row is None:
+        return tui_query_error("Task not found.", task_id=task_id)
+    children = [
+        child for child in latest.values()
+        if str(child.get("parent_task_id") or "") == task_id
+    ]
+    children.sort(key=row_timestamp, reverse=True)
+    traces = [
+        trace for trace in read_jsonl(AGENT_TRACES_PATH, limit=300)
+        if str(trace.get("task_id") or "") == task_id
+    ]
+    approvals = []
+    for approval in approval_latest_records().values():
+        payload = approval.get("payload") if isinstance(approval.get("payload"), dict) else {}
+        if (
+            str(payload.get("task_id") or "") == task_id
+            or str(approval.get("target") or "") == str(row.get("assigned_agent") or "")
+        ):
+            approvals.append(approval)
+    data = {
+        "task": row,
+        "history": task_history(task_id)[-history_limit:],
+        "children": children,
+        "recent_traces": traces[-12:],
+        "approvals": approvals[-10:],
+        "artifact_refs": row.get("artifact_refs") or [],
+    }
+    return tui_query_ok("task.get", **tui_query_json_safe(data))
+
+
+def tui_tool_approval_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    include_all = bool(args.get("include_all", False))
+    limit = tui_query_limit(args.get("limit"), 20)
+    rows = list(approval_latest_records().values()) if include_all else pending_approvals(state)
+    rows.sort(key=row_timestamp, reverse=True)
+    items = []
+    for row in rows[:limit]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        items.append({
+            "approval_id": row.get("approval_id", ""),
+            "type": row.get("type", ""),
+            "status": row.get("status", ""),
+            "source": row.get("source", ""),
+            "target": row.get("target", ""),
+            "approval_required_for": row.get("approval_required_for", ""),
+            "summary": tui_query_text_summary(str(row.get("summary") or ""), 220),
+            "deferred_operation": payload.get("deferred_operation", ""),
+            "payload_keys": sorted(str(key) for key in payload.keys()),
+            "timestamp": row.get("timestamp", ""),
+            "secret_storage": bool(row.get("secret_storage")),
+        })
+    return tui_query_ok("approval.list", total=len(rows), returned=len(items), approvals=tui_query_json_safe(items))
+
+
+def tui_tool_artifact_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    del state
+    source_task_id = str(args.get("source_task_id") or "").strip()
+    artifact_type = str(args.get("artifact_type") or "").strip()
+    limit = tui_query_limit(args.get("limit"), 20)
+    rows = list(artifact_index_latest().values())
+    if source_task_id:
+        rows = [row for row in rows if str(row.get("source_task_id") or "") == source_task_id]
+    if artifact_type:
+        rows = [row for row in rows if str(row.get("type") or "") == artifact_type]
+    rows.sort(key=lambda row: row_timestamp(row) or float(row.get("mtime") or 0.0), reverse=True)
+    items = [
+        {
+            "artifact_id": row.get("artifact_id", ""),
+            "type": row.get("type", ""),
+            "uri": row.get("uri", ""),
+            "path": row.get("path", ""),
+            "preview_path": row.get("preview_path", ""),
+            "hash": row.get("hash", ""),
+            "size_bytes": row.get("size_bytes", 0),
+            "source_task_id": row.get("source_task_id", ""),
+            "content_type": row.get("content_type", ""),
+            "timestamp": row.get("timestamp", ""),
+            "provenance": row.get("provenance") or {},
+        }
+        for row in rows[:limit]
+    ]
+    return tui_query_ok("artifact.list", total=len(rows), returned=len(items), artifacts=tui_query_json_safe(items))
+
+
+def tui_tool_capability_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    del args
+    if state is not None:
+        tui_query_refresh_subagents(state)
+    return tui_query_ok("capability.list", capabilities=tui_query_json_safe(gateway_capability_registry(state)))
+
+
 def subagent_brief(sub: SubAgentRuntime) -> str:
     pending = " waiting-input" if sub.pending_interaction else ""
     scope = "persist" if sub.persistent else "temp"
@@ -9644,6 +10189,7 @@ def set_agent_llm_index(agent: Any, index: int) -> tuple[bool, str]:
         else:
             agent.llm_no = index
             agent.llmclient = clients[index]
+        install_tui_query_runtime(agent)
         install_tui_control_hint(agent)
         return True, f"当前对话模型已切到 {agent.get_llm_name(model=True)}。"
     except Exception as exc:
@@ -9760,6 +10306,124 @@ def agent_has_unfinished_task(agent: Any) -> bool:
     return False
 
 
+def install_tui_query_tool_schema() -> None:
+    schema = getattr(agentmain, "TOOLS_SCHEMA", None)
+    if not isinstance(schema, list):
+        return
+    existing = {
+        str(item.get("function", {}).get("name") or "")
+        for item in schema
+        if isinstance(item, dict) and isinstance(item.get("function"), dict)
+    }
+    for tool in TUI_QUERY_TOOL_SCHEMAS:
+        name = str(tool.get("function", {}).get("name") or "")
+        if name and name not in existing:
+            schema.append(copy.deepcopy(tool))
+            existing.add(name)
+
+
+def wrap_agentmain_tool_schema_loader() -> None:
+    if bool(getattr(agentmain, "_ga_tui_query_tool_schema_wrapped", False)):
+        return
+    original = getattr(agentmain, "load_tool_schema", None)
+    if not callable(original):
+        return
+
+    def _wrapped_load_tool_schema(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        install_tui_query_tool_schema()
+        return result
+
+    setattr(agentmain, "_ga_tui_original_load_tool_schema", original)
+    setattr(agentmain, "load_tool_schema", _wrapped_load_tool_schema)
+    setattr(agentmain, "_ga_tui_query_tool_schema_wrapped", True)
+
+
+def tui_query_state_for_handler(handler: Any) -> Optional[State]:
+    parent = getattr(handler, "parent", None)
+    state = getattr(parent, "_ga_tui_state", None)
+    return state if isinstance(state, State) else None
+
+
+def tui_query_tool_outcome(kind: str, handler: Any, args: dict[str, Any]) -> StepOutcome:
+    state = tui_query_state_for_handler(handler)
+    tool_map = {
+        "agent_list": tui_tool_agent_list,
+        "agent_get": tui_tool_agent_get,
+        "agent_match": tui_tool_agent_match,
+        "task_list": tui_tool_task_list,
+        "task_get": tui_tool_task_get,
+        "approval_list": tui_tool_approval_list,
+        "artifact_list": tui_tool_artifact_list,
+        "capability_list": tui_tool_capability_list,
+    }
+    func = tool_map.get(kind)
+    data = func(state, args) if func is not None else tui_query_error(f"Unknown TUI query tool: {kind}")
+    return StepOutcome(data, next_prompt="\n")
+
+
+def install_tui_query_handler_methods() -> None:
+    handler_cls = getattr(agentmain, "GenericAgentHandler", None)
+    if handler_cls is None or bool(getattr(handler_cls, "_ga_tui_query_tools_patched", False)):
+        return
+
+    def do_agent_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("agent_list", self, args)
+
+    def do_agent_get(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("agent_get", self, args)
+
+    def do_agent_match(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("agent_match", self, args)
+
+    def do_task_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("task_list", self, args)
+
+    def do_task_get(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("task_get", self, args)
+
+    def do_approval_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("approval_list", self, args)
+
+    def do_artifact_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("artifact_list", self, args)
+
+    def do_capability_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("capability_list", self, args)
+
+    for name, method in {
+        "do_agent_list": do_agent_list,
+        "do_agent_get": do_agent_get,
+        "do_agent_match": do_agent_match,
+        "do_task_list": do_task_list,
+        "do_task_get": do_task_get,
+        "do_approval_list": do_approval_list,
+        "do_artifact_list": do_artifact_list,
+        "do_capability_list": do_capability_list,
+    }.items():
+        setattr(handler_cls, name, method)
+    setattr(handler_cls, "_ga_tui_query_tools_patched", True)
+
+
+def install_tui_query_runtime(agent: Any = None, state: Optional[State] = None) -> None:
+    wrap_agentmain_tool_schema_loader()
+    install_tui_query_tool_schema()
+    install_tui_query_handler_methods()
+    if agent is not None and state is not None:
+        try:
+            setattr(agent, "_ga_tui_state", state)
+        except Exception:
+            pass
+
+
 def unfinished_task_labels(state: State) -> list[str]:
     labels: list[str] = []
     if state.status in {"running", "aborting"} or agent_has_unfinished_task(state.agent):
@@ -9840,8 +10504,10 @@ def browse_input_history(state: State, direction: int) -> bool:
 
 
 def new_agent() -> Any:
+    install_tui_query_runtime()
     agent = GenericAgent()
     agent.inc_out = True
+    install_tui_query_runtime(agent)
     install_tui_control_hint(agent)
     agent_no = next(_AGENT_COUNTER)
     thread_name = f"ga-tui-agent-{agent_no}"
@@ -9855,6 +10521,7 @@ def new_agent() -> Any:
 def install_interaction_hook(state: State, agent: Any) -> None:
     if agent is None:
         return
+    install_tui_query_runtime(agent, state)
     try:
         hooks = getattr(agent, "_turn_end_hooks", None)
         if hooks is None:

@@ -1460,6 +1460,8 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     assert '<ga-tui>{"action":"subagent_ask"' not in a.TUI_AGENT_CONTROL_HINT
     assert "secret_subagents" in a.TUI_AGENT_CONTROL_HINT
     assert "memory/subagents/" in a.TUI_AGENT_CONTROL_HINT
+    assert "agent_list" in a.TUI_AGENT_CONTROL_HINT
+    assert "task_get" in a.TUI_AGENT_CONTROL_HINT
     hint_agent = FakeLLMAgent()
     for client in hint_agent.llmclients:
         client.backend.extra_sys_prompt = "prefix\n[GenericAgent-TUI session control]\nold\n[/GenericAgent-TUI session control]\n"
@@ -1486,6 +1488,95 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     non_control_json = "```json\n{\"note\":\"not a TUI action\"}\n```"
     assert a.extract_tui_controls(non_control_json, allow_json_fences=True) == []
     assert a.strip_tui_controls(non_control_json, allow_json_fences=True) == non_control_json
+
+
+def assert_tui_query_tools_expose_dashboard_state() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_query_tools_")
+    retarget_harness(root)
+    state = a.State(agent=FakeLLMAgent())
+    state.running = True
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+    state.agent.log_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_query_tools.txt")
+    a.install_tui_query_runtime(state.agent, state)
+    a.install_tui_query_runtime(state.agent, state)
+    schema_names = [
+        str(item.get("function", {}).get("name") or "")
+        for item in a.agentmain.TOOLS_SCHEMA
+        if isinstance(item, dict) and isinstance(item.get("function"), dict)
+    ]
+    for name in a.TUI_QUERY_TOOL_NAMES:
+        assert schema_names.count(name) == 1, (name, schema_names)
+        assert hasattr(a.agentmain.GenericAgentHandler, f"do_{name}"), name
+
+    researcher = a.create_subagent(
+        state,
+        "Query Researcher",
+        "Find sources, compare evidence, and return artifact refs.",
+        role="researcher",
+        persistent=True,
+    )
+    coder = a.create_subagent(
+        state,
+        "Query Coder",
+        "Implement approved single-writer changes.",
+        role="coder",
+        persistent=False,
+    )
+    a.append_task_ledger("task_query_research", status="working", assigned_agent=researcher.agent_id, objective="Research dashboard tools")
+    a.append_task_ledger("task_query_done", status="completed", assigned_agent=coder.agent_id, objective="Completed write task")
+    artifact_ref = a.write_harness_artifact("query-tools", "result", "query tool artifact", source_task_id="task_query_research")
+    approval_id = a.queue_approval(
+        approval_type="policy_approval_request",
+        summary="Need approval for query test",
+        payload={"task_id": "task_query_research", "deferred_operation": "query_test"},
+        source="orchestrator.main",
+        target=researcher.agent_id,
+        approval_required_for="modify_permission_policy",
+    )
+
+    agent_list = a.tui_tool_agent_list(state, {})
+    assert agent_list["status"] == "ok", agent_list
+    assert {item["agent_id"] for item in agent_list["agents"]} >= {researcher.agent_id, coder.agent_id}
+    persistent_only = a.tui_tool_agent_list(state, {"include_ephemeral": False})
+    assert coder.agent_id not in {item["agent_id"] for item in persistent_only["agents"]}, persistent_only
+
+    agent_get = a.tui_tool_agent_get(state, {"target": "Query Researcher"})
+    assert agent_get["agent"]["agent_id"] == researcher.agent_id, agent_get
+    assert agent_get["agent"]["permissions"]["write_policy"] == "none", agent_get
+
+    match = a.tui_tool_agent_match(
+        state,
+        {
+            "objective": "Research dashboard tools",
+            "role": "researcher",
+            "capabilities_required": ["web.search", "read"],
+        },
+    )
+    assert match["recommended_action"] == "reuse_existing", match
+    assert match["recommended_agent"]["agent_id"] == researcher.agent_id, match
+    force_new = a.tui_tool_agent_match(state, {"objective": "Research dashboard tools", "reuse_policy": "force_new"})
+    assert force_new["recommended_action"] == "create_new", force_new
+
+    task_list = a.tui_tool_task_list(state, {})
+    assert [item["task_id"] for item in task_list["tasks"]] == ["task_query_research"], task_list
+    task_all = a.tui_tool_task_list(state, {"include_completed": True})
+    assert {item["task_id"] for item in task_all["tasks"]} >= {"task_query_research", "task_query_done"}, task_all
+    task_get = a.tui_tool_task_get(state, {"task_id": "task_query_research"})
+    assert task_get["task"]["assigned_agent"] == researcher.agent_id, task_get
+    assert task_get["approvals"][-1]["approval_id"] == approval_id, task_get
+
+    approvals = a.tui_tool_approval_list(state, {})
+    assert approvals["approvals"][0]["approval_id"] == approval_id, approvals
+    assert "payload" not in approvals["approvals"][0], approvals
+    artifacts = a.tui_tool_artifact_list(state, {"source_task_id": "task_query_research"})
+    assert artifacts["artifacts"][0]["uri"] == artifact_ref, artifacts
+    capabilities = a.tui_tool_capability_list(state, {})
+    assert "researcher" in capabilities["capabilities"]["roles"], capabilities
+
+    handler = a.agentmain.GenericAgentHandler(state.agent, [], root)
+    outcome = handler.do_agent_list({}, None)
+    assert outcome.data["status"] == "ok", outcome.data
+    assert outcome.next_prompt == "\n", outcome.next_prompt
 
 
 def assert_legacy_subagent_result_backfills_to_restored_session() -> None:
@@ -1822,6 +1913,7 @@ def run_checks() -> None:
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
     assert_subagent_create_respects_force_new_and_topic_terms()
+    assert_tui_query_tools_expose_dashboard_state()
     assert_legacy_subagent_result_backfills_to_restored_session()
     assert_recent_sessions_use_last_message_activity()
     assert_self_intro_does_not_consume_mutual_chat_step()
