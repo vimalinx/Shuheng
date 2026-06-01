@@ -1453,6 +1453,7 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     )
     assert exact_reuse_score >= 40, exact_reuse_score
     assert "schema_version:\"ga-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
+    assert "agent.delete" in a.TUI_AGENT_CONTROL_HINT
     assert "delegate.create" in a.TUI_AGENT_CONTROL_HINT
     assert "能力说明" in a.TUI_AGENT_CONTROL_HINT
     assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
@@ -1501,6 +1502,19 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     news_agent = a.resolve_subagent(state, "新闻主编")
     assert news_agent is not None, state.subagents
     assert news_agent.persistent is True, news_agent
+    remove_controls = a.extract_tui_controls(ga_control({"action": "agent.remove", "target": "agent-to-remove"}))
+    assert len(remove_controls) == 1, remove_controls
+    assert remove_controls[0]["action"] == "subagent_delete", remove_controls
+    delete_control = ga_control({"action": "agent.delete", "target": news_agent.agent_id})
+    delete_controls = a.extract_tui_controls(delete_control)
+    assert len(delete_controls) == 1, delete_controls
+    assert delete_controls[0]["action"] == "subagent_delete", delete_controls
+    a.apply_tui_controls_from_text(state, delete_control, source="agent")
+    assert a.resolve_subagent(state, news_agent.agent_id) is None, state.subagents
+    deleted_meta = a.load_subagent_meta(news_agent.agent_id)
+    assert deleted_meta.get("deleted") is True, deleted_meta
+    assert deleted_meta.get("status") == "deleted", deleted_meta
+    assert "已从列表移除子 agent：新闻主编" in state.messages[-1].content, state.messages[-1].content
 
     bad_control_count = len(state.messages)
     a.apply_tui_controls_from_text(state, '<ga-control>{"schema_version":</ga-control>', source="agent")

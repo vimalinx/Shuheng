@@ -312,7 +312,7 @@ TUI_AGENT_CONTROL_HINT = """
 动作清单：
 - `session.pin|session.unpin|session.category|session.filter|session.clear_filter|session.collapse_category|session.expand_category|session.archive|session.unarchive|session.delete|session.rename|session.show_archived|session.hide_archived`
 - `task.plan.create`, `task.update`, `task.done`, `task.start`, `task.fail`, `task.cancel`
-- `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`
+- `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`, `agent.delete`
 - `delegate.create`
 - `memory.candidate`
 
@@ -320,6 +320,7 @@ TUI_AGENT_CONTROL_HINT = """
 - `delegate.create` 是异步委派：发出后等待子 agent 结果进入 bus/系统消息，再汇总或完成计划步骤。
 - `delegate.create` 必须带 `routing`、`work_order`、`capability_contract`、`context_contract`、`output_contract`，让能力匹配、工作安排和输出契约完整可审计。
 - 默认创建临时会话 agent；只有用户明确要求长期/持久/永久/正式时，`agent.create` 才使用 `lifecycle:"persistent"` 或 `persistent:true`。
+- 用户明确要求删除/移除子 agent 时使用 `agent.delete`，不要只使用 `agent.stop`；删除会从 TUI agent 列表移除并保留原目录作为可审计文件。
 - 用户明确要求全新/不要复用时，使用 `reuse_policy:"force_new"` 或 `force_new:true`。
 - Secret Vault 已解锁时仍使用同样的 `ga-control.v2` / `agent.create` / `delegate.create` 控制；持久 Secret agent 写入加密 `secret_subagents`，不要检查或推断普通 `memory/subagents/` 目录。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
@@ -11425,6 +11426,8 @@ KNOWN_TUI_CONTROL_ACTIONS = {
     "agent_role_update",
     "agent_model_update",
     "agent_stop",
+    "agent_delete",
+    "agent_remove",
     "delegate_create",
     "memory_candidate",
 }
@@ -11635,7 +11638,7 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
             "memory": control.get("memory") or control.get("statement") or control.get("note") or "",
         })
         return mapped
-    if action in {"agent_profile_update", "agent_role_update", "agent_model_update", "agent_stop"}:
+    if action in {"agent_profile_update", "agent_role_update", "agent_model_update", "agent_stop", "agent_delete", "agent_remove"}:
         mapped = dict(control)
         mapped.update(common)
         mapped["target"] = control.get("target") or control.get("agent_id") or control.get("agent") or ""
@@ -11644,6 +11647,8 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
             "agent_role_update": "subagent_role",
             "agent_model_update": "subagent_model",
             "agent_stop": "subagent_stop",
+            "agent_delete": "subagent_delete",
+            "agent_remove": "subagent_delete",
         }[action]
         return mapped
     return None
@@ -17995,12 +18000,7 @@ def handle_subagent_command(state: State, text: str) -> bool:
         if sub is None:
             add_system(state, f"找不到子 agent: {m_delete.group(1)}")
             return True
-        if sub.status in {"running", "aborting"}:
-            add_system(state, f"{sub.name} 仍在运行，请先 /agent stop {sub.agent_id}")
-            return True
-        save_subagent_meta(sub, state, deleted=True, status="deleted")
-        state.subagents.pop(sub.agent_id, None)
-        add_system(state, f"已从列表移除子 agent：{sub.name}；文件保留在 {sub.home}")
+        add_system(state, soft_delete_subagent(state, sub, source="user"))
         return True
 
     if raw.startswith("/agent"):
@@ -18295,6 +18295,24 @@ def resolve_subagent_control_alias(alias_map: dict[str, str], target: str) -> st
     return target
 
 
+def soft_delete_subagent(state: State, sub: SubAgentRuntime, *, source: str = "agent") -> str:
+    if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
+        return f"{sub.name} 仍在运行，请先停止后再删除。"
+    deleted_at = time.time()
+    sub.status = "deleted"
+    sub.updated_at = deleted_at
+    save_subagent_meta(sub, state, deleted=True, status="deleted", deleted_at=deleted_at, deleted_by=source)
+    state.subagents.pop(sub.agent_id, None)
+    state.expanded_subagent_meta.discard(sub.agent_id)
+    if str(state.selected_session or "") == sub.agent_id:
+        state.selected_session = "main"
+        mark_messages_changed(state)
+    else:
+        mark_dirty(state)
+    state.rightbar_task_rows_cache = []
+    return f"已从列表移除子 agent：{sub.name}；文件保留在 {sub.home}"
+
+
 def apply_subagent_control(
     state: State,
     action: str,
@@ -18445,6 +18463,9 @@ def apply_subagent_control(
         sub.updated_at = time.time()
         save_subagent_meta(sub, state)
         return f"已请求停止子 agent：{sub.name}"
+
+    if action in {"subagent_delete", "subagent_remove", "agent_delete", "agent_remove"}:
+        return soft_delete_subagent(state, sub, source=source)
 
     return f"未知子 agent 操作 {action}"
 
