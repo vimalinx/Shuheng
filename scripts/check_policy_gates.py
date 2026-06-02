@@ -1579,6 +1579,21 @@ def assert_subagent_create_respects_explicit_lifecycle_and_reuse_policy() -> Non
     assert len(state.messages) == bad_control_count + 1, [msg.content for msg in state.messages]
     assert "控制块解析失败" in state.messages[-1].content, state.messages[-1].content
 
+    inline_control_label_then_real_control = (
+        "上次我发的 `<ga-control>` 标签没正确闭合，所以没执行。让我重新发一次。\n\n"
+        + ga_control({"action": "agent.create", "name": "Inline Label Safe", "role": "researcher"})
+    )
+    inline_controls = a.extract_tui_controls(inline_control_label_then_real_control)
+    assert len(inline_controls) == 1, inline_controls
+    assert inline_controls[0]["name"] == "Inline Label Safe", inline_controls
+    assert a.tui_control_parse_errors(inline_control_label_then_real_control) == []
+    inline_visible = a.strip_tui_controls(inline_control_label_then_real_control)
+    assert "`<ga-control>` 标签没正确闭合" in inline_visible, inline_visible
+    assert "Inline Label Safe" not in inline_visible, inline_visible
+    a.apply_tui_controls_from_text(state, inline_control_label_then_real_control, source="agent")
+    assert a.resolve_subagent(state, "Inline Label Safe") is not None
+    assert "parse_error" not in state.messages[-1].content, state.messages[-1].content
+
 
 def assert_tui_query_tools_expose_dashboard_state() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_query_tools_")
