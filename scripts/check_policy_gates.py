@@ -1380,7 +1380,7 @@ def assert_running_main_input_is_queued_and_interruptible() -> None:
     assert state.agent.prompts[-1] == ("draft ctrl c", "user:queued_after_interrupt"), state.agent.prompts
 
 
-def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
+def assert_subagent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_subagent_create_")
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
@@ -1412,8 +1412,7 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
         source="agent",
     )
     falsesocial_agents = [sub for sub in state.subagents.values() if "falsesocial" in sub.agent_id]
-    assert len(falsesocial_agents) == 2, [(sub.agent_id, sub.name) for sub in state.subagents.values()]
-    assert len({sub.agent_id for sub in falsesocial_agents}) == 2
+    assert len(falsesocial_agents) == 1, [(sub.agent_id, sub.name) for sub in state.subagents.values()]
 
     a.apply_tui_controls_from_text(
         state,
@@ -1421,7 +1420,7 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
         source="agent",
     )
     falsesocial_agents = [sub for sub in state.subagents.values() if "falsesocial" in sub.agent_id]
-    assert len(falsesocial_agents) == 3, [(sub.agent_id, sub.name) for sub in state.subagents.values()]
+    assert len(falsesocial_agents) == 2, [(sub.agent_id, sub.name) for sub in state.subagents.values()]
     a.apply_tui_controls_from_text(
         state,
         '<ga-tui>{"action":"subagent_create","name":"Legacy Should Not Run","persistent":true}</ga-tui>',
@@ -1452,9 +1451,26 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
         "specialist",
     )
     assert exact_reuse_score >= 40, exact_reuse_score
+
+    a.apply_tui_controls_from_text(
+        state,
+        ga_control(create_agent_action("Lifecycle 默认检查", persistent=True, role="researcher")),
+        source="agent",
+    )
+    assert len([sub for sub in state.subagents.values() if sub.name == "Lifecycle 默认检查" and sub.persistent]) == 1
+    a.apply_tui_controls_from_text(
+        state,
+        ga_control({"action": "agent.create", "name": "Lifecycle 默认检查", "role": "researcher"}),
+        source="agent",
+    )
+    lifecycle_matches = [sub for sub in state.subagents.values() if sub.name == "Lifecycle 默认检查"]
+    assert len(lifecycle_matches) == 2, [(sub.agent_id, sub.persistent) for sub in lifecycle_matches]
+    assert {sub.persistent for sub in lifecycle_matches} == {False, True}, lifecycle_matches
+
     assert "schema_version:\"ga-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
     assert "agent.delete" in a.TUI_AGENT_CONTROL_HINT
-    assert "每天/每日/定时/持续积累" in a.TUI_AGENT_CONTROL_HINT
+    assert "TUI 不会从 name/profile 自然语言里猜生命周期" in a.TUI_AGENT_CONTROL_HINT
+    assert "TUI 不会从可见正文里猜复用策略" in a.TUI_AGENT_CONTROL_HINT
     assert "delegate.create" in a.TUI_AGENT_CONTROL_HINT
     assert "能力说明" in a.TUI_AGENT_CONTROL_HINT
     assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
@@ -1502,8 +1518,8 @@ def assert_subagent_create_respects_force_new_and_topic_terms() -> None:
     a.apply_tui_controls_from_text(state, long_running_create, source="agent")
     long_running_agent = a.resolve_subagent(state, "RSS日报编辑")
     assert long_running_agent is not None, state.subagents
-    assert long_running_agent.persistent is True, long_running_agent
-    assert os.path.commonpath([a.SUBAGENTS_DIR, long_running_agent.home]) == a.SUBAGENTS_DIR, long_running_agent.home
+    assert long_running_agent.persistent is False, long_running_agent
+    assert os.path.commonpath([a.TEMP_SUBAGENTS_DIR, long_running_agent.home]) == a.TEMP_SUBAGENTS_DIR, long_running_agent.home
 
     truncated_create = (
         '<ga-control>{"schema_version":"ga-control.v2","actions":['
@@ -1770,8 +1786,8 @@ def assert_self_intro_does_not_consume_mutual_chat_step() -> None:
     state.running = True
     orchestration_text = ga_control(
         plan_action("缺少自我介绍步骤的双代理对话", ["创建正式子代理", "创建临时子代理", "两个代理互相聊天对话", "汇总所有内容到我这里"]),
-        create_agent_action("正式丙", persistent=True, profile="你是正式永久子代理，名叫正式丙。稍后和临时子代理临时丁交流。"),
-        create_agent_action("临时丁", temporary=True, profile="你是临时子代理，名叫临时丁。稍后和正式子代理正式丙交流。"),
+        create_agent_action("正式丙", persistent=True, profile="你是正式永久子代理，名叫正式丙。稍后和临时子代理临时丁交流。", plan_step_id="创建正式子代理"),
+        create_agent_action("临时丁", temporary=True, profile="你是临时子代理，名叫临时丁。稍后和正式子代理正式丙交流。", plan_step_id="创建临时子代理"),
         delegate_action("正式丙", "请先向主控说一句话自我介绍，说完了告诉我。"),
         delegate_action("临时丁", "请先向主控说一句话自我介绍，说完了告诉我。"),
     )
@@ -1816,7 +1832,7 @@ def assert_control_result_continues_intermediate_workflow_step() -> None:
                 "新闻管家",
                 persistent=True,
                 profile="负责 RSS 信息源、每日新闻拉取、质量筛选和报纸排版。",
-            ))
+            ) | {"continue_after": True})
         ),
         "收到控制结果，继续后续阶段，本测试不再发控制块。",
     ])
@@ -1998,7 +2014,7 @@ def run_checks() -> None:
     assert_live_subagent_result_reaches_main_context()
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
-    assert_subagent_create_respects_force_new_and_topic_terms()
+    assert_subagent_create_respects_explicit_lifecycle_and_reuse_policy()
     assert_tui_query_tools_expose_dashboard_state()
     assert_legacy_subagent_result_backfills_to_restored_session()
     assert_recent_sessions_use_last_message_activity()
@@ -2784,9 +2800,9 @@ def run_checks() -> None:
         [
             ga_control(
                 plan_action("自动续跑计划", ["创建正式子代理", "创建临时子代理"]),
-                create_agent_action("续跑正式", persistent=True, profile="正式测试子代理"),
+                create_agent_action("续跑正式", persistent=True, profile="正式测试子代理", plan_step_id="创建正式子代理"),
             ),
-            ga_control(create_agent_action("续跑临时", temporary=True, profile="临时测试子代理")),
+            ga_control(create_agent_action("续跑临时", temporary=True, profile="临时测试子代理", plan_step_id="创建临时子代理")),
         ]
     )
     partial_state = a.State(agent=partial_agent)
@@ -2823,7 +2839,7 @@ def run_checks() -> None:
         [
             ga_control(
                 plan_action("自动续跑阻塞计划", ["创建正式子代理", "创建临时子代理"]),
-                create_agent_action("阻塞正式", persistent=True, profile="正式测试子代理"),
+                create_agent_action("阻塞正式", persistent=True, profile="正式测试子代理", plan_step_id="创建正式子代理"),
             ),
             "我没有发出新的控制块。",
         ]
@@ -3088,10 +3104,10 @@ def run_checks() -> None:
 
     orchestration_text = ga_control(
         plan_action("双代理对话演示", ["创建正式子代理(永久)", "创建临时子代理", "两个代理各自先向我说话", "两个代理互相聊天交流", "汇总所有对话内容"]),
-        create_agent_action("正式甲", persistent=True, profile="你是正式永久子代理，名叫正式甲。稍后和临时子代理临时乙交流。"),
-        create_agent_action("临时乙", profile="你是临时子代理，名叫临时乙。稍后和正式子代理正式甲交流。"),
-        delegate_action("正式甲", "请先向主控说一句话自我介绍，说完了告诉我。"),
-        delegate_action("临时乙", "请先向主控说一句话自我介绍，说完了告诉我。"),
+        create_agent_action("正式甲", persistent=True, profile="你是正式永久子代理，名叫正式甲。稍后和临时子代理临时乙交流。", plan_step_id="创建正式子代理(永久)"),
+        create_agent_action("临时乙", temporary=True, profile="你是临时子代理，名叫临时乙。稍后和正式子代理正式甲交流。", plan_step_id="创建临时子代理"),
+        delegate_action("正式甲", "请先向主控说一句话自我介绍，说完了告诉我。", parent_task_id="两个代理各自先向我说话"),
+        delegate_action("临时乙", "请先向主控说一句话自我介绍，说完了告诉我。", parent_task_id="两个代理各自先向我说话"),
     )
     a.apply_tui_controls_from_text(state, orchestration_text, source="agent")
     formal = next(sub for sub in state.subagents.values() if sub.name == "正式甲")

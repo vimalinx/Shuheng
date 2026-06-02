@@ -18,7 +18,6 @@ import hashlib
 import itertools
 import json
 import locale
-import math
 import os
 import queue
 import re
@@ -321,9 +320,11 @@ TUI_AGENT_CONTROL_HINT = """
 规则：
 - `delegate.create` 是异步委派：发出后等待子 agent 结果进入 bus/系统消息，再汇总或完成计划步骤。
 - `delegate.create` 必须带 `routing`、`work_order`、`capability_contract`、`context_contract`、`output_contract`，让能力匹配、工作安排和输出契约完整可审计。
-- 默认创建临时会话 agent；用户明确要求长期/持久/永久/正式，或描述每天/每日/定时/持续积累这类长期职责时，`agent.create` 使用 `lifecycle:"persistent"` 或 `persistent:true`。
+- 默认创建临时会话 agent；如果用户意图是长期、持久、周期性或专职职责，主控必须在 `agent.create` 中显式写 `lifecycle:"persistent"` 或 `persistent:true`。TUI 不会从 name/profile 自然语言里猜生命周期。
 - 用户明确要求删除/移除子 agent 时使用 `agent.delete`，不要只使用 `agent.stop`；删除会从 TUI agent 列表移除并保留原目录作为可审计文件。
-- 用户明确要求全新/不要复用时，使用 `reuse_policy:"force_new"` 或 `force_new:true`。
+- 用户明确要求全新/不要复用时，使用 `reuse_policy:"force_new"` 或 `force_new:true`；TUI 不会从可见正文里猜复用策略。
+- 如果当前控制块只是一个中间步骤，且需要主控继续生成后续控制，在本次 `ga-control.v2` 批量 envelope 或最后一个 action 上显式写 `continue_after:true` 或 `workflow_state:"in_progress"`。
+- 如果控制动作属于某个计划步骤，必须显式提供 `plan_step_id` 或 `parent_task_id`。TUI 不会按“自我介绍/互相聊天/汇总”等词自动绑定步骤。
 - Secret Vault 已解锁时仍使用同样的 `ga-control.v2` / `agent.create` / `delegate.create` 控制；持久 Secret agent 写入加密 `secret_subagents`，不要检查或推断普通 `memory/subagents/` 目录。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
@@ -4036,7 +4037,46 @@ def policy_relevant_subagent_prompt_text(prompt: str) -> str:
     return objective or text
 
 
+def agenttask_payload_from_prompt(prompt: str) -> dict[str, Any]:
+    marker_start = "[GA TUI AgentTask Envelope v2]"
+    marker_end = "[/GA TUI AgentTask Envelope v2]"
+    text = prompt or ""
+    if marker_start not in text or marker_end not in text:
+        return {}
+    raw = text.split(marker_start, 1)[1].split(marker_end, 1)[0].strip()
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def explicit_policy_action_for_subagent_task(prompt: str) -> str:
+    payload = agenttask_payload_from_prompt(prompt)
+    if not payload:
+        return ""
+    approval = payload.get("approval") if isinstance(payload.get("approval"), dict) else {}
+    capability_contract = payload.get("capability_contract") if isinstance(payload.get("capability_contract"), dict) else {}
+    for value in (
+        payload.get("policy_action"),
+        payload.get("approval_required_for"),
+        approval.get("policy_action"),
+        approval.get("approval_required_for"),
+        capability_contract.get("policy_action"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower().replace("-", "_")
+        if isinstance(value, list) and value:
+            first = str(value[0] or "").strip()
+            if first:
+                return first.lower().replace("-", "_")
+    return ""
+
+
 def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> str:
+    explicit_action = explicit_policy_action_for_subagent_task(prompt)
+    if explicit_action:
+        return explicit_action
     text = unicodedata.normalize("NFKC", policy_relevant_subagent_prompt_text(prompt)).lower()
     checks = [
         ("access_secret", ("api key", "apikey", "secret", "token", "credential", "password", "密码", "密钥", "凭据", "令牌")),
@@ -4658,10 +4698,6 @@ def append_trace(task_id: str, event: str, *, agent_id: str = "", status: str = 
 
 def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, artifact_ref: str = "") -> dict[str, Any]:
     clean = clean_text(display_text)
-    lower = clean.lower()
-    has_evidence = any(token in lower for token in ("evidence", "证据", "source", "来源", "artifact://", "http://", "https://", "test", "测试"))
-    has_risk = any(token in lower for token in ("risk", "风险", "warning", "失败", "error", "todo", "待"))
-    has_citation = any(token in lower for token in ("artifact://", "trace://", "source:", "来源", "证据", "http://", "https://"))
     audit_refs = collect_task_audit_refs(task_id)
     if artifact_ref and artifact_ref not in audit_refs["artifacts"]:
         audit_refs["artifacts"].append(artifact_ref)
@@ -4671,11 +4707,11 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
     tool_calls = len(audit_refs["tool_calls"])
     approval_count = len(audit_refs["approvals"])
     artifact_count = len(audit_refs["artifacts"])
-    citation_accuracy = bounded_score(0.85 if has_citation else (0.55 if artifact_count else 0.25))
-    source_quality = bounded_score(0.85 if artifact_count else (0.7 if has_evidence else 0.4))
-    factual_accuracy = bounded_score(0.78 if has_evidence or artifact_count else (0.55 if clean.strip() else 0.0))
+    citation_accuracy = bounded_score(0.85 if artifact_count else 0.25)
+    source_quality = bounded_score(0.85 if artifact_count else 0.4)
+    factual_accuracy = bounded_score(0.78 if artifact_count else (0.55 if clean.strip() else 0.0))
     tool_efficiency = bounded_score(1.0 - min(tool_calls / max_tools, 1.0) * 0.25)
-    policy_compliance = bounded_score(0.85 if has_risk and sub.role in {"coder", "ops"} else 1.0)
+    policy_compliance = bounded_score(0.85 if approval_count and sub.role in {"coder", "ops"} else 1.0)
     human_takeover_cost = bounded_score(min(1.0, approval_count / 3.0))
     row = {
         "schema_version": "agenteval.v2",
@@ -4693,9 +4729,9 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
             "tool_efficiency": tool_efficiency,
             "policy_compliance": policy_compliance,
             "human_takeover_cost": human_takeover_cost,
-            "evidence_quality": 0.85 if has_evidence else 0.45,
+            "evidence_quality": 0.85 if artifact_count else 0.45,
             "artifact_recorded": 1.0 if artifact_ref else 0.0,
-            "needs_review": 1.0 if has_risk or sub.role in {"coder", "ops"} else 0.0,
+            "needs_review": 1.0 if approval_count or sub.role in {"coder", "ops"} else 0.0,
         },
         "audit_refs": audit_refs,
         "coverage": {
@@ -4709,10 +4745,10 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
         "final_state": {
             "status": "completed" if clean.strip() else "empty_result",
             "has_result": bool(clean.strip()),
-            "has_evidence": bool(has_evidence or artifact_count),
-            "has_citation": bool(has_citation or artifact_count),
-            "has_risk_signal": bool(has_risk),
-            "requires_review": bool(has_risk or sub.role in {"coder", "ops"}),
+            "has_evidence": bool(artifact_count),
+            "has_citation": bool(artifact_count),
+            "has_risk_signal": bool(approval_count),
+            "requires_review": bool(approval_count or sub.role in {"coder", "ops"}),
         },
         "policy": {
             "approval_count": approval_count,
@@ -6972,14 +7008,13 @@ def create_task_plan(
     step_ids: dict[str, str] = {}
     for idx, step_title in enumerate(step_titles, 1):
         step_id = short_uid("step")
-        kind = "plan_summary" if any(token in step_title for token in ("汇总", "总结", "收尾")) else "plan_step"
         numbered_title = f"{idx}. {step_title}"
         append_task_ledger(
             step_id,
             status="created",
             assigned_agent="orchestrator.main",
             title=numbered_title,
-            kind=kind,
+            kind="plan_step",
             objective=step_title,
             parent_task_id=plan_id,
             session_key=session,
@@ -7025,122 +7060,6 @@ def active_plan_step_rows(state: State) -> list[tuple[str, dict[str, Any]]]:
 
 def plan_step_text(row: dict[str, Any]) -> str:
     return "\n".join(str(row.get(key) or "") for key in ("title", "objective", "summary"))
-
-
-MUTUAL_CHAT_STEP_TOKENS = ("互相", "相互", "彼此", "交流", "聊天", "对方")
-SELF_INTRO_STEP_TOKENS = ("各自", "分别", "先向", "说话", "自我介绍", "介绍", "打招呼", "问候", "发言")
-SUMMARY_STEP_TOKENS = ("汇总", "总结", "收尾")
-
-
-def control_has_plan_reference(control: dict[str, Any], *, ask: bool) -> bool:
-    keys = ("parent_task_id", "plan_step_id", "step") if ask else ("plan_step_id", "step")
-    return any(str(control.get(key) or "").strip() for key in keys)
-
-
-def choose_plan_step_by_tokens(
-    rows: list[tuple[str, dict[str, Any]]],
-    tokens: tuple[str, ...],
-    *,
-    fallback_index: int = 0,
-    fallback_tokens: tuple[str, ...] = (),
-    exclude_tokens: tuple[str, ...] = (),
-    allow_index_fallback: bool = True,
-) -> tuple[str, dict[str, Any]]:
-    candidates: list[tuple[str, dict[str, Any], str]] = []
-    for task_id, row in rows:
-        text = plan_step_text(row)
-        if exclude_tokens and any(token and token in text for token in exclude_tokens):
-            continue
-        candidates.append((task_id, row, text))
-    for task_id, row, text in candidates:
-        if any(token and token in text for token in tokens):
-            return task_id, row
-    if fallback_tokens:
-        fallback_rows = [
-            (task_id, row)
-            for task_id, row, text in candidates
-            if any(token and token in text for token in fallback_tokens)
-        ]
-        if fallback_rows:
-            idx = max(0, min(fallback_index, len(fallback_rows) - 1))
-            return fallback_rows[idx]
-    if allow_index_fallback and candidates:
-        idx = max(0, min(fallback_index, len(candidates) - 1))
-        task_id, row, _text = candidates[idx]
-        return task_id, row
-    return "", {}
-
-
-def maybe_attach_active_plan_to_subagent_control(
-    state: State,
-    control: dict[str, Any],
-    normalized_action: str,
-    *,
-    create_index: int,
-    ask_index: int,
-) -> dict[str, Any]:
-    if not state.active_plan_task_id:
-        return control
-    rows = active_plan_step_rows(state)
-    if not rows:
-        return control
-    control = dict(control)
-    if normalized_action in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}:
-        if control_has_plan_reference(control, ask=False):
-            return control
-        target = str(control.get("target") or "").strip()
-        value = str(control.get("value") or control.get("category") or control.get("name") or "").strip()
-        name = str(control.get("name") or control.get("title") or value or "").strip()
-        profile = str(control.get("profile") or control.get("description") or control.get("system") or "").strip()
-        persistent, temporary = subagent_control_persistence_intent(control, target, value, name, profile)
-        if persistent:
-            tokens = ("正式", "永久", "持久", "长期", "persistent")
-        elif temporary:
-            tokens = ("临时", "暂时", "temporary", "temp")
-        else:
-            tokens = ()
-        step_id, _row = choose_plan_step_by_tokens(rows, tokens, fallback_index=create_index, fallback_tokens=("创建", "准备", "复用"))
-        if step_id:
-            control["plan_step_id"] = step_id
-        return control
-    if normalized_action in {"subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}:
-        if control_has_plan_reference(control, ask=True):
-            return control
-        prompt = str(control.get("prompt") or control.get("task") or control.get("message") or control.get("value") or "").strip()
-        ask_rows = [
-            (task_id, row)
-            for task_id, row in rows
-            if not terminal_task_status(str(row.get("status") or ""))
-        ]
-        prompt_is_summary = any(token in prompt for token in SUMMARY_STEP_TOKENS)
-        prompt_is_mutual = any(token in prompt for token in MUTUAL_CHAT_STEP_TOKENS)
-        if prompt_is_summary:
-            prompt_tokens = SUMMARY_STEP_TOKENS
-            fallback_tokens = ()
-            exclude_tokens = ()
-        elif prompt_is_mutual:
-            prompt_tokens = MUTUAL_CHAT_STEP_TOKENS
-            fallback_tokens = ("对话",)
-            exclude_tokens = ()
-            ask_rows = [(task_id, row) for task_id, row in ask_rows if str(row.get("kind") or "") == "plan_step"]
-        else:
-            prompt_tokens = SELF_INTRO_STEP_TOKENS
-            fallback_tokens = SELF_INTRO_STEP_TOKENS
-            exclude_tokens = MUTUAL_CHAT_STEP_TOKENS + SUMMARY_STEP_TOKENS
-            ask_rows = [(task_id, row) for task_id, row in ask_rows if str(row.get("kind") or "") == "plan_step"]
-        step_id, row = choose_plan_step_by_tokens(
-            ask_rows,
-            prompt_tokens,
-            fallback_index=ask_index,
-            fallback_tokens=fallback_tokens,
-            exclude_tokens=exclude_tokens,
-            allow_index_fallback=False,
-        )
-        if step_id:
-            control["parent_task_id"] = step_id
-            control.setdefault("task_title", str(row.get("objective") or row.get("title") or "").strip())
-        return control
-    return control
 
 
 def maybe_complete_plan_after_step(step_id: str) -> None:
@@ -7369,7 +7288,7 @@ def format_plan_continuation_prompt(
         "Do not call browser/search/file/code tools such as web_scan, webexecute_js, file_read, or code_run just to decide what to do; the task ledger above is authoritative.",
         f"When a control belongs to the next step, attach it with parent_task_id={next_task_id!r} or an equivalent step reference.",
         "Do not repeat completed steps. Reuse existing subagents before creating new ones.",
-        "Temporary subagents are the default unless the user/control explicitly asks for persistent/long-term agents or describes recurring duties such as daily scheduled collection.",
+        "Temporary subagents are the default unless the control explicitly sets lifecycle:\"persistent\" or persistent:true for a persistent/long-term agent.",
         "If you need child agent output before summarizing, delegate with agenttask.v2 delegate.create and wait for results instead of inventing a summary.",
         "If the plan is blocked, emit task.update/task.fail for the blocked step with a concrete reason.",
         "Examples to adapt, not copy literally:",
@@ -7442,27 +7361,15 @@ CONTROL_CONTINUATION_ACTIONS = {
     "task_start",
 }
 
-CONTROL_CONTINUATION_WORKFLOW_TOKENS = (
-    "执行计划",
-    "开始执行",
-    "继续执行",
-    "第1步",
-    "第 1 步",
-    "第2步",
-    "第 2 步",
-    "第3步",
-    "第 3 步",
-    "step 1",
-    "step 2",
-    "step 3",
-    "phase 1",
-    "phase 2",
-    "phase 3",
-    "1.1",
-    "2.1",
-    "3.1",
-    "上岗培训",
-)
+STRUCTURED_CONTINUATION_STATES = {
+    "in_progress",
+    "running",
+    "continuing",
+    "needs_next_action",
+    "needs_followup",
+    "partial",
+    "unfinished",
+}
 
 
 def control_result_continuation_signature(text: str, control_results: list[str]) -> str:
@@ -7471,11 +7378,41 @@ def control_result_continuation_signature(text: str, control_results: list[str])
     return digest[:16]
 
 
+def control_continuation_metadata(control: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = [control]
+    envelope = control.get("_ga_control_envelope")
+    if isinstance(envelope, dict):
+        candidates.append(envelope)
+    for key in ("workflow", "orchestration", "continuation"):
+        value = control.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+        if isinstance(envelope, dict) and isinstance(envelope.get(key), dict):
+            candidates.append(envelope[key])
+    return candidates
+
+
+def control_explicitly_requests_continuation(control: dict[str, Any]) -> bool:
+    for item in control_continuation_metadata(control):
+        for key in ("continue_after", "next_action_required", "requires_continuation"):
+            if key in item and control_truthy(item.get(key)):
+                return True
+        state = str(item.get("workflow_state") or item.get("orchestrator_state") or item.get("state") or "").strip().lower().replace("-", "_")
+        if state in STRUCTURED_CONTINUATION_STATES:
+            return True
+        next_action = item.get("next_action")
+        if isinstance(next_action, dict) and next_action:
+            return True
+        if isinstance(next_action, str) and next_action.strip():
+            return True
+    return False
+
+
 def control_result_continuation_needed(text: str, controls: list[dict[str, Any]]) -> bool:
+    del text
     if not controls:
         return False
-    visible_text = normalize_subagent_identity_text(strip_tui_controls(text))
-    if not any(compact_identity_text(token) in compact_identity_text(visible_text) for token in CONTROL_CONTINUATION_WORKFLOW_TOKENS):
+    if not any(control_explicitly_requests_continuation(control) for control in controls):
         return False
     actions = {str(control.get("action") or "").strip().lower().replace("-", "_") for control in controls}
     if actions & {"subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}:
@@ -7494,7 +7431,7 @@ def format_control_result_continuation_prompt(
         "[GA TUI Control Result Continuation]",
         f"Reason: {reason}",
         "",
-        "The previous turn executed real TUI controls but ended after an intermediate workflow step.",
+        "The previous turn executed real TUI controls and explicitly requested continuation via structured control metadata.",
         "Continue the user-approved workflow yourself; do not ask the user to confirm the already-approved next step.",
         "Use TUI query tools if needed, then emit the next hidden <ga-control> block for delegation, task updates, configuration, or blocker reporting.",
         "If the prior visible plan was only natural language and no task ledger exists, first create or update the task ledger before continuing.",
@@ -8050,160 +7987,6 @@ def compact_identity_text(text: str) -> str:
     return re.sub(r"\s+", "", normalize_subagent_identity_text(text))
 
 
-def text_has_any_intent_token(text: str, tokens: tuple[str, ...]) -> bool:
-    normalized = normalize_subagent_identity_text(text)
-    compact = compact_identity_text(text)
-    return any(token.lower() in normalized or compact_identity_text(token) in compact for token in tokens)
-
-
-GENERIC_SUBAGENT_IDENTITY_TERMS = {
-    "agent",
-    "subagent",
-    "specialist",
-    "researcher",
-    "reviewer",
-    "verifier",
-    "coder",
-    "ops",
-    "长期",
-    "持久",
-    "永久",
-    "临时",
-    "暂时",
-    "小号",
-    "助手",
-    "专家",
-    "专员",
-    "人员",
-    "研究",
-    "调研",
-    "审查",
-    "代码",
-    "开发",
-    "工程",
-    "运维",
-}
-
-SUBAGENT_PERSISTENT_INTENT_TOKENS = (
-    "persistent",
-    "persist",
-    "long_term",
-    "long-term",
-    "permanent",
-    "durable",
-    "scheduled",
-    "recurring",
-    "daily",
-    "weekly",
-    "长期",
-    "持久",
-    "永久",
-    "正式",
-    "保存身份",
-    "每天",
-    "每日",
-    "每周",
-    "定时",
-    "定期",
-    "周期",
-    "持续",
-    "积累",
-    "以后",
-    "固定",
-    "日报",
-    "周报",
-)
-
-SUBAGENT_TEMPORARY_INTENT_TOKENS = (
-    "temporary",
-    "temp",
-    "ephemeral",
-    "session_only",
-    "session-only",
-    "session scoped",
-    "session-scoped",
-    "临时",
-    "暂时",
-    "小号",
-)
-
-SUBAGENT_FORCE_NEW_INTENT_TOKENS = (
-    "force_new",
-    "force new",
-    "create_new",
-    "new separate",
-    "no reuse",
-    "do not reuse",
-    "dont reuse",
-    "reuse false",
-    "reuse:false",
-    "不要复用",
-    "不复用",
-    "别复用",
-    "不要引用现有",
-    "不引用现有",
-    "不要引用已有",
-    "不引用已有",
-    "单独弄一个",
-    "单独创建",
-    "单独新建",
-    "独立创建",
-    "独立新建",
-    "重新创建",
-    "另起一个",
-    "全新",
-)
-
-GENERIC_LATIN_SUBAGENT_IDENTITY_TERMS = {
-    "agent",
-    "subagent",
-    "specialist",
-    "researcher",
-    "reviewer",
-    "verifier",
-    "coder",
-    "manager",
-    "manage",
-    "assistant",
-    "proxy",
-    "persistent",
-    "permanent",
-    "durable",
-    "temporary",
-    "ephemeral",
-}
-
-
-def distinctive_alnum_identity_terms(text: str) -> set[str]:
-    terms = {part for part in re.findall(r"[a-z0-9_]{4,}", normalize_subagent_identity_text(text))}
-    return {term for term in terms if term not in GENERIC_LATIN_SUBAGENT_IDENTITY_TERMS}
-
-
-def identity_terms(text: str) -> set[str]:
-    normalized = normalize_subagent_identity_text(text)
-    terms = {part for part in re.findall(r"[a-z0-9_]{3,}", normalized)}
-    for segment in re.findall(r"[\u4e00-\u9fff]+", normalized):
-        if len(segment) >= 2:
-            terms.add(segment)
-        terms.update(segment[idx:idx + 2] for idx in range(max(0, len(segment) - 1)))
-        terms.update(segment[idx:idx + 3] for idx in range(max(0, len(segment) - 2)))
-    return {term for term in terms if len(term) >= 2 and term not in GENERIC_SUBAGENT_IDENTITY_TERMS}
-
-
-def longest_common_identity_span(left: str, right: str) -> int:
-    left_compact = compact_identity_text(left)
-    right_compact = compact_identity_text(right)
-    best = 0
-    for idx in range(len(left_compact)):
-        for end in range(idx + 2, len(left_compact) + 1):
-            piece = left_compact[idx:end]
-            if piece in GENERIC_SUBAGENT_IDENTITY_TERMS:
-                continue
-            if piece in right_compact and len(piece) > best:
-                best = len(piece)
-    return best
-
-
 def unique_subagent_id(name: str) -> str:
     base = clean_subagent_id(name)
     candidate = base
@@ -8733,16 +8516,20 @@ def memory_candidate_dedupe_key(scope: str, statement: str) -> str:
     return "sha256:" + digest
 
 
+def explicit_memory_candidate_type(text: str, source: str = "") -> str:
+    allowed = {"preference", "procedural", "project", "episodic", "semantic"}
+    combined = f"{text}\n{source}"
+    match = re.search(r"(?im)^\s*(?:memory_)?type\s*[:=]\s*([a-z_ -]+)\s*$", combined)
+    if not match:
+        return ""
+    value = match.group(1).strip().lower().replace("-", "_").replace(" ", "_")
+    return value if value in allowed else ""
+
+
 def infer_memory_candidate_type(text: str, source: str = "") -> str:
-    lower = unicodedata.normalize("NFKC", f"{text} {source}").lower()
-    if any(token in lower for token in ("prefer", "preference", "偏好", "喜欢", "习惯", "不要", "总是", "always")):
-        return "preference"
-    if any(token in lower for token in ("sop", "procedure", "workflow", "流程", "步骤", "规范", "方法", "how to")):
-        return "procedural"
-    if any(token in lower for token in ("project", "项目", "架构", "decision", "决策")):
-        return "project"
-    if any(token in lower for token in ("failed", "fixed", "completed", "失败", "修复", "完成", "本次", "这次")):
-        return "episodic"
+    explicit_type = explicit_memory_candidate_type(text, source)
+    if explicit_type:
+        return explicit_type
     return "semantic"
 
 
@@ -8755,14 +8542,17 @@ def memory_candidate_ttl(candidate_type: str, confidence: float) -> str:
 
 
 def memory_candidate_confidence(text: str, *, evidence_refs: list[str], task_id: str) -> float:
-    lower = unicodedata.normalize("NFKC", text or "").lower()
+    explicit = re.search(r"(?im)^\s*confidence\s*[:=]\s*(0(?:\.\d+)?|1(?:\.0+)?|\.\d+)\s*$", text or "")
+    if explicit:
+        try:
+            return max(0.0, min(0.95, round(float(explicit.group(1)), 2)))
+        except Exception:
+            pass
     confidence = 0.55
     if evidence_refs:
         confidence += 0.18
     if task_id:
         confidence += 0.07
-    if any(token in lower for token in ("maybe", "可能", "猜", "大概", "临时")):
-        confidence -= 0.18
     return max(0.0, min(0.95, round(confidence, 2)))
 
 
@@ -8871,8 +8661,6 @@ def memory_candidate_rejection_reason(candidate: dict[str, Any]) -> str:
         return "privacy_risk_secret_or_credential"
     if len(canonical) < 8:
         return "too_temporary_or_too_short"
-    if any(token in canonical for token in ("maybe", "可能", "猜", "大概", "临时", "暂时")) and not candidate.get("evidence_refs"):
-        return "too_temporary_low_evidence"
     if float(candidate.get("confidence") or 0.0) < 0.5:
         return "low_confidence"
     return ""
@@ -9208,45 +8996,35 @@ def resolve_subagent(state: State, token: str) -> Optional[SubAgentRuntime]:
     return matches[0] if len(matches) == 1 else None
 
 
-def subagent_identity_blob(sub: SubAgentRuntime) -> str:
-    profile = subagent_profile_text(sub)
-    return "\n".join([sub.agent_id, sub.name, sub.role, profile])
+def resolve_subagent_exact(state: State, token: str) -> Optional[SubAgentRuntime]:
+    token = (token or "").strip()
+    if not token:
+        return None
+    if token in state.subagents:
+        return state.subagents[token]
+    low = token.lower()
+    matches = [
+        sub for sub in state.subagents.values()
+        if sub.agent_id.lower() == low or sub.name.lower() == low
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def reusable_subagent_score(sub: SubAgentRuntime, name: str, profile: str, role: str) -> int:
+    del profile
     requested_name = name or ""
-    requested_profile = profile or ""
-    requested_blob = "\n".join([requested_name, normalized_role(role), requested_profile])
-    candidate_blob = subagent_identity_blob(sub)
-    requested_topic_terms = distinctive_alnum_identity_terms(requested_blob)
-    if requested_topic_terms and not (requested_topic_terms & distinctive_alnum_identity_terms(candidate_blob)):
+    requested_role = normalized_role(role)
+    score = 0
+    if requested_name and requested_name.strip().lower() == sub.agent_id.lower():
+        score += 120
+    elif requested_name and requested_name.strip().lower() == sub.name.lower():
+        score += 100
+    else:
         return 0
-    candidate_name_blob = "\n".join([sub.agent_id, sub.name])
-    req_name_compact = compact_identity_text(requested_name)
-    sub_name_compact = compact_identity_text(sub.name)
-    candidate_name_compact = compact_identity_text(candidate_name_blob)
-    name_score = 0
-    if requested_name and requested_name.strip() == sub.agent_id:
-        name_score += 120
-    if req_name_compact and req_name_compact == sub_name_compact:
-        name_score += 100
-    elif req_name_compact and len(req_name_compact) >= 2 and (
-        req_name_compact in candidate_name_compact or sub_name_compact in req_name_compact
-    ):
-        name_score += 55
-    common_span = longest_common_identity_span(requested_name, candidate_name_blob)
-    if common_span >= 3:
-        name_score += min(70, common_span * 22)
-    score = name_score
-    if not requested_name or name_score >= 40:
-        requested_terms = identity_terms(requested_blob)
-        candidate_terms = identity_terms(candidate_blob)
-        if requested_terms:
-            score += min(60, len(requested_terms & candidate_terms) * 10)
-    if (not requested_name or name_score >= 40) and requested_profile and compact_identity_text(requested_profile) == compact_identity_text(subagent_profile_text(sub)):
-        score += 80
+    if requested_role != "specialist" and requested_role != sub.role:
+        return 0
     if normalized_role(role) != "specialist" and normalized_role(role) == sub.role:
-        score += 8
+        score += 12
     if sub.persistent:
         score += 3
     return score
@@ -9261,24 +9039,12 @@ def find_reusable_subagent(
     require_persistent: bool = False,
     require_temporary: bool = False,
 ) -> Optional[SubAgentRuntime]:
+    del profile, role
     load_subagents(state)
-    direct = resolve_subagent(state, name)
+    direct = resolve_subagent_exact(state, name)
     if direct is not None and (not require_persistent or direct.persistent) and (not require_temporary or not direct.persistent):
         return direct
-    candidates = [
-        sub for sub in state.subagents.values()
-        if (not require_persistent or sub.persistent)
-        and (not require_temporary or not sub.persistent)
-    ]
-    scored = [
-        (reusable_subagent_score(sub, name, profile, role), sub.updated_at, sub)
-        for sub in candidates
-    ]
-    scored = [item for item in scored if item[0] >= 40]
-    if not scored:
-        return None
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return scored[0][2]
+    return None
 
 
 def tui_query_limit(value: Any, default: int, *, minimum: int = 1, maximum: int = 100) -> int:
@@ -9476,15 +9242,22 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
     objective = str(args.get("objective") or "").strip()
     if not objective:
         return tui_query_error("objective is required.")
+    explicit_target = str(args.get("target") or args.get("agent_id") or args.get("name") or "").strip()
     requested_role = normalized_role(str(args.get("role") or "specialist"))
     reuse_policy = str(args.get("reuse_policy") or "prefer_existing").strip().lower()
     security_context = normalized_security_context(str(args.get("security_context") or "standard"))
     required_caps = [str(item) for item in (args.get("capabilities_required") or []) if str(item).strip()]
+    lifecycle_filter = str(args.get("lifecycle") or args.get("scope") or "").strip().lower()
     limit = tui_query_limit(args.get("limit"), 5, maximum=20)
     candidates: list[tuple[int, SubAgentRuntime, list[str]]] = []
     for sub in state.subagents.values():
         reasons: list[str] = []
-        score = reusable_subagent_score(sub, objective, objective, requested_role)
+        score = 0
+        if explicit_target:
+            if sub.agent_id.lower() != explicit_target.lower() and sub.name.lower() != explicit_target.lower():
+                continue
+            score += 100
+            reasons.append("explicit_target_match")
         if sub.security_context == security_context:
             score += 20
             reasons.append(f"security_context={security_context}")
@@ -9493,28 +9266,40 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
             reasons.append(f"security_context_mismatch:{sub.security_context}")
         if requested_role != "specialist":
             if normalized_role(sub.role) == requested_role:
-                score += 30
+                score += 40
                 reasons.append(f"role_match:{requested_role}")
             else:
-                score -= 10
+                score -= 60
                 reasons.append(f"role_mismatch:{sub.role}")
+        elif explicit_target:
+            reasons.append("role_not_requested")
         available_caps = role_tools_allowed(sub.role)
         for cap in required_caps:
             if tui_query_capability_matches(cap, available_caps):
-                score += 12
+                score += 20
                 reasons.append(f"capability_match:{cap}")
             else:
-                score -= 8
+                score -= 30
                 reasons.append(f"capability_missing:{cap}")
+        if lifecycle_filter:
+            requested_persistent = lifecycle_is_persistent({"lifecycle": lifecycle_filter})
+            if requested_persistent is None:
+                reasons.append(f"lifecycle_filter_ignored:{lifecycle_filter}")
+            elif bool(sub.persistent) == bool(requested_persistent):
+                score += 20
+                reasons.append(f"lifecycle_match:{lifecycle_filter}")
+            else:
+                score -= 40
+                reasons.append(f"lifecycle_mismatch:{tui_query_agent_lifecycle(sub)}")
         busy = tui_query_agent_busy_reason(sub)
         if busy == "idle":
-            score += 12
+            score += 8
             reasons.append("idle")
         else:
             score -= 8
             reasons.append(f"busy:{busy}")
         if sub.persistent:
-            score += 4
+            score += 2
             reasons.append("persistent")
         if score > -40:
             candidates.append((score, sub, reasons))
@@ -11811,9 +11596,26 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
 def controls_from_json_payload(payload: Any, *, require_known: bool = False) -> list[dict[str, Any]]:
     raw_items: list[Any] = []
     if isinstance(payload, dict) and str(payload.get("schema_version") or "").strip().lower() == GA_CONTROL_SCHEMA:
+        batch_metadata = {
+            key: payload[key]
+            for key in (
+                "continue_after",
+                "next_action_required",
+                "requires_continuation",
+                "workflow_state",
+                "orchestrator_state",
+                "workflow_id",
+                "phase_id",
+                "next_action",
+            )
+            if key in payload
+        }
         actions = payload.get("actions")
         if isinstance(actions, list):
-            raw_items = list(actions)
+            raw_items = [
+                {**batch_metadata, **item} if isinstance(item, dict) else item
+                for item in actions
+            ]
         elif payload.get("action"):
             item = dict(payload)
             item["schema_version"] = AGENT_TASK_SCHEMA
@@ -11942,76 +11744,6 @@ def strip_tui_controls(text: str, *, allow_json_fences: bool = False) -> str:
     return text.strip()
 
 
-def plan_step_title(index: int) -> str:
-    if index <= 0:
-        index = 1
-    return f"进行第 {index} 轮对话"
-
-
-def attach_implicit_plan_to_controls(state: State, controls: list[dict[str, Any]], source: str = "agent") -> list[dict[str, Any]]:
-    if "agent" not in source:
-        return controls
-    if any(str(item.get("action") or item.get("op") or "").strip().lower().replace("-", "_") in {"task_plan", "plan", "plan_create"} for item in controls):
-        return controls
-    sub_controls = [
-        item for item in controls
-        if str(item.get("action") or item.get("op") or "").strip().lower().replace("-", "_")
-        in {"subagent_create", "agent_create", "create_subagent", "new_subagent", "subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}
-    ]
-    if len(sub_controls) < 2:
-        return controls
-    create_indexes: list[int] = []
-    ask_indexes: list[int] = []
-    for idx, item in enumerate(controls):
-        action = str(item.get("action") or item.get("op") or "").strip().lower().replace("-", "_")
-        if action in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}:
-            create_indexes.append(idx)
-        elif action in {"subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}:
-            ask_indexes.append(idx)
-    if not ask_indexes and len(create_indexes) < 2:
-        return controls
-
-    targets = [
-        str(controls[idx].get("target") or controls[idx].get("name") or "").strip()
-        for idx in ask_indexes
-    ]
-    agent_count = len(create_indexes) or len({target for target in targets if target}) or 1
-    round_count = max(1, math.ceil(len(ask_indexes) / max(1, agent_count))) if ask_indexes else 0
-    steps: list[str] = []
-    create_step_no = 0
-    if create_indexes:
-        steps.append("准备/复用子 agent")
-        create_step_no = len(steps)
-    first_round_step_no = len(steps) + 1
-    for round_no in range(1, round_count + 1):
-        steps.append(plan_step_title(round_no))
-    summary_step_no = 0
-    if ask_indexes:
-        steps.append("对话汇总")
-        summary_step_no = len(steps)
-    plan_title = "多子 agent 协作"
-    expected_children: dict[int, int] = {}
-    for round_no in range(1, round_count + 1):
-        step_no = first_round_step_no + round_no - 1
-        remaining = max(0, len(ask_indexes) - (round_no - 1) * max(1, agent_count))
-        expected_children[step_no] = min(max(1, agent_count), remaining)
-    plan_id, step_ids = create_task_plan(state, plan_title, steps, source=source, expected_children=expected_children)
-    updated: list[dict[str, Any]] = []
-    ask_counter = 0
-    for idx, item in enumerate(controls):
-        item = dict(item)
-        if create_step_no and idx in create_indexes:
-            item.setdefault("plan_step_id", step_ids.get(str(create_step_no), ""))
-        if idx in ask_indexes:
-            round_no = ask_counter // max(1, agent_count) + 1
-            step_id = step_ids.get(str(first_round_step_no + round_no - 1), "")
-            item.setdefault("parent_task_id", step_id)
-            item.setdefault("task_title", plan_step_title(round_no))
-            ask_counter += 1
-        updated.append(item)
-    return updated
-
-
 def apply_task_control(state: State, action: str, target: str, value: str, control: dict[str, Any], source: str = "agent") -> Optional[str]:
     action = (action or "").strip().lower().replace("-", "_")
     if action in {"task_plan", "plan", "plan_create"}:
@@ -12054,25 +11786,11 @@ def format_agent_control_result(action: str, target: str, result: str) -> str:
     return f"- {action_label}: {truncate_cells(result, 260)}"
 
 
-def recent_user_subagent_context(state: State, limit: int = 1) -> str:
-    parts: list[str] = []
-    for msg in reversed(state.messages):
-        if msg.role != "user":
-            continue
-        parts.append(msg.content)
-        if len(parts) >= limit:
-            break
-    return "\n".join(reversed(parts))
-
-
 def apply_tui_controls_from_text(state: State, text: str, source: str = "agent", default_target: str = "current") -> list[str]:
     agent_source = "agent" in source
-    controls = attach_implicit_plan_to_controls(state, extract_tui_controls(text), source=source)
+    controls = extract_tui_controls(text)
     agent_control_results: list[str] = []
     subagent_control_aliases: dict[str, str] = {}
-    create_bind_index = 0
-    ask_bind_index = 0
-    subagent_creation_context = "\n".join([recent_user_subagent_context(state), strip_tui_controls(text)])
 
     def record_control_result(action: str, target: str, result: str) -> None:
         message = f"Agent 控制: {result}"
@@ -12104,20 +11822,6 @@ def apply_tui_controls_from_text(state: State, text: str, source: str = "agent",
         if not action:
             continue
         normalized_action = action.replace("-", "_")
-        bind_create_index = create_bind_index
-        bind_ask_index = ask_bind_index
-        if normalized_action in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}:
-            create_bind_index += 1
-        elif normalized_action in {"subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}:
-            ask_bind_index += 1
-        if normalized_action.startswith("subagent_") or normalized_action.startswith("agent_") or normalized_action in {"create_subagent", "new_subagent"}:
-            control = maybe_attach_active_plan_to_subagent_control(
-                state,
-                control,
-                normalized_action,
-                create_index=bind_create_index,
-                ask_index=bind_ask_index,
-            )
         if (
             (normalized_action.startswith("subagent_") or normalized_action.startswith("agent_"))
             and normalized_action not in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}
@@ -12135,7 +11839,6 @@ def apply_tui_controls_from_text(state: State, text: str, source: str = "agent",
             control,
             source=source,
             control_aliases=subagent_control_aliases,
-            force_new_context=subagent_creation_context,
         )
         if subagent_result is not None:
             record_control_result(action, display_target, subagent_result)
@@ -12201,7 +11904,7 @@ def parse_category_command_args(state: State, args: str) -> tuple[str, str, str]
 
 AGENT_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
     ("list", "", "列出子 agent", True),
-    ("new", "[role:]<name> [| profile]", "新建持久子 agent", False),
+    ("new", "[persistent:] [role:]<name> [| profile]", "新建临时子 agent；加 persistent: 创建持久 agent", False),
     ("role", "<agent> <role>", "设置子 agent 角色", False),
     ("settings", "<agent>", "打开持久 agent 详细设置", False),
     ("model", "<agent> [model|inherit]", "设置持久 agent 默认模型", False),
@@ -17954,7 +17657,7 @@ def handle_subagent_command(state: State, text: str) -> bool:
         if not name:
             add_system(state, "Usage: /agent new [persistent:] [role:]<name> [| profile]")
             return True
-        sub = find_reusable_subagent(state, name, profile, role, require_persistent=persistent)
+        sub = find_reusable_subagent(state, name, profile, role, require_persistent=persistent, require_temporary=not persistent)
         if sub is not None:
             add_system(state, f"已复用已有子 agent：{sub.name} ({sub.agent_id})\n角色：{sub.role}\n目录：{sub.home}")
             return True
@@ -18377,10 +18080,6 @@ def control_falsey(value: Any) -> bool:
     return str(value or "").strip().lower() in {"0", "false", "no", "n", "off", "none", "null", "不要", "不"}
 
 
-def subagent_control_identity_text(target: str, value: str, name: str, profile: str) -> str:
-    return "\n".join(str(part or "") for part in (target, value, name, profile))
-
-
 def subagent_control_persistence_intent(
     control: dict[str, Any],
     target: str,
@@ -18388,20 +18087,14 @@ def subagent_control_persistence_intent(
     name: str,
     profile: str,
 ) -> tuple[bool, bool]:
-    persistent_raw = control.get("persistent", control.get("long_term", control.get("durable", None)))
-    if persistent_raw is not None:
-        return (True, False) if control_truthy(persistent_raw) else (False, True)
+    del target, value, name, profile
+    persistent = lifecycle_is_persistent(control)
+    if persistent is not None:
+        return bool(persistent), not bool(persistent)
     for key in ("temporary", "temp", "ephemeral", "session_only", "session_scoped"):
         if key in control and control_truthy(control.get(key)):
             return False, True
-    identity = subagent_control_identity_text(target, value, name, profile)
-    identity_temporary = text_has_any_intent_token(identity, SUBAGENT_TEMPORARY_INTENT_TOKENS)
-    identity_persistent = text_has_any_intent_token(identity, SUBAGENT_PERSISTENT_INTENT_TOKENS)
-    if identity_temporary:
-        return False, True
-    if identity_persistent:
-        return True, False
-    return False, False
+    return False, True
 
 
 def subagent_control_force_new_intent(
@@ -18412,6 +18105,7 @@ def subagent_control_force_new_intent(
     profile: str,
     context_text: str = "",
 ) -> bool:
+    del target, value, name, profile, context_text
     for key in ("force_new", "create_new", "fresh", "separate"):
         if key in control and control_truthy(control.get(key)):
             return True
@@ -18420,8 +18114,8 @@ def subagent_control_force_new_intent(
             return True
     if "new" in control and isinstance(control.get("new"), (bool, int, float, str)) and control_truthy(control.get("new")):
         return True
-    identity = "\n".join([subagent_control_identity_text(target, value, name, profile), context_text])
-    return text_has_any_intent_token(identity, SUBAGENT_FORCE_NEW_INTENT_TOKENS)
+    reuse_policy = str(control.get("reuse_policy") or "").strip().lower().replace("-", "_")
+    return reuse_policy in {"force_new", "never", "none", "no_reuse"}
 
 
 def subagent_control_alias_keys(*values: Any) -> list[str]:
