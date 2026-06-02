@@ -48,6 +48,8 @@ def retarget_harness(root: str) -> None:
     a.AGENT_RECOVERY_PLANS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "recovery_plans.jsonl")
     a.AGENT_BASELINE_REPORT_PATH = os.path.join(a.AGENT_HARNESS_DIR, "baseline_report.json")
     a.AGENT_GOVERNANCE_PATH = os.path.join(a.AGENT_HARNESS_DIR, "governance_components.json")
+    a.AGENT_RUNTIME_REGISTRY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "runtime_providers.json")
+    a.AGENT_SCHEDULES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "schedules.jsonl")
     a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_push_subscriptions.jsonl")
     a.AGENT_GATEWAY_PUSH_DELIVERIES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_push_deliveries.jsonl")
     a.AGENT_GATEWAY_DAEMON_PID_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_daemon.pid")
@@ -647,6 +649,8 @@ def assert_gateway_schema(registry: dict) -> None:
     assert mcp["request_response"]["resource_read"] == "/mcp/resource?uri={uri}", mcp
     assert any(item["uri"] == "resource://agent-mail/checkpoints" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/recovery-plans" for item in mcp["resources"]), mcp
+    assert any(item["uri"] == "resource://agent-mail/runtime-providers" for item in mcp["resources"]), mcp
+    assert any(item["uri"] == "resource://agent-mail/schedules" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/bridges" for item in mcp["resources"]), mcp
     assert any(item["name"] == "repo.read" for item in mcp["tools"]), mcp
@@ -654,6 +658,27 @@ def assert_gateway_schema(registry: dict) -> None:
     assert capabilities["schema_version"] == "agentcapabilities.v1", capabilities
     assert "researcher" in capabilities["roles"], capabilities
     assert capabilities["roles"]["researcher"]["permissions"]["write_policy"] == "none", capabilities
+    assert capabilities["runtime_registry_ref"] == a.AGENT_RUNTIME_REGISTRY_PATH, capabilities
+    assert capabilities["runtime_providers"][0]["provider_id"] == "genericagent", capabilities
+    runtime_registry = registry["runtime_registry"]
+    assert runtime_registry["schema_version"] == "agentruntime.registry.v1", runtime_registry
+    assert runtime_registry["default_provider_id"] == "genericagent", runtime_registry
+    assert "genericagent" in runtime_registry["provider_ids"], runtime_registry
+    runtime_provider = runtime_registry["providers"][0]
+    assert runtime_provider["schema_version"] == "agentruntime.provider.v1", runtime_provider
+    assert runtime_provider["capabilities"]["streaming"] is True, runtime_provider
+    assert runtime_provider["model_routing"]["owner"] == "ga-tui.control_plane", runtime_provider
+    assert runtime_provider["scheduler"]["dispatch_contract"] == "agenttask.v2", runtime_provider
+    assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
+    model_orchestration = registry["model_orchestration"]
+    assert model_orchestration["schema_version"] == "model_orchestration.v1", model_orchestration
+    assert model_orchestration["owner"] == "ga-tui.control_plane", model_orchestration
+    assert model_orchestration["capabilities"]["set_subagent_default_model"] is True, model_orchestration
+    scheduled = registry["scheduled_task_registry"]
+    assert scheduled["schema_version"] == "scheduledtask.registry.v1", scheduled
+    assert scheduled["owner"] == "ga-tui.control_plane", scheduled
+    assert scheduled["dispatch"]["contract"] == "agenttask.v2", scheduled
+    assert scheduled["job_count"] >= 1, scheduled
     bridges = registry["bridge_registry"]
     assert bridges["schema_version"] == "agentbridge.registry.v1", bridges
     assert {"feishu", "openclaw", "codex", "claude_code", "deer_flow", "cli", "dashboard", "approval_inbox"} <= set(bridges["bridge_ids"]), bridges
@@ -2888,6 +2913,20 @@ def run_checks() -> None:
     assert_artifact_schema(direct_artifact, artifact_type="debug-loop")
     inventory = [item for item in a.artifact_inventory() if item.key == direct_ref]
     assert inventory and "Hash:" in inventory[-1].detail and "Provenance:" in inventory[-1].detail, inventory
+    schedule_control = ga_control({
+        "action": "schedule.create",
+        "schedule_id": "sched_daily_digest",
+        "name": "Daily Digest",
+        "cron": "0 8 * * *",
+        "provider_id": "genericagent",
+        "work_order": {"objective": "Generate a daily digest."},
+    })
+    a.apply_tui_controls_from_text(state, schedule_control, source="agent")
+    schedule_records = a.latest_schedule_records()
+    assert schedule_records["sched_daily_digest"]["dispatch_contract"] == "agenttask.v2", schedule_records
+    assert schedule_records["sched_daily_digest"]["provider_id"] == "genericagent", schedule_records
+    a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
+    assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
     registry = a.ensure_gateway_registry(state)
     assert registry["internal_agent_mail"]["artifact_index"] == a.AGENT_ARTIFACT_INDEX_PATH, registry
     assert registry["internal_agent_mail"]["policy_decisions"] == a.AGENT_POLICY_DECISIONS_PATH, registry
@@ -2899,6 +2938,8 @@ def run_checks() -> None:
     assert registry["internal_agent_mail"]["checkpoint_store"] == a.AGENT_CHECKPOINTS_DIR, registry
     assert registry["internal_agent_mail"]["recovery"] == a.AGENT_RECOVERY_PATH, registry
     assert registry["internal_agent_mail"]["recovery_plans"] == a.AGENT_RECOVERY_PLANS_PATH, registry
+    assert registry["internal_agent_mail"]["runtime_providers"] == a.AGENT_RUNTIME_REGISTRY_PATH, registry
+    assert registry["internal_agent_mail"]["schedules"] == a.AGENT_SCHEDULES_PATH, registry
     assert_gateway_schema(registry)
     baseline_report = registry["baseline_comparison"]
     assert_baseline_report_schema(baseline_report)
@@ -2908,6 +2949,14 @@ def run_checks() -> None:
     formatted_baseline = a.format_baseline_report(baseline_report)
     assert "Architecture Baseline Comparison" in formatted_baseline, formatted_baseline
     assert a.AGENT_BASELINE_REPORT_PATH in formatted_baseline, formatted_baseline
+    runtime_text = a.format_runtime_registry(registry["runtime_registry"])
+    assert "Agent Runtime Providers" in runtime_text and "genericagent" in runtime_text, runtime_text
+    schedule_text = a.format_scheduled_task_registry(registry["scheduled_task_registry"])
+    assert "Scheduled Tasks" in schedule_text and "agenttask.v2" in schedule_text, schedule_text
+    model_text = a.format_model_orchestration_registry(registry["model_orchestration"])
+    assert "Model Orchestration" in model_text, model_text
+    gateway_panel_keys = {item.key for item in a.gateway_panel_items(state)}
+    assert {"runtime_registry", "model_orchestration", "scheduled_task_registry"} <= gateway_panel_keys, gateway_panel_keys
     direct_a2a_task = [item for item in registry["a2a_gateway"]["tasks"] if item["id"] == "task_direct_schema"]
     assert direct_a2a_task
     assert_a2a_task_schema(direct_a2a_task[-1])

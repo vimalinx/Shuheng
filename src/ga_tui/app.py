@@ -46,8 +46,10 @@ PROJECT_AGENTS_PATH = os.path.join(APP_ROOT_DIR, "AGENTS.md")
 
 try:
     from .integration import find_genericagent_root as _find_genericagent_root
+    from .runtime import RuntimeAdapter, RuntimeRegistry, genericagent_provider_spec
 except Exception:
     from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
+    from runtime import RuntimeAdapter, RuntimeRegistry, genericagent_provider_spec  # type: ignore
 
 
 def find_genericagent_root() -> str:
@@ -88,6 +90,8 @@ AGENT_RECOVERY_PATH = os.path.join(AGENT_HARNESS_DIR, "recovery.jsonl")
 AGENT_RECOVERY_PLANS_PATH = os.path.join(AGENT_HARNESS_DIR, "recovery_plans.jsonl")
 AGENT_BASELINE_REPORT_PATH = os.path.join(AGENT_HARNESS_DIR, "baseline_report.json")
 AGENT_GOVERNANCE_PATH = os.path.join(AGENT_HARNESS_DIR, "governance_components.json")
+AGENT_RUNTIME_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_providers.json")
+AGENT_SCHEDULES_PATH = os.path.join(AGENT_HARNESS_DIR, "schedules.jsonl")
 AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_push_subscriptions.jsonl")
 AGENT_GATEWAY_PUSH_DELIVERIES_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_push_deliveries.jsonl")
 AGENT_GATEWAY_DAEMON_PID_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.pid")
@@ -264,6 +268,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/recover", "", "查看/处理可恢复任务", True),
     ("/evals", "", "查看任务评估/trace", True),
     ("/gateway", "", "查看 A2A/MCP gateway 脚手架", True),
+    ("/runtimes", "", "查看 agent runtime/provider 注册表", True),
+    ("/schedules", "", "查看顶层定时任务注册表", True),
     ("/baseline", "", "查看架构基线对比报告", True),
     ("/Secret", "[status|sessions|open-session n|open n]", "进入本地加密 Secret Vault", True),
     ("/lock", "", "锁定 Secret Vault 并清除明文状态", True),
@@ -313,6 +319,7 @@ TUI_AGENT_CONTROL_HINT = """
 动作清单：
 - `session.pin|session.unpin|session.category|session.filter|session.clear_filter|session.collapse_category|session.expand_category|session.archive|session.unarchive|session.delete|session.rename|session.show_archived|session.hide_archived`
 - `task.plan.create`, `task.update`, `task.done`, `task.start`, `task.fail`, `task.cancel`
+- `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, `schedule.delete`
 - `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`, `agent.delete`
 - `delegate.create`
 - `memory.candidate`
@@ -326,6 +333,7 @@ TUI_AGENT_CONTROL_HINT = """
 - 如果当前控制块只是一个中间步骤，且需要主控继续生成后续控制，在本次 `ga-control.v2` 批量 envelope 或最后一个 action 上显式写 `continue_after:true` 或 `workflow_state:"in_progress"`。
 - 如果控制动作属于某个计划步骤，必须显式提供 `plan_step_id` 或 `parent_task_id`。TUI 不会按“自我介绍/互相聊天/汇总”等词自动绑定步骤。
 - Secret Vault 已解锁时仍使用同样的 `ga-control.v2` / `agent.create` / `delegate.create` 控制；持久 Secret agent 写入加密 `secret_subagents`，不要检查或推断普通 `memory/subagents/` 目录。
+- 定时任务由 TUI 顶层登记和治理；`schedule.create` 必须提供明确 `cron`、`interval`、`trigger`、`rrule` 或 `at`，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
 [/GenericAgent-TUI ga-control v2]
@@ -5403,6 +5411,7 @@ def a2a_artifact_object(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def gateway_capability_registry(state: Optional[State] = None) -> dict[str, Any]:
+    runtime_registry = agent_runtime_registry().to_record()
     role_capabilities = {
         role: {
             "role": role,
@@ -5431,12 +5440,264 @@ def gateway_capability_registry(state: Optional[State] = None) -> dict[str, Any]
         "schema_version": "agentcapabilities.v1",
         "roles": role_capabilities,
         "agents": agents,
+        "runtime_registry_ref": AGENT_RUNTIME_REGISTRY_PATH,
+        "runtime_providers": runtime_registry["providers"],
         "discovery": {
             "by_role": sorted(role_capabilities),
             "by_agent": [item["agent_id"] for item in agents],
+            "by_runtime_provider": runtime_registry["provider_ids"],
             "policy": "least privilege; risky capabilities require policy approval",
         },
     }
+
+
+def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any]:
+    entries: list[LLMConfigEntry] = []
+    try:
+        entries, _mixin, _preserved, _error = load_llm_config_entries()
+    except Exception:
+        entries = []
+    current_model = ""
+    current_provider = ""
+    if state is not None:
+        try:
+            current_model = str(state.agent.get_llm_name(model=True))
+            current_provider = str(state.agent.get_llm_name(model=False))
+        except Exception:
+            current_model = ""
+            current_provider = ""
+    models = [
+        {
+            "name": config_display_name(entry),
+            "config_type": entry.cfg_type,
+            "model": str(entry.cfg.get("model") or ""),
+            "base_url": str(entry.cfg.get("apibase") or ""),
+            "health_key": model_health_key(entry),
+        }
+        for entry in entries
+    ]
+    return {
+        "schema_version": "model_orchestration.v1",
+        "owner": "ga-tui.control_plane",
+        "status": "active",
+        "current": {
+            "provider": current_provider,
+            "model": current_model,
+        },
+        "model_count": len(models),
+        "models": models,
+        "recent_models_path": LLM_RECENT_MODELS_PATH,
+        "capabilities": {
+            "switch_current_session_model": True,
+            "set_default_new_session_model": True,
+            "set_subagent_default_model": True,
+            "validate_models": True,
+            "probe_provider_models": True,
+            "route_by_runtime_provider": True,
+        },
+        "policy": {
+            "owner": "ga-tui.orchestrator",
+            "selection_contract": "model config name or explicit provider/model metadata",
+            "fallback": "inherit global default when an agent has no explicit model",
+        },
+    }
+
+
+def scheduled_task_registry(state: Optional[State] = None) -> dict[str, Any]:
+    del state
+    jobs = list(latest_schedule_records().values())
+    jobs.sort(key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""))
+    active_jobs = [
+        row for row in jobs
+        if str(row.get("status") or "enabled").lower() not in {"disabled", "deleted", "cancelled", "canceled"}
+    ]
+    return {
+        "schema_version": "scheduledtask.registry.v1",
+        "owner": "ga-tui.control_plane",
+        "status": "registry_ready",
+        "schedules_path": AGENT_SCHEDULES_PATH,
+        "job_count": len(jobs),
+        "active_job_count": len(active_jobs),
+        "jobs": jobs[-50:],
+        "dispatch": {
+            "contract": "agenttask.v2",
+            "runtime_provider_selection": "explicit provider_id or registry default",
+            "task_ledger": AGENT_TASK_LEDGER_PATH,
+            "agent_mail": AGENT_MAIL_PATH,
+            "artifact_policy": "artifact_refs_required",
+        },
+        "capabilities": {
+            "register_recurring_jobs": True,
+            "dispatch_to_runtime_provider": True,
+            "audit_each_run": True,
+            "approval_gates_before_risky_runs": True,
+        },
+    }
+
+
+def latest_schedule_records() -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for row in read_jsonl(AGENT_SCHEDULES_PATH, limit=500):
+        schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
+        if not schedule_id:
+            continue
+        records[schedule_id] = row
+    return records
+
+
+def append_schedule_record(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    payload.setdefault("schema_version", "scheduledtask.v1")
+    payload.setdefault("updated_at", now_iso())
+    append_jsonl(AGENT_SCHEDULES_PATH, payload)
+    return payload
+
+
+def schedule_trigger_from_control(control: dict[str, Any]) -> str:
+    for key in ("cron", "interval", "trigger", "rrule", "at"):
+        value = str(control.get(key) or "").strip()
+        if value:
+            return value
+    schedule = control.get("schedule") if isinstance(control.get("schedule"), dict) else {}
+    for key in ("cron", "interval", "trigger", "rrule", "at"):
+        value = str(schedule.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def schedule_work_order_from_control(control: dict[str, Any]) -> dict[str, Any]:
+    work_order = control.get("work_order") if isinstance(control.get("work_order"), dict) else {}
+    if work_order:
+        return work_order
+    task = control.get("task") if isinstance(control.get("task"), dict) else {}
+    if task:
+        return task
+    objective = str(control.get("objective") or control.get("prompt") or control.get("message") or "").strip()
+    return {"objective": objective} if objective else {}
+
+
+def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, status: str, source: str) -> dict[str, Any]:
+    work_order = schedule_work_order_from_control(control)
+    provider_id = str(control.get("provider_id") or control.get("runtime_provider_id") or "").strip()
+    return {
+        "schema_version": "scheduledtask.v1",
+        "schedule_id": schedule_id,
+        "name": str(control.get("name") or control.get("title") or schedule_id).strip(),
+        "status": status,
+        "trigger": schedule_trigger_from_control(control),
+        "timezone": str(control.get("timezone") or control.get("tz") or "").strip(),
+        "provider_id": provider_id or agent_runtime_registry().to_record()["default_provider_id"],
+        "dispatch_contract": "agenttask.v2",
+        "work_order": work_order,
+        "routing": control.get("routing") if isinstance(control.get("routing"), dict) else {},
+        "capability_contract": control.get("capability_contract") if isinstance(control.get("capability_contract"), dict) else {},
+        "context_contract": control.get("context_contract") if isinstance(control.get("context_contract"), dict) else {},
+        "output_contract": control.get("output_contract") if isinstance(control.get("output_contract"), dict) else {},
+        "created_at": str(control.get("created_at") or now_iso()),
+        "updated_at": now_iso(),
+        "source": source,
+    }
+
+
+def apply_schedule_control(state: State, action: str, target: str, value: str, control: dict[str, Any], source: str = "agent") -> Optional[str]:
+    del state, value
+    action = (action or "").strip().lower().replace("-", "_")
+    if action not in {"schedule_create", "schedule_update", "schedule_enable", "schedule_disable", "schedule_delete"}:
+        return None
+    records = latest_schedule_records()
+    if action == "schedule_create":
+        schedule_id = str(control.get("schedule_id") or control.get("id") or short_uid("sched")).strip()
+        trigger = schedule_trigger_from_control(control)
+        if not trigger:
+            return "缺少 schedule 触发器：需要 cron、interval、trigger、rrule 或 at。"
+        row = schedule_record_from_control(control, schedule_id=schedule_id, status=str(control.get("status") or "enabled"), source=source)
+        append_schedule_record(row)
+        return f"已登记定时任务：{row['name']} ({schedule_id}) · {trigger}"
+    schedule_id = str(target or control.get("schedule_id") or control.get("id") or "").strip()
+    if not schedule_id:
+        return "缺少 schedule target。"
+    existing = records.get(schedule_id)
+    if existing is None:
+        return f"找不到定时任务：{schedule_id}"
+    if action == "schedule_update":
+        row = dict(existing)
+        updates = schedule_record_from_control(
+            control,
+            schedule_id=schedule_id,
+            status=str(existing.get("status") or "enabled"),
+            source=source,
+        )
+        row.update({key: item for key, item in updates.items() if item not in ("", {}, [])})
+        row["created_at"] = existing.get("created_at") or row.get("created_at") or now_iso()
+        row["updated_at"] = now_iso()
+        append_schedule_record(row)
+        return f"已更新定时任务：{row.get('name') or schedule_id}"
+    status = {
+        "schedule_enable": "enabled",
+        "schedule_disable": "disabled",
+        "schedule_delete": "deleted",
+    }[action]
+    row = dict(existing)
+    row["status"] = status
+    row["updated_at"] = now_iso()
+    row["source"] = source
+    append_schedule_record(row)
+    label = {"enabled": "启用", "disabled": "停用", "deleted": "删除"}[status]
+    return f"已{label}定时任务：{row.get('name') or schedule_id}"
+
+
+def format_runtime_registry(data: dict[str, Any]) -> str:
+    lines = [
+        "Agent Runtime Providers",
+        f"default: {data.get('default_provider_id') or '-'}",
+        f"registry: {data.get('registry_path') or AGENT_RUNTIME_REGISTRY_PATH}",
+        "",
+    ]
+    for provider in data.get("providers") or []:
+        capabilities = provider.get("capabilities") if isinstance(provider.get("capabilities"), dict) else {}
+        enabled = ", ".join(key for key, value in capabilities.items() if value)
+        lines.append(f"- {provider.get('provider_id')}: {provider.get('name')} · {provider.get('status')} · {provider.get('transport')}")
+        lines.append(f"  models: {(provider.get('model_routing') or {}).get('selection_contract', '-')}")
+        lines.append(f"  scheduler: {(provider.get('scheduler') or {}).get('dispatch_contract', '-')}")
+        lines.append(f"  capabilities: {truncate_cells(enabled, 180) if enabled else '-'}")
+    return "\n".join(lines).rstrip()
+
+
+def format_scheduled_task_registry(data: dict[str, Any]) -> str:
+    lines = [
+        "Scheduled Tasks",
+        f"status: {data.get('status')}",
+        f"jobs: {data.get('active_job_count', 0)} active / {data.get('job_count', 0)} total",
+        f"store: {data.get('schedules_path') or AGENT_SCHEDULES_PATH}",
+        f"dispatch: {(data.get('dispatch') or {}).get('contract', '-')}",
+        "",
+    ]
+    jobs = data.get("jobs") or []
+    if not jobs:
+        lines.append("No scheduled jobs registered yet. Future jobs should dispatch via agenttask.v2 and audit each run into the task ledger.")
+    for row in jobs[-20:]:
+        lines.append(
+            f"- {row.get('schedule_id') or row.get('id') or '-'} · {row.get('status', 'enabled')} · "
+            f"{row.get('cron') or row.get('interval') or row.get('trigger') or '-'} · {truncate_cells(str(row.get('objective') or row.get('task') or ''), 140)}"
+        )
+    return "\n".join(lines).rstrip()
+
+
+def format_model_orchestration_registry(data: dict[str, Any]) -> str:
+    current = data.get("current") if isinstance(data.get("current"), dict) else {}
+    lines = [
+        "Model Orchestration",
+        f"current: {current.get('model') or '-'} · {current.get('provider') or '-'}",
+        f"models: {data.get('model_count', 0)}",
+        f"recent: {data.get('recent_models_path') or LLM_RECENT_MODELS_PATH}",
+        "",
+    ]
+    for row in (data.get("models") or [])[:20]:
+        lines.append(f"- {row.get('name')}: {row.get('model')} · {row.get('base_url')}")
+    if int(data.get("model_count") or 0) > 20:
+        lines.append(f"... {int(data.get('model_count') or 0) - 20} more")
+    return "\n".join(lines).rstrip()
 
 
 def external_bridge_registry() -> dict[str, Any]:
@@ -5601,6 +5862,8 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
         {"uri": "resource://agent-mail/checkpoints", "path": AGENT_CHECKPOINT_INDEX_PATH, "description": "Checkpoint index JSONL"},
         {"uri": "resource://agent-mail/recovery", "path": AGENT_RECOVERY_PATH, "description": "Recovery records JSONL"},
         {"uri": "resource://agent-mail/recovery-plans", "path": AGENT_RECOVERY_PLANS_PATH, "description": "Replayable recovery plan JSONL"},
+        {"uri": "resource://agent-mail/runtime-providers", "path": AGENT_RUNTIME_REGISTRY_PATH, "description": "Agent runtime provider registry JSON"},
+        {"uri": "resource://agent-mail/schedules", "path": AGENT_SCHEDULES_PATH, "description": "Top-level scheduled task registry JSONL"},
         {"uri": "resource://agent-mail/gateway-daemon", "path": AGENT_GATEWAY_DAEMON_STATUS_PATH, "description": "Gateway daemon status JSON"},
         {"uri": "resource://agent-mail/gateway-push-subscriptions", "path": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, "description": "Gateway push subscriptions JSONL"},
         {"uri": "resource://agent-mail/gateway-push-deliveries", "path": AGENT_GATEWAY_PUSH_DELIVERIES_PATH, "description": "Gateway push delivery audit JSONL"},
@@ -6704,6 +6967,9 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
     a2a_tasks = [a2a_task_object(row) for row in task_rows]
     a2a_messages = [a2a_message_object(row) for row in mail_rows]
     a2a_artifacts = [a2a_artifact_object(row) for row in artifact_rows]
+    runtime_registry = runtime_registry_record()
+    model_registry = model_orchestration_registry(state)
+    schedule_registry = scheduled_task_registry(state)
     capability_registry = gateway_capability_registry(state)
     governance_registry = governance_component_registry(state)
     bridge_registry = external_bridge_registry()
@@ -6728,6 +6994,8 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "recovery": AGENT_RECOVERY_PATH,
             "recovery_plans": AGENT_RECOVERY_PLANS_PATH,
             "governance": AGENT_GOVERNANCE_PATH,
+            "runtime_providers": AGENT_RUNTIME_REGISTRY_PATH,
+            "schedules": AGENT_SCHEDULES_PATH,
             "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
             "gateway_daemon_pid": AGENT_GATEWAY_DAEMON_PID_PATH,
         },
@@ -6780,6 +7048,9 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             },
         },
         "capability_registry": capability_registry,
+        "runtime_registry": runtime_registry,
+        "model_orchestration": model_registry,
+        "scheduled_task_registry": schedule_registry,
         "governance_components": governance_registry,
         "gateway_service": gateway_service_descriptor(),
         "bridge_registry": bridge_registry,
@@ -10416,6 +10687,47 @@ def install_tui_control_hint(agent: Any) -> None:
             continue
 
 
+class GenericAgentRuntimeAdapter(RuntimeAdapter):
+    def create_agent(self) -> Any:
+        install_tui_query_runtime()
+        agent = GenericAgent()
+        agent.inc_out = True
+        return agent
+
+    def prepare_agent(self, agent: Any, *, state: Any = None) -> None:
+        install_tui_query_runtime(agent, state if isinstance(state, State) else None)
+        install_tui_control_hint(agent)
+
+    def start_agent(self, agent: Any, *, thread_name: str = "") -> Any:
+        if not thread_name:
+            thread_name = "ga-tui-agent"
+        agent._ga_tui_thread_name = thread_name
+        thread = threading.Thread(target=agent.run, daemon=True, name=thread_name)
+        agent._ga_tui_thread = thread
+        thread.start()
+        return thread
+
+
+def agent_runtime_registry() -> RuntimeRegistry:
+    requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "genericagent").strip() or "genericagent"
+    registry = RuntimeRegistry(default_provider_id=requested)
+    registry.register(GenericAgentRuntimeAdapter(genericagent_provider_spec(
+        root_dir=ROOT_DIR,
+        harness_dir=AGENT_HARNESS_DIR,
+        recent_models_path=LLM_RECENT_MODELS_PATH,
+        schedules_path=AGENT_SCHEDULES_PATH,
+    )))
+    return registry
+
+
+def runtime_registry_record() -> dict[str, Any]:
+    data = agent_runtime_registry().to_record()
+    data["updated_at"] = now_iso()
+    data["registry_path"] = AGENT_RUNTIME_REGISTRY_PATH
+    write_text_atomic(AGENT_RUNTIME_REGISTRY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return data
+
+
 def browse_input_history(state: State, direction: int) -> bool:
     if not state.input_history:
         return False
@@ -10444,17 +10756,12 @@ def browse_input_history(state: State, direction: int) -> bool:
 
 
 def new_agent() -> Any:
-    install_tui_query_runtime()
-    agent = GenericAgent()
-    agent.inc_out = True
-    install_tui_query_runtime(agent)
-    install_tui_control_hint(agent)
+    adapter = agent_runtime_registry().default()
+    agent = adapter.create_agent()
     agent_no = next(_AGENT_COUNTER)
     thread_name = f"ga-tui-agent-{agent_no}"
-    agent._ga_tui_thread_name = thread_name
-    thread = threading.Thread(target=agent.run, daemon=True, name=thread_name)
-    agent._ga_tui_thread = thread
-    thread.start()
+    adapter.prepare_agent(agent)
+    adapter.start_agent(agent, thread_name=thread_name)
     return agent
 
 
@@ -11360,6 +11667,11 @@ KNOWN_TUI_CONTROL_ACTIONS = {
     "task_start",
     "task_fail",
     "task_cancel",
+    "schedule_create",
+    "schedule_update",
+    "schedule_enable",
+    "schedule_disable",
+    "schedule_delete",
     "agent_create",
     "agent_profile_update",
     "agent_role_update",
@@ -11529,6 +11841,12 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
         mapped.update(common)
         mapped["action"] = action
         mapped["target"] = control.get("target") or control.get("task_id") or control.get("parent_task_id") or ""
+        return mapped
+    if action in {"schedule_create", "schedule_update", "schedule_enable", "schedule_disable", "schedule_delete"}:
+        mapped = dict(control)
+        mapped.update(common)
+        mapped["action"] = action
+        mapped["target"] = control.get("target") or control.get("schedule_id") or control.get("id") or ""
         return mapped
     if action == "agent_create":
         selector = agenttask_target_selector(control)
@@ -11827,6 +12145,10 @@ def apply_tui_controls_from_text(state: State, text: str, source: str = "agent",
             and normalized_action not in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}
         ):
             target = resolve_subagent_control_alias(subagent_control_aliases, target)
+        schedule_result = apply_schedule_control(state, action, target, value, control, source=source)
+        if schedule_result is not None:
+            record_control_result(action, display_target, schedule_result)
+            continue
         task_result = apply_task_control(state, action, target, value, control, source=source)
         if task_result is not None:
             record_control_result(action, display_target, task_result)
@@ -16585,7 +16907,18 @@ def eval_panel_items() -> list[PanelItem]:
 def gateway_panel_items(state: State) -> list[PanelItem]:
     data = ensure_gateway_registry(state)
     items: list[PanelItem] = []
-    for key in ("internal_agent_mail", "mcp_gateway", "a2a_gateway", "capability_registry", "governance_components", "bridge_registry", "baseline_comparison"):
+    for key in (
+        "internal_agent_mail",
+        "mcp_gateway",
+        "a2a_gateway",
+        "capability_registry",
+        "runtime_registry",
+        "model_orchestration",
+        "scheduled_task_registry",
+        "governance_components",
+        "bridge_registry",
+        "baseline_comparison",
+    ):
         payload = data.get(key) or {}
         items.append(PanelItem(
             key=key,
@@ -18449,6 +18782,14 @@ def submit(state: State, text: str) -> None:
     if text == "/gateway":
         data = ensure_gateway_registry(state)
         add_system(state, "在 TUI 输入框执行 /gateway 会打开 A2A/MCP Gateway 面板。\n" + json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)[:4000])
+        return
+    if text == "/runtimes":
+        data = runtime_registry_record()
+        add_system(state, "在 TUI 输入框执行 /runtimes 会打开 Runtime Provider 面板。\n" + format_runtime_registry(data))
+        return
+    if text == "/schedules":
+        data = scheduled_task_registry(state)
+        add_system(state, "在 TUI 输入框执行 /schedules 会打开 Scheduled Tasks 面板。\n" + format_scheduled_task_registry(data))
         return
     if text == "/baseline":
         report = architecture_baseline_report(state, gateway_data=ensure_gateway_registry(state))
