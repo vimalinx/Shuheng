@@ -2945,13 +2945,19 @@ def run_checks() -> None:
     schedule_records = a.latest_schedule_records()
     assert schedule_records["sched_daily_digest"]["dispatch_contract"] == "agenttask.v2", schedule_records
     assert schedule_records["sched_daily_digest"]["provider_id"] == "genericagent", schedule_records
+    assert schedule_records["sched_daily_digest"]["cron"] == "0 8 * * *", schedule_records
     a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
     assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
-    assert a.schedule_trigger_from_control({"schedule": "08:00", "repeat": "daily"}) == "cron:0 8 * * *"
-    assert a.schedule_trigger_from_control({"schedule": {"schedule": "08:30", "repeat": "weekday"}}) == "cron:30 8 * * 1-5"
-    assert a.split_schedule_trigger({"trigger": "每天 08:00"}) == ("cron", "0 8 * * *")
-    assert a.split_schedule_trigger({"trigger": "每 1 分钟"}) == ("interval", "每 1 分钟")
-    assert a.parse_schedule_interval_seconds("每 1 分钟") == 60.0
+    assert "用户只需要表达自然意图" in a.TUI_AGENT_CONTROL_HINT
+    assert 'cron:"0 8 * * *"' in a.TUI_AGENT_CONTROL_HINT
+    assert 'interval:"1m"' in a.TUI_AGENT_CONTROL_HINT
+    assert a.schedule_trigger_from_control({"schedule": "08:00", "repeat": "daily"}) == ""
+    assert a.schedule_trigger_from_control({"schedule": {"schedule": "08:30", "repeat": "weekday"}}) == ""
+    assert a.split_schedule_trigger({"trigger": "每天 08:00"}) == ("unknown", "每天 08:00")
+    assert a.split_schedule_trigger({"trigger": "每 1 分钟"}) == ("unknown", "每 1 分钟")
+    assert a.parse_schedule_interval_seconds("每 1 分钟") is None
+    assert a.split_schedule_trigger({"interval": "1m"}) == ("interval", "1m")
+    assert a.split_schedule_trigger({"trigger": "interval:1m"}) == ("interval", "1m")
     interval_anchor_row = a.append_schedule_record({
         "schedule_id": "sched_interval_anchor",
         "name": "Interval Anchor",
@@ -3002,6 +3008,7 @@ def run_checks() -> None:
         "output_contract": {"format": "structured_markdown", "required_sections": ["summary", "artifact_refs"]},
     })
     a.apply_tui_controls_from_text(state, due_schedule_control, source="agent")
+    assert a.latest_schedule_records()["sched_due_once"]["at"] == "2026-01-01T00:00:00+0800"
     due_info = a.schedule_due_info(a.latest_schedule_records()["sched_due_once"], now_epoch=1780000000.0)
     assert due_info["due"] and due_info["idempotency_key"], due_info
     tick = a.scheduler_tick(state, now_epoch=1780000000.0, source="test:scheduler")

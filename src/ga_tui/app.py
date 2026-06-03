@@ -340,7 +340,10 @@ TUI_AGENT_CONTROL_HINT = """
 - 如果当前控制块只是一个中间步骤，且需要主控继续生成后续控制，在本次 `ga-control.v2` 批量 envelope 或最后一个 action 上显式写 `continue_after:true` 或 `workflow_state:"in_progress"`。
 - 如果控制动作属于某个计划步骤，必须显式提供 `plan_step_id` 或 `parent_task_id`。TUI 不会按“自我介绍/互相聊天/汇总”等词自动绑定步骤。
 - Secret Vault 已解锁时仍使用同样的 `ga-control.v2` / `agent.create` / `delegate.create` 控制；持久 Secret agent 写入加密 `secret_subagents`，不要检查或推断普通 `memory/subagents/` 目录。
-- 定时任务由 TUI 顶层登记和治理；`schedule.create` 必须提供明确 `cron`、`interval`、`trigger`、`rrule` 或 `at`，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
+- 定时任务由 TUI 顶层登记和治理；用户只需要表达自然意图，不需要说 `schedule_id`、`cron`、`interval`、`at` 这些术语。你负责把“每天早上八点”“每分钟”“明天上午九点”等自然语言翻译成新的 `schedule.create` 结构。
+- `schedule.create` 只能使用新协议字段：`cron`、`interval`、`at`，或标准化 `trigger`（例如 `cron:0 8 * * *`、`interval:1m`、`at:YYYY-MM-DDT09:00:00+08:00`）。不要输出旧 `schedule` / `repeat` 字段，也不要把中文自然时间原样塞进 `trigger`。
+- 用户说“每天 8 点”时输出 `cron:"0 8 * * *"`；说“工作日 8 点半”时输出 `cron:"30 8 * * 1-5"`；说“每 1 分钟”时输出 `interval:"1m"`；说“明天 9 点”时按当前日期和时区输出 ISO `at`。
+- 用户没有指定 `schedule_id` 时可以省略，让 TUI 自动生成；但必须提供明确目标 agent（优先先用 `agent_match` / `agent_list` 查询）和完整 `work_order` / capability / context / output contracts，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
 [/GenericAgent-TUI ga-control v2]
@@ -5620,60 +5623,11 @@ def append_schedule_run(row: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def schedule_time_repeat_trigger(schedule_value: Any, repeat_value: Any = "") -> str:
-    schedule_text = str(schedule_value or "").strip()
-    repeat_text = str(repeat_value or "").strip().lower()
-    if not schedule_text:
-        return ""
-    repeat_norm = re.sub(r"\s+", "", repeat_text.replace("-", "_"))
-    every_match = re.fullmatch(r"every_(\d+(?:\.\d+)?)([mhd])", repeat_norm)
-    if every_match:
-        unit = {"m": "m", "h": "h", "d": "d"}[every_match.group(2)]
-        return f"interval:{every_match.group(1)}{unit}"
-    if parse_schedule_interval_seconds(schedule_text) is not None and repeat_norm in {"", "interval", "repeat"}:
-        return f"interval:{schedule_text}"
-    time_match = re.fullmatch(r"(\d{1,2}):(\d{2})", schedule_text)
-    if not time_match:
-        return ""
-    hour = int(time_match.group(1))
-    minute = int(time_match.group(2))
-    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        return ""
-    if repeat_norm in {"", "daily", "day", "每天", "每日"}:
-        return f"cron:{minute} {hour} * * *"
-    if repeat_norm in {"weekday", "weekdays", "workday", "workdays", "工作日", "工作天"}:
-        return f"cron:{minute} {hour} * * 1-5"
-    return ""
-
-
-def normalize_schedule_trigger_text(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    interval_seconds = parse_schedule_interval_seconds(text)
-    if interval_seconds is not None:
-        return f"interval:{text}"
-    daily_match = re.fullmatch(r"(?:daily|每天|每日)\s+(\d{1,2}):(\d{2})", text, re.I)
-    if daily_match:
-        return schedule_time_repeat_trigger(f"{daily_match.group(1)}:{daily_match.group(2)}", "daily")
-    weekday_match = re.fullmatch(r"(?:weekday|weekdays|工作日|工作天)\s+(\d{1,2}):(\d{2})", text, re.I)
-    if weekday_match:
-        return schedule_time_repeat_trigger(f"{weekday_match.group(1)}:{weekday_match.group(2)}", "weekday")
-    return ""
-
-
 def schedule_record_trigger(row: dict[str, Any]) -> str:
     for key in ("cron", "interval", "at", "rrule", "trigger"):
         value = str(row.get(key) or "").strip()
         if value:
             return value
-    legacy = schedule_time_repeat_trigger(row.get("schedule"), row.get("repeat"))
-    if legacy:
-        return legacy
-    schedule = row.get("schedule") if isinstance(row.get("schedule"), dict) else {}
-    legacy = schedule_time_repeat_trigger(schedule.get("schedule"), schedule.get("repeat"))
-    if legacy:
-        return legacy
     return ""
 
 
@@ -5707,18 +5661,6 @@ def parse_schedule_interval_seconds(value: Any) -> Optional[float]:
     if not text:
         return None
     text = re.sub(r"^(interval|every)\s*[:=]?\s*", "", text).strip()
-    zh_match = re.fullmatch(r"(?:每|每隔)?\s*(\d+(?:\.\d+)?)\s*(秒|秒钟|分钟|分|小时|时|天|日)", text)
-    if zh_match:
-        amount = float(zh_match.group(1))
-        unit = zh_match.group(2)
-        if unit in {"秒", "秒钟"}:
-            return amount if amount > 0 else None
-        if unit in {"分钟", "分"}:
-            return amount * 60.0 if amount > 0 else None
-        if unit in {"小时", "时"}:
-            return amount * 3600.0 if amount > 0 else None
-        if unit in {"天", "日"}:
-            return amount * 86400.0 if amount > 0 else None
     match = re.fullmatch(
         r"(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?",
         text,
@@ -5756,16 +5698,6 @@ def split_schedule_trigger(row: dict[str, Any]) -> tuple[str, str]:
         return "at", str(row.get("at") or "").strip()
     if row.get("rrule"):
         return "rrule", str(row.get("rrule") or "").strip()
-    normalized = normalize_schedule_trigger_text(trigger)
-    if normalized:
-        normalized_kind, _, normalized_value = normalized.partition(":")
-        return normalized_kind, normalized_value.strip()
-    if parse_schedule_interval_seconds(trigger) is not None:
-        return "interval", trigger
-    if len(trigger.split()) == 5:
-        return "cron", trigger
-    if parse_schedule_timestamp(trigger) is not None:
-        return "at", trigger
     return "unknown", trigger
 
 
@@ -5920,18 +5852,7 @@ def schedule_trigger_from_control(control: dict[str, Any]) -> str:
     for key in ("cron", "interval", "trigger", "rrule", "at"):
         value = str(control.get(key) or "").strip()
         if value:
-            return normalize_schedule_trigger_text(value) or value
-    schedule = control.get("schedule") if isinstance(control.get("schedule"), dict) else {}
-    for key in ("cron", "interval", "trigger", "rrule", "at"):
-        value = str(schedule.get(key) or "").strip()
-        if value:
-            return normalize_schedule_trigger_text(value) or value
-    legacy = schedule_time_repeat_trigger(control.get("schedule"), control.get("repeat"))
-    if legacy:
-        return legacy
-    legacy = schedule_time_repeat_trigger(schedule.get("schedule"), schedule.get("repeat"))
-    if legacy:
-        return legacy
+            return value
     return ""
 
 
@@ -5960,7 +5881,7 @@ def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, s
         or selector.get("name")
         or ""
     ).strip()
-    return {
+    record = {
         "schema_version": "scheduledtask.v1",
         "schedule_id": schedule_id,
         "name": str(control.get("name") or control.get("title") or schedule_id).strip(),
@@ -5979,6 +5900,11 @@ def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, s
         "updated_at": now_iso(),
         "source": source,
     }
+    for key in ("cron", "interval", "at", "rrule"):
+        value = str(control.get(key) or "").strip()
+        if value:
+            record[key] = value
+    return record
 
 
 def apply_schedule_control(state: State, action: str, target: str, value: str, control: dict[str, Any], source: str = "agent") -> Optional[str]:
