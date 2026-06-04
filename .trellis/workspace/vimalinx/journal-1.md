@@ -104,3 +104,36 @@ Added structured subagent dispatch results for scheduler agent-task runs, remove
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Track Trellis workflow metadata
+
+**Date**: 2026-06-04
+**Task**: Track Trellis workflow metadata
+**Branch**: `main`
+
+### Summary
+
+Updated root ignore rules so Trellis project metadata and bundled skills are tracked while runtime, backups, template hashes, and local developer state remain ignored.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5168f64` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
