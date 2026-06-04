@@ -14,6 +14,8 @@
 
 - Hidden block: `<ga-control>{...}</ga-control>`
 - Fenced block: ````ga-control`
+- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, and v2-to-internal-action coercion.
+- Execution module: `src/ga_tui/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
 - Batch envelope:
 
 ```json
@@ -49,6 +51,8 @@
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
 - `install_tui_control_hint()` must replace any previous GenericAgent-TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
+- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
+- `src/ga_tui/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
 
 ### 4. Validation & Error Matrix
 
@@ -86,7 +90,8 @@
 - Quarantine checks may assert that historical hidden markup is stripped but must not treat it as an executable protocol.
 - `scripts/check_policy_gates.py` must assert common missing-tail JSON repair for `<ga-control>` and visible parse-error reporting for unrepairable control JSON.
 - `scripts/check_policy_gates.py` must assert inline-code `<ga-control>` labels do not capture later real control blocks.
-- `python3 -m py_compile src/ga_tui/app.py scripts/check_policy_gates.py` must pass.
+- `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `ga_tui.control_protocol` and that the protocol module does not import curses.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py scripts/check_policy_gates.py` must pass.
 - `python3 scripts/check_policy_gates.py` must pass.
 - `ga-tui-check --root /home/vimalinx/Programs/GenericAgent` must pass when the sibling GenericAgent checkout exists.
 

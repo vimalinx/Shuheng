@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ga_tui import app as a  # noqa: E402
+from ga_tui import control_protocol as cp  # noqa: E402
 
 
 def retarget_harness(root: str) -> None:
@@ -1417,6 +1418,11 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
     state.running = True
+    assert a.extract_tui_controls is cp.extract_tui_controls
+    assert a.strip_tui_controls is cp.strip_tui_controls
+    assert a.lifecycle_is_persistent is cp.lifecycle_is_persistent
+    assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
+    assert "curses" not in cp.__dict__
     existing = a.create_subagent(
         state,
         "Obsidiam知识库管家",
