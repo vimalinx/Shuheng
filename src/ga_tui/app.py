@@ -310,6 +310,7 @@ TUI_AGENT_CONTROL_HINT = """
 真实 `<ga-control>` 必须放在所有用户可见正文之后，作为回复末尾隐藏块；不要把它夹在段落、列表或示例中间，否则可见正文会被隐藏块移除后截断。
 
 在决定创建、复用、停止、委派子 agent 或更新任务前，优先调用只读查询工具获取当前事实：`agent_list`、`agent_get`、`agent_match`、`task_list`、`task_get`、`approval_list`、`artifact_list`、`capability_list`。这些工具只读取 TUI 仪表盘/账本，不会修改状态；查清后才在回复末尾输出真实 `<ga-control>`。
+当用户要求创建或查看定时任务时，优先调用 TUI 调度工具：`schedule_create`、`schedule_list`。`schedule_create` 是受 TUI 控制面治理的状态变更工具；`schedule_list` 只读取 TUI 调度注册表。
 
 控制块必须是 `schema_version:"ga-control.v2"`，批量动作放在 `actions` 里；每个动作使用强类型 dotted action 名称。
 
@@ -341,6 +342,7 @@ TUI_AGENT_CONTROL_HINT = """
 - 如果控制动作属于某个计划步骤，必须显式提供 `plan_step_id` 或 `parent_task_id`。TUI 不会按“自我介绍/互相聊天/汇总”等词自动绑定步骤。
 - Secret Vault 已解锁时仍使用同样的 `ga-control.v2` / `agent.create` / `delegate.create` 控制；持久 Secret agent 写入加密 `secret_subagents`，不要检查或推断普通 `memory/subagents/` 目录。
 - 定时任务由 TUI 顶层登记和治理；用户只需要表达自然意图，不需要说 `schedule_id`、`cron`、`interval`、`at` 这些术语。你负责把“每天早上八点”“每分钟”“明天上午九点”等自然语言翻译成当前 `ScheduleCreate` 结构。
+- 创建定时任务时不要读取、修改或启动外部 scheduler 文件、外部定时任务 SOP 或其他程序的调度目录；当前有效调度状态只来自 TUI 调度工具和 `schedule.create` 控制动作。
 - `ScheduleCreate` 的触发器 schema 只由 `cron`、`interval`、`at`，或标准化 `trigger` 前缀定义（例如 `cron:0 8 * * *`、`interval:1m`、`at:YYYY-MM-DDT09:00:00+08:00`）。schema 外字段由通用边界处理，不在当前协议里枚举历史字段。
 - 用户说“每天 8 点”时输出 `cron:"0 8 * * *"`；说“工作日 8 点半”时输出 `cron:"30 8 * * 1-5"`；说“每 1 分钟”时输出 `interval:"1m"`；说“明天 9 点”时按当前日期和时区输出 ISO `at`。
 - 用户没有指定 `schedule_id` 时可以省略，让 TUI 自动生成；但必须提供明确目标 agent（优先先用 `agent_match` / `agent_list` 查询）和完整 `work_order` / capability / context / output contracts，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
@@ -477,6 +479,55 @@ TUI_QUERY_TOOL_NAMES = {
     for tool in TUI_QUERY_TOOL_SCHEMAS
     if tool.get("function")
 }
+TUI_SCHEDULE_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_create",
+            "description": "Governed TUI scheduling mutation. Creates a scheduled task in the TUI schedule registry through the same scheduledtask.v1 path as schedule.create controls. User-facing name: schedule.create.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "Optional stable schedule id. Omit to let TUI generate one."},
+                    "name": {"type": "string", "description": "Human-readable schedule name."},
+                    "cron": {"type": "string", "description": "Five-field cron expression, e.g. 0 8 * * *."},
+                    "interval": {"type": "string", "description": "Interval duration, e.g. 1m, 30s, 2h."},
+                    "at": {"type": "string", "description": "ISO timestamp for a one-shot run."},
+                    "trigger": {"type": "string", "description": "Standardized trigger string prefixed with cron:, interval:, or at:."},
+                    "timezone": {"type": "string", "description": "Optional timezone label."},
+                    "provider_id": {"type": "string", "description": "Optional runtime provider id."},
+                    "target": {"type": "string", "description": "Target subagent id/name when routing.selected_agent is omitted."},
+                    "routing": {"type": "object", "description": "agenttask.v2 routing contract with selected_agent or target_selector."},
+                    "work_order": {"type": "object", "description": "agenttask.v2 work order. Must include objective for dispatchable schedules."},
+                    "capability_contract": {"type": "object", "description": "agenttask.v2 capability contract."},
+                    "context_contract": {"type": "object", "description": "agenttask.v2 context contract."},
+                    "output_contract": {"type": "object", "description": "agenttask.v2 output contract."},
+                    "status": {"type": "string", "enum": ["enabled", "disabled"], "description": "Initial schedule status.", "default": "enabled"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_list",
+            "description": "Read-only TUI scheduling query. Lists TUI scheduled tasks, due state, run count, and audit refs without touching external scheduler files. User-facing name: schedule.list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_inactive": {"type": "boolean", "description": "Include disabled, deleted, or cancelled schedules.", "default": False},
+                    "limit": {"type": "integer", "description": "Maximum schedules to return.", "default": 50},
+                },
+            },
+        },
+    },
+]
+TUI_SCHEDULE_TOOL_NAMES = {
+    str(tool.get("function", {}).get("name") or "")
+    for tool in TUI_SCHEDULE_TOOL_SCHEMAS
+    if tool.get("function")
+}
+TUI_TOOL_SCHEMAS = TUI_QUERY_TOOL_SCHEMAS + TUI_SCHEDULE_TOOL_SCHEMAS
 
 
 def cell_width(text: str) -> int:
@@ -1469,20 +1520,114 @@ def is_subagent_session_log_sample(text: str) -> bool:
     return "\nagent:" in text or "\\nagent:" in text
 
 
+def is_model_response_basename(key: str) -> bool:
+    base = os.path.basename(key or "")
+    return base.startswith("model_responses") and base.endswith(".txt")
+
+
+def session_meta_epoch(value: Any) -> float:
+    if value in (None, ""):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = parse_schedule_timestamp(value)
+    except Exception:
+        parsed = None
+    return float(parsed or 0.0)
+
+
+def clear_missing_source_session_meta(meta: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    if not any(key in meta for key in ("source_missing", "archive_backed", "source_state")):
+        return meta, False
+    entry = dict(meta)
+    for key in ("source_missing", "archive_backed", "source_state"):
+        entry.pop(key, None)
+    return entry, entry != meta
+
+
+def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+    names: dict[str, str] = {}
+    if session_names is not None:
+        try:
+            names = session_names._load()
+        except Exception:
+            names = {}
+    candidates = {
+        key
+        for key in [*state.session_meta.keys(), *names.keys()]
+        if is_model_response_basename(str(key))
+    }
+    rows: list[tuple[str, float, str, int, str]] = []
+    changed = False
+    for key in sorted(candidates):
+        if key in existing_keys:
+            continue
+        path = os.path.join(MODEL_RESPONSES_DIR, key)
+        if os.path.exists(path):
+            continue
+        meta = dict(state.session_meta.get(key, {}))
+        if bool(meta.get("deleted")) or bool(meta.get("hidden_subagent_log")):
+            continue
+        title = compact_title(str(names.get(key) or ""), 80)
+        desc = compact_description(str(meta.get("description") or title or ""))
+        preview = str(meta.get("preview") or desc or title or "已登记的历史会话").strip()
+        last_user_at = max(
+            session_meta_epoch(meta.get("last_user_at")),
+            session_meta_epoch(meta.get("last_opened_at")),
+            session_meta_epoch(meta.get("cache_mtime")),
+            session_meta_epoch(meta.get("updated_at")),
+        )
+        try:
+            rounds = int(meta.get("rounds") or meta.get("ui_preview_total_rounds") or 0)
+        except (TypeError, ValueError):
+            rounds = 0
+        entry = dict(meta)
+        entry.update({
+            "source_missing": True,
+            "archive_backed": True,
+            "source_state": "missing",
+            "source_path": path,
+            "original_basename": key,
+        })
+        if preview and not entry.get("preview"):
+            entry["preview"] = preview
+        if desc and not entry.get("description"):
+            entry["description"] = desc
+        if last_user_at and not entry.get("last_user_at"):
+            entry["last_user_at"] = last_user_at
+        if rounds and not entry.get("rounds"):
+            entry["rounds"] = rounds
+        if entry != meta:
+            state.session_meta[key] = entry
+            changed = True
+        rows.append((path, last_user_at, preview, rounds, desc))
+    return rows, changed
+
+
 def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tuple[list[tuple[str, float, str, int, str]], bool]:
     tag = f"model_responses_{exclude_pid}.txt" if exclude_pid is not None else ""
     paths = sorted(glob.glob(os.path.join(MODEL_RESPONSES_DIR, "model_responses*.txt")), key=os.path.getmtime, reverse=True)
     rows: list[tuple[str, float, str, int, str]] = []
     changed = False
+    existing_keys: set[str] = set()
     for path in paths:
         if tag and path.endswith(tag):
             continue
         key = session_key(path)
+        existing_keys.add(key)
         try:
             stat = os.stat(path)
         except OSError:
             continue
         meta = state.session_meta.get(key, {})
+        cleaned_meta, cleaned = clear_missing_source_session_meta(meta)
+        if cleaned:
+            state.session_meta[key] = cleaned_meta
+            meta = cleaned_meta
+            changed = True
         if bool(meta.get("hidden_subagent_log")):
             continue
         if is_subagent_session_log_sample(sample_file_text(path)):
@@ -1547,6 +1692,10 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
             state.session_meta[key] = entry
             changed = True
         rows.append((path, last_user_at, preview, rounds, desc))
+    missing_rows, missing_changed = missing_source_session_rows(state, existing_keys)
+    if missing_changed:
+        changed = True
+    rows.extend(missing_rows)
     rows.sort(key=lambda item: item[1], reverse=True)
     return rows, changed
 
@@ -5624,7 +5773,7 @@ def append_schedule_run(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def schedule_record_trigger(row: dict[str, Any]) -> str:
-    for key in ("cron", "interval", "at", "rrule", "trigger"):
+    for key in ("cron", "interval", "at", "trigger"):
         value = str(row.get(key) or "").strip()
         if value:
             return value
@@ -5683,7 +5832,7 @@ def parse_schedule_interval_seconds(value: Any) -> Optional[float]:
 def split_schedule_trigger(row: dict[str, Any]) -> tuple[str, str]:
     trigger = schedule_record_trigger(row)
     lowered = trigger.lower().strip()
-    for prefix in ("interval", "cron", "at", "rrule"):
+    for prefix in ("interval", "cron", "at"):
         for sep in (":", "="):
             marker = prefix + sep
             if lowered.startswith(marker):
@@ -5696,8 +5845,6 @@ def split_schedule_trigger(row: dict[str, Any]) -> tuple[str, str]:
         return "cron", str(row.get("cron") or "").strip()
     if row.get("at"):
         return "at", str(row.get("at") or "").strip()
-    if row.get("rrule"):
-        return "rrule", str(row.get("rrule") or "").strip()
     return "unknown", trigger
 
 
@@ -5849,7 +5996,7 @@ def schedule_due_info(
 
 
 def schedule_trigger_from_control(control: dict[str, Any]) -> str:
-    for key in ("cron", "interval", "trigger", "rrule", "at"):
+    for key in ("cron", "interval", "trigger", "at"):
         value = str(control.get(key) or "").strip()
         if value:
             return value
@@ -5900,7 +6047,7 @@ def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, s
         "updated_at": now_iso(),
         "source": source,
     }
-    for key in ("cron", "interval", "at", "rrule"):
+    for key in ("cron", "interval", "at"):
         value = str(control.get(key) or "").strip()
         if value:
             record[key] = value
@@ -5917,7 +6064,7 @@ def apply_schedule_control(state: State, action: str, target: str, value: str, c
         schedule_id = str(control.get("schedule_id") or control.get("id") or short_uid("sched")).strip()
         trigger = schedule_trigger_from_control(control)
         if not trigger:
-            return "缺少 schedule 触发器：需要 cron、interval、trigger、rrule 或 at。"
+            return "缺少 schedule 触发器：需要 cron、interval、trigger 或 at。"
         row = schedule_record_from_control(control, schedule_id=schedule_id, status=str(control.get("status") or "enabled"), source=source)
         append_schedule_record(row)
         return f"已登记定时任务：{row['name']} ({schedule_id}) · {trigger}"
@@ -9906,6 +10053,25 @@ def tui_query_ok(kind: str, **payload: Any) -> dict[str, Any]:
     }
 
 
+def tui_tool_error(message: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.tool.v1",
+        "status": "error",
+        "error": message,
+        **extra,
+    }
+
+
+def tui_tool_ok(kind: str, **payload: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.tool.v1",
+        "kind": kind,
+        "status": "ok",
+        "generated_at": now_iso(),
+        **payload,
+    }
+
+
 def tui_query_json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): tui_query_json_safe(v) for k, v in value.items()}
@@ -10313,6 +10479,51 @@ def tui_tool_capability_list(state: Optional[State], args: dict[str, Any]) -> di
     if state is not None:
         tui_query_refresh_subagents(state)
     return tui_query_ok("capability.list", capabilities=tui_query_json_safe(gateway_capability_registry(state)))
+
+
+def tui_tool_schedule_create(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_tool_error("TUI state is not bound to this GenericAgent runtime.")
+    control = dict(args or {})
+    schedule_id = str(control.get("schedule_id") or control.get("id") or short_uid("sched")).strip()
+    control["schedule_id"] = schedule_id
+    result = apply_schedule_control(
+        state,
+        "schedule_create",
+        schedule_id,
+        "",
+        control,
+        source="tool:schedule_create",
+    )
+    if result is None:
+        return tui_tool_error("schedule_create is not available.")
+    record = latest_schedule_records().get(schedule_id)
+    if record is None:
+        return tui_tool_error(result, schedule_id=schedule_id)
+    mark_dirty(state)
+    return tui_tool_ok(
+        "schedule.create",
+        message=result,
+        schedule=tui_query_json_safe(record),
+        registry=tui_query_json_safe(scheduled_task_registry(state)),
+    )
+
+
+def tui_tool_schedule_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    registry = scheduled_task_registry(state)
+    include_inactive = bool((args or {}).get("include_inactive", False))
+    limit = tui_query_limit((args or {}).get("limit"), 50)
+    jobs = list(registry.get("jobs") or [])
+    if not include_inactive:
+        jobs = [
+            row for row in jobs
+            if str(row.get("status") or "enabled").lower() not in {"disabled", "deleted", "cancelled", "canceled"}
+        ]
+    jobs = jobs[-limit:]
+    data = dict(registry)
+    data["jobs"] = jobs
+    data["returned"] = len(jobs)
+    return tui_tool_ok("schedule.list", registry=tui_query_json_safe(data))
 
 
 def subagent_brief(sub: SubAgentRuntime) -> str:
@@ -11087,7 +11298,7 @@ def install_tui_query_tool_schema() -> None:
         for item in schema
         if isinstance(item, dict) and isinstance(item.get("function"), dict)
     }
-    for tool in TUI_QUERY_TOOL_SCHEMAS:
+    for tool in TUI_TOOL_SCHEMAS:
         name = str(tool.get("function", {}).get("name") or "")
         if name and name not in existing:
             schema.append(copy.deepcopy(tool))
@@ -11128,6 +11339,8 @@ def tui_query_tool_outcome(kind: str, handler: Any, args: dict[str, Any]) -> Ste
         "approval_list": tui_tool_approval_list,
         "artifact_list": tui_tool_artifact_list,
         "capability_list": tui_tool_capability_list,
+        "schedule_create": tui_tool_schedule_create,
+        "schedule_list": tui_tool_schedule_list,
     }
     func = tool_map.get(kind)
     data = func(state, args) if func is not None else tui_query_error(f"Unknown TUI query tool: {kind}")
@@ -11171,6 +11384,14 @@ def install_tui_query_handler_methods() -> None:
         del response
         return tui_query_tool_outcome("capability_list", self, args)
 
+    def do_schedule_create(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("schedule_create", self, args)
+
+    def do_schedule_list(self: Any, args: dict[str, Any], response: Any) -> StepOutcome:
+        del response
+        return tui_query_tool_outcome("schedule_list", self, args)
+
     for name, method in {
         "do_agent_list": do_agent_list,
         "do_agent_get": do_agent_get,
@@ -11180,6 +11401,8 @@ def install_tui_query_handler_methods() -> None:
         "do_approval_list": do_approval_list,
         "do_artifact_list": do_artifact_list,
         "do_capability_list": do_capability_list,
+        "do_schedule_create": do_schedule_create,
+        "do_schedule_list": do_schedule_list,
     }.items():
         setattr(handler_cls, name, method)
     setattr(handler_cls, "_ga_tui_query_tools_patched", True)
@@ -16335,7 +16558,8 @@ def draw_sidebar(stdscr, state: State, height: int, width: int) -> int:
             prefix = f"{marker}S{idx:02d} "
             left_width = max(8, sidebar_w - 12 - cell_width(prefix))
             shown_time = mtime
-            rows.append(("history", path, f"{prefix}{truncate_cells(title.replace(chr(10), ' '), left_width)}", f"{rel_age(shown_time or mtime)} {rounds}"))
+            missing = " M" if meta.get("source_missing") or meta.get("archive_backed") else ""
+            rows.append(("history", path, f"{prefix}{truncate_cells(title.replace(chr(10), ' '), left_width)}", f"{rel_age(shown_time or mtime)} {rounds}{missing}"))
 
     show_virtual = not state.session_filter_category or bool(filter_kind)
     if show_virtual and filter_kind in {"", "pinned"}:
@@ -16752,9 +16976,13 @@ def session_info_popup_lines(state: State, path: str, inner_w: int) -> list[tupl
         (f"标题: {title}", cp(7) | curses.A_BOLD),
         (f"ID: {session_stable_id(path)}", cp(1)),
         (f"分类: {session_category_label(meta)}" + ("  · 置顶" if meta.get("pinned") else ""), cp(1)),
+    ]
+    if meta.get("source_missing") or meta.get("archive_backed"):
+        lines.append(("状态: 源文件已归档/缺失，仅保留侧边栏登记。", cp(3)))
+    lines.extend([
         ("", cp(1)),
         ("简介:", cp(7) | curses.A_BOLD),
-    ]
+    ])
     for line in wrap_cells(desc, inner_w):
         lines.append((line, cp(2)))
     return lines
@@ -20831,6 +21059,16 @@ def maybe_expand_history_at_top(state: State) -> None:
 def restore_history(state: State, path: str) -> None:
     if state.secret_vault.unlocked or state.secret_vault.pending_action:
         state.last_error = "Secret Vault 模式下不能恢复普通历史；请先 /lock。"
+        mark_dirty(state)
+        return
+    if not os.path.exists(path):
+        if not state.session_meta:
+            state.session_meta = load_session_meta_registry()
+        meta = session_meta_for(state, path)
+        if meta.get("source_missing") or meta.get("archive_backed"):
+            state.last_error = "该会话源文件已物理归档或缺失，侧边栏仅保留登记信息；需要先通过归档映射恢复流程找回源文件。"
+        else:
+            state.last_error = "该会话源文件不存在，不能直接恢复。"
         mark_dirty(state)
         return
     if state.status in {"running", "aborting"}:

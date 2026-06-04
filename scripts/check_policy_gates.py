@@ -1615,6 +1615,9 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
     for name in a.TUI_QUERY_TOOL_NAMES:
         assert schema_names.count(name) == 1, (name, schema_names)
         assert hasattr(a.agentmain.GenericAgentHandler, f"do_{name}"), name
+    for name in a.TUI_SCHEDULE_TOOL_NAMES:
+        assert schema_names.count(name) == 1, (name, schema_names)
+        assert hasattr(a.agentmain.GenericAgentHandler, f"do_{name}"), name
 
     researcher = a.create_subagent(
         state,
@@ -1680,11 +1683,35 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
     assert artifacts["artifacts"][0]["uri"] == artifact_ref, artifacts
     capabilities = a.tui_tool_capability_list(state, {})
     assert "researcher" in capabilities["capabilities"]["roles"], capabilities
+    schedule_tool = a.tui_tool_schedule_create(
+        state,
+        {
+            "schedule_id": "sched_tool_digest",
+            "name": "Tool Digest",
+            "interval": "1m",
+            "routing": {"selected_agent": researcher.name},
+            "work_order": {"objective": "Produce a short tool-created digest."},
+            "capability_contract": {"tools_allowed": ["read"], "write_policy": "none"},
+            "context_contract": {"history_mode": "summary", "artifact_reference_only": True},
+            "output_contract": {"format": "structured_markdown", "required_sections": ["summary"]},
+        },
+    )
+    assert schedule_tool["schema_version"] == "ga-tui.tool.v1", schedule_tool
+    assert schedule_tool["status"] == "ok", schedule_tool
+    assert schedule_tool["schedule"]["schedule_id"] == "sched_tool_digest", schedule_tool
+    assert schedule_tool["schedule"]["source"] == "tool:schedule_create", schedule_tool
+    assert schedule_tool["schedule"]["dispatch_contract"] == "agenttask.v2", schedule_tool
+    schedule_list = a.tui_tool_schedule_list(state, {})
+    assert schedule_list["status"] == "ok", schedule_list
+    assert any(job["schedule_id"] == "sched_tool_digest" for job in schedule_list["registry"]["jobs"]), schedule_list
 
     handler = a.agentmain.GenericAgentHandler(state.agent, [], root)
     outcome = handler.do_agent_list({}, None)
     assert outcome.data["status"] == "ok", outcome.data
     assert outcome.next_prompt == "\n", outcome.next_prompt
+    schedule_outcome = handler.do_schedule_list({}, None)
+    assert schedule_outcome.data["status"] == "ok", schedule_outcome.data
+    assert schedule_outcome.next_prompt == "\n", schedule_outcome.next_prompt
 
 
 def assert_legacy_subagent_result_backfills_to_restored_session() -> None:
@@ -1820,6 +1847,34 @@ def assert_recent_sessions_use_last_message_activity() -> None:
     used_paths = {a.normalized_path(new_path)}
     deduped_recent = a.recent_history_items(history_entries, used_paths, limit=2)
     assert all(a.normalized_path(item[0]) not in used_paths for _idx, item in deduped_recent), deduped_recent
+
+
+def assert_missing_source_history_rows_stay_visible_but_not_restorable() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_missing_source_history_")
+    retarget_harness(root)
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+    missing_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_missing_source.txt")
+    a.save_session_meta_registry({
+        os.path.basename(missing_path): {
+            "preview": "archived session preview",
+            "description": "Missing raw source retained in TUI registry",
+            "last_user_at": 1000.0,
+            "rounds": 3,
+        },
+    })
+    state = a.State(agent=FakeLLMAgent())
+    assert a.load_history(state, force=True) is True
+    assert any(path == missing_path for path, _mtime, _preview, _rounds in state.history), state.history
+    meta = a.session_meta_for(state, missing_path)
+    assert meta["source_missing"] is True, meta
+    assert meta["archive_backed"] is True, meta
+    assert meta["source_state"] == "missing", meta
+    assert state.history_descriptions[missing_path] == "Missing raw source retained in TUI registry", state.history_descriptions
+    state.status = "idle"
+    a.restore_history(state, missing_path)
+    assert state.status == "idle", state.status
+    assert "源文件已物理归档或缺失" in state.last_error, state.last_error
+    assert getattr(state.agent, "log_path", "") != missing_path, getattr(state.agent, "log_path", "")
 
 
 def assert_self_intro_does_not_consume_mutual_chat_step() -> None:
@@ -2063,6 +2118,7 @@ def run_checks() -> None:
     assert_tui_query_tools_expose_dashboard_state()
     assert_legacy_subagent_result_backfills_to_restored_session()
     assert_recent_sessions_use_last_message_activity()
+    assert_missing_source_history_rows_stay_visible_but_not_restorable()
     assert_self_intro_does_not_consume_mutual_chat_step()
     assert_control_result_continues_intermediate_workflow_step()
 
@@ -2950,9 +3006,12 @@ def run_checks() -> None:
     assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
     assert "用户只需要表达自然意图" in a.TUI_AGENT_CONTROL_HINT
     assert "ScheduleCreate" in a.TUI_AGENT_CONTROL_HINT
+    assert "schedule_create" in a.TUI_AGENT_CONTROL_HINT
+    assert "不要读取、修改或启动外部 scheduler" in a.TUI_AGENT_CONTROL_HINT
     assert "schema 外字段由通用边界处理" in a.TUI_AGENT_CONTROL_HINT
     assert 'cron:"0 8 * * *"' in a.TUI_AGENT_CONTROL_HINT
     assert 'interval:"1m"' in a.TUI_AGENT_CONTROL_HINT
+    assert "rrule" not in a.TUI_AGENT_CONTROL_HINT.lower()
     assert a.split_schedule_trigger({"cron": "0 8 * * *"}) == ("cron", "0 8 * * *")
     assert a.split_schedule_trigger({"interval": "1m"}) == ("interval", "1m")
     assert a.split_schedule_trigger({"at": "2026-01-01T00:00:00+0800"}) == ("at", "2026-01-01T00:00:00+0800")
