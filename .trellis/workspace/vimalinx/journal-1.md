@@ -137,3 +137,36 @@ Updated root ignore rules so Trellis project metadata and bundled skills are tra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Extract control protocol helpers
+
+**Date**: 2026-06-04
+**Task**: Extract control protocol helpers
+**Branch**: `main`
+
+### Summary
+
+Moved current ga-control.v2 and agenttask.v2 parsing/coercion helpers from app.py into src/ga_tui/control_protocol.py, kept app.py execution behavior compatible, and documented the new protocol module boundary.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02d8eb0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
