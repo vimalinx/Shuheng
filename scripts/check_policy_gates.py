@@ -2460,13 +2460,32 @@ def run_checks() -> None:
         assert [entry.cfg["model"] for entry in added_models] == ["model-gamma"], added_models
     finally:
         a.probe_models_for_config = old_probe_models
-    claude_entry = a.LLMConfigEntry("native_claude_config", "native_claude", {"name": "claude", "apikey": "k", "apibase": "https://claude.invalid", "model": "claude-sonnet"})
-    mixed_entries = [llm_entries[0], claude_entry, llm_entries[1]]
-    assert a.model_entry_category(llm_entries[0]) == "OpenAI"
-    assert a.model_entry_category(claude_entry) == "Anthropic"
-    assert a.model_entry_categories(mixed_entries) == ["Anthropic", "OpenAI"]
-    assert a.model_entry_indices_for_category(mixed_entries, "OpenAI") == [0, 2]
-    assert a.model_entry_indices_for_category(mixed_entries, "Anthropic") == [1]
+    old_config_providers = a.CONFIG_PROVIDERS
+    try:
+        a.CONFIG_PROVIDERS = [
+            {"id": "anthropic", "name": "Anthropic Claude", "type": "native_claude", "template": {"name": "anthropic-direct", "apibase": "https://api.anthropic.com", "model": "claude-sonnet"}},
+            {"id": "openai", "name": "OpenAI GPT", "type": "native_oai", "template": {"name": "gpt-native", "apibase": "https://api.openai.com/v1", "model": "gpt-5.5"}},
+            {"id": "deepseek", "name": "DeepSeek", "type": "native_oai", "template": {"name": "deepseek", "apibase": "https://api.deepseek.com", "model": "deepseek-v4-flash"}},
+            {"id": "qwen", "name": "阿里通义千问", "type": "native_oai", "template": {"name": "qwen", "apibase": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus"}},
+            {"id": "minimax", "name": "MiniMax", "type": "native_claude", "template": {"name": "minimax", "apibase": "https://api.minimaxi.com/anthropic", "model": "MiniMax-M2.7"}},
+        ]
+        openai_entry = a.LLMConfigEntry("native_oai_config", "native_oai", {"name": "gpt-native", "apikey": "k", "apibase": "https://api.openai.com/v1", "model": "gpt-5.5"})
+        deepseek_entry = a.LLMConfigEntry("native_oai_config_1", "native_oai", {"name": "deepseek", "apikey": "k", "apibase": "https://api.deepseek.com", "model": "deepseek-v4-flash"})
+        custom_entry = a.LLMConfigEntry("native_oai_config_2", "native_oai", {"name": "alpha", "apikey": "k", "apibase": "https://api.example.invalid/v1", "model": "model-alpha"})
+        minimax_entry = a.LLMConfigEntry("native_claude_config", "native_claude", {"name": "minimax", "apikey": "k", "apibase": "https://api.minimaxi.com/anthropic", "model": "MiniMax-M2.7"})
+        assert a.model_entry_category(openai_entry) == "OpenAI"
+        assert a.model_entry_category(deepseek_entry) == "DeepSeek"
+        assert a.model_entry_category(custom_entry) == "example.invalid"
+        provider_tabs = a.model_entry_categories([deepseek_entry, custom_entry])
+        assert provider_tabs == ["Anthropic", "OpenAI", "DeepSeek", "Qwen", "example.invalid"]
+        assert "MiniMax" not in provider_tabs
+        assert "MiniMax" in a.model_entry_categories([minimax_entry])
+        mixed_entries = [deepseek_entry, custom_entry, openai_entry]
+        assert a.model_entry_indices_for_category(mixed_entries, "DeepSeek") == [0]
+        assert a.model_entry_indices_for_category(mixed_entries, "example.invalid") == [1]
+        assert a.model_entry_indices_for_category(mixed_entries, "OpenAI") == [2]
+    finally:
+        a.CONFIG_PROVIDERS = old_config_providers
     visible_commands = [cmd for cmd, _args, _desc, _sendable in a.COMMANDS]
     assert "/model" in visible_commands
     assert "/llm" not in visible_commands
@@ -2480,7 +2499,7 @@ def run_checks() -> None:
     assert "/model" in help_state.messages[-1].content
     assert "兼容别名" in help_state.messages[-1].content
     a.submit(help_state, "/MODEL")
-    assert "Provider" in help_state.messages[-1].content
+    assert "供应商" in help_state.messages[-1].content
     assert "默认新对话模型" in help_state.messages[-1].content
     a.submit(help_state, "/models")
     assert "兼容别名" in help_state.messages[-1].content

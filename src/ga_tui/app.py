@@ -10165,6 +10165,24 @@ def llm_template_providers() -> list[dict[str, Any]]:
     return list(CONFIG_PROVIDERS or fallback_providers())
 
 
+COMMON_MODEL_PROVIDER_IDS = ("anthropic", "openai", "deepseek", "kimi", "qwen", "zhipu")
+
+PROVIDER_TAB_LABELS = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "deepseek": "DeepSeek",
+    "kimi": "Kimi",
+    "qwen": "Qwen",
+    "zhipu": "Zhipu",
+    "minimax": "MiniMax",
+    "stepfun": "StepFun",
+    "qianfan": "Baidu",
+    "volcengine": "VolcEngine",
+    "xiaomi": "Xiaomi",
+    "tencent_tokenhub": "Tencent",
+}
+
+
 def provider_category(provider: dict[str, Any]) -> str:
     cfg_type = str(provider.get("type") or provider.get("template", {}).get("type") or "native_oai").lower()
     if "claude" in cfg_type:
@@ -10191,16 +10209,102 @@ def provider_indices_for_category(providers: list[dict[str, Any]], category: str
     return [idx for idx, provider in enumerate(providers) if provider_category(provider) == category]
 
 
+def normalized_provider_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def provider_tab_label(provider: dict[str, Any]) -> str:
+    provider_id = str(provider.get("id") or "").strip()
+    if provider_id in PROVIDER_TAB_LABELS:
+        return PROVIDER_TAB_LABELS[provider_id]
+    if provider_id:
+        return provider_id.replace("_", "-").replace("-", " ").title().replace(" ", "")
+    name = str(provider.get("name") or provider.get("template", {}).get("name") or "").strip()
+    if name:
+        label = re.split(r"[\s(/（]", name, maxsplit=1)[0].strip()
+        return label or name
+    return "Custom"
+
+
+def provider_template_bases(provider: dict[str, Any]) -> set[str]:
+    bases = {endpoint_base(str(provider.get("template", {}).get("apibase") or ""))}
+    for field in provider.get("extra_fields") or []:
+        if not isinstance(field, dict):
+            continue
+        for option in field.get("options") or []:
+            if isinstance(option, dict):
+                bases.add(endpoint_base(str(option.get("apibase") or "")))
+    return {base for base in bases if base}
+
+
+def provider_match_tokens(provider: dict[str, Any]) -> set[str]:
+    template = provider.get("template") or {}
+    values = [
+        provider.get("id"),
+        provider.get("name"),
+        template.get("name"),
+    ]
+    return {token for token in (normalized_provider_token(value) for value in values) if token}
+
+
+def provider_for_model_entry(entry: LLMConfigEntry) -> Optional[dict[str, Any]]:
+    base = endpoint_base(str(entry.cfg.get("apibase") or ""))
+    providers = llm_template_providers()
+    if base:
+        for provider in providers:
+            if base in provider_template_bases(provider):
+                return provider
+    entry_tokens = {
+        normalized_provider_token(entry.cfg.get("name")),
+        normalized_provider_token(entry.var_name),
+    }
+    entry_tokens.discard("")
+    for provider in providers:
+        if entry_tokens & provider_match_tokens(provider):
+            return provider
+    return None
+
+
+def provider_host_label(apibase: str) -> str:
+    base = endpoint_base(apibase)
+    if not base:
+        return ""
+    parsed = urllib.parse.urlparse(base if "://" in base else f"https://{base}")
+    host = (parsed.netloc or parsed.path).split("@")[-1].split(":")[0].lower()
+    for prefix in ("api.", "gateway."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    return host or ""
+
+
+def common_model_provider_categories() -> list[str]:
+    providers_by_id = {str(provider.get("id") or ""): provider for provider in llm_template_providers()}
+    categories: list[str] = []
+    for provider_id in COMMON_MODEL_PROVIDER_IDS:
+        provider = providers_by_id.get(provider_id)
+        if provider is None:
+            continue
+        label = provider_tab_label(provider)
+        if label not in categories:
+            categories.append(label)
+    return categories
+
+
 def model_entry_category(entry: LLMConfigEntry) -> str:
-    return provider_category({"type": entry.cfg_type, "template": entry.cfg})
+    provider = provider_for_model_entry(entry)
+    if provider is not None:
+        return provider_tab_label(provider)
+    host_label = provider_host_label(str(entry.cfg.get("apibase") or ""))
+    return host_label or config_display_name(entry) or "Custom"
 
 
 def model_entry_categories(entries: list[LLMConfigEntry]) -> list[str]:
-    if entries:
-        providers = [{"type": entry.cfg_type, "template": entry.cfg} for entry in entries]
-    else:
-        providers = llm_template_providers()
-    return provider_categories(providers)
+    categories = common_model_provider_categories()
+    for entry in entries:
+        category = model_entry_category(entry)
+        if category not in categories:
+            categories.append(category)
+    return categories or ["Custom"]
 
 
 def model_entry_indices_for_category(entries: list[LLMConfigEntry], category: str) -> list[int]:
@@ -15836,15 +15940,15 @@ def draw_model_manager(
     recent_text = " / ".join(recent_names[:3]) if recent_names else "(无)"
     safe_add(stdscr, y0 + 2, x0 + 2, f"当前对话: {current}    默认新对话: {primary or '(未设置)'}    最近: {recent_text}", inner_w, cp(2))
     if manage_configs:
-        help_text = "Tab/←→ 切分类  Enter 当前对话  d 默认  u 最近  a 新增  e 编辑  p 提取  t 测试  v 验活  x 删除  r 重载"
+        help_text = "Tab/←→ 切供应商  Enter 当前对话  d 默认  u 最近  a 新增  e 编辑  p 提取  t 测试  v 验活  x 删除  r 重载"
     else:
-        help_text = "Tab/←→ 切分类  Enter 当前对话  d 默认  u 最近  t 测试  v 验活  r 重载  Esc 返回"
+        help_text = "Tab/←→ 切供应商  Enter 当前对话  d 默认  u 最近  t 测试  v 验活  r 重载  Esc 返回"
     safe_add(stdscr, y0 + 3, x0 + 2, help_text, inner_w, cp(1))
     categories = model_entry_categories(entries)
     if active_category not in categories:
         active_category = categories[0]
     category_text = " / ".join(f"[{category}]" if category == active_category else category for category in categories)
-    safe_add(stdscr, y0 + 4, x0 + 2, f"Provider Tabs: {category_text}", inner_w, cp(1))
+    safe_add(stdscr, y0 + 4, x0 + 2, f"供应商 Tabs: {category_text}", inner_w, cp(1))
     start_y = y0 + 6
     list_h = max(1, h - 9)
     visible_indices = model_entry_indices_for_category(entries, active_category)
@@ -15853,7 +15957,7 @@ def draw_model_manager(
     if not entries:
         safe_add(stdscr, start_y, x0 + 2, "还没有已配置模型；用 /model 添加供应商/API。", inner_w, cp(5))
     elif not visible_indices:
-        safe_add(stdscr, start_y, x0 + 2, "此分类没有已配置模型。", inner_w, cp(5))
+        safe_add(stdscr, start_y, x0 + 2, "此供应商没有已配置模型。", inner_w, cp(5))
     try:
         selected_row = visible_indices.index(selected)
     except ValueError:
@@ -18445,7 +18549,7 @@ def submit(state: State, text: str) -> None:
         add_system(state, f"轻量 Markdown 渲染已{'开启' if state.markdown else '关闭'}。")
         return
     if text.lower() in {"/llm", "/models", "/model"}:
-        add_system(state, "在输入框回车执行 /model 可管理模型配置、按 Provider 分类切换、提取 models、验活、选择当前对话模型、最近模型、设置默认新对话模型；/llm 与 /models 是兼容别名。")
+        add_system(state, "在输入框回车执行 /model 可管理模型配置、按供应商切换、提取 models、验活、选择当前对话模型、最近模型、设置默认新对话模型；/llm 与 /models 是兼容别名。")
         return
     m_secret = re.match(r"/secret(?:\s+(.+))?\s*$", text, re.I)
     if m_secret:
