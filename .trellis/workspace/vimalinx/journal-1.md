@@ -236,3 +236,36 @@ Cleaned up GenericAgent-TUI model manager save/reload flow by centralizing persi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Unified model command panel
+
+**Date**: 2026-06-10
+**Task**: Unified model command panel
+**Branch**: `main`
+
+### Summary
+
+Merged model command surfaces into a single visible /model command, kept /llm and /models as hidden aliases, added provider/category tabs to the model manager, updated README/specs, and expanded policy-gate coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d32cce` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
