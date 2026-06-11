@@ -15947,17 +15947,39 @@ def draw_model_manager(
     categories = model_entry_categories(entries)
     if active_category not in categories:
         active_category = categories[0]
-    category_text = " / ".join(f"[{category}]" if category == active_category else category for category in categories)
-    safe_add(stdscr, y0 + 4, x0 + 2, f"供应商 Tabs: {category_text}", inner_w, cp(1))
+    provider_w = min(24, max(16, inner_w // 4))
+    model_x = x0 + 2 + provider_w + 3
+    model_w = max(20, inner_w - provider_w - 3)
+    safe_add(stdscr, y0 + 4, x0 + 2, "供应商", provider_w, cp(7) | curses.A_BOLD)
+    safe_add(stdscr, y0 + 4, model_x, "模型", model_w, cp(7) | curses.A_BOLD)
     start_y = y0 + 6
     list_h = max(1, h - 9)
     visible_indices = model_entry_indices_for_category(entries, active_category)
     if entries and selected not in visible_indices and visible_indices:
         selected = visible_indices[0]
+    try:
+        active_provider_row = categories.index(active_category)
+    except ValueError:
+        active_provider_row = 0
+    provider_start = max(0, min(active_provider_row - list_h + 1, max(0, len(categories) - list_h)))
+    separator_x = x0 + 2 + provider_w + 1
+    for y in range(y0 + 4, y0 + h - 2):
+        safe_add(stdscr, y, separator_x, "│", 1, cp(10))
+    for row, category in enumerate(categories[provider_start:provider_start + list_h]):
+        provider_indices = model_entry_indices_for_category(entries, category)
+        marker = "›" if category == active_category else " "
+        line = f"{marker} {category}"
+        if provider_indices:
+            line += f" ({len(provider_indices)})"
+        attr = cp(11) | curses.A_BOLD if category == active_category else cp(2)
+        if not provider_indices and category != active_category:
+            attr = cp(1)
+        safe_add(stdscr, start_y + row, x0 + 2, " " * provider_w, provider_w, attr)
+        safe_add(stdscr, start_y + row, x0 + 2, truncate_cells(line, provider_w), provider_w, attr)
     if not entries:
-        safe_add(stdscr, start_y, x0 + 2, "还没有已配置模型；用 /model 添加供应商/API。", inner_w, cp(5))
+        safe_add(stdscr, start_y, model_x, "还没有已配置模型；用 /model 添加供应商/API。", model_w, cp(5))
     elif not visible_indices:
-        safe_add(stdscr, start_y, x0 + 2, "此供应商没有已配置模型。", inner_w, cp(5))
+        safe_add(stdscr, start_y, model_x, "此供应商没有已配置模型。", model_w, cp(5))
     try:
         selected_row = visible_indices.index(selected)
     except ValueError:
@@ -15976,8 +15998,8 @@ def draw_model_manager(
         attr = cp(11) | curses.A_BOLD if idx == selected else cp(2)
         if health_result is not None and not health_result[0] and idx != selected:
             attr = cp(5)
-        safe_add(stdscr, start_y + row, x0 + 2, " " * inner_w, inner_w, attr)
-        safe_add(stdscr, start_y + row, x0 + 2, line, inner_w, attr)
+        safe_add(stdscr, start_y + row, model_x, " " * model_w, model_w, attr)
+        safe_add(stdscr, start_y + row, model_x, line, model_w, attr)
     detail_y = y0 + h - 3
     if entries and 0 <= selected < len(entries):
         cfg = entries[selected].cfg
@@ -15986,7 +16008,7 @@ def draw_model_manager(
         if health_result is not None:
             label = "OK" if health_result[0] else "BAD"
             detail += f"    验活: {label} {health_result[1]}"
-        safe_add(stdscr, detail_y, x0 + 2, detail, inner_w, cp(1))
+        safe_add(stdscr, detail_y, model_x, detail, model_w, cp(1))
     if message:
         safe_add(stdscr, y0 + h - 2, x0 + 2, message, inner_w, cp(5) if "失败" in message or "错误" in message else cp(3))
     stdscr.refresh()

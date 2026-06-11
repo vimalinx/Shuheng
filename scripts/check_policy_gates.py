@@ -435,8 +435,14 @@ class FakeDrawScreen:
     def __init__(self) -> None:
         self.calls: list[tuple[int, int, str, int]] = []
 
+    def getmaxyx(self) -> tuple[int, int]:
+        return (40, 120)
+
     def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
         self.calls.append((y, x, text, attr))
+
+    def refresh(self) -> None:
+        return None
 
 
 def install_fake_agent_runtime() -> None:
@@ -2484,6 +2490,26 @@ def run_checks() -> None:
         assert a.model_entry_indices_for_category(mixed_entries, "DeepSeek") == [0]
         assert a.model_entry_indices_for_category(mixed_entries, "example.invalid") == [1]
         assert a.model_entry_indices_for_category(mixed_entries, "OpenAI") == [2]
+        model_draw_screen = FakeDrawScreen()
+        model_draw_state = a.State(agent=FakeLLMAgent())
+        a.draw_model_manager(
+            model_draw_screen,
+            model_draw_state,
+            mixed_entries,
+            {"llm_nos": ["deepseek"]},
+            0,
+            "",
+            recent_names=[],
+            active_category="DeepSeek",
+        )
+        draw_texts = [text for _y, _x, text, _attr in model_draw_screen.calls]
+        assert any(text == "供应商" for text in draw_texts), draw_texts
+        assert not any("供应商 Tabs:" in text for text in draw_texts), draw_texts
+        assert any("› DeepSeek (1)" in text for text in draw_texts), draw_texts
+        provider_rows = [(y, x, text) for y, x, text, _attr in model_draw_screen.calls if text in {"  OpenAI (1)", "› DeepSeek (1)"}]
+        assert len(provider_rows) == 2, provider_rows
+        assert len({x for _y, x, _text in provider_rows}) == 1, provider_rows
+        assert len({y for y, _x, _text in provider_rows}) == 2, provider_rows
     finally:
         a.CONFIG_PROVIDERS = old_config_providers
     visible_commands = [cmd for cmd, _args, _desc, _sendable in a.COMMANDS]

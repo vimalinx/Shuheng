@@ -167,6 +167,7 @@
 - `/model`, `/llm`, and `/models` all open the unified model manager with config-management actions enabled.
 - The unified manager must keep current-session switching, default selection, recent-model jumping, add/edit/delete, model extraction, single-model test, batch health check, and reload actions.
 - Model rows are grouped by concrete provider tabs, not broad protocol categories.
+- Provider labels must render as a vertical provider rail inside the model manager, with model rows rendered beside the rail. Do not collapse providers back into one horizontal `供应商 Tabs: A / B / C` line.
 - Provider tabs must include configured providers plus the common-provider set derived from template order: `Anthropic`, `OpenAI`, `DeepSeek`, `Kimi`, `Qwen`, and `Zhipu` when those provider templates exist.
 - Known provider identity should prefer normalized provider-template `apibase` matches, then provider/template name matches. Unknown/custom providers should fall back to a stable endpoint host label or config display name.
 - Non-common template providers must not appear as empty tabs; they appear only after the user configures a model/API for that provider.
@@ -179,17 +180,20 @@
 - No configured models -> `/model` manager displays an empty-state message that says to add a provider/API with `/model`.
 - Selected row belongs to a different active tab after reload/edit/delete -> normalize selection to the first visible row in the active category.
 - Active provider tab has no visible rows -> display a no-models-in-provider message and keep navigation safe.
+- Many provider tabs -> vertical rail scrolls around the active provider without changing model-selection up/down behavior.
 - Runtime cannot find a named model -> error tells the user to reload from `/model`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `/model` opens one panel where the user can switch the current dialogue model, set the default, add a provider, extract provider models, test a model, and batch validate all models grouped by supplier.
+- Good: Providers render as a left-side vertical list, and the filtered model list renders to the right.
 - Good: DeepSeek and OpenAI-compatible entries with known template base URLs appear under `DeepSeek` and `OpenAI`, not together under one broad `OpenAI` protocol category.
 - Base: `/llm` and `/models` still work for users who type them directly, but they are absent from `/help`, README command tables, and command completion.
 - Base: A custom endpoint such as `https://api.example.invalid/v1` appears under a stable `example.invalid` tab.
 - Bad: `/llm` appears as a normal command row, because that splits the visible command ontology again.
 - Bad: `/model` opens a switch-only panel that cannot add/edit/delete or probe provider models.
 - Bad: The model panel shows every known provider template as an empty tab.
+- Bad: Provider labels are rendered as one long horizontal tab line that truncates useful providers on narrower terminals.
 
 ### 6. Tests Required
 
@@ -197,6 +201,7 @@
 - `scripts/check_policy_gates.py` must assert `/mo` completes to `/model` and hidden aliases do not complete.
 - `scripts/check_policy_gates.py` must assert `/llm`, `/model`, and `/models` help text describes the unified manager and compatibility aliases.
 - `scripts/check_policy_gates.py` must assert model category helpers group OpenAI, DeepSeek, custom endpoint, common-provider, and non-common configured providers correctly.
+- `scripts/check_policy_gates.py` must assert the model manager renders a vertical provider rail and does not render the old horizontal `供应商 Tabs:` line.
 - README command tables must document `/model` as the single visible model command.
 
 ### 7. Wrong vs Correct
