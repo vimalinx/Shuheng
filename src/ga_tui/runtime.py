@@ -2,7 +2,7 @@
 
 The TUI owns orchestration, ledgers, approvals, artifacts, model routing, and
 scheduled work. Concrete agent runtimes plug in through adapters so GenericAgent
-can remain the default backend without being the only possible backend.
+can remain available without being the only possible backend.
 """
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def genericagent_provider_spec(
             "resource_gateway": "resource://agent-mail",
         },
         notes=[
-            "GenericAgent remains the default backend adapter.",
+            "GenericAgent remains available as the fallback/escape-hatch adapter.",
             "The TUI owns orchestration, model routing, scheduled jobs, ledgers, approvals, and artifacts.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",

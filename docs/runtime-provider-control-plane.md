@@ -37,9 +37,10 @@ Provider metadata must include:
 - `policy`: Approval owner, memory write policy, and risky action classes.
 - `a2a` / `mcp`: Gateway compatibility metadata.
 
-The first implemented provider is `genericagent`. It remains the default backend,
-but it is now registered through the provider registry instead of being the TUI's
-only architectural assumption.
+The first implemented provider is `genericagent`. On the
+`experiment/ohmypi-runtime-memory` branch, `ohmypi` is the default runtime while
+`genericagent` remains available as an explicit fallback through
+`GA_TUI_RUNTIME_PROVIDER=genericagent`.
 
 ## Registry Surfaces
 
@@ -61,7 +62,8 @@ Runtime and top-level control metadata are exposed through:
 - Do not let scheduled jobs bypass task ledger, artifact, or approval policy.
 - Scheduled jobs must reserve an idempotency key before dispatch, record the run result, and then delegate through `agenttask.v2`.
 - Do not let model choice override policy gates. Model routing is subordinate to TUI governance.
-- Keep `GenericAgent` as the default adapter while making future adapters additive.
+- Keep provider selection explicit and reversible; this experiment branch defaults
+  to `ohmypi`, with `genericagent` retained as the fallback adapter.
 
 ## Next Providers
 

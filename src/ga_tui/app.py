@@ -104,7 +104,12 @@ try:
         tui_query_tool_outcome,
         wrap_agentmain_tool_schema_loader,
     )
-    from .ohmypi_provider import OhMyPiRuntimeAdapter, ohmypi_provider_spec
+    from .ohmypi_provider import (
+        OhMyPiRuntimeAdapter,
+        ohmypi_provider_spec,
+        ohmypi_rpc_command,
+        write_ohmypi_memory_prompt,
+    )
     from .runtime import RuntimeRegistry, genericagent_provider_spec
 except Exception:
     from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
@@ -166,7 +171,12 @@ except Exception:
         tui_query_tool_outcome,
         wrap_agentmain_tool_schema_loader,
     )
-    from ohmypi_provider import OhMyPiRuntimeAdapter, ohmypi_provider_spec  # type: ignore
+    from ohmypi_provider import (  # type: ignore
+        OhMyPiRuntimeAdapter,
+        ohmypi_provider_spec,
+        ohmypi_rpc_command,
+        write_ohmypi_memory_prompt,
+    )
     from runtime import RuntimeRegistry, genericagent_provider_spec  # type: ignore
 
 
@@ -10903,8 +10913,61 @@ def all_task_agents(state: State) -> list[Any]:
     return agents
 
 
+def append_ohmypi_memory_candidate_signal(signal: dict[str, Any]) -> dict[str, Any] | None:
+    statement = clean_text(str(signal.get("statement") or "")).strip()
+    if not statement:
+        return None
+    candidate_id = short_uid("memcand")
+    evidence_ref = str(signal.get("evidence_ref") or "runtime://provider/ohmypi")
+    dedupe_key = "ohmypi:" + hashlib.sha256(statement.encode("utf-8", errors="ignore")).hexdigest()[:20]
+    candidate = {
+        "schema_version": "memory_candidate.v1",
+        "candidate_id": candidate_id,
+        "created_at": now_iso(),
+        "target_subagent": "runtime:ohmypi",
+        "target_role": "runtime_provider",
+        "curator_id": "runtime:ohmypi",
+        "source": str(signal.get("source") or "ohmypi.rpc"),
+        "task_id": "",
+        "scope": "runtime.ohmypi.project",
+        "type": "runtime_observation",
+        "statement": statement,
+        "evidence_refs": [evidence_ref],
+        "artifact_refs": [],
+        "confidence": 0.55,
+        "ttl": "long",
+        "dedupe_key": dedupe_key,
+        "duplicate_of": [],
+        "conflicts_with": [],
+        "conflict_check": {
+            "status": "not_checked",
+            "existing_memory_checked": False,
+            "pending_candidates_checked": False,
+        },
+        "requires_human_approval": True,
+    }
+    row = {
+        "schema_version": "memory_candidate_record.v1",
+        "candidate_id": candidate_id,
+        "timestamp": now_iso(),
+        "status": "pending_signal",
+        "approval_id": "",
+        "target_subagent": "runtime:ohmypi",
+        "scope": candidate["scope"],
+        "type": candidate["type"],
+        "ttl": candidate["ttl"],
+        "dedupe_key": dedupe_key,
+        "duplicate_of": [],
+        "conflicts_with": [],
+        "memory_candidate": candidate,
+        "signal": dict(signal),
+    }
+    append_jsonl(AGENT_MEMORY_CANDIDATES_PATH, row)
+    return row
+
+
 def agent_runtime_registry() -> RuntimeRegistry:
-    requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "genericagent").strip() or "genericagent"
+    requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
     registry = RuntimeRegistry(default_provider_id=requested)
     registry.register(GenericAgentRuntimeAdapter(genericagent_provider_spec(
         root_dir=ROOT_DIR,
@@ -10912,12 +10975,15 @@ def agent_runtime_registry() -> RuntimeRegistry:
         recent_models_path=LLM_RECENT_MODELS_PATH,
         schedules_path=AGENT_SCHEDULES_PATH,
     )))
+    ohmypi_memory_prompt_path = write_ohmypi_memory_prompt(root_dir=ROOT_DIR, harness_dir=AGENT_HARNESS_DIR)
+    ohmypi_command = ohmypi_rpc_command(append_system_prompt=ohmypi_memory_prompt_path)
     registry.register(OhMyPiRuntimeAdapter(ohmypi_provider_spec(
         root_dir=ROOT_DIR,
         harness_dir=AGENT_HARNESS_DIR,
         recent_models_path=LLM_RECENT_MODELS_PATH,
         schedules_path=AGENT_SCHEDULES_PATH,
-    ), cwd=ROOT_DIR))
+        command=ohmypi_command,
+    ), command=ohmypi_command, cwd=ROOT_DIR, memory_candidate_sink=append_ohmypi_memory_candidate_signal))
     return registry
 
 
@@ -19053,7 +19119,7 @@ def start_subagent_task_structured(
 
 
 def _scheduler_default_provider_id() -> str:
-    return str(agent_runtime_registry().to_record().get("default_provider_id") or "genericagent")
+    return str(agent_runtime_registry().to_record().get("default_provider_id") or "ohmypi")
 
 
 def _scheduler_emit_tui_beep() -> str:

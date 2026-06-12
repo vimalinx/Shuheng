@@ -389,8 +389,8 @@ configure_genericagent_provider_runtime(
 
 ### 1. Scope / Trigger
 
-- Trigger: GenericAgent-TUI integrates Oh My Pi as an additional local runtime provider.
-- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, opt-in provider selection, and RPC queue/event mapping.
+- Trigger: GenericAgent-TUI integrates Oh My Pi as the experiment-branch default local runtime provider.
+- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, GA/TUI memory prompt injection, memory candidate signaling, and RPC queue/event mapping.
 - Non-goal: This provider must not own curses rendering, mutable TUI `State`, GenericAgent tool schema injection, TUI approval storage, scheduler registries, or first-class TUI subagent ledger mutation.
 
 ### 2. Signatures
@@ -399,13 +399,15 @@ configure_genericagent_provider_runtime(
 - Provider id: `ohmypi`.
 - Runtime adapter: `OhMyPiRuntimeAdapter(RuntimeAdapter)`.
 - Queue-compatible wrapper: `OhMyPiRpcAgent`.
-- Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None)`.
-- RPC command helper: `ohmypi_rpc_command(binary=None, extra_args=None)`.
+- Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
+- RPC command helper: `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
+- Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
 - Environment keys:
-  - `GA_TUI_RUNTIME_PROVIDER=ohmypi` selects the provider.
+  - unset `GA_TUI_RUNTIME_PROVIDER` selects `ohmypi` on this experiment branch.
+  - `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the fallback GenericAgent adapter.
   - `GA_TUI_OHMYPI_BIN` overrides the executable, default `omp`.
   - `GA_TUI_OHMYPI_ARGS` appends shell-split extra CLI arguments.
-- Default RPC command shape: `omp --mode rpc --no-title --approval-mode always-ask`.
+- Default RPC command shape: `omp --mode rpc --no-title --approval-mode always-ask --append-system-prompt <generated-memory-file>`.
 
 ### 3. Contracts
 
@@ -417,7 +419,10 @@ configure_genericagent_provider_runtime(
 - `OhMyPiRuntimeAdapter.start_agent()` must not block on model or network startup. RPC process startup is lazy and happens on first prompt.
 - The provider module must not import `ga_tui.app`, curses, or mutable TUI `State`.
 - Oh My Pi host tools, host URI schemes, and TUI approval mapping are disabled until explicitly implemented; the provider is a bounded runtime worker, not a bypass around TUI policy gates.
-- GenericAgent remains the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
+- On this experiment branch, Oh My Pi is the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
+- GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent`.
+- The TUI should generate a bounded `GA/TUI Memory Guidance` append prompt from GA/TUI memory sources and pass it through `--append-system-prompt`.
+- Oh My Pi completion output may emit memory candidate signals, but long-term memory writes remain governed by TUI memory candidate records and human approval.
 
 ### 4. Validation & Error Matrix
 
@@ -432,9 +437,10 @@ configure_genericagent_provider_runtime(
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `GA_TUI_RUNTIME_PROVIDER=ohmypi` selects `OhMyPiRuntimeAdapter`, starts `omp --mode rpc` lazily, streams text deltas into the existing TUI message renderer, and keeps GenericAgent untouched.
+- Good: unset `GA_TUI_RUNTIME_PROVIDER` selects `OhMyPiRuntimeAdapter`, starts `omp --mode rpc` lazily with the generated memory append prompt, streams text deltas into the existing TUI message renderer, and keeps GenericAgent available as an explicit fallback.
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
-- Base: `/runtimes` shows both `genericagent` and `ohmypi`, while default remains `genericagent`.
+- Base: `/runtimes` shows both `genericagent` and `ohmypi`, while the experiment-branch default is `ohmypi`.
+- Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
 - Base: Oh My Pi internal task/subagent events are provider-owned details until a future ledger-mapping feature is implemented.
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
 - Bad: The adapter enables host tools or auto-approval before TUI policy gates can audit and approve those operations.
@@ -442,9 +448,11 @@ configure_genericagent_provider_runtime(
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `ohmypi` appears in the runtime registry while `genericagent` remains the default.
-- Tests must assert `GA_TUI_RUNTIME_PROVIDER=ohmypi` selects the Oh My Pi adapter.
+- `scripts/check_policy_gates.py` must assert `ohmypi` appears in the runtime registry and is the experiment-branch default.
+- Tests must assert `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the GenericAgent fallback adapter.
 - Tests must assert `ohmypi_provider.py` has no reverse import into `app.py` and no curses import.
+- Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
+- Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, and secret-looking outputs are skipped.
 - Tests must assert a fake RPC process maps `ready`, `prompt` ack, `message_update` deltas, and `agent_end` into queue `next`/`done` items.
 - Tests must assert missing binary failure and `abort()` cleanup decrement unfinished task state.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `ga-tui-check --root /home/vimalinx/Programs/GenericAgent` must pass.

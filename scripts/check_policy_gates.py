@@ -82,7 +82,7 @@ def retarget_harness(root: str) -> None:
         append_jsonl=a.append_jsonl,
         now_iso=a.now_iso,
         json_safe=a.tui_query_json_safe,
-        default_provider_id=lambda: str(a.agent_runtime_registry().to_record().get("default_provider_id") or "genericagent"),
+        default_provider_id=lambda: str(a.agent_runtime_registry().to_record().get("default_provider_id") or "ohmypi"),
         truncate_cells=a.truncate_cells,
         emit_tui_beep=lambda: a.emit_tui_beep(),
         resolve_subagent=a.resolve_subagent,
@@ -302,11 +302,17 @@ class FakeRpcStdin:
                 if self.auto_finish:
                     self.stdout.push({
                         "type": "message_update",
-                        "assistantMessageEvent": {"type": "text_delta", "delta": "hi "},
+                        "assistantMessageEvent": {
+                            "type": "text_delta",
+                            "delta": "Validated durable lesson: ",
+                        },
                     })
                     self.stdout.push({
                         "type": "message_update",
-                        "assistantMessageEvent": {"type": "text_delta", "delta": "there"},
+                        "assistantMessageEvent": {
+                            "type": "text_delta",
+                            "delta": "TUI owns memory approval while Oh My Pi emits candidates.",
+                        },
                     })
                     self.stdout.push({"type": "agent_end"})
             elif frame.get("type") == "abort":
@@ -363,16 +369,19 @@ def assert_ohmypi_runtime_registry() -> None:
     try:
         registry = a.agent_runtime_registry()
         data = registry.to_record()
-        assert data["default_provider_id"] == "genericagent", data
+        assert data["default_provider_id"] == "ohmypi", data
         assert {"genericagent", "ohmypi"} <= set(data["provider_ids"]), data
         providers = {item["provider_id"]: item for item in data["providers"]}
         ohmypi = providers["ohmypi"]
         assert ohmypi["schema_version"] == "agentruntime.provider.v1", ohmypi
         assert ohmypi["transport"] == "jsonl_stdio_rpc", ohmypi
         assert ohmypi["capabilities"]["streaming"] is True, ohmypi
+        assert ohmypi["capabilities"]["memory_candidates"] is True, ohmypi
+        assert ohmypi["capabilities"]["memory_candidate_signals"] is True, ohmypi
         assert ohmypi["policy"]["approval_gate_owner"] == "ga-tui.policy", ohmypi
-        os.environ["GA_TUI_RUNTIME_PROVIDER"] = "ohmypi"
-        assert a.agent_runtime_registry().default().provider_id == "ohmypi"
+        assert ohmypi["policy"]["memory_write"] == "candidate_signal_only", ohmypi
+        os.environ["GA_TUI_RUNTIME_PROVIDER"] = "genericagent"
+        assert a.agent_runtime_registry().default().provider_id == "genericagent"
     finally:
         if old is None:
             os.environ.pop("GA_TUI_RUNTIME_PROVIDER", None)
@@ -380,8 +389,37 @@ def assert_ohmypi_runtime_registry() -> None:
             os.environ["GA_TUI_RUNTIME_PROVIDER"] = old
 
 
+def assert_ohmypi_memory_prompt_and_command() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_omp_root_")
+    harness = tempfile.mkdtemp(prefix="ga_tui_omp_harness_")
+    memory_dir = os.path.join(root, "memory")
+    os.makedirs(memory_dir, exist_ok=True)
+    Path(memory_dir, "global_mem_insight.txt").write_text("remember useful path\n", encoding="utf-8")
+    Path(memory_dir, "global_mem.txt").write_text("api_key: SHOULD_NOT_LEAK\nvalidated fact\n", encoding="utf-8")
+    Path(memory_dir, "memory_management_sop.md").write_text("No Execution, No Memory.\n", encoding="utf-8")
+    prompt_path = omp.write_ohmypi_memory_prompt(root_dir=root, harness_dir=harness)
+    prompt_text = Path(prompt_path).read_text(encoding="utf-8")
+    assert "GA/TUI Memory Guidance" in prompt_text, prompt_text
+    assert "remember useful path" in prompt_text, prompt_text
+    assert "validated fact" in prompt_text, prompt_text
+    assert "SHOULD_NOT_LEAK" not in prompt_text, prompt_text
+    assert "[REDACTED]" in prompt_text, prompt_text
+    command = omp.ohmypi_rpc_command(binary="/fake/omp", append_system_prompt=prompt_path)
+    assert command[:3] == ["/fake/omp", "--mode", "rpc"], command
+    assert "--append-system-prompt" in command, command
+    assert command[command.index("--append-system-prompt") + 1] == prompt_path, command
+    command_with_user_append = omp.ohmypi_rpc_command(
+        binary="/fake/omp",
+        extra_args=["--append-system-prompt", "/user/append.md"],
+        append_system_prompt=prompt_path,
+    )
+    assert command_with_user_append.count("--append-system-prompt") == 1, command_with_user_append
+    assert "/user/append.md" in command_with_user_append, command_with_user_append
+
+
 def assert_ohmypi_rpc_queue_mapping() -> None:
     processes: list[FakeRpcProcess] = []
+    memory_signals: list[dict[str, object]] = []
 
     def process_factory(*_args, **_kwargs):
         process = FakeRpcProcess()
@@ -392,19 +430,39 @@ def assert_ohmypi_rpc_queue_mapping() -> None:
         command=["/fake/omp", "--mode", "rpc"],
         cwd=str(ROOT),
         process_factory=process_factory,
+        memory_candidate_sink=lambda signal: memory_signals.append(signal),
         startup_timeout=1,
     )
     dq = agent.put_task("hello", source="test")
     first = dq.get(timeout=2)
     second = dq.get(timeout=2)
     done = dq.get(timeout=2)
-    assert first["next"] == "hi ", first
-    assert second["next"] == "there", second
-    assert done["done"] == "hi there", done
+    expected_done = "Validated durable lesson: TUI owns memory approval while Oh My Pi emits candidates."
+    assert first["next"] == "Validated durable lesson: ", first
+    assert second["next"] == "TUI owns memory approval while Oh My Pi emits candidates.", second
+    assert done["done"] == expected_done, done
     assert agent.is_running is False
     assert agent.task_queue.unfinished_tasks == 0
     assert any(item.get("type") == "prompt" and item.get("message") == "hello" for item in processes[0].stdin.writes)
+    assert memory_signals
+    assert memory_signals[-1]["schema_version"] == "ohmypi.memory_candidate_signal.v1", memory_signals[-1]
+    assert memory_signals[-1]["statement"] == expected_done, memory_signals[-1]
     agent.close()
+
+
+def assert_ohmypi_memory_candidate_signal_filters() -> None:
+    assert omp.ohmypi_memory_candidate_signal("", source="test") is None
+    assert omp.ohmypi_memory_candidate_signal("too short", source="test") is None
+    secret = "This output contains api_key: SHOULD_NOT_LEAK and must not be retained long term."
+    assert omp.ohmypi_memory_candidate_signal(secret, source="test") is None
+    durable = (
+        "Validated durable lesson: when Oh My Pi runs under GenericAgent-TUI, "
+        "the TUI must remain the memory approval owner and OMP should only emit candidates."
+    )
+    signal = omp.ohmypi_memory_candidate_signal(durable, source="test", request_id="req-1")
+    assert signal is not None, signal
+    assert signal["statement"].startswith("Validated durable lesson"), signal
+    assert signal["evidence_ref"] == "runtime://provider/ohmypi/req-1", signal
 
 
 def assert_ohmypi_missing_binary_and_abort() -> None:
@@ -996,7 +1054,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert {"genericagent", "ohmypi"} <= capability_provider_ids, capabilities
     runtime_registry = registry["runtime_registry"]
     assert runtime_registry["schema_version"] == "agentruntime.registry.v1", runtime_registry
-    assert runtime_registry["default_provider_id"] == "genericagent", runtime_registry
+    assert runtime_registry["default_provider_id"] == "ohmypi", runtime_registry
     assert "genericagent" in runtime_registry["provider_ids"], runtime_registry
     assert "ohmypi" in runtime_registry["provider_ids"], runtime_registry
     providers_by_id = {item["provider_id"]: item for item in runtime_registry["providers"]}
@@ -1008,6 +1066,8 @@ def assert_gateway_schema(registry: dict) -> None:
     ohmypi_provider = providers_by_id["ohmypi"]
     assert ohmypi_provider["transport"] == "jsonl_stdio_rpc", ohmypi_provider
     assert ohmypi_provider["capabilities"]["streaming"] is True, ohmypi_provider
+    assert ohmypi_provider["capabilities"]["memory_candidate_signals"] is True, ohmypi_provider
+    assert ohmypi_provider["policy"]["memory_write"] == "candidate_signal_only", ohmypi_provider
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
     model_orchestration = registry["model_orchestration"]
     assert model_orchestration["schema_version"] == "model_orchestration.v1", model_orchestration
@@ -2530,7 +2590,9 @@ def run_checks() -> None:
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
     assert_ohmypi_runtime_registry()
+    assert_ohmypi_memory_prompt_and_command()
     assert_ohmypi_rpc_queue_mapping()
+    assert_ohmypi_memory_candidate_signal_filters()
     assert_ohmypi_missing_binary_and_abort()
     assert_top_bar_header_requested_fields()
     assert_long_secret_render_reuses_stable_message_blocks()

@@ -41,7 +41,7 @@ class SchedulerRuntime:
     append_jsonl: Optional[Callable[[str, dict[str, Any]], None]] = None
     now_iso: Callable[[], str] = lambda: time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
     json_safe: Callable[[Any], Any] = lambda value: _json_safe(value)
-    default_provider_id: Callable[[], str] = lambda: "genericagent"
+    default_provider_id: Callable[[], str] = lambda: "ohmypi"
     truncate_cells: Callable[[str, int], str] = lambda text, width: str(text or "")[: max(0, width)]
     emit_tui_beep: Optional[Callable[[], str]] = None
     resolve_subagent: Optional[Callable[[Any, str], Any]] = None

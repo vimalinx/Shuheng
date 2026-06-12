@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Check runtime provider, branch default, memory candidate, and governance contracts."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for quality verification."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check cross-layer consistency for provider, app, memory, and tests."}
+{"file": ".trellis/tasks/06-12-fuse-ohmypi-runtime-ga-memory/research/runtime-memory-architecture.md", "reason": "Check implementation against chosen MVP and out-of-scope boundaries."}

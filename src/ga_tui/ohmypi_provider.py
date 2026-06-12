@@ -8,6 +8,7 @@ this module.
 from __future__ import annotations
 
 import json
+import re
 import os
 import queue
 import shlex
@@ -26,6 +27,15 @@ except Exception:
 
 ProcessFactory = Callable[..., Any]
 ThreadFactory = Callable[..., Any]
+MemoryCandidateSink = Callable[[dict[str, Any]], None]
+
+GA_TUI_MEMORY_PROMPT_FILENAME = "ohmypi-ga-tui-memory.md"
+GA_TUI_MEMORY_PROMPT_HEADER = "GA/TUI Memory Guidance"
+_SECRET_PATTERNS = (
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}\b"),
+    re.compile(r"\b(api[_-]?key|secret|token|password|passwd|密码|密钥)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\b[A-Za-z0-9_\-]{24,}\.[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,}\b"),
+)
 
 
 class _TaskCounter:
@@ -74,6 +84,7 @@ class _OhMyPiClient:
 class _ActivePrompt:
     request_id: str
     display_queue: queue.Queue
+    source: str = ""
     buffer: str = ""
     finished: bool = False
 
@@ -88,6 +99,7 @@ class OhMyPiRpcAgent:
         cwd: str | None = None,
         process_factory: ProcessFactory | None = None,
         thread_factory: ThreadFactory = threading.Thread,
+        memory_candidate_sink: MemoryCandidateSink | None = None,
         startup_timeout: float = 10.0,
         stop_timeout: float = 3.0,
     ) -> None:
@@ -95,6 +107,7 @@ class OhMyPiRpcAgent:
         self.cwd = cwd or os.getcwd()
         self.process_factory = process_factory or subprocess.Popen
         self.thread_factory = thread_factory
+        self.memory_candidate_sink = memory_candidate_sink
         self.startup_timeout = startup_timeout
         self.stop_timeout = stop_timeout
         self.task_queue = _TaskCounter()
@@ -144,7 +157,7 @@ class OhMyPiRpcAgent:
                 display_queue.put({"done": "[Oh My Pi] 当前 RPC 会话仍在运行，不能并发启动新任务。", "source": source})
                 return display_queue
             request_id = self._next_request_id("prompt")
-            self._active = _ActivePrompt(request_id=request_id, display_queue=display_queue)
+            self._active = _ActivePrompt(request_id=request_id, display_queue=display_queue, source=source)
             self.is_running = True
             self.task_queue.start()
 
@@ -305,6 +318,9 @@ class OhMyPiRpcAgent:
             active.display_queue.put({"next": delta, "source": "ohmypi"})
 
     def _finish_active(self, text: str | None = None, *, source: str = "ohmypi") -> None:
+        done_text = ""
+        signal_source = source
+        request_id = ""
         with self._active_lock:
             active = self._active
             if active is None or active.finished:
@@ -312,10 +328,24 @@ class OhMyPiRpcAgent:
                 return
             active.finished = True
             done_text = active.buffer if text is None else text
+            signal_source = active.source or source
+            request_id = active.request_id
             active.display_queue.put({"done": done_text, "source": source})
             self._active = None
             self.is_running = False
             self.task_queue.done()
+        self._emit_memory_candidate_signal(done_text, source=signal_source, request_id=request_id)
+
+    def _emit_memory_candidate_signal(self, text: str, *, source: str, request_id: str) -> None:
+        if self.memory_candidate_sink is None:
+            return
+        signal = ohmypi_memory_candidate_signal(text, source=source, request_id=request_id)
+        if signal is None:
+            return
+        try:
+            self.memory_candidate_sink(signal)
+        except Exception as exc:
+            self._remember_stderr(f"memory candidate sink failed: {type(exc).__name__}: {exc}")
 
     def _answer_extension_ui(self, frame: dict[str, Any]) -> None:
         request_id = frame.get("id")
@@ -369,12 +399,14 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         cwd: str | None = None,
         process_factory: ProcessFactory | None = None,
         thread_factory: ThreadFactory = threading.Thread,
+        memory_candidate_sink: MemoryCandidateSink | None = None,
     ) -> None:
         super().__init__(spec)
         self.command = command
         self.cwd = cwd
         self.process_factory = process_factory
         self.thread_factory = thread_factory
+        self.memory_candidate_sink = memory_candidate_sink
 
     def create_agent(self) -> OhMyPiRpcAgent:
         return OhMyPiRpcAgent(
@@ -382,6 +414,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
             cwd=self.cwd,
             process_factory=self.process_factory,
             thread_factory=self.thread_factory,
+            memory_candidate_sink=self.memory_candidate_sink,
         )
 
     def prepare_agent(self, agent: Any, *, state: Any = None) -> None:
@@ -399,9 +432,18 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         return None
 
 
-def ohmypi_rpc_command(binary: str | None = None, extra_args: list[str] | None = None) -> list[str]:
+def _has_cli_flag(args: list[str], flag: str) -> bool:
+    return any(item == flag or item.startswith(flag + "=") for item in args)
+
+
+def ohmypi_rpc_command(
+    binary: str | None = None,
+    extra_args: list[str] | None = None,
+    append_system_prompt: str | None = None,
+) -> list[str]:
     binary = binary or os.environ.get("GA_TUI_OHMYPI_BIN", "omp")
     env_args = shlex.split(os.environ.get("GA_TUI_OHMYPI_ARGS", ""))
+    appended_args = list(extra_args or env_args)
     args = [
         binary,
         "--mode",
@@ -410,8 +452,95 @@ def ohmypi_rpc_command(binary: str | None = None, extra_args: list[str] | None =
         "--approval-mode",
         "always-ask",
     ]
-    args.extend(extra_args or env_args)
+    if append_system_prompt and not _has_cli_flag(appended_args, "--append-system-prompt"):
+        args.extend(["--append-system-prompt", append_system_prompt])
+    args.extend(appended_args)
     return args
+
+
+def ohmypi_memory_prompt_path(harness_dir: str) -> str:
+    return os.path.join(harness_dir, "runtime", GA_TUI_MEMORY_PROMPT_FILENAME)
+
+
+def _read_text_if_exists(path: str, *, max_chars: int = 4000) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read(max_chars)
+    except OSError:
+        return ""
+
+
+def _redact_memory_text(text: str) -> str:
+    redacted = text
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _bounded_section(title: str, path: str, text: str, *, max_chars: int = 2200) -> str:
+    text = _redact_memory_text(text).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "\n...[truncated]"
+    if not text:
+        text = "(not available)"
+    return f"## {title}\n\nSource: `{path}`\n\n{text}\n"
+
+
+def build_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
+    memory_dir = os.path.join(root_dir, "memory")
+    insight_path = os.path.join(memory_dir, "global_mem_insight.txt")
+    global_path = os.path.join(memory_dir, "global_mem.txt")
+    sop_path = os.path.join(memory_dir, "memory_management_sop.md")
+    sections = [
+        f"# {GA_TUI_MEMORY_PROMPT_HEADER}",
+        "",
+        "You are running as the Oh My Pi execution runtime inside GenericAgent-TUI.",
+        "GenericAgent-TUI remains the Orchestrator: it owns task ledgers, approvals, artifact refs, and long-term memory governance.",
+        "Use the memory below as heuristic context. Verify current repository state before acting when memory could be stale.",
+        "Do not write long-term memory directly. If execution reveals a durable, verified lesson, include it in your final answer under `Memory candidates` with evidence refs.",
+        "Never expose or store secrets. Treat redacted or credential-looking content as unavailable.",
+        "",
+        _bounded_section("L1 Global Memory Index", insight_path, _read_text_if_exists(insight_path, max_chars=3500), max_chars=2600),
+        _bounded_section("L2 Global Memory Facts", global_path, _read_text_if_exists(global_path, max_chars=3500), max_chars=2600),
+        _bounded_section("L0 Memory Governance", sop_path, _read_text_if_exists(sop_path, max_chars=2800), max_chars=2200),
+        "## TUI Governance Refs",
+        "",
+        f"- Runtime harness dir: `{harness_dir}`",
+        "- Architecture baseline: `docs/agent-harness-architecture.md`",
+        "- Runtime provider contract: `docs/runtime-provider-control-plane.md`",
+        "- Control protocol spec: `.trellis/spec/backend/agent-control-protocol.md`",
+        "",
+    ]
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def write_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
+    path = ohmypi_memory_prompt_path(harness_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    text = build_ohmypi_memory_prompt(root_dir=root_dir, harness_dir=harness_dir)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(tmp_path, path)
+    return path
+
+
+def ohmypi_memory_candidate_signal(text: str, *, source: str = "", request_id: str = "") -> dict[str, Any] | None:
+    statement = _redact_memory_text(str(text or "")).strip()
+    if not statement or len(statement) < 80:
+        return None
+    if statement.startswith("[Oh My Pi]"):
+        return None
+    if "[REDACTED]" in statement:
+        return None
+    return {
+        "schema_version": "ohmypi.memory_candidate_signal.v1",
+        "source": source or "ohmypi",
+        "request_id": request_id,
+        "statement": statement[:2400].rstrip(),
+        "evidence_ref": f"runtime://provider/ohmypi/{request_id}" if request_id else "runtime://provider/ohmypi",
+        "requires_human_approval": True,
+    }
 
 
 def ohmypi_provider_spec(
@@ -421,8 +550,9 @@ def ohmypi_provider_spec(
     recent_models_path: str,
     schedules_path: str,
     binary: str | None = None,
+    command: list[str] | None = None,
 ) -> RuntimeProviderSpec:
-    command = ohmypi_rpc_command(binary=binary)
+    command = list(command or ohmypi_rpc_command(binary=binary))
     executable = command[0]
     exists = shutil.which(executable) is not None if os.path.sep not in executable else os.path.exists(executable)
     return RuntimeProviderSpec(
@@ -439,7 +569,8 @@ def ohmypi_provider_spec(
             "tool_calling": True,
             "host_tools": False,
             "artifact_refs": True,
-            "memory_candidates": False,
+            "memory_candidates": True,
+            "memory_candidate_signals": True,
             "human_approval": False,
             "subagents": True,
             "provider_owned_subagents": True,
@@ -462,7 +593,7 @@ def ohmypi_provider_spec(
         policy={
             "approval_gate_owner": "ga-tui.policy",
             "tool_permissions": "ohmypi_internal_until_host_tools_are_mapped",
-            "memory_write": "disabled",
+            "memory_write": "candidate_signal_only",
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],
         },
         a2a={
@@ -475,8 +606,10 @@ def ohmypi_provider_spec(
             "resource_gateway": "not_exposed",
         },
         notes=[
-            "Opt-in provider; GenericAgent remains the default backend.",
+            "Experiment branch default provider; GenericAgent remains available via GA_TUI_RUNTIME_PROVIDER=genericagent.",
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
+            "GenericAgent/TUI memory is injected through --append-system-prompt.",
+            "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
             "Host tools, host URI schemes, and TUI approval mapping are intentionally disabled in the MVP.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",
@@ -488,6 +621,10 @@ def ohmypi_provider_spec(
 __all__ = [
     "OhMyPiRpcAgent",
     "OhMyPiRuntimeAdapter",
+    "build_ohmypi_memory_prompt",
+    "ohmypi_memory_candidate_signal",
+    "ohmypi_memory_prompt_path",
     "ohmypi_provider_spec",
     "ohmypi_rpc_command",
+    "write_ohmypi_memory_prompt",
 ]
