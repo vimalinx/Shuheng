@@ -2395,6 +2395,32 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "parse_error" not in state.messages[-1].content, state.messages[-1].content
 
 
+def assert_temp_subagent_current_fallback_is_reloadable() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_temp_subagent_current_")
+    retarget_harness(root)
+    state = a.State(agent=ContextFakeAgent())
+    state.running = True
+    assert a.active_ui_session_key(state) == ""
+
+    sub = a.create_subagent(state, "TUI-Smoke", role="reviewer", persistent=False)
+    assert sub.persistent is False
+    assert os.path.commonpath([a.TEMP_SUBAGENTS_DIR, sub.home]) == a.TEMP_SUBAGENTS_DIR, sub.home
+    assert os.path.relpath(sub.home, a.TEMP_SUBAGENTS_DIR).split(os.sep)[0] == "current", sub.home
+
+    state.subagents = {}
+    assert a.load_subagents(state) is True
+    assert a.resolve_subagent(state, sub.agent_id) is not None, state.subagents
+    assert a.resolve_subagent(state, "TUI-Smoke") is not None, state.subagents
+
+    keyed_agent = FakeLLMAgent()
+    a.set_agent_log_path(keyed_agent, a.new_session_log_path())
+    keyed_state = a.State(agent=keyed_agent)
+    keyed_state.running = True
+    assert a.active_ui_session_key(keyed_state) != ""
+    a.load_subagents(keyed_state)
+    assert a.resolve_subagent(keyed_state, sub.agent_id) is None, keyed_state.subagents
+
+
 def assert_tui_query_tools_expose_dashboard_state() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_query_tools_")
     retarget_harness(root)
@@ -3022,6 +3048,7 @@ def run_checks() -> None:
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
+    assert_temp_subagent_current_fallback_is_reloadable()
     assert_tui_query_tools_expose_dashboard_state()
     assert_historical_subagent_result_quarantine_backfill()
     assert_recent_sessions_use_last_message_activity()

@@ -8429,14 +8429,13 @@ def subagent_home_dirs_for_session(state: State) -> list[str]:
         home = subagent_home(name)
         if os.path.isdir(home):
             homes.append(home)
-    owner = active_ui_session_key(state)
-    if owner:
-        temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
-        if os.path.isdir(temp_root):
-            for name in sorted(os.listdir(temp_root)):
-                home = os.path.join(temp_root, name)
-                if os.path.isdir(home):
-                    homes.append(home)
+    owner = active_ui_session_key(state) or "current"
+    temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
+    if os.path.isdir(temp_root):
+        for name in sorted(os.listdir(temp_root)):
+            home = os.path.join(temp_root, name)
+            if os.path.isdir(home):
+                homes.append(home)
     return homes
 
 

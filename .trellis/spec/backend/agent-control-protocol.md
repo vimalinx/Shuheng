@@ -143,6 +143,66 @@
 }
 ```
 
+## Scenario: Temporary Subagent Owner Fallback
+
+### 1. Scope / Trigger
+
+- Trigger: Temporary subagents are created or reloaded while the active UI session has no durable session key.
+- Applies to: `/agent new --temp ...`, `agent.create` with an ephemeral lifecycle, `create_subagent()`, `load_subagents()`, `subagent_home_dirs_for_session()`, and `/agent ask <id|name> ...`.
+- Non-goal: This does not promote temporary subagents to persistent storage and does not hydrate long-term memory.
+
+### 2. Signatures
+
+- Temporary subagent root: `TEMP_SUBAGENTS_DIR`.
+- Empty-session fallback owner: `current`.
+- Empty-session path shape: `TEMP_SUBAGENTS_DIR/current/<agent_id>/meta.json`.
+- Session-keyed path shape: `TEMP_SUBAGENTS_DIR/<active_ui_session_key>/<agent_id>/meta.json`.
+
+### 3. Contracts
+
+- `create_subagent(..., persistent=False)` must compute the temp owner as `active_ui_session_key(state) or "current"`.
+- `subagent_home_dirs_for_session(state)` must inspect the same temp owner expression as creation: `active_ui_session_key(state) or "current"`.
+- Persistent subagents under `SUBAGENTS_DIR` are always loaded independently of the temp owner.
+- A keyed TUI session must load only its keyed temp owner and must not load the `current` fallback temp subagents.
+- Empty-session fallback temp subagents remain non-persistent and must keep `persistent:false` in metadata/runtime state.
+
+### 4. Validation & Error Matrix
+
+- Empty active session key + temp subagent created -> metadata stored under `TEMP_SUBAGENTS_DIR/current/...`.
+- Empty active session key + `load_subagents()` -> the `current` temp owner is scanned and the subagent resolves by id and name.
+- Keyed active session + `load_subagents()` -> only that keyed temp owner is scanned; `current` fallback temp agents remain hidden.
+- Missing temp owner directory -> no error and no temp subagents loaded.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/agent new --temp reviewer:TUI-Smoke | ...` creates `tmp-tui-smoke-...` under `temp/ga-tui-subagents/current/...`; `/agent ask tmp-tui-smoke-... ...` starts the subagent in the same TUI session.
+- Base: A persistent subagent continues to load from `SUBAGENTS_DIR` regardless of session key.
+- Bad: Creation writes to `current` but reload only scans keyed owner directories, causing `/agent ask` to report `找不到子 agent` immediately after creation.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert empty-session temp subagent creation writes under the `current` temp owner.
+- Tests must clear in-memory `state.subagents`, call `load_subagents()`, and assert resolution by both id and display name.
+- Tests must assert a keyed state does not load a temp subagent from the `current` fallback owner.
+- Real TUI smoke should create a temp subagent and immediately run `/agent ask <created-id> ...` without a missing-subagent error.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+owner = active_ui_session_key(state)
+if owner:
+    temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
+```
+
+#### Correct
+
+```python
+owner = active_ui_session_key(state) or "current"
+temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
+```
+
 ## Scenario: Unified Model Command Surface
 
 ### 1. Scope / Trigger
