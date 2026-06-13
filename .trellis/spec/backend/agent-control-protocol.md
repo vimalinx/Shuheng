@@ -390,7 +390,7 @@ configure_genericagent_provider_runtime(
 ### 1. Scope / Trigger
 
 - Trigger: GenericAgent-TUI integrates Oh My Pi as the experiment-branch default local runtime provider.
-- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, GA/TUI memory prompt injection, read-only TUI host tool registration, memory candidate signaling, and RPC queue/event mapping.
+- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, GA/TUI memory prompt injection, app-injected TUI host tool registration, governed proposal routing, memory candidate signaling, and RPC queue/event mapping.
 - Non-goal: This provider must not own curses rendering, mutable TUI `State`, GenericAgent tool schema injection, TUI approval storage, scheduler registries, or first-class TUI subagent ledger mutation.
 
 ### 2. Signatures
@@ -402,9 +402,12 @@ configure_genericagent_provider_runtime(
 - Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
 - RPC command helper: `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
 - Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
-- TUI host tool exposed to OMP: `ga_tui_query`.
-- Host tool definition helper: `ohmypi_tui_readonly_host_tool_definitions()`.
-- Host tool callback helper: `ohmypi_tui_query_host_tool_handler(state=None)`.
+- TUI host tools exposed to OMP: `ga_tui_query` and `ga_tui_propose`.
+- Read-only host tool definition helper: `ohmypi_tui_readonly_host_tool_definitions()`.
+- Governed proposal host tool definition helper: `ohmypi_tui_proposal_host_tool_definition()`.
+- Combined host tool definition helper: `ohmypi_tui_host_tool_definitions()`.
+- Combined host tool callback helper: `ohmypi_tui_host_tool_handler(state=None)`.
+- Backward-compatible query callback helper: `ohmypi_tui_query_host_tool_handler(state=None)`.
 - Environment keys:
   - unset `GA_TUI_RUNTIME_PROVIDER` selects `ohmypi` on this experiment branch.
   - `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the fallback GenericAgent adapter.
@@ -422,8 +425,13 @@ configure_genericagent_provider_runtime(
 - `OhMyPiRuntimeAdapter.start_agent()` must not block on model or network startup. RPC process startup is lazy and happens on first prompt.
 - The provider module must not import `ga_tui.app`, curses, or mutable TUI `State`.
 - Oh My Pi unrestricted host tools remain disabled in provider metadata: `capabilities.host_tools:false`.
-- The only allowed host tool bridge is app-injected, read-only TUI governance querying: `capabilities.tui_readonly_host_tools:true`.
-- `OhMyPiRpcAgent` may register read-only host tools through `set_host_tools` only from definitions injected by `app.py`; provider code must not invent writable tools or import TUI `State`.
+- The only allowed host tool bridge is app-injected TUI governance querying and governed proposal routing: `capabilities.tui_readonly_host_tools:true` and `capabilities.tui_governed_proposal_tools:true`.
+- `OhMyPiRpcAgent` may register host tools through `set_host_tools` only from definitions injected by `app.py`; provider code must not invent writable tools or import TUI `State`.
+- `ga_tui_query` is read-only and must never mutate sessions, tasks, agents, approvals, artifacts, memory, or files.
+- `ga_tui_propose` accepts only bounded proposal payloads with `proposal_type:"ga_control"` or `proposal_type:"memory_candidate"`.
+- `ga_tui_propose` with `proposal_type:"ga_control"` must require a current-schema `ga-control.v2` envelope or `agenttask.v2` action object, validate that it maps to known current controls, and route execution through `apply_tui_controls_from_text(..., source="agent:ohmypi_host_tool")` so existing policy gates and ledgers remain the source of truth.
+- `ga_tui_propose` with `proposal_type:"memory_candidate"` must resolve the target subagent from the bound TUI `State` and call `queue_curated_memory_candidate(...)`; direct long-term memory writes remain forbidden.
+- `ga_tui_propose` results use `schema_version:"ga-tui.proposal.v1"` and return JSON-safe `status`, `kind`, result lines/messages, ids, and artifact refs where available.
 - Host tool registration must happen after OMP emits `{"type":"ready"}` and before the first prompt command is sent for that process.
 - OMP `host_tool_call` frames must be answered with `host_tool_result` using the same frame `id`.
 - Host tool result payloads must be AgentToolResult-shaped JSON, with bounded redacted text under `content:[{"type":"text","text":"..."}]`.
@@ -433,7 +441,7 @@ configure_genericagent_provider_runtime(
 - On this experiment branch, Oh My Pi is the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
 - GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent`.
 - The TUI should generate a bounded `GA/TUI Memory Guidance` append prompt from GA/TUI memory sources and pass it through `--append-system-prompt`.
-- Oh My Pi completion output may emit memory candidate signals, but long-term memory writes remain governed by TUI memory candidate records and human approval.
+- Oh My Pi completion output may emit memory candidate signals, and `ga_tui_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
 
 ### 4. Validation & Error Matrix
 
@@ -445,8 +453,11 @@ configure_genericagent_provider_runtime(
 - RPC extension UI request `confirm` -> provider replies `confirmed:false`.
 - RPC extension UI request `select`, `input`, or `editor` -> provider replies `cancelled:true`.
 - `abort()` called during a prompt -> provider sends RPC `abort`, emits a queue `done` item, clears `is_running`, and decrements `task_queue.unfinished_tasks`.
-- OMP `ready` with configured read-only TUI tools -> provider sends `set_host_tools` before the prompt frame.
+- OMP `ready` with configured app-injected TUI tools -> provider sends `set_host_tools` before the prompt frame.
 - OMP `host_tool_call` for `ga_tui_query` -> provider runs the app-injected read-only callback and sends a JSON-safe `host_tool_result`.
+- OMP `host_tool_call` for `ga_tui_propose` memory candidate -> app callback routes through `queue_curated_memory_candidate(...)` and returns a JSON-safe proposal result with candidate/approval/artifact refs when queued.
+- OMP `host_tool_call` for `ga_tui_propose` current-schema control -> app callback routes through `apply_tui_controls_from_text(...)` and returns control result lines.
+- OMP `host_tool_call` for `ga_tui_propose` with unknown proposal type, missing required fields, missing TUI state, unresolved target, invalid schema, or no known action -> callback returns `schema_version:"ga-tui.proposal.v1"` with `status:"error"`.
 - OMP `host_tool_call` for an unregistered tool -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_call` whose callback raises -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_cancel` -> provider records the cancellation safely and continues normal prompt handling.
@@ -457,6 +468,8 @@ configure_genericagent_provider_runtime(
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
 - Base: `/runtimes` shows both `genericagent` and `ohmypi`, while the experiment-branch default is `ohmypi`.
 - Base: Oh My Pi can query bounded TUI governance facts through `ga_tui_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
+- Base: Oh My Pi can propose current-schema actions through `ga_tui_propose`, while GenericAgent-TUI remains the Orchestrator and policy/ledger owner.
+- Base: Oh My Pi can submit a durable memory candidate through `ga_tui_propose`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
 - Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
 - Base: Oh My Pi internal task/subagent events are provider-owned details until a future ledger-mapping feature is implemented.
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
@@ -471,11 +484,13 @@ configure_genericagent_provider_runtime(
 - Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
 - Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, and secret-looking outputs are skipped.
 - Tests must assert a fake RPC process maps `ready`, `prompt` ack, `message_update` deltas, and `agent_end` into queue `next`/`done` items.
-- Tests must assert a fake RPC process receives `set_host_tools` for `ga_tui_query` before the prompt frame.
+- Tests must assert a fake RPC process receives app-injected `set_host_tools` definitions before the prompt frame.
 - Tests must assert fake `host_tool_call` frames receive `host_tool_result` success frames.
 - Tests must assert unknown or failing host tool calls receive `host_tool_result` with `isError:true`.
 - Tests must assert `host_tool_cancel` frames are handled safely.
-- Tests must assert provider metadata advertises `tui_readonly_host_tools:true` while keeping unrestricted `host_tools:false`.
+- Tests must assert `ga_tui_query` remains read-only and `ga_tui_propose` supports governed `ga_control` and `memory_candidate` proposals.
+- Tests must assert `ga_tui_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
+- Tests must assert provider metadata advertises `tui_readonly_host_tools:true` and `tui_governed_proposal_tools:true` while keeping unrestricted `host_tools:false`.
 - Tests must assert missing binary failure and `abort()` cleanup decrement unfinished task state.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `ga-tui-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
@@ -497,6 +512,24 @@ if provider_id == "ohmypi":
 class OhMyPiRuntimeAdapter(RuntimeAdapter):
     def create_agent(self) -> OhMyPiRpcAgent:
         return OhMyPiRpcAgent()
+```
+
+#### Wrong
+
+```python
+# ohmypi_provider.py
+def handle_memory_candidate(statement):
+    from ga_tui.app import queue_curated_memory_candidate
+    queue_curated_memory_candidate(...)
+```
+
+#### Correct
+
+```python
+# app.py
+def ohmypi_tui_propose_host_tool_handler(state, args):
+    if args["proposal_type"] == "memory_candidate":
+        return ohmypi_tui_propose_memory_candidate(state, args)
 ```
 
 ## Scenario: TUI Governed Schedule Tools

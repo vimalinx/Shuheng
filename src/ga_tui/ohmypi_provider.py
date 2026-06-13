@@ -742,6 +742,7 @@ def ohmypi_provider_spec(
             "tool_calling": True,
             "host_tools": False,
             "tui_readonly_host_tools": True,
+            "tui_governed_proposal_tools": True,
             "artifact_refs": True,
             "memory_candidates": True,
             "memory_candidate_signals": True,
@@ -766,8 +767,8 @@ def ohmypi_provider_spec(
         },
         policy={
             "approval_gate_owner": "ga-tui.policy",
-            "tool_permissions": "tui_readonly_host_tools_only",
-            "memory_write": "candidate_signal_only",
+            "tool_permissions": "tui_readonly_and_governed_proposal_tools_only",
+            "memory_write": "candidate_only",
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],
         },
         a2a={
@@ -784,7 +785,7 @@ def ohmypi_provider_spec(
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
             "GenericAgent/TUI memory is injected through --append-system-prompt.",
             "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
-            "Only app-injected read-only TUI query host tools are enabled; unrestricted host tools, host URI schemes, and TUI approval mapping stay disabled.",
+            "Only app-injected TUI query and governed proposal host tools are enabled; unrestricted host tools, host URI schemes, and direct TUI approval mapping stay disabled.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",
             f"command={' '.join(command)}",

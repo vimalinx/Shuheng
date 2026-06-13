@@ -10971,6 +10971,7 @@ def append_ohmypi_memory_candidate_signal(signal: dict[str, Any]) -> dict[str, A
 
 
 OHMYPI_TUI_QUERY_TOOL_NAME = "ga_tui_query"
+OHMYPI_TUI_PROPOSE_TOOL_NAME = "ga_tui_propose"
 OHMYPI_TUI_QUERY_ENDPOINTS = (
     "runtime_registry",
     "model_orchestration",
@@ -10983,6 +10984,7 @@ OHMYPI_TUI_QUERY_ENDPOINTS = (
     "approval_list",
     "artifact_list",
 )
+OHMYPI_TUI_PROPOSAL_TYPES = ("ga_control", "memory_candidate")
 
 
 def ohmypi_tui_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]:
@@ -11016,6 +11018,62 @@ def ohmypi_tui_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]:
     ]
 
 
+def ohmypi_tui_proposal_host_tool_definition() -> RpcHostToolDefinition:
+    return RpcHostToolDefinition(
+        name=OHMYPI_TUI_PROPOSE_TOOL_NAME,
+        label="GA/TUI Proposal",
+        description=(
+            "Bounded GenericAgent-TUI proposal bridge. Use it to submit current-schema "
+            "ga-control.v2 actions through existing TUI gates, or curated memory candidates "
+            "through the existing human approval queue. It does not grant unrestricted host tools."
+        ),
+        parameters={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "proposal_type": {
+                    "type": "string",
+                    "enum": list(OHMYPI_TUI_PROPOSAL_TYPES),
+                    "description": "Use ga_control for current-schema TUI controls or memory_candidate for curated memory.",
+                },
+                "control": {
+                    "type": "object",
+                    "description": "Current-schema ga-control.v2 envelope or agenttask.v2 action. Required for proposal_type=ga_control.",
+                    "additionalProperties": True,
+                },
+                "default_target": {
+                    "type": "string",
+                    "description": "Optional default TUI target for controls that omit target.",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target subagent id or unique name. Required for proposal_type=memory_candidate.",
+                },
+                "statement": {
+                    "type": "string",
+                    "description": "Durable, verified memory candidate statement. Required for proposal_type=memory_candidate.",
+                },
+                "evidence_ref": {
+                    "type": "string",
+                    "description": "Optional artifact/runtime evidence reference for the memory candidate.",
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": "Optional task id associated with this proposal.",
+                },
+            },
+            "required": ["proposal_type"],
+        },
+    )
+
+
+def ohmypi_tui_host_tool_definitions() -> list[RpcHostToolDefinition]:
+    return [
+        *ohmypi_tui_readonly_host_tool_definitions(),
+        ohmypi_tui_proposal_host_tool_definition(),
+    ]
+
+
 def ohmypi_runtime_registry_snapshot() -> dict[str, Any]:
     data = agent_runtime_registry(write_memory_prompt_file=False).to_record()
     data["updated_at"] = now_iso()
@@ -11023,8 +11081,139 @@ def ohmypi_runtime_registry_snapshot() -> dict[str, Any]:
     return data
 
 
-def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None):
+def ohmypi_proposal_error(message: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.proposal.v1",
+        "status": "error",
+        "error": message,
+        **extra,
+    }
+
+
+def ohmypi_proposal_ok(kind: str, **payload: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "ga-tui.proposal.v1",
+        "kind": kind,
+        "status": "ok",
+        "generated_at": now_iso(),
+        **payload,
+    }
+
+
+def ohmypi_tui_propose_memory_candidate(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return ohmypi_proposal_error("TUI state is not bound; memory candidates require an active TUI state.")
+    target = str(args.get("target") or "").strip()
+    statement = clean_text(str(args.get("statement") or "")).strip()
+    if not target:
+        return ohmypi_proposal_error("Missing target for memory candidate proposal.", proposal_type="memory_candidate")
+    if not statement:
+        return ohmypi_proposal_error("Missing statement for memory candidate proposal.", proposal_type="memory_candidate")
+    target_sub = resolve_subagent(state, target)
+    if target_sub is None:
+        return ohmypi_proposal_error(
+            "Target subagent was not found or was ambiguous.",
+            proposal_type="memory_candidate",
+            target=target,
+        )
+    task_id = str(args.get("task_id") or "").strip()
+    evidence_ref = str(args.get("evidence_ref") or "").strip() or "runtime://provider/ohmypi/host_tool"
+    candidate_start = len(read_jsonl(AGENT_MEMORY_CANDIDATES_PATH))
+    approval_start = len(read_jsonl(AGENT_APPROVALS_PATH))
+    result_message = queue_curated_memory_candidate(
+        state,
+        target_sub,
+        statement,
+        source="agent:ohmypi_host_tool",
+        evidence_ref=evidence_ref,
+        task_id=task_id,
+    )
+    candidate_rows = read_jsonl(AGENT_MEMORY_CANDIDATES_PATH)[candidate_start:]
+    approval_rows = read_jsonl(AGENT_APPROVALS_PATH)[approval_start:]
+    if any(str(row.get("status") or "") == "rejected" for row in candidate_rows) or "已拒绝" in result_message:
+        result_status = "rejected"
+    elif candidate_rows or approval_rows or "等待审批" in result_message:
+        result_status = "queued"
+    elif "已忽略" in result_message or "不写入" in result_message or "临时会话" in result_message:
+        result_status = "ignored"
+    else:
+        result_status = "returned"
+    return ohmypi_proposal_ok(
+        "memory_candidate",
+        proposal_type="memory_candidate",
+        result_status=result_status,
+        result_message=result_message,
+        target_subagent=target_sub.agent_id,
+        candidate_ids=[str(row.get("candidate_id") or "") for row in candidate_rows if row.get("candidate_id")],
+        approval_ids=[str(row.get("approval_id") or "") for row in approval_rows if row.get("approval_id")],
+        artifact_refs=[
+            ref
+            for row in candidate_rows
+            for ref in (row.get("artifact_refs") if isinstance(row.get("artifact_refs"), list) else [])
+            if ref
+        ],
+    )
+
+
+def ohmypi_tui_propose_ga_control(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return ohmypi_proposal_error("TUI state is not bound; ga_control proposals require an active TUI state.")
+    control = args.get("control")
+    if not isinstance(control, dict):
+        return ohmypi_proposal_error("Missing current-schema control object.", proposal_type="ga_control")
+    schema = str(control.get("schema_version") or "").strip().lower()
+    if schema not in {GA_CONTROL_SCHEMA, AGENT_TASK_SCHEMA}:
+        return ohmypi_proposal_error(
+            "Control proposals must use ga-control.v2 or agenttask.v2 schema_version.",
+            proposal_type="ga_control",
+            schema_version=schema,
+        )
+    controls = controls_from_json_payload(control, require_known=True)
+    if not controls:
+        return ohmypi_proposal_error(
+            "Control proposal parsed but contained no known current-schema action.",
+            proposal_type="ga_control",
+        )
+    text = "<ga-control>" + json.dumps(control, ensure_ascii=False, separators=(",", ":")) + "</ga-control>"
+    result_lines = apply_tui_controls_from_text(
+        state,
+        text,
+        source="agent:ohmypi_host_tool",
+        default_target=str(args.get("default_target") or "current"),
+    )
+    return ohmypi_proposal_ok(
+        "ga_control",
+        proposal_type="ga_control",
+        control_count=len(controls),
+        result_lines=tui_query_json_safe(result_lines),
+    )
+
+
+def ohmypi_tui_propose_host_tool_handler(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(args, dict):
+        return ohmypi_proposal_error("Host tool arguments must be an object.")
+    proposal_type = str(args.get("proposal_type") or "").strip()
+    try:
+        if proposal_type == "memory_candidate":
+            return ohmypi_tui_propose_memory_candidate(state, args)
+        if proposal_type == "ga_control":
+            return ohmypi_tui_propose_ga_control(state, args)
+        return ohmypi_proposal_error(
+            "Unsupported proposal_type.",
+            proposal_type=proposal_type,
+            supported_proposal_types=list(OHMYPI_TUI_PROPOSAL_TYPES),
+        )
+    except Exception as exc:
+        return ohmypi_proposal_error(
+            f"{type(exc).__name__}: {exc}",
+            proposal_type=proposal_type,
+        )
+
+
+def ohmypi_tui_host_tool_handler(state: Optional[State] = None):
     def _handler(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if tool_name == OHMYPI_TUI_PROPOSE_TOOL_NAME:
+            return ohmypi_tui_propose_host_tool_handler(state, args)
         if tool_name != OHMYPI_TUI_QUERY_TOOL_NAME:
             return tui_query_error("Unsupported host tool.", tool_name=tool_name)
         if not isinstance(args, dict):
@@ -11075,6 +11264,10 @@ def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None):
     return _handler
 
 
+def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None):
+    return ohmypi_tui_host_tool_handler(state)
+
+
 def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeRegistry:
     requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
     registry = RuntimeRegistry(default_provider_id=requested)
@@ -11100,8 +11293,8 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         command=ohmypi_command,
         cwd=ROOT_DIR,
         memory_candidate_sink=append_ohmypi_memory_candidate_signal,
-        host_tool_definitions=ohmypi_tui_readonly_host_tool_definitions(),
-        host_tool_handler=ohmypi_tui_query_host_tool_handler(None),
+        host_tool_definitions=ohmypi_tui_host_tool_definitions(),
+        host_tool_handler=ohmypi_tui_host_tool_handler(None),
     ))
     return registry
 
@@ -11158,8 +11351,8 @@ def install_interaction_hook(state: State, agent: Any) -> None:
     if hasattr(agent, "configure_host_tools"):
         try:
             agent.configure_host_tools(
-                host_tool_definitions=ohmypi_tui_readonly_host_tool_definitions(),
-                host_tool_handler=ohmypi_tui_query_host_tool_handler(state),
+                host_tool_definitions=ohmypi_tui_host_tool_definitions(),
+                host_tool_handler=ohmypi_tui_host_tool_handler(state),
             )
         except Exception:
             pass

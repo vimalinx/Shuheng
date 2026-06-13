@@ -406,11 +406,12 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["capabilities"]["streaming"] is True, ohmypi
         assert ohmypi["capabilities"]["host_tools"] is False, ohmypi
         assert ohmypi["capabilities"]["tui_readonly_host_tools"] is True, ohmypi
+        assert ohmypi["capabilities"]["tui_governed_proposal_tools"] is True, ohmypi
         assert ohmypi["capabilities"]["memory_candidates"] is True, ohmypi
         assert ohmypi["capabilities"]["memory_candidate_signals"] is True, ohmypi
         assert ohmypi["policy"]["approval_gate_owner"] == "ga-tui.policy", ohmypi
-        assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_host_tools_only", ohmypi
-        assert ohmypi["policy"]["memory_write"] == "candidate_signal_only", ohmypi
+        assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi
+        assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
         os.environ["GA_TUI_RUNTIME_PROVIDER"] = "genericagent"
         assert a.agent_runtime_registry().default().provider_id == "genericagent"
     finally:
@@ -603,6 +604,98 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     unknown = handler("ga_tui_query", {"endpoint": "not-real"})
     assert unknown["status"] == "error", unknown
     assert "runtime_registry" in unknown["supported_endpoints"], unknown
+
+
+def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_omp_proposal_")
+    retarget_harness(root)
+    state = a.State(agent=FakeLLMAgent())
+    target = a.create_subagent(
+        state,
+        "OMP Proposal Target",
+        "Receives durable project memory candidates from governed OMP proposals.",
+        role="researcher",
+        persistent=True,
+    )
+
+    tools = [tool.to_rpc() for tool in a.ohmypi_tui_host_tool_definitions()]
+    tool_names = {str(tool.get("name") or "") for tool in tools}
+    assert {"ga_tui_query", "ga_tui_propose"} <= tool_names, tools
+    propose_tool = next(tool for tool in tools if tool["name"] == "ga_tui_propose")
+    assert "ga_control" in propose_tool["parameters"]["properties"]["proposal_type"]["enum"], propose_tool
+    assert "memory_candidate" in propose_tool["parameters"]["properties"]["proposal_type"]["enum"], propose_tool
+
+    handler = a.ohmypi_tui_host_tool_handler(state)
+    memory_result = handler("ga_tui_propose", {
+        "proposal_type": "memory_candidate",
+        "target": target.agent_id,
+        "statement": (
+            "type: project\n"
+            "Validated durable lesson: OMP proposal host tools must route long-term memory "
+            "through GenericAgent-TUI human approval gates instead of writing memory directly."
+        ),
+        "evidence_ref": "runtime://provider/ohmypi/test-proposal",
+        "task_id": "task_omp_proposal_memory",
+    })
+    assert memory_result["schema_version"] == "ga-tui.proposal.v1", memory_result
+    assert memory_result["status"] == "ok", memory_result
+    assert memory_result["kind"] == "memory_candidate", memory_result
+    assert memory_result["result_status"] == "queued", memory_result
+    assert memory_result["target_subagent"] == target.agent_id, memory_result
+    assert memory_result["candidate_ids"], memory_result
+    assert memory_result["approval_ids"], memory_result
+    assert memory_result["artifact_refs"], memory_result
+
+    candidate_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
+    approval_rows = a.read_jsonl(a.AGENT_APPROVALS_PATH)
+    artifact_rows = a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)
+    assert candidate_rows, "missing OMP proposal memory candidate row"
+    assert approval_rows, "missing OMP proposal approval row"
+    assert artifact_rows, "missing OMP proposal memory artifact row"
+    latest_candidate = candidate_rows[-1]
+    assert latest_candidate["status"] == "pending", latest_candidate
+    assert latest_candidate["approval_id"] == memory_result["approval_ids"][-1], latest_candidate
+    assert_memory_candidate_schema(latest_candidate["memory_candidate"])
+    latest_approval = approval_rows[-1]
+    assert latest_approval["type"] == "memory_write_request", latest_approval
+    assert latest_approval["target"] == target.agent_id, latest_approval
+    assert latest_approval["approval_id"] == latest_candidate["approval_id"], latest_approval
+    latest_artifact = artifact_rows[-1]
+    assert_artifact_schema(latest_artifact, artifact_type="memory-candidates")
+    assert latest_artifact["uri"] in memory_result["artifact_refs"], (latest_artifact, memory_result)
+
+    control_result = handler("ga_tui_propose", {
+        "proposal_type": "ga_control",
+        "control": {
+            "schema_version": "ga-control.v2",
+            "actions": [
+                {
+                    "action": "task.plan.create",
+                    "title": "OMP Proposal Plan",
+                    "steps": ["Inspect governed proposal", "Verify policy gate result"],
+                }
+            ],
+        },
+    })
+    assert control_result["schema_version"] == "ga-tui.proposal.v1", control_result
+    assert control_result["status"] == "ok", control_result
+    assert control_result["kind"] == "ga_control", control_result
+    assert control_result["control_count"] == 1, control_result
+    assert any("已创建任务计划：OMP Proposal Plan" in line for line in control_result["result_lines"]), control_result
+    assert any("OMP Proposal Plan" in str(row.get("objective") or "") for row in a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+
+    invalid_type = handler("ga_tui_propose", {"proposal_type": "not-real"})
+    assert invalid_type["status"] == "error", invalid_type
+    assert "memory_candidate" in invalid_type["supported_proposal_types"], invalid_type
+    invalid_control = handler("ga_tui_propose", {"proposal_type": "ga_control", "control": {"actions": []}})
+    assert invalid_control["status"] == "error", invalid_control
+    missing_state = a.ohmypi_tui_host_tool_handler(None)("ga_tui_propose", {
+        "proposal_type": "memory_candidate",
+        "target": target.agent_id,
+        "statement": "This should fail because no TUI state is bound.",
+    })
+    assert missing_state["status"] == "error", missing_state
+    assert "TUI state is not bound" in missing_state["error"], missing_state
 
 
 def assert_ohmypi_memory_candidate_signal_filters() -> None:
@@ -1223,9 +1316,10 @@ def assert_gateway_schema(registry: dict) -> None:
     assert ohmypi_provider["capabilities"]["streaming"] is True, ohmypi_provider
     assert ohmypi_provider["capabilities"]["host_tools"] is False, ohmypi_provider
     assert ohmypi_provider["capabilities"]["tui_readonly_host_tools"] is True, ohmypi_provider
+    assert ohmypi_provider["capabilities"]["tui_governed_proposal_tools"] is True, ohmypi_provider
     assert ohmypi_provider["capabilities"]["memory_candidate_signals"] is True, ohmypi_provider
-    assert ohmypi_provider["policy"]["tool_permissions"] == "tui_readonly_host_tools_only", ohmypi_provider
-    assert ohmypi_provider["policy"]["memory_write"] == "candidate_signal_only", ohmypi_provider
+    assert ohmypi_provider["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi_provider
+    assert ohmypi_provider["policy"]["memory_write"] == "candidate_only", ohmypi_provider
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
     model_orchestration = registry["model_orchestration"]
     assert model_orchestration["schema_version"] == "model_orchestration.v1", model_orchestration
@@ -2752,6 +2846,7 @@ def run_checks() -> None:
     assert_ohmypi_rpc_queue_mapping()
     assert_ohmypi_host_tool_bridge()
     assert_ohmypi_tui_query_host_tool_contract()
+    assert_ohmypi_tui_proposal_host_tool_contract()
     assert_ohmypi_memory_candidate_signal_filters()
     assert_ohmypi_missing_binary_and_abort()
     assert_top_bar_header_requested_fields()
