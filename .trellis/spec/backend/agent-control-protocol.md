@@ -450,7 +450,7 @@ configure_genericagent_provider_runtime(
 ### 1. Scope / Trigger
 
 - Trigger: GenericAgent-TUI integrates Oh My Pi as the experiment-branch default local runtime provider.
-- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, GA/TUI memory prompt injection, app-injected TUI host tool registration, governed proposal routing, memory candidate signaling, and RPC queue/event mapping.
+- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, GA/TUI memory prompt injection, app-injected TUI host tool registration, typed host-tool routing, governed proposal routing, memory candidate signaling, runtime task request/event records, and RPC queue/event mapping.
 - Non-goal: This provider must not own curses rendering, mutable TUI `State`, GenericAgent tool schema injection, TUI approval storage, scheduler registries, or first-class TUI subagent ledger mutation.
 
 ### 2. Signatures
@@ -460,13 +460,17 @@ configure_genericagent_provider_runtime(
 - Runtime adapter: `OhMyPiRuntimeAdapter(RuntimeAdapter)`.
 - Queue-compatible wrapper: `OhMyPiRpcAgent`.
 - Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
+- Provider-neutral runtime envelopes: `RuntimeTaskRequest` and `RuntimeTaskEvent` in `src/ga_tui/runtime.py`.
 - RPC command helper: `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
 - Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
 - Isolated runtime helpers: `ohmypi_runtime_root(harness_dir)`, `ohmypi_isolated_agent_dir(harness_dir)`, `ohmypi_config_path(agent_dir)`, `ohmypi_models_path(agent_dir)`, `write_ohmypi_runtime_files(...)`, and `ohmypi_subprocess_env(...)`.
 - Isolated runtime records: `OhMyPiRuntimeConfig` and `OhMyPiRuntimeModel`.
-- TUI host tools exposed to OMP: `ga_tui_query` and `ga_tui_propose`.
+- Compatibility TUI host tools exposed to OMP: `ga_tui_query` and `ga_tui_propose`.
+- Typed TUI host tools exposed to OMP include `agent_list`, `agent_get`, `agent_match`, `task_list`, `task_get`, `approval_list`, `artifact_list`, `capability_list`, `schedule_list`, `memory_context_get`, `proposal_submit`, `memory_candidate_submit`, and `schedule_create`.
 - Read-only host tool definition helper: `ohmypi_tui_readonly_host_tool_definitions()`.
+- Typed read-only host tool definition helper: `ohmypi_typed_readonly_host_tool_definitions()`.
 - Governed proposal host tool definition helper: `ohmypi_tui_proposal_host_tool_definition()`.
+- Typed governed host tool definition helper: `ohmypi_typed_governed_host_tool_definitions()`.
 - Combined host tool definition helper: `ohmypi_tui_host_tool_definitions()`.
 - Combined host tool callback helper: `ohmypi_tui_host_tool_handler(state=None)`.
 - Backward-compatible query callback helper: `ohmypi_tui_query_host_tool_handler(state=None)`.
@@ -482,7 +486,9 @@ configure_genericagent_provider_runtime(
 
 ### 3. Contracts
 
-- `OhMyPiRpcAgent.put_task(prompt, source="", images=None)` must return a `queue.Queue` immediately.
+- `OhMyPiRpcAgent.put_task(prompt, source="", images=None)` must return a `queue.Queue` immediately and remain as the compatibility shim for existing hot paths.
+- `OhMyPiRpcAgent.put_runtime_task(RuntimeTaskRequest)` must accept provider-neutral task requests and preserve `task_id`, `provider_id`, `agent_id`, `role`, `objective`, `source`, `context_pack_ref`, artifact refs, permissions, approval policy, output contract, and metadata in normalized runtime events.
+- Durable `runtime.task_request.v1` records must not store the full prompt; they store bounded `prompt_preview`, `prompt_chars`, and artifact/context refs. The full prompt remains in-memory for runtime dispatch only.
 - Oh My Pi RPC `message_update` frames with `assistantMessageEvent.type:"text_delta"` map to queue items shaped as `{"next": <delta>, "source": "ohmypi"}`.
 - Oh My Pi RPC terminal frames `agent_end` or `turn_end` map to one queue item shaped as `{"done": <buffer>, "source": "ohmypi"}`.
 - If no `text_delta` populated the active buffer, the done text must fall back to visible assistant text carried by `message_end`, terminal-frame `message.content`, or `assistantMessageEvent` text payloads.
@@ -491,7 +497,8 @@ configure_genericagent_provider_runtime(
 - `OhMyPiRuntimeAdapter.start_agent()` must not block on model or network startup. RPC process startup is lazy and happens on first prompt.
 - The provider module must not import `ga_tui.app`, curses, or mutable TUI `State`.
 - Oh My Pi unrestricted host tools remain disabled in provider metadata: `capabilities.host_tools:false`.
-- The only allowed host tool bridge is app-injected TUI governance querying and governed proposal routing: `capabilities.tui_readonly_host_tools:true` and `capabilities.tui_governed_proposal_tools:true`.
+- The only allowed host tool bridge is app-injected TUI governance querying, typed read-only control-plane tools, and governed proposal routing: `capabilities.tui_readonly_host_tools:true`, `capabilities.tui_governed_proposal_tools:true`, and `capabilities.tui_typed_host_tools:true`.
+- Provider metadata must advertise `capabilities.runtime_task_requests:true` and `capabilities.runtime_task_events:true` once OMP execution is wrapped by `runtime.task_request.v1` and `runtime.task_event.v1`.
 - `OhMyPiRpcAgent` may register host tools through `set_host_tools` only from definitions injected by `app.py`; provider code must not invent writable tools or import TUI `State`.
 - Embedded OMP must use a GA-TUI-owned runtime root and must not read or write system-level `~/.omp/agent/config.yml`, `~/.omp/agent/models.yml`, sessions, auth storage, or cache as its active agent directory.
 - `app.py` owns translation from GA-TUI `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, command construction, and RPC behavior.
@@ -504,6 +511,11 @@ configure_genericagent_provider_runtime(
 - `ga_tui_propose` with `proposal_type:"ga_control"` must require a current-schema `ga-control.v2` envelope or `agenttask.v2` action object, validate that it maps to known current controls, and route execution through `apply_tui_controls_from_text(..., source="agent:ohmypi_host_tool")` so existing policy gates and ledgers remain the source of truth.
 - `ga_tui_propose` with `proposal_type:"memory_candidate"` must resolve the target subagent from the bound TUI `State` and call `queue_curated_memory_candidate(...)`; direct long-term memory writes remain forbidden.
 - `ga_tui_propose` results use `schema_version:"ga-tui.proposal.v1"` and return JSON-safe `status`, `kind`, result lines/messages, ids, and artifact refs where available.
+- Typed read-only tools must call the same app-layer query functions as the compatibility query endpoint. They must not mutate sessions, tasks, approvals, long-term memory, or ledgers.
+- `memory_context_get` may generate a GA-TUI-owned context-pack artifact and return `context_pack_ref` plus a JSON-safe pack. This is the allowed way for OMP to hydrate memory/context; it is not a long-term memory write.
+- `memory_candidate_submit` must call the same governed memory-candidate path as `ga_tui_propose` with `proposal_type:"memory_candidate"`.
+- `proposal_submit` must call the same governed proposal path as `ga_tui_propose`.
+- `schedule_create` may create a TUI-owned schedule through the scheduler service; it must use the existing schedule registry and must not call OMP or any runtime directly.
 - Host tool registration must happen after OMP emits `{"type":"ready"}` and before the first prompt command is sent for that process.
 - OMP `host_tool_call` frames must be answered with `host_tool_result` using the same frame `id`.
 - Host tool result payloads must be AgentToolResult-shaped JSON, with bounded redacted text under `content:[{"type":"text","text":"..."}]`.
@@ -515,6 +527,9 @@ configure_genericagent_provider_runtime(
 - GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent`.
 - The TUI should generate a bounded `GA/TUI Memory Guidance` append prompt from GA/TUI memory sources and pass it through `--append-system-prompt`.
 - Oh My Pi completion output may emit memory candidate signals, and `ga_tui_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
+- Main OMP tasks and worker/subagent OMP tasks should include generated GA-TUI context pack artifacts when using the structured runtime request path.
+- OMP runtime events for requested tasks, host tool calls/results, completion, failure, and abort must be normalized into `runtime.task_event.v1` records and appended to GA-TUI traces when a concrete task id exists.
+- OMP runtime events for Secret-context tasks must not be appended to the normal trace store, and OMP memory candidate extraction must ignore `secret-*` sources.
 
 ### 4. Validation & Error Matrix
 
@@ -528,6 +543,9 @@ configure_genericagent_provider_runtime(
 - `abort()` called during a prompt -> provider sends RPC `abort`, emits a queue `done` item, clears `is_running`, and decrements `task_queue.unfinished_tasks`.
 - OMP `ready` with configured app-injected TUI tools -> provider sends `set_host_tools` before the prompt frame.
 - OMP `host_tool_call` for `ga_tui_query` -> provider runs the app-injected read-only callback and sends a JSON-safe `host_tool_result`.
+- OMP `host_tool_call` for a typed read-only tool such as `agent_list`, `schedule_list`, or `memory_context_get` -> app callback routes through the same control-plane query/context helpers and sends a JSON-safe `host_tool_result`.
+- OMP `host_tool_call` for `memory_candidate_submit` -> app callback routes through `queue_curated_memory_candidate(...)` and returns candidate/approval/artifact refs when queued.
+- OMP `host_tool_call` for `schedule_create` -> app callback writes a TUI-owned `scheduledtask.v1` row with default provider `ohmypi` when no explicit provider is supplied.
 - OMP `host_tool_call` for `ga_tui_propose` memory candidate -> app callback routes through `queue_curated_memory_candidate(...)` and returns a JSON-safe proposal result with candidate/approval/artifact refs when queued.
 - OMP `host_tool_call` for `ga_tui_propose` current-schema control -> app callback routes through `apply_tui_controls_from_text(...)` and returns control result lines.
 - OMP `host_tool_call` for `ga_tui_propose` with unknown proposal type, missing required fields, missing TUI state, unresolved target, invalid schema, or no known action -> callback returns `schema_version:"ga-tui.proposal.v1"` with `status:"error"`.
@@ -539,6 +557,7 @@ configure_genericagent_provider_runtime(
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
 - OMP error frame with `stopReason:"error"` and `errorMessage` -> active TUI queue receives a visible `[Oh My Pi] ...` done item.
+- `put_runtime_task(RuntimeTaskRequest)` -> provider emits at least `runtime_task_requested` and a terminal `runtime_task_completed`, `runtime_task_failed`, or `runtime_task_aborted` event carrying the original request and context-pack artifact refs.
 
 ### 5. Good/Base/Bad Cases
 
@@ -548,10 +567,11 @@ configure_genericagent_provider_runtime(
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
 - Base: `/runtimes` shows both `genericagent` and `ohmypi`, while the experiment-branch default is `ohmypi`.
 - Base: Oh My Pi can query bounded TUI governance facts through `ga_tui_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
+- Base: Oh My Pi can use typed tools such as `agent_list`, `schedule_list`, and `memory_context_get`; compatibility aliases remain available during migration.
 - Base: Oh My Pi can propose current-schema actions through `ga_tui_propose`, while GenericAgent-TUI remains the Orchestrator and policy/ledger owner.
-- Base: Oh My Pi can submit a durable memory candidate through `ga_tui_propose`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
+- Base: Oh My Pi can submit a durable memory candidate through `ga_tui_propose` or `memory_candidate_submit`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
 - Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
-- Base: Oh My Pi internal task/subagent events are provider-owned details until a future ledger-mapping feature is implemented.
+- Base: Oh My Pi task request/completion/host-tool events are normalized into trace rows when they have a GA-TUI task id.
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
 - Bad: Embedded OMP inherits `~/.omp/agent` or uses the user's system OMP `modelRoles.default`, because `/model` would no longer be the single GA-TUI settings surface.
 - Bad: Generated OMP `models.yml` writes raw API key values.
@@ -564,16 +584,19 @@ configure_genericagent_provider_runtime(
 - Tests must assert `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the GenericAgent fallback adapter.
 - Tests must assert `ohmypi_provider.py` has no reverse import into `app.py` and no curses import.
 - Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
-- Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, and secret-looking outputs are skipped.
+- Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, secret-looking, and Secret-context outputs are skipped.
 - Tests must assert a fake RPC process maps `ready`, `prompt` ack, `message_update` deltas, and `agent_end` into queue `next`/`done` items.
+- Tests must assert `put_runtime_task(RuntimeTaskRequest)` emits `runtime.task_event.v1` rows that preserve `runtime.task_request.v1`, `prompt_preview`, `prompt_chars`, `context_pack_ref`, and artifact refs without storing the raw prompt.
 - Tests must assert a fake RPC process with no `text_delta` still produces non-empty `done` text when final assistant text is carried by `message_end.message.content` or terminal-frame `message.content`.
 - Tests must assert a fake RPC process receives app-injected `set_host_tools` definitions before the prompt frame.
 - Tests must assert fake `host_tool_call` frames receive `host_tool_result` success frames.
 - Tests must assert unknown or failing host tool calls receive `host_tool_result` with `isError:true`.
 - Tests must assert `host_tool_cancel` frames are handled safely.
 - Tests must assert `ga_tui_query` remains read-only and `ga_tui_propose` supports governed `ga_control` and `memory_candidate` proposals.
+- Tests must assert typed OMP tools include read-only state queries, `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
+- Tests must assert `memory_context_get` writes a GA-TUI context-pack artifact under the harness and returns its artifact ref.
 - Tests must assert `ga_tui_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
-- Tests must assert provider metadata advertises `tui_readonly_host_tools:true` and `tui_governed_proposal_tools:true` while keeping unrestricted `host_tools:false`.
+- Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
@@ -618,6 +641,22 @@ def handle_memory_candidate(statement):
 def ohmypi_tui_propose_host_tool_handler(state, args):
     if args["proposal_type"] == "memory_candidate":
         return ohmypi_tui_propose_memory_candidate(state, args)
+```
+
+#### Wrong
+
+```python
+event_payload = runtime_request.to_record()
+event_payload["prompt"] = full_prompt
+append_trace(task_id, "runtime_task_requested", payload=event_payload)
+```
+
+#### Correct
+
+```python
+event_payload = runtime_request.to_record()
+# to_record() stores prompt_preview, prompt_chars, and artifact refs only.
+append_trace(task_id, "runtime_task_requested", payload=event_payload)
 ```
 
 ## Scenario: TUI Governed Schedule Tools
@@ -764,7 +803,9 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - A TUI-action reminder schedule must include `execution.action`; it does not require `work_order.objective` or an agent target.
 - Due jobs reserve an `idempotency_key` by appending a `starting` run row before dispatching.
 - Final run rows reuse the same `run_id` and append status such as `dispatched`, `queued`, `approval_required`, `failed`, `rejected`, `duplicate`, `skipped`, or `invalid`.
-- Agent-task final run status must come from a structured dispatch result (`status`, `message`, `task_id`, `approval_id`, `error`) rather than parsing localized UI text returned to ordinary callers.
+- Agent-task final run status must come from a structured dispatch result (`status`, `message`, `task_id`, `approval_id`, `error`, `provider_id`) rather than parsing localized UI text returned to ordinary callers.
+- Schedule run rows must record `provider_id`. If a schedule does not explicitly carry a provider id, scheduler dispatch resolves it through the injected runtime default, which is `ohmypi` on this branch.
+- Agent-task final run rows should also record `runtime_provider_id` from the structured dispatch result or the resolved schedule provider.
 - After each run row, the latest schedule record is updated append-only with `last_run_id`, `last_run_status`, `last_run_at`, and `last_idempotency_key`.
 - Due calculation for interval schedules must use the latest real dispatch attempt (`starting`, `dispatched`, `queued`, `approval_required`, `failed`, or `rejected`) as its anchor. Observation-only rows such as `duplicate`, `skipped`, and `invalid` may be displayed as the latest run, but must not move the next interval due time.
 - Disabled, deleted, cancelled, and canceled schedules are not dispatched.
@@ -790,10 +831,11 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Unsupported TUI action -> failed run row.
 - Target subagent not found -> failed run row.
 - Risky scheduled work -> governed subagent dispatch queues approval and writes a final schedule-run row with `status:"approval_required"`, `task_id`, and `approval_id`.
+- Schedule without explicit `provider_id` -> due run rows record `provider_id:"ohmypi"` and final agent-task rows record `runtime_provider_id:"ohmypi"` on this branch.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: A due `at` schedule with `routing.selected_agent` dispatches through `start_subagent_task()`, writes task ledger rows, and records `starting` then `dispatched` schedule-run rows.
+- Good: A due `at` schedule with `routing.selected_agent` dispatches through `start_subagent_task()`, writes task ledger rows, and records `starting` then `dispatched` schedule-run rows with OMP provider provenance by default.
 - Good: A due TUI beep schedule executes the local TUI action, writes `starting` then `completed` schedule-run rows, and creates no task-ledger row.
 - Base: A disabled schedule is shown in `/schedules` and may record a manual skip, but it never dispatches.
 - Base: A cron schedule is evaluated once per matching minute and idempotency prevents repeat dispatch inside that minute.
@@ -808,7 +850,8 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 
 - `scripts/check_policy_gates.py` must assert schedule registration still records `dispatch_contract:"agenttask.v2"`.
 - Tests must assert a due enabled schedule writes `scheduledtask.run.v1` rows and delegates to a fake subagent through the existing task ledger.
-- Tests must assert risky scheduled work records `approval_required` from structured dispatch fields and includes the matching task/approval ids.
+- Tests must assert a due enabled schedule without explicit provider records `provider_id:"ohmypi"` and `runtime_provider_id:"ohmypi"` in schedule-run audit rows.
+- Tests must assert risky scheduled work records `approval_required` from structured dispatch fields and includes the matching task/approval ids plus OMP provider provenance by default.
 - Tests must assert duplicate scheduler ticks do not dispatch a second task for the same idempotency key.
 - Tests must assert observation-only rows do not change interval due anchors.
 - Tests must assert the positive trigger schema and generic schema-boundary behavior without behavior-testing retired field names.

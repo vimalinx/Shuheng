@@ -29,6 +29,7 @@ class SchedulerDispatchResult:
     task_id: str = ""
     approval_id: str = ""
     error: str = ""
+    provider_id: str = ""
 
 
 @dataclass
@@ -622,7 +623,7 @@ def schedule_agenttask_control(row: dict[str, Any]) -> dict[str, Any]:
         "output_contract": execution.get("output_contract") if isinstance(execution.get("output_contract"), dict) else {},
         "task_title": str(row.get("name") or row.get("title") or row.get("schedule_id") or "Scheduled task"),
         "schedule_id": str(row.get("schedule_id") or ""),
-        "provider_id": str(row.get("provider_id") or ""),
+        "provider_id": str(row.get("provider_id") or _runtime.default_provider_id() or "ohmypi"),
     }
 
 
@@ -695,6 +696,7 @@ def dispatch_schedule_tui_action(row: dict[str, Any], started: dict[str, Any]) -
 def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any], *, source: str = "scheduler") -> dict[str, Any]:
     schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
     idempotency_key = str(info.get("idempotency_key") or "").strip()
+    provider_id = str(row.get("provider_id") or _runtime.default_provider_id() or "ohmypi").strip()
     if not schedule_id:
         return append_schedule_run({"status": "failed", "reason": "missing schedule_id", "idempotency_key": idempotency_key})
     if idempotency_key and idempotency_key in schedule_run_idempotency_keys():
@@ -710,7 +712,7 @@ def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any],
         "trigger_kind": info.get("trigger_kind", ""),
         "due_at": info.get("due_at", ""),
         "idempotency_key": idempotency_key,
-        "provider_id": row.get("provider_id", ""),
+        "provider_id": provider_id,
         "dispatch_contract": row.get("dispatch_contract") or "agenttask.v2",
         "source": source,
     })
@@ -775,6 +777,7 @@ def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any],
         "target_name": getattr(sub, "name", target),
         "result": dispatch.message,
         "task_id": dispatch.task_id,
+        "runtime_provider_id": dispatch.provider_id or provider_id,
     })
     if dispatch.approval_id:
         finished["approval_id"] = dispatch.approval_id

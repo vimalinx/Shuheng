@@ -117,7 +117,7 @@ try:
         write_ohmypi_runtime_files,
         write_ohmypi_memory_prompt,
     )
-    from .runtime import RuntimeRegistry, genericagent_provider_spec
+    from .runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec
 except Exception:
     from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
     from compat_legacy import (  # type: ignore
@@ -191,7 +191,7 @@ except Exception:
         write_ohmypi_runtime_files,
         write_ohmypi_memory_prompt,
     )
-    from runtime import RuntimeRegistry, genericagent_provider_spec  # type: ignore
+    from runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec  # type: ignore
 
 
 SCHEDULE_RUN_ATTEMPT_STATUSES = scheduler_runtime.SCHEDULE_RUN_ATTEMPT_STATUSES
@@ -673,6 +673,7 @@ class SubagentDispatchResult:
     task_id: str = ""
     approval_id: str = ""
     error: str = ""
+    provider_id: str = ""
 
 
 @dataclass
@@ -5330,6 +5331,82 @@ def build_context_pack(state: State, sub: SubAgentRuntime, objective: str, task_
     return pack, harness_artifact_uri(path)
 
 
+def build_main_runtime_context_pack(
+    state: State,
+    objective: str,
+    task_id: str,
+    parent_task_id: str = "",
+) -> tuple[dict[str, Any], str]:
+    main_worker = SubAgentRuntime(
+        agent_id="orchestrator.main",
+        name="GA-TUI Main Orchestrator",
+        home=AGENT_HARNESS_DIR,
+        role="specialist",
+        security_context="secret" if state.secret_vault.unlocked else "standard",
+        owner_session=active_ui_session_key(state),
+        persistent=False,
+        agent=state.agent,
+        status=state.status,
+        profile_text=(
+            "Primary GA-TUI Orchestrator. It owns planning, routing, policy gates, "
+            "task ledgers, artifact refs, trace, and memory-candidate governance around OMP."
+        ),
+    )
+    return build_context_pack(state, main_worker, objective, task_id, parent_task_id=parent_task_id)
+
+
+def agent_runtime_provider_id(agent: Any) -> str:
+    provider_id = str(getattr(agent, "_ga_tui_runtime_provider_id", "") or "").strip()
+    return provider_id or "unknown"
+
+
+def runtime_task_request_for_agent(
+    *,
+    agent: Any,
+    task_id: str,
+    prompt: str,
+    source: str,
+    agent_id: str,
+    role: str,
+    objective: str,
+    parent_task_id: str = "",
+    context_pack_ref: str = "",
+    permissions: Optional[dict[str, Any]] = None,
+    approval_policy: Optional[dict[str, Any]] = None,
+    output_contract: Optional[dict[str, Any]] = None,
+    artifact_refs: Optional[list[str]] = None,
+    metadata: Optional[dict[str, Any]] = None,
+) -> RuntimeTaskRequest:
+    model = ""
+    try:
+        model = str(agent.get_llm_name(model=True))
+    except Exception:
+        model = ""
+    return RuntimeTaskRequest(
+        task_id=task_id,
+        parent_task_id=parent_task_id,
+        provider_id=agent_runtime_provider_id(agent),
+        agent_id=agent_id,
+        role=role,
+        objective=objective,
+        prompt=prompt,
+        source=source,
+        context_pack_ref=context_pack_ref,
+        model=model,
+        permissions=permissions or {},
+        approval_policy=approval_policy or {},
+        output_contract=output_contract or {},
+        artifact_refs=artifact_refs or ([context_pack_ref] if context_pack_ref else []),
+        metadata=metadata or {},
+    )
+
+
+def put_agent_runtime_task(agent: Any, request: RuntimeTaskRequest) -> Any:
+    if hasattr(agent, "put_runtime_task"):
+        return agent.put_runtime_task(request)
+    return agent.put_task(request.prompt, source=request.source)
+
+
 def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     budget = pack.get("budget") or {}
     task = pack.get("task") or {}
@@ -7489,8 +7566,46 @@ def start_main_agent_task(
     state.messages.append(Message("assistant", "", done=False))
     state.follow_bottom = True
     mark_messages_changed(state)
+    runtime_prompt = agent_text
+    runtime_task_id = f"main-{task_id}"
+    runtime_context_ref = ""
+    if hasattr(state.agent, "put_runtime_task") and not secret_task:
+        try:
+            context_pack, runtime_context_ref = build_main_runtime_context_pack(
+                state,
+                policy_relevant_subagent_prompt_text(text),
+                runtime_task_id,
+            )
+            runtime_prompt = f"{format_context_pack_for_prompt(context_pack)}\n\n[Task]\n{agent_text}\n[/Task]"
+        except Exception as exc:
+            append_trace(
+                runtime_task_id,
+                "runtime_context_pack_failed",
+                agent_id="orchestrator.main",
+                status="failed",
+                payload={"error": f"{type(exc).__name__}: {exc}", "runtime_provider_id": agent_runtime_provider_id(state.agent)},
+            )
     try:
-        dq = state.agent.put_task(agent_text, source=source)
+        if hasattr(state.agent, "put_runtime_task") and not secret_task:
+            request = runtime_task_request_for_agent(
+                agent=state.agent,
+                task_id=runtime_task_id,
+                prompt=runtime_prompt,
+                source=source,
+                agent_id="orchestrator.main",
+                role="orchestrator",
+                objective=policy_relevant_subagent_prompt_text(text),
+                context_pack_ref=runtime_context_ref,
+                permissions=permissions_for_role("specialist", security_context="secret" if secret_task else "standard"),
+                approval_policy=approval_metadata(),
+                output_contract={"required_sections": role_output_contract("specialist")},
+                artifact_refs=[runtime_context_ref] if runtime_context_ref else [],
+                metadata={"runtime_lane": "main", "ui_task_id": task_id, "security_context": "standard"},
+            )
+            dq = put_agent_runtime_task(state.agent, request)
+        else:
+            task_source = f"secret-main:{source}" if secret_task else source
+            dq = state.agent.put_task(agent_text, source=task_source)
     except Exception as exc:
         state.status = "error"
         state.active_task_id = None
@@ -10979,6 +11094,39 @@ def append_ohmypi_memory_candidate_signal(signal: dict[str, Any]) -> dict[str, A
     return row
 
 
+def append_ohmypi_runtime_event(event: RuntimeTaskEvent | dict[str, Any]) -> dict[str, Any] | None:
+    if hasattr(event, "to_record"):
+        row = event.to_record()  # type: ignore[assignment]
+    elif isinstance(event, dict):
+        row = dict(event)
+    else:
+        return None
+    event_type = str(row.get("event_type") or "").strip()
+    if not event_type or event_type == "runtime_stream_delta":
+        return None
+    task_id = str(row.get("task_id") or "").strip()
+    if not task_id:
+        return None
+    request = row.get("request") if isinstance(row.get("request"), dict) else {}
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    if str(metadata.get("security_context") or "").lower() == "secret":
+        return None
+    status = str(row.get("status") or "")
+    provider_id = str(row.get("provider_id") or "ohmypi")
+    agent_id = str(row.get("agent_id") or "runtime:ohmypi")
+    payload = tui_query_json_safe(row)
+    return append_trace(
+        task_id,
+        event_type,
+        agent_id=agent_id,
+        status=status,
+        payload={
+            "runtime_provider_id": provider_id,
+            "runtime_event": payload,
+        },
+    )
+
+
 OHMYPI_TUI_QUERY_TOOL_NAME = "ga_tui_query"
 OHMYPI_TUI_PROPOSE_TOOL_NAME = "ga_tui_propose"
 OHMYPI_TUI_QUERY_ENDPOINTS = (
@@ -10992,8 +11140,27 @@ OHMYPI_TUI_QUERY_ENDPOINTS = (
     "task_get",
     "approval_list",
     "artifact_list",
+    "schedule_list",
+    "memory_context_get",
 )
 OHMYPI_TUI_PROPOSAL_TYPES = ("ga_control", "memory_candidate")
+OHMYPI_TYPED_READONLY_TOOL_NAMES = (
+    "agent_list",
+    "agent_get",
+    "agent_match",
+    "task_list",
+    "task_get",
+    "approval_list",
+    "artifact_list",
+    "capability_list",
+    "schedule_list",
+    "memory_context_get",
+)
+OHMYPI_TYPED_GOVERNED_TOOL_NAMES = (
+    "proposal_submit",
+    "memory_candidate_submit",
+    "schedule_create",
+)
 
 
 def ohmypi_tui_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]:
@@ -11024,6 +11191,41 @@ def ohmypi_tui_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]:
                 "required": ["endpoint"],
             },
         )
+    ]
+
+
+def ohmypi_typed_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]:
+    common_params = {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "target": {"type": "string", "description": "Agent id or unique agent name when the tool needs a target."},
+            "task_id": {"type": "string", "description": "Task id when the tool needs a task."},
+            "objective": {"type": "string", "description": "Objective for matching agents or generating memory context."},
+            "limit": {"type": "integer", "description": "Maximum number of records to return."},
+            "status": {"type": "string", "description": "Optional status filter."},
+        },
+    }
+    descriptions = {
+        "agent_list": "Read bounded GA-TUI worker records.",
+        "agent_get": "Read one GA-TUI worker record by id or unique name.",
+        "agent_match": "Find suitable GA-TUI workers for an objective.",
+        "task_list": "Read task ledger rows.",
+        "task_get": "Read one task plus related approvals, artifacts, and traces.",
+        "approval_list": "Read approval metadata without granting approval.",
+        "artifact_list": "Read artifact references and metadata.",
+        "capability_list": "Read roles, tools, runtime providers, and gateway capabilities.",
+        "schedule_list": "Read scheduled task registry and run audit metadata.",
+        "memory_context_get": "Generate and return a GA-TUI memory/context pack artifact reference for OMP execution.",
+    }
+    return [
+        RpcHostToolDefinition(
+            name=name,
+            label=name.replace("_", "."),
+            description=descriptions[name],
+            parameters=common_params,
+        )
+        for name in OHMYPI_TYPED_READONLY_TOOL_NAMES
     ]
 
 
@@ -11076,10 +11278,57 @@ def ohmypi_tui_proposal_host_tool_definition() -> RpcHostToolDefinition:
     )
 
 
+def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]:
+    return [
+        RpcHostToolDefinition(
+            name="proposal_submit",
+            label="proposal.submit",
+            description="Submit a governed GA-TUI proposal through the same policy path as ga_tui_propose.",
+            parameters=ohmypi_tui_proposal_host_tool_definition().parameters,
+        ),
+        RpcHostToolDefinition(
+            name="memory_candidate_submit",
+            label="memory.candidate.submit",
+            description="Submit a memory candidate to the GA-TUI human approval queue; never writes long-term memory directly.",
+            parameters={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "target": {"type": "string", "description": "Target subagent id or unique name."},
+                    "statement": {"type": "string", "description": "Durable, verified memory candidate statement."},
+                    "evidence_ref": {"type": "string", "description": "Artifact/runtime evidence reference."},
+                    "task_id": {"type": "string", "description": "Related task id."},
+                },
+                "required": ["target", "statement"],
+            },
+        ),
+        RpcHostToolDefinition(
+            name="schedule_create",
+            label="schedule.create",
+            description="Create a GA-TUI scheduled task record through the control-plane scheduler service.",
+            parameters={
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {
+                    "schedule_id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "cron": {"type": "string"},
+                    "interval": {"type": "string"},
+                    "at": {"type": "string"},
+                    "execution": {"type": "object", "additionalProperties": True},
+                },
+                "required": ["name"],
+            },
+        ),
+    ]
+
+
 def ohmypi_tui_host_tool_definitions() -> list[RpcHostToolDefinition]:
     return [
         *ohmypi_tui_readonly_host_tool_definitions(),
+        *ohmypi_typed_readonly_host_tool_definitions(),
         ohmypi_tui_proposal_host_tool_definition(),
+        *ohmypi_typed_governed_host_tool_definitions(),
     ]
 
 
@@ -11088,6 +11337,26 @@ def ohmypi_runtime_registry_snapshot() -> dict[str, Any]:
     data["updated_at"] = now_iso()
     data["registry_path"] = AGENT_RUNTIME_REGISTRY_PATH
     return data
+
+
+def ohmypi_tui_memory_context_get(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_query_error("TUI state is not bound; memory_context_get requires an active TUI state.")
+    target = str(args.get("target") or args.get("agent_id") or "").strip()
+    objective = clean_text(str(args.get("objective") or args.get("prompt") or "OMP runtime context request")).strip()
+    task_id = str(args.get("task_id") or "").strip() or short_uid("ctx-task")
+    if target:
+        sub = resolve_subagent(state, target)
+        if sub is None:
+            return tui_query_error("Target subagent was not found or was ambiguous.", target=target)
+        pack, context_ref = build_context_pack(state, sub, objective, task_id, parent_task_id=str(args.get("parent_task_id") or ""))
+    else:
+        pack, context_ref = build_main_runtime_context_pack(state, objective, task_id, parent_task_id=str(args.get("parent_task_id") or ""))
+    return tui_query_ok(
+        "memory.context",
+        context_pack_ref=context_ref,
+        context_pack=tui_query_json_safe(pack),
+    )
 
 
 def ohmypi_proposal_error(message: str, **extra: Any) -> dict[str, Any]:
@@ -11219,8 +11488,59 @@ def ohmypi_tui_propose_host_tool_handler(state: Optional[State], args: dict[str,
         )
 
 
+def ohmypi_tui_query_endpoint(state: Optional[State], endpoint: str, endpoint_args: dict[str, Any]) -> dict[str, Any]:
+    if endpoint == "runtime_registry":
+        return tui_query_ok(
+            "runtime.registry",
+            runtime_registry=tui_query_json_safe(ohmypi_runtime_registry_snapshot()),
+        )
+    if endpoint == "model_orchestration":
+        return tui_query_ok(
+            "model.orchestration",
+            model_orchestration=tui_query_json_safe(model_orchestration_registry(state)),
+        )
+    if endpoint == "capability_registry" or endpoint == "capability_list":
+        return tui_query_ok(
+            "capability.registry",
+            capabilities=tui_query_json_safe(gateway_capability_registry(state, write_runtime_artifacts=False)),
+        )
+    if endpoint == "agent_list":
+        return tui_tool_agent_list(state, endpoint_args)
+    if endpoint == "agent_get":
+        return tui_tool_agent_get(state, endpoint_args)
+    if endpoint == "agent_match":
+        return tui_tool_agent_match(state, endpoint_args)
+    if endpoint == "task_list":
+        return tui_tool_task_list(state, endpoint_args)
+    if endpoint == "task_get":
+        return tui_tool_task_get(state, endpoint_args)
+    if endpoint == "approval_list":
+        return tui_tool_approval_list(state, endpoint_args)
+    if endpoint == "artifact_list":
+        return tui_tool_artifact_list(state, endpoint_args)
+    if endpoint == "schedule_list":
+        return tui_tool_schedule_list(state, endpoint_args)
+    if endpoint == "memory_context_get":
+        return ohmypi_tui_memory_context_get(state, endpoint_args)
+    return tui_query_error(
+        "Unsupported endpoint.",
+        endpoint=endpoint,
+        supported_endpoints=list(OHMYPI_TUI_QUERY_ENDPOINTS),
+    )
+
+
 def ohmypi_tui_host_tool_handler(state: Optional[State] = None):
     def _handler(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if tool_name in OHMYPI_TYPED_READONLY_TOOL_NAMES:
+            return ohmypi_tui_query_endpoint(state, tool_name, args if isinstance(args, dict) else {})
+        if tool_name == "proposal_submit":
+            return ohmypi_tui_propose_host_tool_handler(state, args if isinstance(args, dict) else {})
+        if tool_name == "memory_candidate_submit":
+            payload = dict(args) if isinstance(args, dict) else {}
+            payload["proposal_type"] = "memory_candidate"
+            return ohmypi_tui_propose_memory_candidate(state, payload)
+        if tool_name == "schedule_create":
+            return tui_tool_schedule_create(state, args if isinstance(args, dict) else {})
         if tool_name == OHMYPI_TUI_PROPOSE_TOOL_NAME:
             return ohmypi_tui_propose_host_tool_handler(state, args)
         if tool_name != OHMYPI_TUI_QUERY_TOOL_NAME:
@@ -11235,40 +11555,7 @@ def ohmypi_tui_host_tool_handler(state: Optional[State] = None):
             endpoint_args = raw_endpoint_args
         else:
             return tui_query_error("args must be an object.", endpoint=endpoint)
-        if endpoint == "runtime_registry":
-            return tui_query_ok(
-                "runtime.registry",
-                runtime_registry=tui_query_json_safe(ohmypi_runtime_registry_snapshot()),
-            )
-        if endpoint == "model_orchestration":
-            return tui_query_ok(
-                "model.orchestration",
-                model_orchestration=tui_query_json_safe(model_orchestration_registry(state)),
-            )
-        if endpoint == "capability_registry":
-            return tui_query_ok(
-                "capability.registry",
-                capabilities=tui_query_json_safe(gateway_capability_registry(state, write_runtime_artifacts=False)),
-            )
-        if endpoint == "agent_list":
-            return tui_tool_agent_list(state, endpoint_args)
-        if endpoint == "agent_get":
-            return tui_tool_agent_get(state, endpoint_args)
-        if endpoint == "agent_match":
-            return tui_tool_agent_match(state, endpoint_args)
-        if endpoint == "task_list":
-            return tui_tool_task_list(state, endpoint_args)
-        if endpoint == "task_get":
-            return tui_tool_task_get(state, endpoint_args)
-        if endpoint == "approval_list":
-            return tui_tool_approval_list(state, endpoint_args)
-        if endpoint == "artifact_list":
-            return tui_tool_artifact_list(state, endpoint_args)
-        return tui_query_error(
-            "Unsupported endpoint.",
-            endpoint=endpoint,
-            supported_endpoints=list(OHMYPI_TUI_QUERY_ENDPOINTS),
-        )
+        return ohmypi_tui_query_endpoint(state, endpoint, endpoint_args)
 
     return _handler
 
@@ -11428,6 +11715,7 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         memory_candidate_sink=append_ohmypi_memory_candidate_signal,
         host_tool_definitions=ohmypi_tui_host_tool_definitions(),
         host_tool_handler=ohmypi_tui_host_tool_handler(None),
+        runtime_event_sink=append_ohmypi_runtime_event,
     ))
     return registry
 
@@ -11470,6 +11758,10 @@ def browse_input_history(state: State, direction: int) -> bool:
 def new_agent() -> Any:
     adapter = agent_runtime_registry().default()
     agent = adapter.create_agent()
+    try:
+        setattr(agent, "_ga_tui_runtime_provider_id", adapter.provider_id)
+    except Exception:
+        pass
     agent_no = next(_AGENT_COUNTER)
     thread_name = f"ga-tui-agent-{agent_no}"
     adapter.prepare_agent(agent)
@@ -19523,19 +19815,19 @@ def queue_subagent_task(
     return f"{sub.name} 正在运行，已排队 1 个任务（队列 {len(sub.task_queue)}）。"
 
 
-def dispatch_result_from_task_row(row: dict[str, Any], message: str) -> SubagentDispatchResult:
+def dispatch_result_from_task_row(row: dict[str, Any], message: str, *, provider_id: str = "") -> SubagentDispatchResult:
     status = str(row.get("status") or "").strip().lower()
     approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
     approval_id = str(approval.get("approval_id") or "")
     task_id = str(row.get("task_id") or "")
     if status == "working":
-        return SubagentDispatchResult(status="dispatched", message=message, task_id=task_id, approval_id=approval_id)
+        return SubagentDispatchResult(status="dispatched", message=message, task_id=task_id, approval_id=approval_id, provider_id=provider_id)
     if status in {"approval_required", "failed", "rejected"}:
         error = str(row.get("error") or "") if status in {"failed", "rejected"} else ""
-        return SubagentDispatchResult(status=status, message=message, task_id=task_id, approval_id=approval_id, error=error)
+        return SubagentDispatchResult(status=status, message=message, task_id=task_id, approval_id=approval_id, error=error, provider_id=provider_id)
     if status:
-        return SubagentDispatchResult(status=status, message=message, task_id=task_id, approval_id=approval_id)
-    return SubagentDispatchResult(status="failed", message=message, task_id=task_id, approval_id=approval_id, error=message)
+        return SubagentDispatchResult(status=status, message=message, task_id=task_id, approval_id=approval_id, provider_id=provider_id)
+    return SubagentDispatchResult(status="failed", message=message, task_id=task_id, approval_id=approval_id, error=message, provider_id=provider_id)
 
 
 def start_subagent_task_structured(
@@ -19550,6 +19842,7 @@ def start_subagent_task_structured(
     before_tasks = latest_task_records()
     before_queue_len = len(sub.task_queue)
     before_active_task_id = str(getattr(sub, "active_bus_task_id", "") or "")
+    before_provider_id = agent_runtime_provider_id(sub.agent) if sub.agent is not None else _scheduler_default_provider_id()
     message = start_subagent_task(
         state,
         sub,
@@ -19561,14 +19854,17 @@ def start_subagent_task_structured(
     )
     after_tasks = latest_task_records()
     new_task_ids = [task_id for task_id in after_tasks if task_id not in before_tasks]
+    provider_id = agent_runtime_provider_id(sub.agent) if sub.agent is not None else before_provider_id
+    if provider_id == "unknown":
+        provider_id = before_provider_id
     if new_task_ids:
-        return dispatch_result_from_task_row(after_tasks[new_task_ids[-1]], message)
+        return dispatch_result_from_task_row(after_tasks[new_task_ids[-1]], message, provider_id=provider_id)
     active_task_id = str(getattr(sub, "active_bus_task_id", "") or "")
     if active_task_id and active_task_id != before_active_task_id:
-        return SubagentDispatchResult(status="dispatched", message=message, task_id=active_task_id)
+        return SubagentDispatchResult(status="dispatched", message=message, task_id=active_task_id, provider_id=provider_id)
     if len(sub.task_queue) > before_queue_len:
-        return SubagentDispatchResult(status="queued", message=message)
-    return SubagentDispatchResult(status="failed", message=message, error=message)
+        return SubagentDispatchResult(status="queued", message=message, provider_id=provider_id)
+    return SubagentDispatchResult(status="failed", message=message, error=message, provider_id=provider_id)
 
 
 def _scheduler_default_provider_id() -> str:
@@ -19601,6 +19897,7 @@ def _scheduler_dispatch_subagent_task(
         task_id=dispatch.task_id,
         approval_id=dispatch.approval_id,
         error=dispatch.error,
+        provider_id=dispatch.provider_id or str(row.get("provider_id") or _scheduler_default_provider_id()),
     )
 
 
@@ -19798,13 +20095,42 @@ def start_secret_subagent_task(
         bus_task_id,
         intent="delegate",
         status="working",
-        payload={"objective": task_objective, "context_pack_ref": context_ref, "role": sub.role},
+        payload={
+            "objective": task_objective,
+            "context_pack_ref": context_ref,
+            "role": sub.role,
+            "runtime_provider_id": agent_runtime_provider_id(agent),
+        },
         artifact_refs=[context_ref],
     )
-    write_secret_subagent_trace(state, sub, bus_task_id, "delegated", "working", {"context_pack": context_ref, "source": source})
+    write_secret_subagent_trace(
+        state,
+        sub,
+        bus_task_id,
+        "delegated",
+        "working",
+        {"context_pack": context_ref, "source": source, "runtime_provider_id": agent_runtime_provider_id(agent)},
+    )
     agent_prompt = f"{format_context_pack_for_prompt(context_pack)}\n\n[Task]\n{prompt}\n[/Task]"
     try:
-        dq = agent.put_task(agent_prompt, source=f"secret-subagent:{sub.agent_id}")
+        runtime_source = f"secret-subagent:{sub.agent_id}"
+        request = runtime_task_request_for_agent(
+            agent=agent,
+            task_id=bus_task_id,
+            parent_task_id=parent_task_id,
+            prompt=agent_prompt,
+            source=runtime_source,
+            agent_id=sub.agent_id,
+            role=sub.role,
+            objective=task_objective,
+            context_pack_ref=context_ref,
+            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            approval_policy=approval_metadata(),
+            output_contract=task_contract_for_role(sub.role, task_objective).get("output_contract") or {},
+            artifact_refs=[context_ref],
+            metadata={"runtime_lane": "secret_subagent", "source": source, "security_context": sub.security_context},
+        )
+        dq = put_agent_runtime_task(agent, request)
     except Exception as exc:
         sub.status = "error"
         sub.active_task_id = None
@@ -19843,9 +20169,29 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     save_subagent_chat_session(state, sub, source=source)
     mark_subagent_messages_changed(state, sub)
     append_subagent_event(sub, source, prompt, state=state)
-    agent_prompt, _context_ref, _chat_context_id = build_subagent_direct_chat_prompt(state, sub, prompt)
+    agent_prompt, context_ref, chat_context_id = build_subagent_direct_chat_prompt(state, sub, prompt)
     try:
-        dq = agent.put_task(agent_prompt, source=f"subagent-chat:{sub.agent_id}")
+        runtime_source = f"subagent-chat:{sub.agent_id}"
+        request = runtime_task_request_for_agent(
+            agent=agent,
+            task_id=f"chat:{chat_context_id}",
+            prompt=agent_prompt,
+            source=runtime_source,
+            agent_id=sub.agent_id,
+            role=sub.role,
+            objective=prompt,
+            context_pack_ref=context_ref,
+            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            approval_policy=approval_metadata(),
+            output_contract=task_contract_for_role(sub.role, prompt).get("output_contract") or {},
+            artifact_refs=[context_ref] if context_ref else [],
+            metadata={
+                "runtime_lane": "subagent_chat",
+                "chat_context_id": chat_context_id,
+                "security_context": sub.security_context,
+            },
+        )
+        dq = put_agent_runtime_task(agent, request)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         sub.status = "error"
@@ -20051,6 +20397,7 @@ def start_subagent_task(
         **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
     )
     update_plan_step_from_child(parent_task_id)
+    runtime_provider_id = agent_runtime_provider_id(agent)
     append_agent_mail(
         from_agent="orchestrator.main",
         to_type="agent",
@@ -20062,6 +20409,7 @@ def start_subagent_task(
             "objective": task_objective,
             "context_pack_ref": context_ref,
             "role": sub.role,
+            "runtime_provider_id": runtime_provider_id,
             "output_contract": {"required_sections": role_output_contract(sub.role)},
             "permissions": permissions_for_role(sub.role, security_context=sub.security_context),
         },
@@ -20086,10 +20434,38 @@ def start_subagent_task(
         summary=truncate_cells(task_objective, 240),
         extra={"context_pack_ref": context_ref},
     )
-    append_trace(bus_task_id, "delegated", agent_id=sub.agent_id, status="working", payload={"context_pack": context_ref, "role": sub.role, "checkpoint_id": checkpoint.get("checkpoint_id", "")})
+    append_trace(
+        bus_task_id,
+        "delegated",
+        agent_id=sub.agent_id,
+        status="working",
+        payload={
+            "context_pack": context_ref,
+            "role": sub.role,
+            "checkpoint_id": checkpoint.get("checkpoint_id", ""),
+            "runtime_provider_id": runtime_provider_id,
+        },
+    )
     agent_prompt = f"{format_context_pack_for_prompt(context_pack)}\n\n[Task]\n{prompt}\n[/Task]"
     try:
-        dq = agent.put_task(agent_prompt, source=f"subagent:{sub.agent_id}")
+        runtime_source = f"subagent:{sub.agent_id}"
+        request = runtime_task_request_for_agent(
+            agent=agent,
+            task_id=bus_task_id,
+            parent_task_id=parent_task_id,
+            prompt=agent_prompt,
+            source=runtime_source,
+            agent_id=sub.agent_id,
+            role=sub.role,
+            objective=task_objective,
+            context_pack_ref=context_ref,
+            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            approval_policy=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
+            output_contract=task_contract_for_role(sub.role, task_objective).get("output_contract") or {},
+            artifact_refs=[context_ref],
+            metadata={"runtime_lane": "subagent", "source": source, "security_context": sub.security_context},
+        )
+        dq = put_agent_runtime_task(agent, request)
     except Exception as exc:
         sub.status = "error"
         sub.active_task_id = None

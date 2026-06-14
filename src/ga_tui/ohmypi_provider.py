@@ -20,15 +20,16 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 try:
-    from .runtime import RuntimeAdapter, RuntimeProviderSpec
+    from .runtime import RuntimeAdapter, RuntimeProviderSpec, RuntimeTaskEvent, RuntimeTaskRequest
 except Exception:
-    from runtime import RuntimeAdapter, RuntimeProviderSpec  # type: ignore
+    from runtime import RuntimeAdapter, RuntimeProviderSpec, RuntimeTaskEvent, RuntimeTaskRequest  # type: ignore
 
 
 ProcessFactory = Callable[..., Any]
 ThreadFactory = Callable[..., Any]
 MemoryCandidateSink = Callable[[dict[str, Any]], None]
 HostToolHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
+RuntimeEventSink = Callable[[RuntimeTaskEvent], None]
 
 GA_TUI_MEMORY_PROMPT_FILENAME = "ohmypi-ga-tui-memory.md"
 GA_TUI_MEMORY_PROMPT_HEADER = "GA/TUI Memory Guidance"
@@ -91,6 +92,7 @@ class _ActivePrompt:
     request_id: str
     display_queue: queue.Queue
     source: str = ""
+    runtime_request: RuntimeTaskRequest | None = None
     buffer: str = ""
     final_text: str = ""
     finished: bool = False
@@ -261,6 +263,7 @@ class OhMyPiRpcAgent:
         memory_candidate_sink: MemoryCandidateSink | None = None,
         host_tool_definitions: list[RpcHostToolDefinition | dict[str, Any]] | None = None,
         host_tool_handler: HostToolHandler | None = None,
+        runtime_event_sink: RuntimeEventSink | None = None,
         configured_models: list[OhMyPiRuntimeModel] | None = None,
         startup_timeout: float = 10.0,
         stop_timeout: float = 3.0,
@@ -277,6 +280,7 @@ class OhMyPiRpcAgent:
             if item.get("name")
         ]
         self.host_tool_handler = host_tool_handler
+        self.runtime_event_sink = runtime_event_sink
         self.startup_timeout = startup_timeout
         self.stop_timeout = stop_timeout
         self.task_queue = _TaskCounter()
@@ -368,17 +372,41 @@ class OhMyPiRpcAgent:
             return str(getattr(backend, "model", "") or "unknown")
         return f"OhMyPi/{getattr(backend, 'name', 'Oh My Pi')}"
 
+    def put_runtime_task(self, request: RuntimeTaskRequest) -> queue.Queue:
+        return self._put_prompt(request.prompt, source=request.source, runtime_request=request)
+
     def put_task(self, prompt: str, source: str = "", images: Any = None) -> queue.Queue:
         del images
+        return self._put_prompt(prompt, source=source, runtime_request=None)
+
+    def _put_prompt(
+        self,
+        prompt: str,
+        *,
+        source: str = "",
+        runtime_request: RuntimeTaskRequest | None = None,
+    ) -> queue.Queue:
         display_queue: queue.Queue = queue.Queue()
         with self._active_lock:
             if self._active is not None and not self._active.finished:
                 display_queue.put({"done": "[Oh My Pi] 当前 RPC 会话仍在运行，不能并发启动新任务。", "source": source})
                 return display_queue
             request_id = self._next_request_id("prompt")
-            self._active = _ActivePrompt(request_id=request_id, display_queue=display_queue, source=source)
+            self._active = _ActivePrompt(
+                request_id=request_id,
+                display_queue=display_queue,
+                source=source,
+                runtime_request=runtime_request,
+            )
             self.is_running = True
             self.task_queue.start()
+        self._emit_runtime_event(
+            "runtime_task_requested",
+            status="starting",
+            request=runtime_request,
+            source=source,
+            payload={"request_id": request_id},
+        )
 
         def _runner() -> None:
             try:
@@ -637,6 +665,7 @@ class OhMyPiRpcAgent:
         done_text = ""
         signal_source = source
         request_id = ""
+        runtime_request: RuntimeTaskRequest | None = None
         with self._active_lock:
             active = self._active
             if active is None or active.finished:
@@ -651,10 +680,30 @@ class OhMyPiRpcAgent:
                 done_text = fallback_text or active.final_text
             signal_source = active.source or source
             request_id = active.request_id
+            runtime_request = active.runtime_request
             active.display_queue.put({"done": done_text, "source": source})
             self._active = None
             self.is_running = False
             self.task_queue.done()
+        event_type = "runtime_task_completed"
+        status = "completed"
+        error = ""
+        if done_text.startswith("[Oh My Pi] 已请求中止"):
+            event_type = "runtime_task_aborted"
+            status = "aborted"
+        elif done_text.startswith("[Oh My Pi]") and ("失败" in done_text or "error" in done_text.lower() or "退出" in done_text):
+            event_type = "runtime_task_failed"
+            status = "failed"
+            error = done_text
+        self._emit_runtime_event(
+            event_type,
+            status=status,
+            request=runtime_request,
+            source=signal_source,
+            message=done_text[:1200],
+            error=error,
+            payload={"request_id": request_id},
+        )
         self._emit_memory_candidate_signal(done_text, source=signal_source, request_id=request_id)
 
     def _emit_memory_candidate_signal(self, text: str, *, source: str, request_id: str) -> None:
@@ -667,6 +716,50 @@ class OhMyPiRpcAgent:
             self.memory_candidate_sink(signal)
         except Exception as exc:
             self._remember_stderr(f"memory candidate sink failed: {type(exc).__name__}: {exc}")
+
+    def _active_runtime_request(self) -> RuntimeTaskRequest | None:
+        with self._active_lock:
+            active = self._active
+            if active is None or active.finished:
+                return None
+            return active.runtime_request
+
+    def _emit_runtime_event(
+        self,
+        event_type: str,
+        *,
+        status: str = "",
+        request: RuntimeTaskRequest | None = None,
+        source: str = "",
+        message: str = "",
+        delta: str = "",
+        error: str = "",
+        artifact_refs: list[str] | None = None,
+        tool_call_refs: list[str] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if self.runtime_event_sink is None:
+            return
+        runtime_request = request or self._active_runtime_request()
+        try:
+            event = RuntimeTaskEvent(
+                task_id=runtime_request.task_id if runtime_request is not None else "",
+                provider_id=runtime_request.provider_id if runtime_request is not None else "ohmypi",
+                event_type=event_type,
+                status=status,
+                agent_id=runtime_request.agent_id if runtime_request is not None else "",
+                source=source or (runtime_request.source if runtime_request is not None else "ohmypi"),
+                message=message,
+                delta=delta,
+                error=error,
+                artifact_refs=list(artifact_refs or (runtime_request.artifact_refs if runtime_request is not None else [])),
+                tool_call_refs=list(tool_call_refs or []),
+                request=runtime_request,
+                payload=dict(payload or {}),
+            )
+            self.runtime_event_sink(event)
+        except Exception as exc:
+            self._remember_stderr(f"runtime event sink failed: {type(exc).__name__}: {exc}")
 
     def _answer_extension_ui(self, frame: dict[str, Any]) -> None:
         request_id = frame.get("id")
@@ -694,6 +787,7 @@ class OhMyPiRpcAgent:
     def _handle_host_tool_call(self, frame: dict[str, Any]) -> None:
         request_id = str(frame.get("id") or "")
         tool_name = str(frame.get("toolName") or "")
+        tool_call_id = str(frame.get("toolCallId") or request_id)
         args = frame.get("arguments")
         arguments = args if isinstance(args, dict) else {}
         if not request_id:
@@ -724,8 +818,21 @@ class OhMyPiRpcAgent:
             )
             return
         try:
+            self._emit_runtime_event(
+                "runtime_host_tool_call",
+                status="started",
+                tool_call_refs=[tool_call_id],
+                payload={"request_id": request_id, "tool_name": tool_name, "arguments": arguments},
+            )
             result = self.host_tool_handler(tool_name, dict(arguments))
         except Exception as exc:
+            self._emit_runtime_event(
+                "runtime_host_tool_result",
+                status="failed",
+                error=f"{type(exc).__name__}: {exc}",
+                tool_call_refs=[tool_call_id],
+                payload={"request_id": request_id, "tool_name": tool_name},
+            )
             self._send_host_tool_result(
                 request_id,
                 {
@@ -737,6 +844,12 @@ class OhMyPiRpcAgent:
                 is_error=True,
             )
             return
+        self._emit_runtime_event(
+            "runtime_host_tool_result",
+            status="completed",
+            tool_call_refs=[tool_call_id],
+            payload={"request_id": request_id, "tool_name": tool_name},
+        )
         self._send_host_tool_result(request_id, result)
 
     def _handle_host_tool_cancel(self, frame: dict[str, Any]) -> None:
@@ -802,6 +915,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         memory_candidate_sink: MemoryCandidateSink | None = None,
         host_tool_definitions: list[RpcHostToolDefinition | dict[str, Any]] | None = None,
         host_tool_handler: HostToolHandler | None = None,
+        runtime_event_sink: RuntimeEventSink | None = None,
         env: dict[str, str] | None = None,
         configured_models: list[OhMyPiRuntimeModel] | None = None,
     ) -> None:
@@ -814,6 +928,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         self.memory_candidate_sink = memory_candidate_sink
         self.host_tool_definitions = list(host_tool_definitions or [])
         self.host_tool_handler = host_tool_handler
+        self.runtime_event_sink = runtime_event_sink
         self.configured_models = list(configured_models or [])
 
     def create_agent(self) -> OhMyPiRpcAgent:
@@ -826,6 +941,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
             memory_candidate_sink=self.memory_candidate_sink,
             host_tool_definitions=self.host_tool_definitions,
             host_tool_handler=self.host_tool_handler,
+            runtime_event_sink=self.runtime_event_sink,
             configured_models=self.configured_models,
         )
 
@@ -941,6 +1057,8 @@ def write_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
 
 
 def ohmypi_memory_candidate_signal(text: str, *, source: str = "", request_id: str = "") -> dict[str, Any] | None:
+    if str(source or "").startswith("secret-"):
+        return None
     statement = _redact_memory_text(str(text or "")).strip()
     if not statement or len(statement) < 80:
         return None
@@ -986,6 +1104,9 @@ def ohmypi_provider_spec(
             "host_tools": False,
             "tui_readonly_host_tools": True,
             "tui_governed_proposal_tools": True,
+            "tui_typed_host_tools": True,
+            "runtime_task_requests": True,
+            "runtime_task_events": True,
             "artifact_refs": True,
             "memory_candidates": True,
             "memory_candidate_signals": True,
@@ -1008,7 +1129,7 @@ def ohmypi_provider_spec(
         },
         scheduler={
             "owner": "ga-tui.control_plane",
-            "status": "not_enabled",
+            "status": "registry_ready",
             "schedules_path": schedules_path,
             "dispatch_contract": "agenttask.v2",
             "runtime_provider_id": "ohmypi",
@@ -1033,8 +1154,9 @@ def ohmypi_provider_spec(
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
             "Embedded Oh My Pi uses a GA-TUI-owned PI_CODING_AGENT_DIR instead of ~/.omp/agent.",
             "GenericAgent/TUI memory is injected through --append-system-prompt.",
+            "GA-TUI emits provider-neutral runtime.task_request.v1 and runtime.task_event.v1 records around OMP execution.",
             "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
-            "Only app-injected TUI query and governed proposal host tools are enabled; unrestricted host tools, host URI schemes, and direct TUI approval mapping stay disabled.",
+            "Only app-injected TUI query, typed read-only, and governed proposal host tools are enabled; unrestricted host tools, host URI schemes, and direct TUI approval mapping stay disabled.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",
             f"command={' '.join(command)}",
@@ -1047,6 +1169,7 @@ __all__ = [
     "OhMyPiRuntimeAdapter",
     "OhMyPiRuntimeConfig",
     "OhMyPiRuntimeModel",
+    "RuntimeEventSink",
     "build_ohmypi_memory_prompt",
     "ohmypi_config_path",
     "ohmypi_isolated_agent_dir",

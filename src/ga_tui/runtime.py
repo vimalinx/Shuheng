@@ -11,6 +11,87 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class RuntimeTaskRequest:
+    """Provider-neutral task envelope used above runtime-specific transports."""
+
+    task_id: str
+    provider_id: str
+    prompt: str
+    source: str = ""
+    parent_task_id: str = ""
+    agent_id: str = ""
+    role: str = ""
+    objective: str = ""
+    context_pack_ref: str = ""
+    model: str = ""
+    permissions: dict[str, Any] = field(default_factory=dict)
+    approval_policy: dict[str, Any] = field(default_factory=dict)
+    output_contract: dict[str, Any] = field(default_factory=dict)
+    artifact_refs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_record(self) -> dict[str, Any]:
+        prompt = str(self.prompt or "")
+        return {
+            "schema_version": "runtime.task_request.v1",
+            "task_id": self.task_id,
+            "parent_task_id": self.parent_task_id,
+            "provider_id": self.provider_id,
+            "agent_id": self.agent_id,
+            "role": self.role,
+            "objective": self.objective,
+            "source": self.source,
+            "prompt_preview": prompt[:1000],
+            "prompt_chars": len(prompt),
+            "context_pack_ref": self.context_pack_ref,
+            "model": self.model,
+            "permissions": dict(self.permissions),
+            "approval_policy": dict(self.approval_policy),
+            "output_contract": dict(self.output_contract),
+            "artifact_refs": list(self.artifact_refs),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeTaskEvent:
+    """Normalized runtime event emitted by concrete providers."""
+
+    task_id: str
+    provider_id: str
+    event_type: str
+    status: str = ""
+    agent_id: str = ""
+    source: str = ""
+    message: str = ""
+    delta: str = ""
+    error: str = ""
+    artifact_refs: list[str] = field(default_factory=list)
+    tool_call_refs: list[str] = field(default_factory=list)
+    request: RuntimeTaskRequest | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def to_record(self) -> dict[str, Any]:
+        request_record = self.request.to_record() if self.request is not None else {}
+        return {
+            "schema_version": "runtime.task_event.v1",
+            "task_id": self.task_id,
+            "provider_id": self.provider_id,
+            "event_type": self.event_type,
+            "status": self.status,
+            "agent_id": self.agent_id,
+            "source": self.source,
+            "message": self.message,
+            "delta": self.delta,
+            "error": self.error,
+            "artifact_refs": list(self.artifact_refs),
+            "tool_call_refs": list(self.tool_call_refs),
+            "request": request_record,
+            "payload": dict(self.payload),
+        }
+
+
+@dataclass(frozen=True)
 class RuntimeProviderSpec:
     provider_id: str
     name: str
@@ -73,6 +154,11 @@ class RuntimeAdapter:
 
     def put_task(self, agent: Any, prompt: str, *, source: str = "") -> Any:
         return agent.put_task(prompt, source=source)
+
+    def put_runtime_task(self, agent: Any, request: RuntimeTaskRequest) -> Any:
+        if hasattr(agent, "put_runtime_task"):
+            return agent.put_runtime_task(request)
+        return self.put_task(agent, request.prompt, source=request.source)
 
     def current_model(self, agent: Any) -> str:
         try:

@@ -408,8 +408,12 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["capabilities"]["host_tools"] is False, ohmypi
         assert ohmypi["capabilities"]["tui_readonly_host_tools"] is True, ohmypi
         assert ohmypi["capabilities"]["tui_governed_proposal_tools"] is True, ohmypi
+        assert ohmypi["capabilities"]["tui_typed_host_tools"] is True, ohmypi
+        assert ohmypi["capabilities"]["runtime_task_requests"] is True, ohmypi
+        assert ohmypi["capabilities"]["runtime_task_events"] is True, ohmypi
         assert ohmypi["capabilities"]["memory_candidates"] is True, ohmypi
         assert ohmypi["capabilities"]["memory_candidate_signals"] is True, ohmypi
+        assert ohmypi["scheduler"]["status"] == "registry_ready", ohmypi
         assert ohmypi["policy"]["approval_gate_owner"] == "ga-tui.policy", ohmypi
         assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi
         assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
@@ -506,6 +510,7 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
 def assert_ohmypi_rpc_queue_mapping() -> None:
     processes: list[FakeRpcProcess] = []
     memory_signals: list[dict[str, object]] = []
+    runtime_events: list[dict[str, object]] = []
 
     def process_factory(*_args, **_kwargs):
         process = FakeRpcProcess()
@@ -517,9 +522,21 @@ def assert_ohmypi_rpc_queue_mapping() -> None:
         cwd=str(ROOT),
         process_factory=process_factory,
         memory_candidate_sink=lambda signal: memory_signals.append(signal),
+        runtime_event_sink=lambda event: runtime_events.append(event.to_record()),
         startup_timeout=1,
     )
-    dq = agent.put_task("hello", source="test")
+    request = a.RuntimeTaskRequest(
+        task_id="task_omp_runtime",
+        provider_id="ohmypi",
+        agent_id="researcher-1",
+        role="researcher",
+        objective="Validate structured OMP runtime request.",
+        prompt="hello",
+        source="test",
+        context_pack_ref="artifact://context_packs/researcher-1/task_omp_runtime.json",
+        artifact_refs=["artifact://context_packs/researcher-1/task_omp_runtime.json"],
+    )
+    dq = agent.put_runtime_task(request)
     first = dq.get(timeout=2)
     second = dq.get(timeout=2)
     done = dq.get(timeout=2)
@@ -533,6 +550,15 @@ def assert_ohmypi_rpc_queue_mapping() -> None:
     assert memory_signals
     assert memory_signals[-1]["schema_version"] == "ohmypi.memory_candidate_signal.v1", memory_signals[-1]
     assert memory_signals[-1]["statement"] == expected_done, memory_signals[-1]
+    assert runtime_events[0]["schema_version"] == "runtime.task_event.v1", runtime_events
+    assert runtime_events[0]["event_type"] == "runtime_task_requested", runtime_events
+    assert runtime_events[0]["request"]["schema_version"] == "runtime.task_request.v1", runtime_events[0]
+    assert "prompt" not in runtime_events[0]["request"], runtime_events[0]
+    assert runtime_events[0]["request"]["prompt_preview"] == "hello", runtime_events[0]
+    assert runtime_events[0]["request"]["prompt_chars"] == 5, runtime_events[0]
+    assert runtime_events[0]["request"]["context_pack_ref"].startswith("artifact://context_packs/"), runtime_events[0]
+    assert runtime_events[-1]["event_type"] == "runtime_task_completed", runtime_events
+    assert runtime_events[-1]["artifact_refs"] == ["artifact://context_packs/researcher-1/task_omp_runtime.json"], runtime_events[-1]
     agent.close()
 
 
@@ -748,6 +774,8 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert runtime["status"] == "ok", runtime
     assert runtime["runtime_registry"]["default_provider_id"] == "ohmypi", runtime
     assert runtime["runtime_registry"]["providers"], runtime
+    provider = {item["provider_id"]: item for item in runtime["runtime_registry"]["providers"]}["ohmypi"]
+    assert provider["capabilities"]["tui_typed_host_tools"] is True, provider
 
     tasks = handler("ga_tui_query", {"endpoint": "task_list", "args": {"limit": 1}})
     assert tasks["schema_version"] == "ga-tui.query.v1", tasks
@@ -760,6 +788,29 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     unknown = handler("ga_tui_query", {"endpoint": "not-real"})
     assert unknown["status"] == "error", unknown
     assert "runtime_registry" in unknown["supported_endpoints"], unknown
+    assert "memory_context_get" in unknown["supported_endpoints"], unknown
+
+    root = tempfile.mkdtemp(prefix="ga_tui_omp_typed_tools_")
+    retarget_harness(root)
+    state = a.State(agent=FakeLLMAgent())
+    all_tools = [item.to_rpc() for item in a.ohmypi_tui_host_tool_definitions()]
+    tool_names = {str(item.get("name") or "") for item in all_tools}
+    assert {"ga_tui_query", "agent_list", "schedule_list", "memory_context_get", "memory_candidate_submit"} <= tool_names, all_tools
+    typed_handler = a.ohmypi_tui_host_tool_handler(state)
+    typed_agents = typed_handler("agent_list", {"limit": 5})
+    assert typed_agents["schema_version"] == "ga-tui.query.v1", typed_agents
+    assert typed_agents["kind"] == "agent.list", typed_agents
+    typed_schedule = typed_handler("schedule_list", {})
+    assert typed_schedule["status"] == "ok", typed_schedule
+    memory_context = typed_handler(
+        "memory_context_get",
+        {"objective": "Prepare OMP with GA-TUI context.", "task_id": "task_omp_memory_context"},
+    )
+    assert memory_context["status"] == "ok", memory_context
+    assert memory_context["kind"] == "memory.context", memory_context
+    assert memory_context["context_pack_ref"].startswith("artifact://"), memory_context
+    artifact_rows = a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)
+    assert artifact_rows and artifact_rows[-1]["type"] == "context_pack", artifact_rows
 
 
 def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
@@ -820,6 +871,38 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
     assert_artifact_schema(latest_artifact, artifact_type="memory-candidates")
     assert latest_artifact["uri"] in memory_result["artifact_refs"], (latest_artifact, memory_result)
 
+    typed_memory = handler("memory_candidate_submit", {
+        "target": target.agent_id,
+        "statement": (
+            "type: project\n"
+            "Typed OMP memory_candidate_submit must queue a GA-TUI approval record instead of "
+            "writing long-term memory directly."
+        ),
+        "evidence_ref": "runtime://provider/ohmypi/typed-memory",
+        "task_id": "task_omp_typed_memory",
+    })
+    assert typed_memory["schema_version"] == "ga-tui.proposal.v1", typed_memory
+    assert typed_memory["status"] == "ok", typed_memory
+    assert typed_memory["kind"] == "memory_candidate", typed_memory
+    assert typed_memory["approval_ids"], typed_memory
+
+    typed_schedule = handler("schedule_create", {
+        "schedule_id": "sched_omp_typed_digest",
+        "name": "OMP Typed Digest",
+        "interval": "5m",
+        "execution": {
+            "mode": "agent_task",
+            "routing": {"selected_agent": target.name},
+            "work_order": {"objective": "Produce a typed OMP scheduled digest."},
+            "capability_contract": {"tools_allowed": ["read"], "write_policy": "none"},
+            "context_contract": {"history_mode": "summary", "artifact_reference_only": True},
+            "output_contract": {"format": "structured_markdown", "required_sections": ["summary"]},
+        },
+    })
+    assert typed_schedule["schema_version"] == "ga-tui.tool.v1", typed_schedule
+    assert typed_schedule["status"] == "ok", typed_schedule
+    assert typed_schedule["schedule"]["provider_id"] == "ohmypi", typed_schedule
+
     control_result = handler("ga_tui_propose", {
         "proposal_type": "ga_control",
         "control": {
@@ -857,6 +940,8 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
 def assert_ohmypi_memory_candidate_signal_filters() -> None:
     assert omp.ohmypi_memory_candidate_signal("", source="test") is None
     assert omp.ohmypi_memory_candidate_signal("too short", source="test") is None
+    secret_durable = "Secret durable lesson should not leave the Secret Vault boundary even if it is long enough for candidate extraction."
+    assert omp.ohmypi_memory_candidate_signal(secret_durable, source="secret-main:user") is None
     secret = "This output contains api_key: SHOULD_NOT_LEAK and must not be retained long term."
     assert omp.ohmypi_memory_candidate_signal(secret, source="test") is None
     durable = (
@@ -1473,7 +1558,11 @@ def assert_gateway_schema(registry: dict) -> None:
     assert ohmypi_provider["capabilities"]["host_tools"] is False, ohmypi_provider
     assert ohmypi_provider["capabilities"]["tui_readonly_host_tools"] is True, ohmypi_provider
     assert ohmypi_provider["capabilities"]["tui_governed_proposal_tools"] is True, ohmypi_provider
+    assert ohmypi_provider["capabilities"]["tui_typed_host_tools"] is True, ohmypi_provider
+    assert ohmypi_provider["capabilities"]["runtime_task_requests"] is True, ohmypi_provider
+    assert ohmypi_provider["capabilities"]["runtime_task_events"] is True, ohmypi_provider
     assert ohmypi_provider["capabilities"]["memory_candidate_signals"] is True, ohmypi_provider
+    assert ohmypi_provider["scheduler"]["status"] == "registry_ready", ohmypi_provider
     assert ohmypi_provider["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi_provider
     assert ohmypi_provider["policy"]["memory_write"] == "candidate_only", ohmypi_provider
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
@@ -4179,7 +4268,6 @@ def run_checks() -> None:
         "schedule_id": "sched_due_once",
         "name": "Due Once",
         "at": "2026-01-01T00:00:00+0800",
-        "provider_id": "genericagent",
         "execution": {
             "mode": "agent_task",
             "routing": {
@@ -4198,6 +4286,7 @@ def run_checks() -> None:
     })
     a.apply_tui_controls_from_text(state, due_schedule_control, source="agent")
     assert a.latest_schedule_records()["sched_due_once"]["at"] == "2026-01-01T00:00:00+0800"
+    assert a.latest_schedule_records()["sched_due_once"]["provider_id"] == "ohmypi"
     due_info = a.schedule_due_info(a.latest_schedule_records()["sched_due_once"], now_epoch=1780000000.0)
     assert due_info["due"] and due_info["idempotency_key"], due_info
     tick = a.scheduler_tick(state, now_epoch=1780000000.0, source="test:scheduler")
@@ -4207,6 +4296,8 @@ def run_checks() -> None:
     assert any(row.get("status") == "starting" for row in due_runs), due_runs
     assert any(row.get("status") == "dispatched" for row in due_runs), due_runs
     assert any(row.get("task_id") for row in due_runs if row.get("status") == "dispatched"), due_runs
+    assert all(row.get("provider_id") == "ohmypi" for row in due_runs), due_runs
+    assert any(row.get("runtime_provider_id") == "ohmypi" for row in due_runs if row.get("status") == "dispatched"), due_runs
     scheduled_task_rows = [
         row for row in a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
         if row.get("assigned_agent") == scheduler_worker.agent_id and row.get("status") == "working"
@@ -4225,7 +4316,6 @@ def run_checks() -> None:
         "schedule_id": "sched_ops_approval",
         "name": "Scheduled Ops Approval",
         "at": "2026-01-01T00:00:00+0800",
-        "provider_id": "genericagent",
         "execution": {
             "mode": "agent_task",
             "routing": {
@@ -4248,6 +4338,8 @@ def run_checks() -> None:
     approval_final = [row for row in approval_runs if row.get("status") == "approval_required"][-1]
     assert approval_final["task_id"], approval_final
     assert approval_final["approval_id"], approval_final
+    assert approval_final["provider_id"] == "ohmypi", approval_final
+    assert approval_final["runtime_provider_id"] == "ohmypi", approval_final
     approval_task = a.latest_task_records()[approval_final["task_id"]]
     assert approval_task["status"] == "approval_required", approval_task
     assert approval_task["approval"]["approval_id"] == approval_final["approval_id"], approval_task
