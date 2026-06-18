@@ -3238,8 +3238,9 @@ ROLE_TEMPLATES: dict[str, dict[str, Any]] = {
         "write_policy": "single_writer",
         "tools_allowed": [
             "read", "reason", "search", "repo.read", "repo.write", "edit", "write", "test",
-            "bash", "shell", "browser", "eval", "web.search", "git", "lsp", "artifact.read",
-            "artifact.write", "host_tools", "task", "memory.candidate",
+            "bash", "shell", "browser", "eval", "python", "javascript", "web.search", "web_search",
+            "git", "lsp", "artifact.read", "artifact.write", "host_tools", "task",
+            "subagent.delegate", "memory.candidate",
         ],
         "output_contract": ["summary", "actions_taken", "tool_results", "findings", "risks", "artifact_refs", "memory_candidates", "confidence"],
     },
@@ -3363,7 +3364,7 @@ def default_omp_permission_profile() -> str:
 
 
 def default_ohmypi_approval_mode() -> str:
-    return normalized_ohmypi_approval_mode(os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "write")
+    return normalized_ohmypi_approval_mode(os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "yolo")
 
 
 POLICY_ACTIONS: dict[str, dict[str, Any]] = {
@@ -4120,6 +4121,7 @@ def permissions_for_role(
     security_context = normalized_security_context(security_context)
     permission_profile = normalized_permission_profile(permission_profile)
     tools_forbidden = ["email.send", "deploy", "filesystem.delete", "memory.write.direct"]
+    approval_required_for = list(APPROVAL_REQUIRED_FOR)
     network_policy = "allowlist" if role in {"researcher", "ops"} else "none"
     secrets_policy = "no_secret_access"
     tools_allowed = role_tools_allowed(role)
@@ -4130,8 +4132,10 @@ def permissions_for_role(
         network_policy = "none"
     elif permission_profile == PERMISSION_PROFILE_FULL:
         tools_allowed = list(FULL_PERMISSION_TOOLS_ALLOWED)
+        tools_forbidden = []
         write_policy = "single_writer"
         network_policy = "allowlist"
+        approval_required_for = []
     if security_context == "secret":
         network_policy = "secret_proxy_chain_required"
         secrets_policy = "secret_vault_only_no_export"
@@ -4146,7 +4150,7 @@ def permissions_for_role(
         "network_policy": network_policy,
         "secrets_policy": secrets_policy,
         "memory_write": "candidate_only",
-        "approval_required_for": APPROVAL_REQUIRED_FOR,
+        "approval_required_for": approval_required_for,
     }
 
 

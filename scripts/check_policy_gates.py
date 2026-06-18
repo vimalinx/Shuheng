@@ -471,7 +471,7 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["scheduler"]["status"] == "registry_ready", ohmypi
         assert ohmypi["policy"]["approval_gate_owner"] == "ga-tui.policy", ohmypi
         assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi
-        assert ohmypi["policy"]["runtime_tool_approval_mode"] == "write", ohmypi
+        assert ohmypi["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi
         assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
         os.environ["GA_TUI_RUNTIME_PROVIDER"] = "genericagent"
         assert a.agent_runtime_registry().default().provider_id == "genericagent"
@@ -500,7 +500,7 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
     command = omp.ohmypi_rpc_command(binary="/fake/omp", append_system_prompt=prompt_path)
     assert command[:3] == ["/fake/omp", "--mode", "rpc"], command
     assert "--approval-mode" in command, command
-    assert command[command.index("--approval-mode") + 1] == "write", command
+    assert command[command.index("--approval-mode") + 1] == "yolo", command
     assert "--append-system-prompt" in command, command
     assert command[command.index("--append-system-prompt") + 1] == prompt_path, command
     old_approval_mode = os.environ.get("GA_TUI_OMP_APPROVAL_MODE")
@@ -581,11 +581,11 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert runtime_config.env["PI_CODING_AGENT_DIR"] == runtime_config.agent_dir, runtime_config.env
         assert len(runtime_config.models) == 2, runtime_config.models
         assert runtime_config.default_model.endswith("/model-beta"), runtime_config.default_model
-        assert runtime_config.approval_mode == "write", runtime_config
+        assert runtime_config.approval_mode == "yolo", runtime_config
         config_data = json.loads(Path(runtime_config.config_path).read_text(encoding="utf-8"))
         models_data = json.loads(Path(runtime_config.models_path).read_text(encoding="utf-8"))
         assert config_data["modelRoles"]["default"] == runtime_config.default_model, config_data
-        assert config_data["tools"]["approvalMode"] == "write", config_data
+        assert config_data["tools"]["approvalMode"] == "yolo", config_data
         assert "providers" in models_data and len(models_data["providers"]) == 2, models_data
         beta_provider = next(
             provider for provider in models_data["providers"].values()
@@ -603,8 +603,8 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         record = adapter.spec.to_record()
         assert record["model_routing"]["isolated_agent_dir"] == runtime_config.agent_dir, record
         assert record["model_routing"]["configured_model_count"] == 2, record
-        assert record["model_routing"]["tool_approval_mode"] == "write", record
-        assert record["policy"]["runtime_tool_approval_mode"] == "write", record
+        assert record["model_routing"]["tool_approval_mode"] == "yolo", record
+        assert record["policy"]["runtime_tool_approval_mode"] == "yolo", record
         command = getattr(adapter, "command")
         assert "--model" in command and runtime_config.default_model in command, command
         if before_hash:
@@ -633,6 +633,8 @@ def assert_ohmypi_permission_profiles() -> None:
         assert pack["permission_profile"] == "full", pack
         assert pack["permissions"]["permission_profile"] == "full", pack["permissions"]
         assert pack["permissions"]["write_policy"] == "single_writer", pack["permissions"]
+        assert pack["permissions"]["tools_forbidden"] == [], pack["permissions"]
+        assert pack["permissions"]["approval_required_for"] == [], pack["permissions"]
         assert pack["permissions"]["memory_write"] == "candidate_only", pack["permissions"]
         assert {"bash", "edit", "write", "browser", "task", "host_tools", "subagent.delegate", "memory.candidate"} <= set(pack["permissions"]["tools_allowed"]), pack["permissions"]
         prompt = a.format_context_pack_for_prompt(pack)
@@ -657,6 +659,8 @@ def assert_ohmypi_permission_profiles() -> None:
         assert request.agent_id == "orchestrator.main", request
         assert request.permissions["permission_profile"] == "full", request.permissions
         assert request.permissions["write_policy"] == "single_writer", request.permissions
+        assert request.permissions["tools_forbidden"] == [], request.permissions
+        assert request.permissions["approval_required_for"] == [], request.permissions
         assert {"bash", "write", "host_tools", "subagent.delegate", "memory.candidate"} <= request_tools, request.permissions
         assert "permission_profile: full" in request.prompt, request.prompt
         assert "role: main_orchestrator" in request.prompt, request.prompt
@@ -719,7 +723,7 @@ def assert_ohmypi_rpc_extension_approval_bridge() -> None:
         "title": "Allow tool: bash\nCommand: rm -rf /tmp/ga-tui-test",
         "options": ["Approve", "Deny"],
     })
-    assert sent[-1] == {"type": "extension_ui_response", "id": "ui-risky", "value": "Deny"}, sent[-1]
+    assert sent[-1] == {"type": "extension_ui_response", "id": "ui-risky", "value": "Approve"}, sent[-1]
 
     standard_request = a.RuntimeTaskRequest(
         task_id="task_approval_standard",
@@ -2106,7 +2110,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert ohmypi_provider["capabilities"]["memory_candidate_signals"] is True, ohmypi_provider
     assert ohmypi_provider["scheduler"]["status"] == "registry_ready", ohmypi_provider
     assert ohmypi_provider["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi_provider
-    assert ohmypi_provider["policy"]["runtime_tool_approval_mode"] == "write", ohmypi_provider
+    assert ohmypi_provider["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi_provider
     assert ohmypi_provider["policy"]["memory_write"] == "candidate_only", ohmypi_provider
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
     model_orchestration = registry["model_orchestration"]

@@ -84,7 +84,7 @@ _OHMYPI_APPROVAL_MODES = {"always-ask", "write", "yolo"}
 
 def normalized_ohmypi_approval_mode(value: str = "") -> str:
     raw = str(value or "").strip().lower().replace("_", "-")
-    return raw if raw in _OHMYPI_APPROVAL_MODES else "write"
+    return raw if raw in _OHMYPI_APPROVAL_MODES else "yolo"
 
 
 class _TaskCounter:
@@ -191,7 +191,7 @@ class OhMyPiRuntimeConfig:
     default_model: str = ""
     config_path: str = ""
     models_path: str = ""
-    approval_mode: str = "write"
+    approval_mode: str = "yolo"
 
 
 def ohmypi_runtime_root(harness_dir: str) -> str:
@@ -1120,7 +1120,7 @@ class OhMyPiRpcAgent:
         if str(permissions.get("permission_profile") or "") != "full":
             return False, "permission_profile_not_full"
         prompt_text = "\n".join(str(frame.get(key) or "") for key in ("title", "message"))
-        if _APPROVAL_RISK_RE.search(prompt_text):
+        if permissions.get("approval_required_for") and _APPROVAL_RISK_RE.search(prompt_text):
             return False, "risky_tool_prompt"
         tool_name = self._approval_tool_name(frame)
         if not self._tool_allowed_by_permissions(tool_name, permissions):
@@ -1371,7 +1371,7 @@ def ohmypi_rpc_command(
     binary = resolve_ohmypi_binary(binary)
     env_args = shlex.split(os.environ.get("GA_TUI_OHMYPI_ARGS", ""))
     appended_args = list(extra_args or env_args)
-    approval_mode = normalized_ohmypi_approval_mode(approval_mode or os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "write")
+    approval_mode = normalized_ohmypi_approval_mode(approval_mode or os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "yolo")
     args = [
         binary,
         "--mode",
@@ -1537,7 +1537,7 @@ def ohmypi_provider_spec(
         policy={
             "approval_gate_owner": "ga-tui.policy",
             "tool_permissions": "tui_readonly_and_governed_proposal_tools_only",
-            "runtime_tool_approval_mode": runtime_config.approval_mode if runtime_config else "write",
+            "runtime_tool_approval_mode": runtime_config.approval_mode if runtime_config else "yolo",
             "memory_write": "candidate_only",
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],
         },
@@ -1557,7 +1557,7 @@ def ohmypi_provider_spec(
             "GenericAgent/TUI memory is injected through --append-system-prompt.",
             "Shuheng emits provider-neutral runtime.task_request.v1 and runtime.task_event.v1 records around OMP execution.",
             "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
-            "Default isolated OMP approval mode is write: read/write tiers run headless, exec prompts are bridged through Shuheng permission-profile checks.",
+            "Default isolated OMP approval mode is yolo: runtime tools run without OMP approval prompts inside the Shuheng-owned isolated agent directory.",
             "Only app-injected TUI query, typed read-only, and governed proposal host tools are enabled; unrestricted host tools, host URI schemes, and direct TUI approval mapping stay disabled.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",

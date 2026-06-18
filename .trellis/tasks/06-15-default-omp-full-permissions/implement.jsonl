@@ -6,3 +6,7 @@
 {"file":"scripts/check_policy_gates.py","reason":"2026-06-17: Added regression coverage for main OMP context role, prompt role, full permissions, host tools, and RuntimeTaskRequest wiring."}
 {"file":".trellis/spec/backend/agent-control-protocol.md","reason":"2026-06-17: Documented that main OMP context packs and runtime task requests must be main_orchestrator/full while subagents remain role-bounded."}
 {"file":"docs/runtime-provider-control-plane.md","reason":"2026-06-17: Updated provider documentation to identify the main OMP runtime role as main_orchestrator."}
+{"file":"src/ga_tui/app.py","reason":"2026-06-18: Opened main OMP full runtime by clearing tools_forbidden and approval_required_for, expanding main_orchestrator tool aliases, and defaulting app-level OMP approval mode to yolo."}
+{"file":"src/ga_tui/ohmypi_provider.py","reason":"2026-06-18: Changed provider-side OMP approval default and fallback RPC command mode from write to yolo; full-profile extension approval fallback now approves mapped tools even for risky-looking prompts when no runtime approval list is present."}
+{"file":".trellis/spec/backend/agent-control-protocol.md","reason":"2026-06-18: Updated executable OMP permission contract to yolo default, empty runtime deny/approval lists, and full-profile risky prompt approval behavior."}
+{"file":"docs/runtime-provider-control-plane.md","reason":"2026-06-18: Documented that isolated OMP defaults to tools.approvalMode=yolo and that the main full context carries no runtime tool deny/approval list."}
