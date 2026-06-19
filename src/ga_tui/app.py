@@ -253,6 +253,12 @@ SHUHENG_LOG_PATH = os.path.join(SHUHENG_LOG_DIR, "shuheng.log")
 MODEL_RESPONSES_DIR = os.path.join(SHUHENG_HOME, "model_responses")
 TOKEN_USAGE_PATH = os.path.join(MODEL_RESPONSES_DIR, "session_token_usage.json")
 SESSION_META_PATH = os.path.join(MODEL_RESPONSES_DIR, "session_meta.json")
+SHUHENG_WORKSPACES_DIR = os.path.join(SHUHENG_HOME, "workspaces")
+SHUHENG_WORKSPACE_STATE_PATH = os.path.join(SHUHENG_WORKSPACES_DIR, "active.json")
+WORKSPACE_MANIFEST_FILENAME = "manifest.json"
+WORKSPACE_MEMORY_FILENAME = "memory.md"
+WORKSPACE_INDEX_FILENAME = "index.json"
+WORKSPACE_L4_INDEX_FILENAME = "l4_index.json"
 L4_RAW_SESSIONS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "L4_raw_sessions")
 UI_DURABLE_SYSTEM_MESSAGES_KEY = "ui_durable_system_messages"
 UI_DURABLE_SYSTEM_MESSAGE_LIMIT = 200
@@ -469,6 +475,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/model", "", "管理模型配置/切换/提取/验活/默认", True),
     ("/agents", "", "列出持久子 agent", True),
     ("/agent", "<cmd>", "管理/运行持久子 agent", False),
+    ("/workspace", "<cmd>", "管理项目工作区记忆", False),
+    ("/workspaces", "", "列出项目工作区", True),
     ("/tasks", "", "查看共享任务账本", True),
     ("/bus", "", "查看 agent mail", True),
     ("/approvals", "", "查看待审批事项", True),
@@ -1943,6 +1951,322 @@ def maybe_bootstrap_shuheng_legacy_state() -> dict[str, Any]:
     if os.path.isdir(history_src) or os.path.isdir(memory_src):
         write_text_atomic(marker, json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return report
+
+
+def normalized_workspace_id(value: str) -> str:
+    raw = (value or "").strip().lower()
+    raw = raw.replace(os.sep, "-")
+    if os.altsep:
+        raw = raw.replace(os.altsep, "-")
+    raw = re.sub(r"[^a-z0-9._-]+", "-", raw)
+    raw = re.sub(r"-{2,}", "-", raw).strip("._-")
+    return raw[:80]
+
+
+def workspace_slug(value: str) -> str:
+    ascii_text = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    slug = normalized_workspace_id(ascii_text)
+    return slug or "workspace"
+
+
+def workspace_dir(workspace_id: str) -> str:
+    workspace_id = normalized_workspace_id(workspace_id)
+    return os.path.join(SHUHENG_WORKSPACES_DIR, workspace_id)
+
+
+def workspace_manifest_path(workspace_id: str) -> str:
+    return os.path.join(workspace_dir(workspace_id), WORKSPACE_MANIFEST_FILENAME)
+
+
+def workspace_memory_path(workspace_id: str) -> str:
+    return os.path.join(workspace_dir(workspace_id), WORKSPACE_MEMORY_FILENAME)
+
+
+def workspace_index_path(workspace_id: str) -> str:
+    return os.path.join(workspace_dir(workspace_id), WORKSPACE_INDEX_FILENAME)
+
+
+def workspace_l4_index_path(workspace_id: str) -> str:
+    return os.path.join(workspace_dir(workspace_id), WORKSPACE_L4_INDEX_FILENAME)
+
+
+def unique_workspace_id(name: str) -> str:
+    base = workspace_slug(name)
+    candidate = base
+    suffix = 2
+    while os.path.exists(workspace_manifest_path(candidate)):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def load_workspace_manifest(workspace_id: str) -> dict[str, Any]:
+    workspace_id = normalized_workspace_id(workspace_id)
+    if not workspace_id:
+        return {}
+    manifest = read_json_dict_file(workspace_manifest_path(workspace_id))
+    if not manifest:
+        return {}
+    if str(manifest.get("workspace_id") or "") != workspace_id:
+        manifest["workspace_id"] = workspace_id
+    return manifest
+
+
+def list_workspaces() -> list[dict[str, Any]]:
+    if not os.path.isdir(SHUHENG_WORKSPACES_DIR):
+        return []
+    rows: list[dict[str, Any]] = []
+    for name in sorted(os.listdir(SHUHENG_WORKSPACES_DIR)):
+        workspace_id = normalized_workspace_id(name)
+        if not workspace_id:
+            continue
+        manifest = load_workspace_manifest(workspace_id)
+        if manifest:
+            rows.append(manifest)
+    rows.sort(key=lambda row: (str(row.get("name") or "").lower(), str(row.get("workspace_id") or "")))
+    return rows
+
+
+def active_workspace_id_from_state() -> str:
+    state = read_json_dict_file(SHUHENG_WORKSPACE_STATE_PATH)
+    return normalized_workspace_id(str(state.get("active_workspace_id") or ""))
+
+
+def selected_workspace_id() -> str:
+    workspace_id = active_workspace_id_from_state()
+    if workspace_id and load_workspace_manifest(workspace_id):
+        return workspace_id
+    return ""
+
+
+def selected_workspace_manifest() -> dict[str, Any]:
+    workspace_id = selected_workspace_id()
+    return load_workspace_manifest(workspace_id) if workspace_id else {}
+
+
+def set_selected_workspace(workspace_id: str) -> dict[str, Any]:
+    manifest = load_workspace_manifest(workspace_id)
+    if not manifest:
+        raise ValueError(f"workspace not found: {workspace_id}")
+    state = {
+        "schema_version": "shuheng.workspace_state.v1",
+        "active_workspace_id": manifest["workspace_id"],
+        "selected_at": now_iso(),
+        "selection_mode": "manual",
+    }
+    write_text_atomic(SHUHENG_WORKSPACE_STATE_PATH, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return manifest
+
+
+def clear_selected_workspace() -> None:
+    state = {
+        "schema_version": "shuheng.workspace_state.v1",
+        "active_workspace_id": "",
+        "selected_at": now_iso(),
+        "selection_mode": "manual",
+    }
+    write_text_atomic(SHUHENG_WORKSPACE_STATE_PATH, json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
+def resolve_workspace(query: str) -> Optional[dict[str, Any]]:
+    needle = (query or "").strip()
+    if not needle:
+        return None
+    normalized = normalized_workspace_id(needle)
+    direct = load_workspace_manifest(normalized)
+    if direct:
+        return direct
+    lowered = needle.lower()
+    matches = [
+        row for row in list_workspaces()
+        if str(row.get("name") or "").lower() == lowered or str(row.get("workspace_id") or "").lower().startswith(lowered)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def l4_zip_member_modified_at(info: zipfile.ZipInfo) -> str:
+    try:
+        year, month, day, hour, minute, second = info.date_time
+        return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
+    except Exception:
+        return ""
+
+
+def build_l4_archive_index() -> dict[str, Any]:
+    archives: list[dict[str, Any]] = []
+    refs: list[dict[str, Any]] = []
+    for archive_path in l4_archive_zip_paths():
+        archive_name = os.path.basename(archive_path)
+        archive_row = {"archive": archive_path, "name": archive_name, "members": 0, "error": ""}
+        try:
+            with zipfile.ZipFile(archive_path) as zf:
+                for info in sorted(zf.infolist(), key=lambda item: item.filename):
+                    if info.is_dir():
+                        continue
+                    ref = f"l4://{archive_name}/{info.filename}"
+                    refs.append({
+                        "ref": ref,
+                        "archive": archive_path,
+                        "archive_name": archive_name,
+                        "member": info.filename,
+                        "size": int(info.file_size),
+                        "modified_at": l4_zip_member_modified_at(info),
+                    })
+                    archive_row["members"] += 1
+        except Exception as exc:
+            archive_row["error"] = f"{type(exc).__name__}: {exc}"
+        archives.append(archive_row)
+    return {
+        "schema_version": "shuheng.l4_index.v1",
+        "generated_at": now_iso(),
+        "source_dir": L4_RAW_SESSIONS_DIR,
+        "archives": archives,
+        "refs_count": len(refs),
+        "refs": refs,
+        "mode": "non_destructive_index_only",
+    }
+
+
+def refresh_workspace_l4_index(workspace_id: str) -> dict[str, Any]:
+    workspace_id = normalized_workspace_id(workspace_id)
+    data = build_l4_archive_index()
+    data["workspace_id"] = workspace_id
+    write_text_atomic(workspace_l4_index_path(workspace_id), json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return data
+
+
+def create_workspace(name: str, description: str = "") -> dict[str, Any]:
+    clean_name = clean_text(name).strip() or "Workspace"
+    workspace_id = unique_workspace_id(clean_name)
+    directory = workspace_dir(workspace_id)
+    now = now_iso()
+    manifest = {
+        "schema_version": "shuheng.workspace.v1",
+        "workspace_id": workspace_id,
+        "name": clean_name,
+        "description": clean_text(description).strip(),
+        "created_at": now,
+        "updated_at": now,
+        "selection_mode": "manual",
+        "workspace_dir": directory,
+        "memory_path": workspace_memory_path(workspace_id),
+        "index_path": workspace_index_path(workspace_id),
+        "l4_index_path": workspace_l4_index_path(workspace_id),
+        "root_aliases": [],
+        "source": "tui.slash_command",
+    }
+    os.makedirs(directory, exist_ok=True)
+    write_text_atomic(workspace_manifest_path(workspace_id), json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    if not os.path.exists(workspace_memory_path(workspace_id)):
+        write_text_atomic(
+            workspace_memory_path(workspace_id),
+            f"# {clean_name}\n\nThis workspace memory is manually selected by Shuheng before context hydration.\n",
+        )
+    build_workspace_index(workspace_id)
+    return manifest
+
+
+def workspace_file_record(path: str, *, root: str) -> Optional[dict[str, Any]]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return {
+        "path": path,
+        "label": os.path.relpath(path, root),
+        "size": int(st.st_size),
+        "mtime": float(st.st_mtime),
+    }
+
+
+def build_workspace_index(workspace_id: str) -> dict[str, Any]:
+    workspace_id = normalized_workspace_id(workspace_id)
+    manifest = load_workspace_manifest(workspace_id)
+    if not manifest:
+        return {}
+    directory = workspace_dir(workspace_id)
+    memory_files: list[dict[str, Any]] = []
+    memory_record = workspace_file_record(workspace_memory_path(workspace_id), root=directory)
+    if memory_record:
+        memory_files.append(memory_record)
+    l4_index = refresh_workspace_l4_index(workspace_id)
+    index = {
+        "schema_version": "shuheng.workspace_index.v1",
+        "generated_at": now_iso(),
+        "workspace": {
+            "workspace_id": workspace_id,
+            "name": manifest.get("name", workspace_id),
+            "selection_mode": "manual",
+            "manifest_path": workspace_manifest_path(workspace_id),
+        },
+        "memory_files": memory_files,
+        "l4": {
+            "index_path": workspace_l4_index_path(workspace_id),
+            "source_dir": L4_RAW_SESSIONS_DIR,
+            "refs_count": int(l4_index.get("refs_count") or 0),
+            "sample_refs": [row.get("ref", "") for row in (l4_index.get("refs") or [])[-8:] if row.get("ref")],
+            "mode": "non_destructive_index_only",
+        },
+        "harness_refs": {
+            "tasks": AGENT_TASK_LEDGER_PATH,
+            "artifacts": AGENT_ARTIFACT_INDEX_PATH,
+            "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
+        },
+    }
+    write_text_atomic(workspace_index_path(workspace_id), json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return index
+
+
+def workspace_context_payload(*, security_context: str = "standard") -> dict[str, Any]:
+    if normalized_security_context(security_context) == "secret":
+        return {
+            "included": False,
+            "reason": "Secret context does not hydrate normal Shuheng workspace memory.",
+            "workspace": None,
+            "items": [],
+            "refs": [],
+        }
+    workspace_id = active_workspace_id_from_state()
+    if not workspace_id:
+        return {
+            "included": False,
+            "reason": "No Shuheng workspace is manually selected.",
+            "workspace": None,
+            "items": [],
+            "refs": [],
+        }
+    manifest = load_workspace_manifest(workspace_id)
+    if not manifest:
+        return {
+            "included": False,
+            "reason": "Selected Shuheng workspace manifest is missing.",
+            "workspace": {"workspace_id": workspace_id},
+            "items": [],
+            "refs": [],
+        }
+    index = build_workspace_index(workspace_id)
+    memory_text = read_text_file(workspace_memory_path(workspace_id), "")
+    memory_items = compact_nonempty_lines(memory_text, limit=8, width=220)
+    l4 = index.get("l4") or {}
+    refs = [workspace_manifest_path(workspace_id), workspace_memory_path(workspace_id), workspace_index_path(workspace_id), workspace_l4_index_path(workspace_id)]
+    return {
+        "included": True,
+        "reason": "Manual Shuheng workspace is selected for this context pack.",
+        "workspace": {
+            "workspace_id": workspace_id,
+            "name": manifest.get("name", workspace_id),
+            "description": manifest.get("description", ""),
+            "selection_mode": "manual",
+        },
+        "items": memory_items or ["(workspace memory is empty)"],
+        "refs": refs,
+        "l4": {
+            "refs_count": int(l4.get("refs_count") or 0),
+            "index_path": l4.get("index_path", workspace_l4_index_path(workspace_id)),
+            "sample_refs": l4.get("sample_refs", []),
+            "mode": l4.get("mode", "non_destructive_index_only"),
+        },
+    }
 
 
 def read_text_file(path: str, default: str = "") -> str:
@@ -4231,6 +4555,7 @@ def secret_status_text(state: State) -> str:
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
     "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/continue", "/sessions",
+    "/workspace", "/workspaces",
     "/temp",
 }
 
@@ -5373,9 +5698,11 @@ def memory_hydration_pack(
     profile: str,
     memory: str,
     recent_mail: list[dict[str, Any]],
+    workspace_context: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     profile_items = compact_nonempty_lines(profile, limit=8)
     memory_items = compact_nonempty_lines(memory, limit=12)
+    workspace_context = workspace_context or {}
     included: list[dict[str, Any]] = [
         {
             "scope": "project.agent-harness",
@@ -5399,6 +5726,19 @@ def memory_hydration_pack(
             "refs": [subagent_memory_file(sub)] if sub.persistent else [],
         },
     ]
+    if workspace_context.get("included"):
+        workspace = workspace_context.get("workspace") or {}
+        workspace_name = str(workspace.get("name") or workspace.get("workspace_id") or "selected workspace")
+        l4 = workspace_context.get("l4") or {}
+        workspace_items = [f"Workspace: {workspace_name}"]
+        workspace_items.extend(str(item) for item in (workspace_context.get("items") or [])[:6])
+        workspace_items.append(f"L4 cold archive refs indexed: {int(l4.get('refs_count') or 0)}")
+        included.append({
+            "scope": "workspace.project",
+            "reason": "Manual Shuheng workspace selection hydrates project-scoped memory.",
+            "items": workspace_items,
+            "refs": [str(ref) for ref in (workspace_context.get("refs") or []) if ref],
+        })
     mail_items = [
         f"{row.get('message_id', '')}: {row.get('intent', '')} {row.get('status', '')} task={row.get('task_id', '')}"
         for row in recent_mail[-5:]
@@ -5410,16 +5750,22 @@ def memory_hydration_pack(
             "items": mail_items,
             "refs": [str(row.get("message_id") or "") for row in recent_mail[-5:] if row.get("message_id")],
         })
-    return {
+    result = {
         "memory_pack_id": short_uid("mempack"),
         "for_task_id": task_id,
         "included": included,
         "excluded": [
             {"scope": "raw_logs", "reason": "context_policy.include_raw_logs=false; use refs and previews instead."},
             {"scope": "unrelated_project_memory", "reason": "Avoid context pollution across unrelated projects."},
+            {
+                "scope": "workspace.project",
+                "reason": str(workspace_context.get("reason") or "Workspace memory is included only after manual selection."),
+            } if not workspace_context.get("included") else {},
             {"scope": "secrets", "reason": "No secret access without an explicit approval gate."},
         ],
     }
+    result["excluded"] = [row for row in result["excluded"] if row]
+    return result
 
 
 def context_layers_for_task(
@@ -5433,7 +5779,9 @@ def context_layers_for_task(
     recent_mail: list[dict[str, Any]],
     task_contract: dict[str, Any],
     memory_pack: dict[str, Any],
+    workspace_context: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    workspace_context = workspace_context or {}
     if sub.security_context == "secret":
         recent_tasks: list[dict[str, Any]] = []
         recent_traces: list[dict[str, Any]] = []
@@ -5446,6 +5794,18 @@ def context_layers_for_task(
         f"{row.get('task_id', '')}: {row.get('status', '')} {truncate_cells(str(row.get('summary') or row.get('error') or row.get('objective') or ''), 160)}"
         for row in recent_tasks[-6:]
     ]
+    project_items = [
+        "Shuheng agent harness implementation follows docs/agent-harness-architecture.md.",
+        "Program-level approval, task/mail schemas, artifact index, and single-writer are active implementation layers.",
+    ]
+    project_refs = ["docs/agent-harness-architecture.md", "goal-2/tasks.md"]
+    if workspace_context.get("included"):
+        workspace = workspace_context.get("workspace") or {}
+        project_items.append(f"Active Shuheng workspace: {workspace.get('name') or workspace.get('workspace_id')}")
+        project_items.extend(str(item) for item in (workspace_context.get("items") or [])[:6])
+        l4 = workspace_context.get("l4") or {}
+        project_items.append(f"L4 cold archive refs indexed for workspace: {int(l4.get('refs_count') or 0)}")
+        project_refs.extend(str(ref) for ref in (workspace_context.get("refs") or []) if ref)
     return {
         "L0_system_constitution": {
             "included": True,
@@ -5464,11 +5824,12 @@ def context_layers_for_task(
         },
         "L2_project_memory": {
             "included": True,
-            "items": [
-                "Shuheng agent harness implementation follows docs/agent-harness-architecture.md.",
-                "Program-level approval, task/mail schemas, artifact index, and single-writer are active implementation layers.",
-            ],
-            "refs": ["docs/agent-harness-architecture.md", "goal-2/tasks.md"],
+            "workspace": workspace_context or {
+                "included": False,
+                "reason": "No Shuheng workspace context was provided.",
+            },
+            "items": project_items,
+            "refs": project_refs,
         },
         "L3_task_brief": {
             "included": True,
@@ -5533,7 +5894,15 @@ def build_context_pack(
     task_contract = task_contract_for_role(sub.role, objective)
     context_policy = context_policy_for_task(objective, security_context=sub.security_context)
     permissions = permissions_for_role(sub.role, security_context=sub.security_context, permission_profile=permission_profile)
-    memory_pack = memory_hydration_pack(task_id=task_id, sub=sub, profile=profile, memory=memory, recent_mail=recent_mail)
+    workspace_context = workspace_context_payload(security_context=sub.security_context)
+    memory_pack = memory_hydration_pack(
+        task_id=task_id,
+        sub=sub,
+        profile=profile,
+        memory=memory,
+        recent_mail=recent_mail,
+        workspace_context=workspace_context,
+    )
     layers = context_layers_for_task(
         state,
         sub,
@@ -5544,6 +5913,7 @@ def build_context_pack(
         recent_mail=recent_mail,
         task_contract=task_contract,
         memory_pack=memory_pack,
+        workspace_context=workspace_context,
     )
     pack = {
         "schema_version": "contextpack.v1",
@@ -5576,6 +5946,7 @@ def build_context_pack(
         },
         "source_policy": source_policy_for_role(sub.role, security_context=sub.security_context),
         "memory_pack": memory_pack,
+        "workspace_context": workspace_context,
         "layers": layers,
         "risks": risks_for_action("read_only", sub.role, objective),
         "approval": approval_metadata(),
@@ -5713,6 +6084,17 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
         scope = entry.get("scope", "")
         items = entry.get("items", []) or []
         memory_items.append(f"- {scope}: " + "; ".join(str(item) for item in items[:3]))
+    memory_excluded: list[str] = []
+    for entry in memory_pack.get("excluded", []) or []:
+        scope = entry.get("scope", "")
+        reason = entry.get("reason", "")
+        memory_excluded.append(f"- {scope}: {reason}")
+    workspace_context = pack.get("workspace_context") or {}
+    workspace = workspace_context.get("workspace") or {}
+    if workspace_context.get("included"):
+        workspace_line = f"{workspace.get('name') or workspace.get('workspace_id')} ({workspace.get('workspace_id')})"
+    else:
+        workspace_line = f"none - {workspace_context.get('reason') or 'No Shuheng workspace is selected.'}"
     artifact_items = []
     for item in ((layers.get("L7_artifacts") or {}).get("items") or [])[-5:]:
         artifact_items.append(f"- {item.get('uri', '')} {item.get('hash', '')} task={item.get('source_task_id', '')}")
@@ -5743,6 +6125,12 @@ Source policy:
 
 Memory hydration pack:
 {chr(10).join(memory_items) or "- (empty)"}
+
+Memory excluded:
+{chr(10).join(memory_excluded) or "- (empty)"}
+
+Workspace context:
+- active: {workspace_line}
 
 Recent artifact refs:
 {chr(10).join(artifact_items) or "- (empty)"}
@@ -13220,6 +13608,13 @@ AGENT_SUBCOMMANDS_REQUIRING_AGENT = {
     "ask", "run", "input", "answer", "reply", "memory", "remember", "profile", "rename", "role", "settings", "model", "info", "stop", "delete"
 }
 AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "stop", "delete"}
+WORKSPACE_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
+    ("list", "", "列出工作区", True),
+    ("current", "", "显示当前工作区", True),
+    ("new", "<name> [| description]", "创建并选择工作区", False),
+    ("select", "<workspace>", "选择工作区", False),
+    ("clear", "", "清除当前选择", True),
+]
 
 
 def completion_insert_text(candidate: tuple[str, str, str, bool]) -> str:
@@ -13331,6 +13726,41 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
     ]
 
 
+def workspace_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
+    raw = text or ""
+    if not re.match(r"^/workspaces?(?:\s|$)", raw, re.I):
+        return []
+    if raw.strip().lower() == "/workspaces":
+        return [("/workspaces", "", "列出项目工作区", True)]
+    rest = re.sub(r"^/workspace\s*", "", raw, flags=re.I)
+    if raw.lower().startswith("/workspaces"):
+        rest = re.sub(r"^/workspaces\s*", "", raw, flags=re.I)
+    if not rest:
+        return [("/workspace", "<cmd>", "管理项目工作区记忆", False)]
+    parts = rest.split()
+    trailing_space = raw.endswith(" ")
+    sub_prefix = parts[0].lower() if parts else ""
+    if len(parts) == 1 and not trailing_space:
+        return [
+            (f"/workspace {cmd}", args, desc, sendable)
+            for cmd, args, desc, sendable in WORKSPACE_SUBCOMMANDS
+            if cmd.startswith(sub_prefix)
+        ]
+    if sub_prefix not in {"select", "use", "switch"}:
+        return []
+    if len(parts) > 2:
+        return []
+    target_prefix = parts[1].lower() if len(parts) == 2 else ""
+    rows: list[tuple[str, str, str, bool]] = []
+    for workspace in list_workspaces():
+        workspace_id = str(workspace.get("workspace_id") or "")
+        name = str(workspace.get("name") or workspace_id)
+        if target_prefix and not (workspace_id.lower().startswith(target_prefix) or name.lower().startswith(target_prefix)):
+            continue
+        rows.append((f"/workspace select {workspace_id}", "", name, True))
+    return rows
+
+
 def approval_command_matches(text: str, state: Optional[State] = None) -> list[tuple[str, str, str, bool]]:
     match = re.match(r"^/(approve|reject)\s+(.*)$", text or "", re.I)
     if not match:
@@ -13353,6 +13783,8 @@ def command_matches(text: str, state: Optional[State] = None) -> list[tuple[str,
         return []
     if re.match(r"^/agent(?:\s|$)", raw):
         return agent_command_matches(raw, state)
+    if re.match(r"^/workspaces?(?:\s|$)", raw, re.I):
+        return workspace_command_matches(raw)
     if re.match(r"^/(?:filter|collapse|expand)\s", raw, re.I):
         return category_command_matches(raw, state)
     if re.match(r"^/archived\s", raw, re.I):
@@ -17424,7 +17856,24 @@ def memory_inventory() -> list[MemoryEntry]:
             item = memory_entry_for(layer, path, note, root=memory_root)
             if item:
                 entries.append(item)
-    order = {"L1": 0, "L2": 1, "L0": 2, "L3": 3, "Agent": 4, "Harness": 5, "L4": 6}
+    if os.path.isdir(SHUHENG_WORKSPACES_DIR):
+        for root, dirs, files in os.walk(SHUHENG_WORKSPACES_DIR):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for filename in sorted(files):
+                if filename.startswith(".") or filename.endswith(".tmp"):
+                    continue
+                path = os.path.join(root, filename)
+                note = {
+                    WORKSPACE_MANIFEST_FILENAME: "工作区身份/边界 manifest",
+                    WORKSPACE_MEMORY_FILENAME: "手动选择的项目工作区记忆",
+                    WORKSPACE_INDEX_FILENAME: "工作区聚合索引",
+                    WORKSPACE_L4_INDEX_FILENAME: "L4 冷归档引用索引",
+                    "active.json": "当前手动选择的工作区",
+                }.get(filename, "工作区辅助文件")
+                item = memory_entry_for("Workspace", path, note, root=SHUHENG_HOME)
+                if item:
+                    entries.append(item)
+    order = {"L1": 0, "L2": 1, "L0": 2, "Workspace": 3, "L3": 4, "Agent": 5, "Harness": 6, "L4": 7}
     entries.sort(key=lambda item: (order.get(item.layer, 99), item.label.lower()))
     return entries
 
@@ -19805,6 +20254,95 @@ def apply_subagent_control(
     return f"未知子 agent 操作 {action}"
 
 
+def format_current_workspace() -> str:
+    manifest = selected_workspace_manifest()
+    if not manifest:
+        return (
+            "当前没有选择 Shuheng 工作区。\n"
+            "用法：/workspace new <name> 或 /workspace select <workspace_id|name>"
+        )
+    index = build_workspace_index(str(manifest.get("workspace_id") or ""))
+    l4 = index.get("l4") or {}
+    return (
+        "当前 Shuheng 工作区：\n"
+        f"- id: {manifest.get('workspace_id')}\n"
+        f"- name: {manifest.get('name')}\n"
+        f"- memory: {manifest.get('memory_path')}\n"
+        f"- index: {manifest.get('index_path')}\n"
+        f"- L4 refs: {int(l4.get('refs_count') or 0)}"
+    )
+
+
+def format_workspace_list() -> str:
+    rows = list_workspaces()
+    active = selected_workspace_id()
+    if not rows:
+        return (
+            "还没有 Shuheng 工作区。\n"
+            "用法：/workspace new <name> 创建并选择一个工作区。"
+        )
+    lines = [f"Shuheng 工作区（当前: {active or '未选择'}）："]
+    for row in rows:
+        marker = "*" if row.get("workspace_id") == active else " "
+        desc = str(row.get("description") or "").strip()
+        suffix = f" - {desc}" if desc else ""
+        lines.append(f"{marker} {row.get('workspace_id')} · {row.get('name')}{suffix}")
+    lines.append("用法：/workspace select <workspace_id|name>；/workspace current；/workspace clear")
+    return "\n".join(lines)
+
+
+def handle_workspace_command(state: State, text: str) -> bool:
+    match = re.match(r"^/workspaces?(?:\s+([\s\S]*))?$", (text or "").strip(), re.I)
+    if not match:
+        return False
+    arg = (match.group(1) or "").strip()
+    if not arg or arg.lower() in {"list", "ls"}:
+        add_system(state, format_workspace_list())
+        return True
+    if arg.lower() in {"current", "show", "status"}:
+        add_system(state, format_current_workspace())
+        return True
+    if arg.lower() in {"clear", "none", "off"}:
+        clear_selected_workspace()
+        add_system(state, "已清除当前 Shuheng 工作区；后续 context pack 不会注入项目工作区记忆。")
+        return True
+    new_match = re.match(r"^(?:new|create)\s+(.+)$", arg, re.I | re.S)
+    if new_match:
+        payload = new_match.group(1).strip()
+        if not payload:
+            add_system(state, "用法：/workspace new <name> [| description]")
+            return True
+        if "|" in payload:
+            name, description = [part.strip() for part in payload.split("|", 1)]
+        else:
+            name, description = payload, ""
+        manifest = create_workspace(name, description)
+        set_selected_workspace(str(manifest.get("workspace_id") or ""))
+        add_system(
+            state,
+            "已创建并选择 Shuheng 工作区："
+            f"{manifest.get('name')} ({manifest.get('workspace_id')})\n"
+            f"memory: {manifest.get('memory_path')}",
+        )
+        return True
+    select_match = re.match(r"^(?:select|use|switch)\s+(.+)$", arg, re.I | re.S)
+    if select_match:
+        target = select_match.group(1).strip()
+        manifest = resolve_workspace(target)
+        if not manifest:
+            add_system(state, f"找不到唯一工作区：{target}\n" + format_workspace_list())
+            return True
+        set_selected_workspace(str(manifest.get("workspace_id") or ""))
+        add_system(state, f"已选择 Shuheng 工作区：{manifest.get('name')} ({manifest.get('workspace_id')})")
+        return True
+    add_system(
+        state,
+        "未知 /workspace 命令。\n"
+        "用法：/workspace list、/workspace current、/workspace new <name>、/workspace select <id|name>、/workspace clear",
+    )
+    return True
+
+
 def submit(state: State, text: str) -> None:
     raw_text = text
     text = text.strip()
@@ -19839,6 +20377,8 @@ def submit(state: State, text: str) -> None:
     if text in {"/quit", "/exit"}:
         state.exit_reason = "已退出枢衡。"
         state.running = False
+        return
+    if handle_workspace_command(state, text):
         return
     if handle_subagent_command(state, text):
         return

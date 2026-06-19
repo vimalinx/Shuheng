@@ -41,6 +41,8 @@ def retarget_harness(root: str) -> None:
     a.MODEL_RESPONSES_DIR = os.path.join(root, "model_responses")
     a.TOKEN_USAGE_PATH = os.path.join(a.MODEL_RESPONSES_DIR, "session_token_usage.json")
     a.SESSION_META_PATH = os.path.join(a.MODEL_RESPONSES_DIR, "session_meta.json")
+    a.SHUHENG_WORKSPACES_DIR = os.path.join(root, "workspaces")
+    a.SHUHENG_WORKSPACE_STATE_PATH = os.path.join(a.SHUHENG_WORKSPACES_DIR, "active.json")
     a.L4_RAW_SESSIONS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "L4_raw_sessions")
     a.SESSION_TRASH_DIR = os.path.join(a.MODEL_RESPONSES_DIR, ".trash")
     a.configure_frontend_history_storage()
@@ -84,6 +86,7 @@ def retarget_harness(root: str) -> None:
     os.makedirs(a.AGENT_HARNESS_DIR, exist_ok=True)
     os.makedirs(a.SUBAGENTS_DIR, exist_ok=True)
     os.makedirs(a.TEMP_SUBAGENTS_DIR, exist_ok=True)
+    os.makedirs(a.SHUHENG_WORKSPACES_DIR, exist_ok=True)
     a.configure_scheduler_runtime(
         schedules_path=a.AGENT_SCHEDULES_PATH,
         runs_path=a.AGENT_SCHEDULE_RUNS_PATH,
@@ -460,9 +463,13 @@ def assert_shuheng_history_storage_owned() -> None:
     assert a.SHUHENG_HOME == expected_home, a.SHUHENG_HOME
     assert a.SHUHENG_MEMORY_DIR == os.path.join(a.SHUHENG_HOME, "memory"), a.SHUHENG_MEMORY_DIR
     assert a.SHUHENG_TEMP_DIR == os.path.join(a.SHUHENG_HOME, "temp"), a.SHUHENG_TEMP_DIR
+    assert a.SHUHENG_WORKSPACES_DIR == os.path.join(a.SHUHENG_HOME, "workspaces"), a.SHUHENG_WORKSPACES_DIR
+    assert a.SHUHENG_WORKSPACE_STATE_PATH == os.path.join(a.SHUHENG_WORKSPACES_DIR, "active.json"), a.SHUHENG_WORKSPACE_STATE_PATH
     assert a.path_is_within(a.MODEL_RESPONSES_DIR, a.SHUHENG_HOME), a.MODEL_RESPONSES_DIR
     assert a.path_is_within(a.TOKEN_USAGE_PATH, a.SHUHENG_HOME), a.TOKEN_USAGE_PATH
     assert a.path_is_within(a.SESSION_META_PATH, a.SHUHENG_HOME), a.SESSION_META_PATH
+    assert a.path_is_within(a.SHUHENG_WORKSPACES_DIR, a.SHUHENG_HOME), a.SHUHENG_WORKSPACES_DIR
+    assert a.path_is_within(a.SHUHENG_WORKSPACE_STATE_PATH, a.SHUHENG_HOME), a.SHUHENG_WORKSPACE_STATE_PATH
     assert a.path_is_within(a.L4_RAW_SESSIONS_DIR, a.SHUHENG_HOME), a.L4_RAW_SESSIONS_DIR
     assert a.path_is_within(a.SESSION_TRASH_DIR, a.SHUHENG_HOME), a.SESSION_TRASH_DIR
     assert a.path_is_within(a.AGENT_HARNESS_DIR, a.SHUHENG_HOME), a.AGENT_HARNESS_DIR
@@ -484,6 +491,69 @@ def assert_shuheng_history_storage_owned() -> None:
         assert a.session_names._LOG_DIR == a.MODEL_RESPONSES_DIR
         assert a.session_names._REG_PATH == os.path.join(a.MODEL_RESPONSES_DIR, "session_names.json")
     assert "GenericAgent 的 model_responses" not in Path(a.__file__).read_text(encoding="utf-8")
+
+
+def assert_shuheng_workspace_memory_context() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_workspaces_")
+    retarget_harness(root)
+    state = a.State(agent=FakeLLMAgent())
+    pack_without, _ref_without = a.build_main_runtime_context_pack(state, "read project memory", "task_workspace_none")
+    assert pack_without["workspace_context"]["included"] is False, pack_without["workspace_context"]
+    assert "No Shuheng workspace is manually selected" in pack_without["workspace_context"]["reason"], pack_without["workspace_context"]
+    assert any(row.get("scope") == "workspace.project" for row in pack_without["memory_pack"]["excluded"]), pack_without["memory_pack"]
+    prompt_without = a.format_context_pack_for_prompt(pack_without)
+    assert "Workspace context:" in prompt_without and "none" in prompt_without, prompt_without
+
+    os.makedirs(a.L4_RAW_SESSIONS_DIR, exist_ok=True)
+    archive_path = os.path.join(a.L4_RAW_SESSIONS_DIR, "2026-06.zip")
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("0619_1200-session.txt", "archived session")
+    before = Path(archive_path).read_bytes()
+
+    manifest = a.create_workspace("Demo Project", "workspace memory test")
+    assert manifest["workspace_id"] == "demo-project", manifest
+    assert a.selected_workspace_id() == "", a.selected_workspace_id()
+    selected = a.set_selected_workspace(manifest["workspace_id"])
+    assert selected["workspace_id"] == manifest["workspace_id"], selected
+    assert a.selected_workspace_id() == manifest["workspace_id"], a.selected_workspace_id()
+    assert any(row[0] == "/workspace" for row in a.command_matches("/work", state)), a.command_matches("/work", state)
+    assert any(row[0] == "/workspace select demo-project" for row in a.command_matches("/workspace select d", state)), a.command_matches("/workspace select d", state)
+    assert a.handle_workspace_command(state, "/workspace current") is True
+    assert a.handle_workspace_command(state, "/workspace list") is True
+    a.write_text_atomic(a.workspace_memory_path(manifest["workspace_id"]), "# Demo Project\n\nUse this project-specific fact.\n")
+
+    pack_with, _ref_with = a.build_main_runtime_context_pack(state, "use project memory", "task_workspace_selected")
+    assert pack_with["workspace_context"]["included"] is True, pack_with["workspace_context"]
+    assert pack_with["workspace_context"]["workspace"]["workspace_id"] == manifest["workspace_id"], pack_with["workspace_context"]
+    assert "Use this project-specific fact." in str(pack_with["layers"]["L2_project_memory"]["items"]), pack_with["layers"]["L2_project_memory"]
+    workspace_memory_entries = [row for row in pack_with["memory_pack"]["included"] if row.get("scope") == "workspace.project"]
+    assert workspace_memory_entries, pack_with["memory_pack"]
+    assert workspace_memory_entries[-1]["refs"], workspace_memory_entries[-1]
+    l4_index = a.read_json_dict_file(a.workspace_l4_index_path(manifest["workspace_id"]))
+    assert l4_index["refs_count"] == 1, l4_index
+    assert l4_index["refs"][0]["ref"] == "l4://2026-06.zip/0619_1200-session.txt", l4_index
+    assert Path(archive_path).read_bytes() == before, "L4 indexing must not rewrite archive content"
+
+    inventory = a.memory_inventory()
+    workspace_entries = [row for row in inventory if row.layer == "Workspace"]
+    assert any(row.label.endswith("manifest.json") for row in workspace_entries), workspace_entries
+    assert any(row.label.endswith("memory.md") for row in workspace_entries), workspace_entries
+
+    a.clear_selected_workspace()
+    assert a.selected_workspace_id() == "", a.selected_workspace_id()
+    pack_cleared, _ref_cleared = a.build_main_runtime_context_pack(state, "cleared", "task_workspace_cleared")
+    assert pack_cleared["workspace_context"]["included"] is False, pack_cleared["workspace_context"]
+    a.write_text_atomic(
+        a.SHUHENG_WORKSPACE_STATE_PATH,
+        json.dumps({
+            "schema_version": "shuheng.workspace_state.v1",
+            "active_workspace_id": "missing-workspace",
+            "selection_mode": "manual",
+        }, ensure_ascii=False),
+    )
+    pack_missing, _ref_missing = a.build_main_runtime_context_pack(state, "missing", "task_workspace_missing")
+    assert pack_missing["workspace_context"]["included"] is False, pack_missing["workspace_context"]
+    assert "manifest is missing" in pack_missing["workspace_context"]["reason"], pack_missing["workspace_context"]
 
 
 def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
@@ -3819,6 +3889,7 @@ def run_checks() -> None:
     assert_ohmypi_provider_module_boundary()
     assert_shuheng_brand_entrypoints()
     assert_shuheng_history_storage_owned()
+    assert_shuheng_workspace_memory_context()
     assert_shuheng_bootstraps_legacy_state_without_mutating_source()
     assert_ohmypi_runtime_registry()
     assert_ohmypi_memory_prompt_and_command()

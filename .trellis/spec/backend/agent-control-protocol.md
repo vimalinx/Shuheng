@@ -1150,6 +1150,84 @@ configure_frontend_history_storage()
 maybe_bootstrap_shuheng_legacy_state()
 ```
 
+## Scenario: Manual Shuheng Workspace Memory
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng project memory is hydrated through a manually selected workspace instead of automatic repo/workdir inference.
+- Applies to: workspace storage paths, `/workspace` commands, workspace manifests/indexes, L4 cold archive indexes, `memory_inventory()`, `memory_hydration_pack()`, `context_layers_for_task()`, `build_context_pack()`, and `memory_context_get`.
+- Non-goal: This does not mine L4 archives into approved long-term facts, does not infer the active workspace from the current directory, and does not let OMP/Codex/plugins write long-term memory directly.
+
+### 2. Signatures
+
+- Workspace root: `SHUHENG_WORKSPACES_DIR = os.path.join(SHUHENG_HOME, "workspaces")`.
+- Active workspace state: `SHUHENG_WORKSPACE_STATE_PATH = os.path.join(SHUHENG_WORKSPACES_DIR, "active.json")`.
+- Workspace files:
+  - `~/.shuheng/workspaces/<workspace_id>/manifest.json`
+  - `~/.shuheng/workspaces/<workspace_id>/memory.md`
+  - `~/.shuheng/workspaces/<workspace_id>/index.json`
+  - `~/.shuheng/workspaces/<workspace_id>/l4_index.json`
+- Commands: `/workspace list`, `/workspace current`, `/workspace new <name> [| description]`, `/workspace select <workspace_id|name>`, `/workspace clear`, and `/workspaces`.
+- Context-pack field: `workspace_context` with `included`, `reason`, `workspace`, `items`, `refs`, and optional `l4`.
+
+### 3. Contracts
+
+- Workspace ids are normalized filesystem-safe slugs; callers must not be able to escape `SHUHENG_WORKSPACES_DIR`.
+- Creating a workspace writes a manifest, an initial `memory.md`, a generated `index.json`, and a generated non-destructive L4 index.
+- Workspace creation alone does not rely on repo/workdir inference. Slash-command creation may immediately select the created workspace because it is an explicit user action.
+- The active workspace is selected only by explicit state in `active.json`.
+- `build_context_pack()` hydrates workspace memory only when `active.json` points to an existing manifest and the context is not Secret Vault.
+- With no active workspace, `workspace_context.included` must be `false`, and the memory pack must explicitly exclude `workspace.project` with a reason.
+- L4 handling is index-only: `l4_index.json` stores `l4://<archive>/<member>` refs, archive/member metadata, counts, and samples. It must not unzip, delete, rewrite, or mine archive content.
+- `memory_inventory()` reports workspace manifest, memory, workspace index, active state, and L4 index files as `Workspace` entries without hiding legacy memory visibility.
+- `memory_context_get` and OMP prompt generation consume the same app-layer context-pack behavior; plugins must not scrape workspace files directly.
+
+### 4. Validation & Error Matrix
+
+- No `active.json` or empty `active_workspace_id` -> context pack contains `workspace_context.included:false` and no workspace memory items.
+- `active_workspace_id` references a missing manifest -> context pack contains `included:false` and a missing-manifest reason.
+- Secret Vault context -> normal workspace memory is not hydrated.
+- `/workspace select <unknown>` -> user-visible not-found/ambiguous message and active workspace is unchanged.
+- L4 zip exists -> `l4_index.json` contains exact `l4://` refs.
+- L4 zip read fails -> index row records the archive error, but workspace creation/context generation does not destructively modify archives.
+
+### 5. Good/Base/Bad Cases
+
+- Good: User runs `/workspace new Demo`, then context packs include `workspace_context.workspace.workspace_id:"demo"` plus `workspace.project` memory refs.
+- Good: User runs `/workspace clear`, then later context packs state that no workspace is manually selected and exclude workspace project memory.
+- Base: A workspace has empty `memory.md`; context pack may include the workspace identity and an empty-memory marker but no invented facts.
+- Base: L4 archives are indexed as cold refs so a future Memory Curator can cite exact zip members.
+- Bad: The TUI infers a workspace from the current checkout and injects memory without explicit selection.
+- Bad: OMP or a plugin writes directly to `~/.shuheng/workspaces/*/memory.md`.
+- Bad: L4 indexing deletes raw sessions, rewrites zips, or mines facts into approved memory without candidate approval.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert workspace root and active state paths are under `SHUHENG_HOME`.
+- Tests must assert no selected workspace produces `workspace_context.included:false`, an excluded `workspace.project` memory-pack row, and prompt text that reports no active workspace.
+- Tests must assert workspace creation writes manifest/memory/index/L4 index files without selecting implicitly at the API layer.
+- Tests must assert explicit selection persists in `active.json` and selected workspace memory appears in L2 project memory plus `workspace.project` hydration entries.
+- Tests must assert L4 zip indexing creates exact `l4://` member refs and does not rewrite archive bytes.
+- Tests must assert `/workspace` completion/command paths can list/current/select workspaces.
+- Tests must assert `memory_inventory()` includes `Workspace` entries for manifest and memory files.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+workspace_id = infer_workspace_from_cwd()
+pack["memory_pack"]["included"].append(read_project_memory(workspace_id))
+```
+
+#### Correct
+
+```python
+workspace_id = selected_workspace_id()
+workspace_context = workspace_context_payload(security_context=sub.security_context)
+pack["workspace_context"] = workspace_context
+```
+
 ## Scenario: Temporary Non-Persistent Main Sessions
 
 ### 1. Scope / Trigger
