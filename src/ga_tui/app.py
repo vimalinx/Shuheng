@@ -16695,7 +16695,7 @@ def render_assistant_text(
 
     process_indices = [
         idx for idx, (_marker, body) in enumerate(turns)
-        if process_has_tool_noise(body) and not has_ask_user_tool(body)
+        if not has_ask_user_tool(body)
     ]
     if fold_process and len(process_indices) >= 2:
         process_set = set(process_indices)
@@ -16704,6 +16704,10 @@ def render_assistant_text(
         group_expanded = group_key in expanded_groups
         process_turns = [(idx, *turns[idx]) for idx in process_indices]
         current_group = (not done) and (len(turns) - 1 in process_set)
+        group_final_visible = ""
+        if process_indices and process_indices[-1] == len(turns) - 1:
+            _last_marker, last_body = turns[process_indices[-1]]
+            group_final_visible = visible_reply_text(last_body, hide_detail_fences=process_has_tool_noise(last_body))
         inserted_group = False
         for idx, (marker, body) in enumerate(turns):
             is_last = idx == len(turns) - 1
@@ -16725,10 +16729,8 @@ def render_assistant_text(
                                 rendered.append(detail)
                         else:
                             rendered.append(collapsed_process_child_line(child_label, child_marker, child_body, child_current))
-                for _original_idx, child_marker, child_body in process_turns:
-                    final_visible = visible_reply_text(child_body, hide_detail_fences=True)
-                    if final_visible:
-                        rendered.append(final_visible)
+                if group_final_visible:
+                    rendered.append(group_final_visible)
                 continue
             if has_ask_user_tool(body):
                 final_text = visible_ask_user_text(body)

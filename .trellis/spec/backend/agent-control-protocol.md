@@ -89,11 +89,13 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - AI title context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
 - Main transcript renderer sees process blocks -> folded process UI still shows the process label.
 - Main transcript renderer sees a legacy thinking block plus a standalone `.` line -> renders the thinking excerpt and suppresses the dot line.
+- Main transcript renderer sees multiple `LLM Running` blocks in one assistant message -> collapsed view shows one `过程组 G...` row, not one visible `过程 Turn ...` row per process block; intermediate progress prose stays inside the expandable group while the final user-facing reply remains visible outside the group.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: History row title is `修复左栏历史会话标题` while restored assistant preview says `已完成历史会话标题修复`.
 - Good: Main transcript shows `过程 Turn 15: Let me observe the page...`, not `过程 Turn 15: OMP 思考`.
+- Good: A long OMP research turn with many thinking/tool/status blocks renders as one expandable `过程组` plus the final report, not dozens of separate `过程 Turn` lines.
 - Base: A normal non-process assistant `<summary>` can still be used as a title candidate.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
 - Bad: Main transcript shows standalone `.` lines between process turns.
@@ -104,6 +106,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - The test must seed a stale `session_meta.json` cache with `preview:"OMP 思考"` to prove cache invalidation.
 - The test must assert restored preview messages and AI title context exclude process-only summary and hidden reasoning.
 - Tests must assert OMP thinking summaries use thinking excerpts, legacy `OMP 思考` summaries render from `<thinking>`, and standalone dot deltas/lines are suppressed.
+- Tests must assert mixed OMP process turns, including thinking-only summaries, tool turns, and short progress prose, collapse into one expandable process group while the final response stays visible.
 
 ### 7. Wrong vs Correct
 

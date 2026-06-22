@@ -2916,7 +2916,7 @@ def assert_context_pack_schema(path: str) -> dict:
     return pack
 
 
-def assert_restored_process_group_main_speech_visible() -> None:
+def assert_restored_process_group_folds_intermediate_speech() -> None:
     restored = (
         "**LLM Running (Turn 1) ...**\n"
         "<summary>检查已有子代理</summary>\n"
@@ -2944,8 +2944,8 @@ def assert_restored_process_group_main_speech_visible() -> None:
     rendered = a.render_assistant_text(restored, done=True, fold_process=True, message_index=2)
     assert "过程组 G3" in rendered, rendered
     assert "检查已有子代理 / 派发任务并等待回复" in rendered, rendered
-    assert "第一段主代理说明：先检查已有子代理。" in rendered, rendered
-    assert "第二段主代理说明：现在派发任务并等待回复。" in rendered, rendered
+    assert "第一段主代理说明：先检查已有子代理。" not in rendered, rendered
+    assert "第二段主代理说明：现在派发任务并等待回复。" not in rendered, rendered
     assert "最终主代理总结：两个步骤都已处理。" in rendered, rendered
     assert rendered.count("最终主代理总结：两个步骤都已处理。") == 1, rendered
     assert "· 过程 Turn 1" not in rendered, rendered
@@ -2953,6 +2953,45 @@ def assert_restored_process_group_main_speech_visible() -> None:
     assert "hidden lookup" not in rendered, rendered
     assert "hidden.txt" not in rendered, rendered
     assert "hidden tool output" not in rendered, rendered
+
+    expanded = a.render_assistant_text(restored, done=True, fold_process=True, message_index=2, expanded_groups={"G3"})
+    assert "▸ 过程 G3T1 Turn 1" in expanded, expanded
+    assert "▸ 过程 G3T2 Turn 2" in expanded, expanded
+    assert "▸ 过程 G3T3 Turn 3" in expanded, expanded
+
+
+def assert_mixed_omp_process_turns_fold_into_single_group() -> None:
+    restored = (
+        "**LLM Running (Turn 1) ...**\n"
+        "<summary>The user wants market research.</summary>\n"
+        "<thinking>\nplan research\n</thinking>\n"
+        "好，我来从整个链路做调研。\n\n"
+        "**LLM Running (Turn 4) ...**\n"
+        "<summary>Let me start researching each area.</summary>\n"
+        "先调研市场和竞品。\n\n"
+        "**LLM Running (Turn 5) ...**\n"
+        "<summary>调用 OMP 工具: web_search</summary>\n"
+        "🛠️ Tool: `web_search` 📥 args:\n"
+        "````text\n"
+        "{\"query\":\"photo homework solver market\"}\n"
+        "````\n"
+        "`````\n"
+        "search noise\n"
+        "`````\n\n"
+        "**LLM Running (Turn 41) ...**\n"
+        "<summary>Now compile the comprehensive report.</summary>\n"
+        "# 完整链路报告\n\n这是最终用户可见报告。\n"
+    )
+    rendered = a.render_assistant_text(restored, done=True, fold_process=True, message_index=6)
+    assert "过程组 G7" in rendered, rendered
+    assert "完整链路报告" in rendered, rendered
+    assert "这是最终用户可见报告。" in rendered, rendered
+    assert "· 过程 Turn 1" not in rendered, rendered
+    assert "· 过程 Turn 4" not in rendered, rendered
+    assert "· 过程 Turn 41" not in rendered, rendered
+    assert "好，我来从整个链路做调研。" not in rendered, rendered
+    assert "先调研市场和竞品。" not in rendered, rendered
+    assert "search noise" not in rendered, rendered
 
 
 def assert_process_detail_line_not_swallowed_by_code_fence() -> None:
@@ -4480,7 +4519,8 @@ def run_checks() -> None:
     assert_top_bar_header_requested_fields()
     assert_long_secret_render_reuses_stable_message_blocks()
     assert_secret_native_restore_hydrates_backend_context_blocks()
-    assert_restored_process_group_main_speech_visible()
+    assert_restored_process_group_folds_intermediate_speech()
+    assert_mixed_omp_process_turns_fold_into_single_group()
     assert_process_detail_line_not_swallowed_by_code_fence()
     assert_single_search_turn_keeps_final_reply_visible()
     assert_ask_user_tool_use_input_payload_visible()
