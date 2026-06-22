@@ -1371,6 +1371,41 @@ def assert_ohmypi_rpc_final_text_fallback() -> None:
     agent.close()
 
 
+def assert_ohmypi_rpc_streamed_final_text_dedupes_terminal_message() -> None:
+    processes: list[FakeRpcProcess] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        startup_timeout=1,
+    )
+    dq = agent.put_task("segmented punctuation", source="test")
+    process = wait_for_process(processes)
+    final_text = "明白了。\n1. 注册个体工商户（0.6%费率）\n2. 对接 webhook。"
+    for delta in ["明白了", ".", "\n1", ".", " 注册个体工商户（0", ".", "6%费率）\n2", ".", " 对接 webhook", "."]:
+        process.stdout.push({
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": delta},
+        })
+    process.stdout.push({
+        "type": "agent_end",
+        "messages": [{"role": "assistant", "content": [{"type": "text", "text": final_text}]}],
+    })
+    done, streamed = wait_for_queue_done(dq)
+    assert done["done"] == streamed, done
+    assert done["done"].count("明白了") == 1, done
+    assert done["done"].count("注册个体工商户") == 1, done
+    assert "0.6%费率" in done["done"], done
+    assert "06%费率" not in done["done"], done
+    agent.close()
+
+
 def assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt() -> None:
     processes: list[FakeRpcProcess] = []
 
@@ -4431,6 +4466,7 @@ def run_checks() -> None:
     assert_ohmypi_rpc_queue_mapping()
     assert_ohmypi_rpc_usage_tracking()
     assert_ohmypi_rpc_final_text_fallback()
+    assert_ohmypi_rpc_streamed_final_text_dedupes_terminal_message()
     assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt()
     assert_ohmypi_rpc_tool_use_turn_end_waits_for_final_answer()
     assert_ohmypi_rpc_process_blocks_fold_like_genericagent()

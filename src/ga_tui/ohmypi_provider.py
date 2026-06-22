@@ -148,6 +148,7 @@ class _ActivePrompt:
     finished: bool = False
     process_turn_no: int = 0
     pending_thinking: str = ""
+    pending_standalone_dot_delta: str = ""
     pending_terminal_text: str | None = None
     pending_terminal_fallback_text: str = ""
     terminal_grace_started: bool = False
@@ -376,6 +377,34 @@ def _visible_text_from_payload(value: Any) -> str:
         if text:
             parts.append(text)
     return "".join(parts)
+
+
+_TERMINAL_DEDUPE_PUNCT_TRANSLATION = str.maketrans({
+    "。": ".",
+    "．": ".",
+    "，": ",",
+    "：": ":",
+    "；": ";",
+    "！": "!",
+    "？": "?",
+})
+
+
+def _terminal_dedupe_text(text: str) -> str:
+    clean = str(text or "").translate(_TERMINAL_DEDUPE_PUNCT_TRANSLATION)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def _should_append_terminal_final_tail(buffer: str, final_tail: str) -> bool:
+    if not final_tail:
+        return False
+    if final_tail in buffer:
+        return False
+    normalized_tail = _terminal_dedupe_text(final_tail)
+    if not normalized_tail:
+        return False
+    return normalized_tail not in _terminal_dedupe_text(buffer)
 
 
 def _token_usage_int(value: Any) -> int:
@@ -1028,6 +1057,7 @@ class OhMyPiRpcAgent:
             active = self._active
             if active is None or active.finished:
                 return
+            active.pending_standalone_dot_delta = ""
             active.process_turn_no += 1
             block = (
                 f"\n\n**LLM Running (Turn {active.process_turn_no}) ...**\n"
@@ -1056,6 +1086,16 @@ class OhMyPiRpcAgent:
         thinking_text = _bounded_process_text(thinking, max_chars=MAX_PROCESS_RESULT_CHARS)
         body = "<thinking>\n" + thinking_text + "\n</thinking>"
         self._append_active_process_block(_thinking_process_summary(thinking_text), body)
+
+    def _flush_active_pending_standalone_dot_delta(self) -> None:
+        with self._active_lock:
+            active = self._active
+            if active is None or active.finished or not active.pending_standalone_dot_delta:
+                return
+            delta = active.pending_standalone_dot_delta
+            active.pending_standalone_dot_delta = ""
+            active.buffer += delta
+            active.display_queue.put({"next": delta, "source": "ohmypi"})
 
     def _append_active_tool_call_process(self, tool_name: str, args: Any, *, summary: str = "") -> None:
         self._flush_active_thinking()
@@ -1099,12 +1139,20 @@ class OhMyPiRpcAgent:
         if not delta:
             return
         if _is_standalone_dot_delta(delta):
+            with self._active_lock:
+                active = self._active
+                if active is None or active.finished:
+                    return
+                active.pending_standalone_dot_delta += delta
             return
         self._flush_active_thinking()
         with self._active_lock:
             active = self._active
             if active is None or active.finished:
                 return
+            if active.pending_standalone_dot_delta:
+                delta = active.pending_standalone_dot_delta + delta
+                active.pending_standalone_dot_delta = ""
             active.buffer += delta
             active.display_queue.put({"next": delta, "source": "ohmypi"})
 
@@ -1254,6 +1302,7 @@ class OhMyPiRpcAgent:
     ) -> None:
         if text is None:
             self._flush_active_thinking()
+            self._flush_active_pending_standalone_dot_delta()
         self._merge_active_session_file_token_usage(wait=wait_for_session_usage)
         done_text = ""
         signal_source = source
@@ -1271,7 +1320,7 @@ class OhMyPiRpcAgent:
             elif active.buffer:
                 done_text = active.buffer
                 final_tail = fallback_text or active.final_text
-                if final_tail and final_tail not in done_text:
+                if _should_append_terminal_final_tail(done_text, final_tail):
                     done_text = done_text.rstrip() + "\n\n" + final_tail
             else:
                 done_text = fallback_text or active.final_text
