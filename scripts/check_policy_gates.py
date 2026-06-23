@@ -3250,6 +3250,51 @@ def assert_mixed_omp_process_turns_fold_into_single_group() -> None:
     assert "search noise" not in rendered, rendered
 
 
+def assert_process_group_keeps_substantive_reply_before_housekeeping() -> None:
+    restored = (
+        "**LLM Running (Turn 11) ...**\n"
+        "<summary>调用 OMP 工具: irc</summary>\n"
+        "🛠️ Tool: `irc` 📥 args:\n"
+        "````text\n"
+        '{"args":{"await":true,"message":"hello","op":"send","to":"DemoBeta"}}\n'
+        "````\n\n"
+        "**LLM Running (Turn 12) ...**\n"
+        "<summary>OMP 工具结果: irc</summary>\n"
+        "🛠️ Tool: `irc` 📥 args:\n"
+        "````text\n"
+        '{"status":"ok","toolCallId":"call_beta"}\n'
+        "````\n"
+        "`````\n"
+        '{"content":[{"text":"Delivered to 1 peer(s):\\n- DemoBeta: injected\\n\\nReply from DemoBeta:\\nHello Main! DemoBeta here, I can hear you loud and clear.","type":"text"}],"details":{"waited":{"from":"DemoBeta","body":"Hello Main! DemoBeta here, I can hear you loud and clear."}}}\n'
+        "`````\n\n"
+        "**LLM Running (Turn 13) ...**\n"
+        "<summary>OMP 工具结果: irc</summary>\n"
+        "🛠️ Tool: `irc` 📥 args:\n"
+        "````text\n"
+        '{"status":"ok","toolCallId":"call_alpha"}\n'
+        "````\n"
+        "`````\n"
+        '{"content":[{"text":"Delivered to 1 peer(s):\\n- DemoAlpha: injected\\n\\nReply from DemoAlpha:\\n你好 Main！我是 DemoAlpha，能听到你说话。","type":"text"}],"details":{"waited":{"from":"DemoAlpha","body":"你好 Main！我是 DemoAlpha，能听到你说话。"}}}\n'
+        "`````\n\n"
+        "## 能和代理说话吗 — 结论\n\n"
+        "能。刚才通过 IRC 分别向 DemoAlpha 和 DemoBeta 发了消息，并收到了回复。"
+        "这个结论应该保留在过程组外面，而不是被后续收尾思考覆盖。\n\n"
+        "**LLM Running (Turn 14) ...**\n"
+        "<summary>Both demo agents have completed. Nothing further to do.</summary>\n"
+        "<thinking>Both demo agents have completed. Nothing further to do.</thinking>\n"
+        "两个子 agent 都已完成并关闭。IRC 多 agent 通信功能验证通过。\n"
+    )
+    rendered = a.render_assistant_text(restored, done=True, fold_process=True, message_index=12)
+    assert "过程组 G13" in rendered, rendered
+    assert "能和代理说话吗" in rendered, rendered
+    assert "这个结论应该保留" in rendered, rendered
+    assert "IRC 回复" in rendered, rendered
+    assert "DemoBeta: Hello Main! DemoBeta here" in rendered, rendered
+    assert "DemoAlpha: 你好 Main！我是 DemoAlpha" in rendered, rendered
+    assert "Delivered to 1 peer" not in rendered, rendered
+    assert "toolCallId" not in rendered, rendered
+
+
 def assert_process_detail_line_not_swallowed_by_code_fence() -> None:
     restored = (
         "**LLM Running (Turn 1) ...**\n"
@@ -4901,6 +4946,7 @@ def run_checks() -> None:
     assert_secret_native_restore_hydrates_backend_context_blocks()
     assert_restored_process_group_folds_intermediate_speech()
     assert_mixed_omp_process_turns_fold_into_single_group()
+    assert_process_group_keeps_substantive_reply_before_housekeeping()
     assert_process_detail_line_not_swallowed_by_code_fence()
     assert_single_search_turn_keeps_final_reply_visible()
     assert_ask_user_tool_use_input_payload_visible()

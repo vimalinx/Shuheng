@@ -16810,6 +16810,83 @@ def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
     return strip_standalone_dot_lines(text)
 
 
+def visible_reply_is_substantive(text: str) -> bool:
+    clean = strip_inline_markdown(clean_text(text or "")).strip()
+    if len(clean) >= 180:
+        return True
+    markers = ("# ", "## ", "### ", "|", "- ", "1.", "1. ", "✅", "结论", "报告")
+    return len(clean) >= 80 and any(marker in (text or "") for marker in markers)
+
+
+def visible_reply_has_section_shape(text: str) -> bool:
+    return bool(re.search(r"(?m)^#{1,3}\s+\S+", text or "")) or "结论" in (text or "")
+
+
+def irc_reply_snippets_from_process_body(body: str) -> list[str]:
+    if "irc" not in {tool.lower() for tool in process_tools(body)}:
+        return []
+    snippets: list[str] = []
+    seen: set[str] = set()
+    for fence in TOOL_RESULT_FENCE_RE.findall(body or ""):
+        for obj in jsonish_objects(fence):
+            content = obj.get("content")
+            items = content if isinstance(content, list) else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                text = clean_text(str(item.get("text") or "")).strip()
+                for match in re.finditer(r"Reply from ([^:\n]+):\s*([\s\S]*?)(?=\n\nReply from |\Z)", text):
+                    name = match.group(1).strip()
+                    reply = clean_text(match.group(2)).strip()
+                    if not name or not reply:
+                        continue
+                    line = f"{name}: {reply}"
+                    if line not in seen:
+                        snippets.append(line)
+                        seen.add(line)
+            details = obj.get("details") if isinstance(obj.get("details"), dict) else {}
+            waited = details.get("waited") if isinstance(details.get("waited"), dict) else {}
+            speaker = str(waited.get("from") or "").strip()
+            reply = clean_text(str(waited.get("body") or "")).strip()
+            if speaker and reply:
+                line = f"{speaker}: {reply}"
+                if line not in seen:
+                    snippets.append(line)
+                    seen.add(line)
+    return snippets
+
+
+def preferred_group_visible_reply(process_turns: list[tuple[str, str]]) -> str:
+    visible_items: list[str] = []
+    for _marker, body in process_turns:
+        visible = visible_reply_text(body, hide_detail_fences=process_has_tool_noise(body)).strip()
+        if visible:
+            visible_items.append(visible)
+    chosen = visible_items[-1] if visible_items else ""
+    if chosen and not visible_reply_is_substantive(chosen):
+        chosen_len = len(strip_inline_markdown(clean_text(chosen)).strip())
+        for candidate in reversed(visible_items[:-1]):
+            candidate_len = len(strip_inline_markdown(clean_text(candidate)).strip())
+            if (
+                visible_reply_is_substantive(candidate)
+                and (
+                    candidate_len >= max(160, chosen_len * 3)
+                    or (visible_reply_has_section_shape(candidate) and candidate_len >= max(80, chosen_len * 2))
+                )
+            ):
+                chosen = candidate
+                break
+    irc_replies: list[str] = []
+    for _marker, body in process_turns:
+        for reply in irc_reply_snippets_from_process_body(body):
+            if reply not in irc_replies and reply not in chosen:
+                irc_replies.append(reply)
+    if irc_replies:
+        reply_block = "### IRC 回复\n" + "\n".join(f"- {reply}" for reply in irc_replies)
+        chosen = (chosen.rstrip() + "\n\n" + reply_block).strip() if chosen else reply_block
+    return chosen
+
+
 def close_unbalanced_markdown_fence(text: str) -> str:
     in_code = False
     fence_ticks = ""
@@ -16933,10 +17010,7 @@ def render_assistant_text(
         group_expanded = group_key in expanded_groups
         process_turns = [(idx, *turns[idx]) for idx in process_indices]
         current_group = (not done) and (len(turns) - 1 in process_set)
-        group_final_visible = ""
-        if process_indices and process_indices[-1] == len(turns) - 1:
-            _last_marker, last_body = turns[process_indices[-1]]
-            group_final_visible = visible_reply_text(last_body, hide_detail_fences=process_has_tool_noise(last_body))
+        group_final_visible = preferred_group_visible_reply([(item[1], item[2]) for item in process_turns])
         inserted_group = False
         for idx, (marker, body) in enumerate(turns):
             is_last = idx == len(turns) - 1

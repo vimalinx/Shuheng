@@ -96,12 +96,15 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Main transcript renderer sees process blocks -> folded process UI still shows the process label.
 - Main transcript renderer sees a legacy thinking block plus a standalone `.` line -> renders the thinking excerpt and suppresses the dot line.
 - Main transcript renderer sees multiple `LLM Running` blocks in one assistant message -> collapsed view shows one `过程组 G...` row, not one visible `过程 Turn ...` row per process block; intermediate progress prose stays inside the expandable group while the final user-facing reply remains visible outside the group.
+- Main transcript renderer sees a substantive user-facing reply before later housekeeping process turns -> the substantive reply remains visible outside the collapsed group instead of being replaced by a short "nothing further" cleanup sentence.
+- Main transcript renderer sees OMP `irc` tool results with `Reply from ...` payloads -> bounded IRC reply snippets remain visible outside the collapsed group while raw receipts, tool ids, and tool JSON stay folded.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: History row title is `修复左栏历史会话标题` while restored assistant preview says `已完成历史会话标题修复`.
 - Good: Main transcript shows `过程 Turn 15: Let me observe the page...`, not `过程 Turn 15: OMP 思考`.
 - Good: A long OMP research turn with many thinking/tool/status blocks renders as one expandable `过程组` plus the final report, not dozens of separate `过程 Turn` lines.
+- Good: An OMP IRC demo shows the final conclusion and `IRC 回复` snippets from DemoAlpha/DemoBeta even if later turns only close the demo agents.
 - Base: A normal non-process assistant `<summary>` can still be used as a title candidate.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
 - Bad: Main transcript shows standalone `.` lines between process turns.
@@ -115,6 +118,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Tests must assert model-owned `session.rename` updates are marked AI-owned and do not override manual titles.
 - Tests must assert OMP thinking summaries use thinking excerpts, legacy `OMP 思考` summaries render from `<thinking>`, and standalone dot deltas/lines are suppressed.
 - Tests must assert mixed OMP process turns, including thinking-only summaries, tool turns, and short progress prose, collapse into one expandable process group while the final response stays visible.
+- Tests must assert a grouped OMP IRC exchange preserves the substantive conclusion and bounded `Reply from ...` snippets when later housekeeping turns are shorter.
 
 ### 7. Wrong vs Correct
 
