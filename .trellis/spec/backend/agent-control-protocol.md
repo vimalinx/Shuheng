@@ -207,6 +207,64 @@ S01 修复左栏历史会话标题
 /curate-history cat:Shuheng limit=5 -> index artifact + cached summaries -> candidate recommendations + subagent recommendations -> user-approved follow-up actions
 ```
 
+## Scenario: Running Indicator Rendering
+
+### 1. Scope / Trigger
+
+- Trigger: The visible main or subagent transcript contains an unfinished assistant message while `display_status(state)` is `running` or `aborting`.
+- Applies to: `State.run_frame`, `RenderLine` metadata, `message_lines_cached()`, `draw_main()`, and the main curses event loop.
+- Non-goal: This does not change runtime provider streaming, transcript persistence, token accounting, process folding, or session history naming.
+
+### 2. Signatures
+
+- Frame source: `RUN_FRAMES` and `running_indicator(frame)`.
+- Cached line marker: `RenderLine.kind == "running_indicator"`.
+- Visible row state: `State.running_indicator_rect`.
+- Lightweight redraw helper: `draw_running_indicator_frame(stdscr, state)`.
+
+### 3. Contracts
+
+- `run_frame` must not be part of `message_render_cache_key()` or the `message_lines_cached()` key.
+- Long assistant messages must not run through markdown/process rendering on every animation tick.
+- Full `draw_main()` may render the current spinner frame from cached `RenderLine` metadata without mutating the cache.
+- The main event loop must not set `state.dirty` solely because `run_frame` advanced.
+- When the transcript spinner row is visible and the screen is otherwise clean, the animation tick may refresh only that row and then restore the input cursor.
+- Lightweight spinner refresh must no-op when the spinner row is not visible, text selection is active, or a session popup is open.
+
+### 4. Validation & Error Matrix
+
+- `run_frame` changes from 0 to 1 -> message block cache keys and cached block object identities remain stable.
+- Visible unfinished assistant message + clean screen + frame tick -> one row is updated and curses refreshes once.
+- Hidden spinner row, active selection, popup, idle status, or aborted/finished message -> no lightweight row update.
+- Terminal resize or full redraw -> `draw_main()` recomputes `State.running_indicator_rect` from currently visible lines.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A long streaming OMP reply keeps the transcript cache stable while `[=     ] running...` animates smoothly.
+- Base: A normal dirty redraw caused by input, scroll, history refresh, or clock refresh still redraws the whole TUI.
+- Bad: Adding `run_frame` to the message cache key or setting `state.dirty = True` every 120ms.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert run-frame changes do not invalidate message block cache keys.
+- Tests must assert a visible running indicator can be refreshed with a single row update and one curses refresh while preserving the cache and input cursor.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+state.run_frame += 1
+state.dirty = True
+```
+
+#### Correct
+
+```python
+state.run_frame += 1
+draw_running_indicator_frame(stdscr, state)
+```
+
 ## Scenario: OMP Runtime Permission Profiles
 
 ### 1. Scope / Trigger
@@ -291,6 +349,72 @@ tools_allowed: read, reason, search, repo.read, repo.write, edit, write, test, b
 tools_forbidden:
 approval_required_for:
 memory_write: candidate_only
+```
+
+## Scenario: OMP Native Session And Context Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng uses OMP as the main runtime provider and must restore sessions, show context usage, and persist history without replaying display transcripts as provider context.
+- Applies to: `OhMyPiRpcAgent`, `restore_backend_and_recent_messages()`, session metadata, left status token lines, and OMP RPC state handling.
+- Non-goal: This does not make OMP own Shuheng memory, session category metadata, history archive flags, approvals, or long-term memory writes.
+
+### 2. Signatures
+
+- OMP RPC state command: `{ "type": "get_state" }`.
+- OMP RPC switch command: `{ "type": "switch_session", "sessionPath": "<absolute OMP session jsonl>" }`.
+- OMP RPC compact command: `{ "type": "compact", "customInstructions"?: "<text>" }`.
+- Provider attributes: `native_session_file`, `native_session_id`, `native_session_name`, `native_message_count`, `native_auto_compaction_enabled`, and `native_context_usage`.
+- Shuheng metadata fields: `runtime_provider:"ohmypi"`, `ohmypi_session_file`, `ohmypi_session_id`, `ohmypi_session_name`, `ohmypi_message_count`, `ohmypi_context_usage`, and `ohmypi_updated_at`.
+
+### 3. Contracts
+
+- OMP provider startup and task completion must refresh native state with `get_state`.
+- `contextUsage.tokens`, `contextUsage.contextWindow`, and `contextUsage.percent` from OMP are the source of truth for OMP context display.
+- When an OMP-backed Shuheng session completes, Shuheng stores the OMP `sessionFile` in `session_meta.json` for the visible `model_responses*.txt` row.
+- Restoring a history row with an existing `ohmypi_session_file` must call OMP `switch_session` and must not parse the visible `model_responses*.txt` transcript back into provider history.
+- If the OMP session file is missing or switching fails, Shuheng may fall back to legacy transcript parsing, but the fallback must be explicit and must not be treated as the native OMP path.
+- Shuheng left history remains a Shuheng-owned UI/index surface; the provider context remains OMP's active `SessionManager` state.
+
+### 4. Validation & Error Matrix
+
+- `get_state.contextUsage` is present -> token panel shows OMP context tokens/window instead of `tracker unavailable`.
+- `get_state.model.contextWindow` is present -> backend `contextWindow` and `context_win` mirror it.
+- `ohmypi_session_file` exists -> restore calls `switch_runtime_session()` and avoids `reset_runtime_session()` plus backend-history replay.
+- `ohmypi_session_file` missing -> restore uses the legacy Shuheng transcript fallback.
+- `switch_session` returns `cancelled:true` or RPC error -> restore falls back and includes a visible native-switch failure note.
+- `compact` succeeds -> provider refreshes `get_state` before exposing updated context usage.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A restored OMP history row switches to `/.../sessions/<session>.jsonl`, then the next prompt continues from OMP's compacted provider context.
+- Good: The left status panel shows `ctx 123k/1.00M 12%` from OMP `contextUsage`.
+- Base: A legacy Shuheng-only transcript has no OMP session metadata and still restores with the old parser.
+- Bad: Restoring an OMP row builds backend history from folded process/UI transcript text.
+- Bad: Token display estimates context from transcript characters when OMP has supplied `contextUsage`.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert OMP provider consumes `get_state.contextUsage`, `sessionFile`, `sessionId`, `sessionName`, and `messageCount`.
+- Tests must assert `switch_runtime_session()` sends `switch_session` with `sessionPath` and refreshes native state.
+- Tests must assert `compact_runtime_session()` refreshes native context usage after compacting.
+- Tests must assert restoring a Shuheng row with `ohmypi_session_file` uses native switch and does not call `reset_runtime_session()`.
+- Tests must assert OMP token panel lines render OMP `contextUsage` even when Shuheng's cost tracker is unavailable.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+restore -> parse model_responses*.txt -> backend.history = parsed visible transcript -> prompt
+token panel -> estimate context from Shuheng transcript chars
+```
+
+#### Correct
+
+```text
+restore -> OMP switch_session(sessionPath=ohmypi_session_file) -> prompt
+token panel -> OMP get_state.contextUsage
 ```
 
 ## Scenario: ga-control v2 Delegation

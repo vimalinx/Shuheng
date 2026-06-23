@@ -304,6 +304,12 @@ class FakeRpcStdin:
         self.stdout = stdout
         self.auto_finish = auto_finish
         self.writes: list[dict] = []
+        self.session_path = "/tmp/omp-session.jsonl"
+        self.session_id = "omp-session-1"
+        self.session_name = "OMP Native Session"
+        self.message_count = 4
+        self.context_tokens = 123456
+        self.context_window = 1000000
 
     def write(self, payload: str) -> int:
         for line in payload.splitlines():
@@ -329,6 +335,59 @@ class FakeRpcStdin:
                         },
                     })
                     self.stdout.push({"type": "agent_end"})
+            elif frame.get("type") == "get_state":
+                self.stdout.push({
+                    "id": frame.get("id"),
+                    "type": "response",
+                    "command": "get_state",
+                    "success": True,
+                    "data": {
+                        "model": {"provider": "token52", "id": "gpt-5.5", "contextWindow": self.context_window},
+                        "sessionFile": self.session_path,
+                        "sessionId": self.session_id,
+                        "sessionName": self.session_name,
+                        "autoCompactionEnabled": True,
+                        "messageCount": self.message_count,
+                        "contextUsage": {
+                            "tokens": self.context_tokens,
+                            "contextWindow": self.context_window,
+                            "percent": self.context_tokens / self.context_window * 100,
+                        },
+                    },
+                })
+            elif frame.get("type") == "switch_session":
+                self.session_path = str(frame.get("sessionPath") or self.session_path)
+                self.session_id = "omp-session-switched"
+                self.session_name = "Switched OMP Session"
+                self.message_count = 9
+                self.stdout.push({
+                    "id": frame.get("id"),
+                    "type": "response",
+                    "command": "switch_session",
+                    "success": True,
+                    "data": {"cancelled": False},
+                })
+            elif frame.get("type") == "new_session":
+                self.session_path = "/tmp/omp-new-session.jsonl"
+                self.session_id = "omp-session-new"
+                self.session_name = "New OMP Session"
+                self.message_count = 0
+                self.stdout.push({
+                    "id": frame.get("id"),
+                    "type": "response",
+                    "command": "new_session",
+                    "success": True,
+                    "data": {"cancelled": False},
+                })
+            elif frame.get("type") == "compact":
+                self.context_tokens = 45678
+                self.stdout.push({
+                    "id": frame.get("id"),
+                    "type": "response",
+                    "command": "compact",
+                    "success": True,
+                    "data": {"summary": "compacted"},
+                })
             elif frame.get("type") == "set_host_tools":
                 tools = frame.get("tools") if isinstance(frame.get("tools"), list) else []
                 self.stdout.push({
@@ -1400,6 +1459,83 @@ def assert_ohmypi_rpc_usage_tracking() -> None:
     fallback_agent.close()
 
 
+def assert_ohmypi_native_session_state_and_restore() -> None:
+    processes: list[FakeRpcProcess] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        startup_timeout=1,
+    )
+    target_session = "/tmp/omp-restored-session.jsonl"
+    assert agent.switch_runtime_session(target_session) is True
+    process = wait_for_process(processes)
+    assert any(item.get("type") == "switch_session" and item.get("sessionPath") == target_session for item in process.stdin.writes), process.stdin.writes
+    assert agent.native_session_file == target_session, agent.native_session_file
+    assert agent.native_session_id == "omp-session-switched", agent.native_session_id
+    assert agent.native_message_count == 9, agent.native_message_count
+    assert agent.native_context_usage["contextWindow"] == 1000000, agent.native_context_usage
+    assert getattr(agent.llmclient.backend, "contextWindow", 0) == 1000000
+    assert agent.compact_runtime_session("keep current task") is True
+    assert agent.native_context_usage["tokens"] == 45678, agent.native_context_usage
+    agent.close()
+
+    class NativeRestoreAgent:
+        def __init__(self) -> None:
+            self._ga_tui_runtime_provider_id = "ohmypi"
+            self.switches: list[str] = []
+            self.reset_calls = 0
+            self.log_path = ""
+
+        def switch_runtime_session(self, session_path: str) -> bool:
+            self.switches.append(session_path)
+            return True
+
+        def reset_runtime_session(self) -> None:
+            self.reset_calls += 1
+
+        def abort(self) -> None:
+            return None
+
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+    shuheng_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_omp_native_restore.txt")
+    native_session_path = os.path.join(a.MODEL_RESPONSES_DIR, "omp-native-session.jsonl")
+    Path(native_session_path).write_text("", encoding="utf-8")
+    a.write_text_atomic(a.SESSION_META_PATH, json.dumps({
+        os.path.basename(shuheng_path): {"runtime_provider": "ohmypi", "ohmypi_session_file": native_session_path},
+    }, ensure_ascii=False))
+    a.append_model_response_transcript_turn(shuheng_path, "恢复这个 OMP 会话", "已完成。")
+    restore_agent = NativeRestoreAgent()
+    messages, restore_msg, loaded_rounds, total_rounds, _history_message_count = a.restore_backend_and_recent_messages(restore_agent, shuheng_path)
+    assert restore_agent.switches == [native_session_path], restore_agent.switches
+    assert restore_agent.reset_calls == 0, restore_agent.reset_calls
+    assert "已切换到 OMP 原生会话" in restore_msg, restore_msg
+    assert loaded_rounds == 1 and total_rounds == 1, (loaded_rounds, total_rounds)
+    assert [msg.role for msg in messages[:2]] == ["user", "assistant"], messages
+
+    class NativeTokenAgent:
+        def __init__(self) -> None:
+            self._ga_tui_runtime_provider_id = "ohmypi"
+            self.native_context_usage = {"tokens": 123456, "contextWindow": 1000000, "percent": 12.3456}
+            self.native_message_count = 8
+
+    old_cost_tracker = a.cost_tracker
+    try:
+        a.cost_tracker = None
+        token_state = a.State(agent=NativeTokenAgent())
+        rendered = [text for text, _attr in a.current_token_lines(token_state, 80)]
+        assert any("ctx 123k/1.00M" in line and "12%" in line for line in rendered), rendered
+        assert "omp msgs 8" in rendered, rendered
+    finally:
+        a.cost_tracker = old_cost_tracker
+
+
 def assert_ohmypi_rpc_final_text_fallback() -> None:
     def make_agent(processes: list[FakeRpcProcess]) -> omp.OhMyPiRpcAgent:
         def process_factory(*_args, **_kwargs):
@@ -2400,6 +2536,8 @@ class TimeoutFakeScreen:
 class FakeDrawScreen:
     def __init__(self) -> None:
         self.calls: list[tuple[int, int, str, int]] = []
+        self.moves: list[tuple[int, int]] = []
+        self.refresh_count = 0
 
     def getmaxyx(self) -> tuple[int, int]:
         return (40, 120)
@@ -2407,7 +2545,11 @@ class FakeDrawScreen:
     def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
         self.calls.append((y, x, text, attr))
 
+    def move(self, y: int, x: int) -> None:
+        self.moves.append((y, x))
+
     def refresh(self) -> None:
+        self.refresh_count += 1
         return None
 
 
@@ -4506,6 +4648,33 @@ def assert_long_secret_render_reuses_stable_message_blocks() -> None:
     assert state.message_block_cache[streaming_key_frame1] is streaming_block
 
 
+def assert_running_indicator_uses_lightweight_row_refresh() -> None:
+    state = a.State(agent=None)
+    state.status = "running"
+    state.messages.append(a.Message("assistant", "streaming response", done=False))
+    screen = FakeDrawScreen()
+
+    a.draw_main(screen, state, height=40, width=120, sidebar_w=30, rightbar_w=0)
+    assert state.running_indicator_rect is not None
+    assert state.input_cursor_screen is not None
+    assert any(call[2].strip() == a.running_indicator(0) for call in screen.calls), screen.calls
+
+    line_cache_key = state.line_cache_key
+    block_cache_ids = {key: id(value) for key, value in state.message_block_cache.items()}
+    screen.calls.clear()
+    screen.moves.clear()
+    screen.refresh_count = 0
+
+    state.run_frame = 1
+    assert a.draw_running_indicator_frame(screen, state) is True
+    assert state.line_cache_key == line_cache_key
+    assert {key: id(value) for key, value in state.message_block_cache.items()} == block_cache_ids
+    assert len(screen.calls) == 1, screen.calls
+    assert screen.calls[0][2].strip() == a.running_indicator(1), screen.calls
+    assert screen.refresh_count == 1
+    assert screen.moves[-1] == state.input_cursor_screen
+
+
 def assert_stream_queue_coalesces_burst_updates() -> None:
     state = a.State(agent=None)
     target = a.StreamTarget("active")
@@ -4712,6 +4881,7 @@ def run_checks() -> None:
     assert_ohmypi_rpc_extension_approval_bridge()
     assert_ohmypi_rpc_queue_mapping()
     assert_ohmypi_rpc_usage_tracking()
+    assert_ohmypi_native_session_state_and_restore()
     assert_ohmypi_rpc_final_text_fallback()
     assert_ohmypi_rpc_streamed_final_text_dedupes_terminal_message()
     assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt()
@@ -4726,6 +4896,7 @@ def run_checks() -> None:
     assert_ohmypi_missing_binary_and_abort()
     assert_top_bar_header_requested_fields()
     assert_long_secret_render_reuses_stable_message_blocks()
+    assert_running_indicator_uses_lightweight_row_refresh()
     assert_stream_queue_coalesces_burst_updates()
     assert_secret_native_restore_hydrates_backend_context_blocks()
     assert_restored_process_group_folds_intermediate_speech()

@@ -95,6 +95,26 @@ def _positive_int(value: Any) -> int:
     return number if number > 0 else 0
 
 
+def _normalize_context_usage(raw: Any) -> dict[str, int | float]:
+    if not isinstance(raw, dict):
+        return {}
+    tokens = _positive_int(raw.get("tokens") or raw.get("used") or raw.get("inputTokens") or 0)
+    context_window = _positive_int(raw.get("contextWindow") or raw.get("context_window") or raw.get("size") or 0)
+    try:
+        percent = float(raw.get("percent", 0) or 0)
+    except (TypeError, ValueError):
+        percent = 0.0
+    if tokens <= 0 and context_window <= 0:
+        return {}
+    if percent <= 0 and tokens > 0 and context_window > 0:
+        percent = tokens / context_window * 100.0
+    return {
+        "tokens": tokens,
+        "contextWindow": context_window,
+        "percent": max(0.0, percent),
+    }
+
+
 def normalized_ohmypi_approval_mode(value: str = "") -> str:
     raw = str(value or "").strip().lower().replace("_", "-")
     return raw if raw in _OHMYPI_APPROVAL_MODES else "yolo"
@@ -603,10 +623,18 @@ class OhMyPiRpcAgent:
         self._active_lock = threading.Lock()
         self._active: _ActivePrompt | None = None
         self._request_no = 0
+        self._response_waiters: dict[str, queue.Queue] = {}
+        self._response_waiters_lock = threading.Lock()
         self._stderr_tail: list[str] = []
         self._closed = False
         self._host_tools_registered = False
         self._pending_model: OhMyPiRuntimeModel | None = None
+        self.native_session_file = ""
+        self.native_session_id = ""
+        self.native_session_name = ""
+        self.native_message_count = 0
+        self.native_auto_compaction_enabled = False
+        self.native_context_usage: dict[str, int | float] = {}
 
     def _clients_from_models(self, models: list[OhMyPiRuntimeModel]) -> list[_OhMyPiClient]:
         if not models:
@@ -654,6 +682,57 @@ class OhMyPiRpcAgent:
     def load_llm_sessions(self) -> None:
         if self._process is not None:
             self._send({"id": self._next_request_id("models"), "type": "get_available_models"})
+            self.request_runtime_state()
+
+    def request_runtime_state(self, *, wait: bool = False, timeout: float = 5.0) -> bool:
+        request = {"id": self._next_request_id("state"), "type": "get_state"}
+        try:
+            if wait:
+                frame = self._send_and_wait(request, timeout=timeout)
+                return bool(frame.get("success") is not False)
+            process = self._process
+            if process is None or process.poll() is not None or not self._ready.is_set():
+                return False
+            self._send(request)
+            return True
+        except Exception:
+            return False
+
+    def switch_runtime_session(self, session_path: str, *, timeout: float = 8.0) -> bool:
+        session_path = str(session_path or "").strip()
+        if not session_path:
+            return False
+        try:
+            self._ensure_process()
+            frame = self._send_and_wait(
+                {"id": self._next_request_id("switch-session"), "type": "switch_session", "sessionPath": session_path},
+                timeout=timeout,
+            )
+        except Exception as exc:
+            self._remember_stderr(f"switch session failed: {type(exc).__name__}: {exc}")
+            return False
+        if frame.get("success") is False:
+            self._remember_stderr(f"switch session failed: {frame.get('error') or 'unknown RPC error'}")
+            return False
+        data = frame.get("data")
+        if isinstance(data, dict) and bool(data.get("cancelled")):
+            return False
+        return self.request_runtime_state(wait=True, timeout=timeout)
+
+    def compact_runtime_session(self, custom_instructions: str = "", *, timeout: float = 30.0) -> bool:
+        request: dict[str, Any] = {"id": self._next_request_id("compact"), "type": "compact"}
+        if str(custom_instructions or "").strip():
+            request["customInstructions"] = str(custom_instructions).strip()
+        try:
+            self._ensure_process()
+            frame = self._send_and_wait(request, timeout=timeout)
+        except Exception as exc:
+            self._remember_stderr(f"compact session failed: {type(exc).__name__}: {exc}")
+            return False
+        if frame.get("success") is False:
+            self._remember_stderr(f"compact session failed: {frame.get('error') or 'unknown RPC error'}")
+            return False
+        return self.request_runtime_state(wait=True, timeout=timeout)
 
     def next_llm(self, index: int = -1) -> None:
         if self.configured_models:
@@ -744,6 +823,11 @@ class OhMyPiRpcAgent:
 
     def reset_runtime_session(self) -> None:
         self.history = []
+        self.native_session_file = ""
+        self.native_session_id = ""
+        self.native_session_name = ""
+        self.native_message_count = 0
+        self.native_context_usage = {}
         with self._active_lock:
             self._active = None
             self.is_running = False
@@ -845,12 +929,14 @@ class OhMyPiRpcAgent:
         if frame_type == "ready":
             self._register_host_tools()
             self._ready.set()
+            self.request_runtime_state()
             return
         if frame_type == "turn_start":
             self._cancel_active_terminal_grace()
             return
         if frame_type == "response":
             self._handle_response(frame)
+            self._notify_response_waiter(frame)
             return
         if frame_type == "host_tool_call":
             self._handle_host_tool_call(frame)
@@ -964,9 +1050,13 @@ class OhMyPiRpcAgent:
             return
         data = frame.get("data")
         if command in {"get_state", "set_model"} and isinstance(data, dict):
+            self._update_session_state(data)
             model = data.get("model")
             if isinstance(model, dict):
                 self._update_model(model)
+        if command in {"new_session", "switch_session", "compact"} and isinstance(data, dict):
+            if not bool(data.get("cancelled")):
+                self.request_runtime_state()
         if command == "cycle_model" and isinstance(data, dict):
             model = data.get("model")
             if isinstance(model, dict):
@@ -976,6 +1066,22 @@ class OhMyPiRpcAgent:
             if isinstance(models, list) and models:
                 self._replace_models_from_rpc(models)
 
+    def _update_session_state(self, data: dict[str, Any]) -> None:
+        self.native_session_file = str(data.get("sessionFile") or data.get("session_file") or "").strip()
+        self.native_session_id = str(data.get("sessionId") or data.get("session_id") or "").strip()
+        self.native_session_name = str(data.get("sessionName") or data.get("session_name") or "").strip()
+        self.native_message_count = _positive_int(data.get("messageCount") or data.get("message_count") or 0)
+        self.native_auto_compaction_enabled = bool(data.get("autoCompactionEnabled"))
+        context_usage = _normalize_context_usage(data.get("contextUsage") or data.get("context_usage"))
+        self.native_context_usage = context_usage
+        context_window = _positive_int(context_usage.get("contextWindow") if context_usage else 0)
+        backend = getattr(self.llmclient, "backend", None)
+        if backend is not None and context_window > 0:
+            setattr(backend, "context_win", context_window)
+            setattr(backend, "contextWindow", context_window)
+            setattr(backend, "current_context_tokens", _positive_int(context_usage.get("tokens")))
+            setattr(backend, "current_context_percent", float(context_usage.get("percent") or 0.0))
+
     def _update_model(self, model: dict[str, Any]) -> None:
         provider = str(model.get("provider") or self.llmclient.backend.name or "Oh My Pi")
         model_id = str(model.get("id") or model.get("modelId") or self.llmclient.backend.model or "unknown")
@@ -984,6 +1090,10 @@ class OhMyPiRpcAgent:
         self.llmclient.backend.model = model_id
         self.llmclient.backend.provider = provider
         self.llmclient.backend.model_id = model_id
+        context_window = _positive_int(model.get("contextWindow") or model.get("context_window") or 0)
+        if context_window > 0:
+            setattr(self.llmclient.backend, "context_win", context_window)
+            setattr(self.llmclient.backend, "contextWindow", context_window)
 
     def _replace_models_from_rpc(self, models: list[Any]) -> None:
         configured: list[OhMyPiRuntimeModel] = []
@@ -1390,6 +1500,7 @@ class OhMyPiRpcAgent:
             payload=event_payload,
         )
         self._emit_memory_candidate_signal(done_text, source=signal_source, request_id=request_id)
+        self.request_runtime_state()
 
     def _emit_memory_candidate_signal(self, text: str, *, source: str, request_id: str) -> None:
         if self.memory_candidate_sink is None:
@@ -1605,6 +1716,33 @@ class OhMyPiRpcAgent:
             self._send(frame)
         except Exception as exc:
             self._remember_stderr(f"host tool result failed: {type(exc).__name__}: {exc}")
+
+    def _send_and_wait(self, obj: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+        request_id = str(obj.get("id") or self._next_request_id("request"))
+        obj["id"] = request_id
+        waiter: queue.Queue = queue.Queue(maxsize=1)
+        with self._response_waiters_lock:
+            self._response_waiters[request_id] = waiter
+        try:
+            self._send(obj)
+            frame = waiter.get(timeout=max(0.1, timeout))
+            return frame if isinstance(frame, dict) else {}
+        finally:
+            with self._response_waiters_lock:
+                self._response_waiters.pop(request_id, None)
+
+    def _notify_response_waiter(self, frame: dict[str, Any]) -> None:
+        request_id = str(frame.get("id") or "")
+        if not request_id:
+            return
+        with self._response_waiters_lock:
+            waiter = self._response_waiters.get(request_id)
+        if waiter is None:
+            return
+        try:
+            waiter.put_nowait(frame)
+        except queue.Full:
+            pass
 
     def _send(self, obj: dict[str, Any]) -> None:
         process = self._process

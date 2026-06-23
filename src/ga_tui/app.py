@@ -591,6 +591,8 @@ class Message:
 class RenderLine:
     text: str
     attr: int = 0
+    kind: str = ""
+    prefix_cells: int = 0
 
 
 @dataclass
@@ -802,6 +804,8 @@ class State:
     main_width: int = 0
     body_top: int = 1
     body_height: int = 0
+    running_indicator_rect: Optional[tuple[int, int, int, int]] = None
+    input_cursor_screen: Optional[tuple[int, int]] = None
     active_plan_task_id: str = ""
     active_plan_steps: dict[str, str] = field(default_factory=dict)
     auto_plan_continue_attempts: dict[str, int] = field(default_factory=dict)
@@ -1131,6 +1135,36 @@ def set_session_meta_fields(state: State, path: str, **fields: Any) -> None:
             entry[field_name] = value
     state.session_meta[key] = entry
     save_session_meta_registry(state.session_meta)
+
+
+def remember_ohmypi_native_session_for_path(state: State, agent: Any, path: str) -> bool:
+    if not path or not is_normal_session_log_path(path) or not is_ohmypi_runtime_agent(agent):
+        return False
+    session_file = ohmypi_native_session_file(agent)
+    if not session_file:
+        request_state = getattr(agent, "request_runtime_state", None)
+        if callable(request_state):
+            try:
+                request_state(wait=True, timeout=2.0)
+            except Exception:
+                pass
+            session_file = ohmypi_native_session_file(agent)
+    if not session_file:
+        return False
+    usage = ohmypi_native_context_usage(agent)
+    fields: dict[str, Any] = {
+        "runtime_provider": "ohmypi",
+        "ohmypi_session_file": session_file,
+        "ohmypi_session_id": str(getattr(agent, "native_session_id", "") or ""),
+        "ohmypi_session_name": str(getattr(agent, "native_session_name", "") or ""),
+        "ohmypi_message_count": int(getattr(agent, "native_message_count", 0) or 0),
+        "ohmypi_auto_compaction_enabled": bool(getattr(agent, "native_auto_compaction_enabled", False)),
+        "ohmypi_updated_at": time.time(),
+    }
+    if usage:
+        fields["ohmypi_context_usage"] = usage
+    set_session_meta_fields(state, path, **fields)
+    return True
 
 
 def agent_log_path(agent: Any) -> str:
@@ -1804,10 +1838,7 @@ def agent_requires_transcript_bridge(agent: Any) -> bool:
     provider_id = agent_runtime_provider_id(agent)
     if provider_id == "genericagent":
         return False
-    if provider_id == "ohmypi":
-        return True
-    module = str(getattr(type(agent), "__module__", "") or "")
-    if module.endswith("ohmypi_provider"):
+    if is_ohmypi_runtime_agent(agent):
         return True
     return hasattr(agent, "put_runtime_task")
 
@@ -6300,6 +6331,44 @@ def build_main_runtime_context_pack(
 def agent_runtime_provider_id(agent: Any) -> str:
     provider_id = str(getattr(agent, "_ga_tui_runtime_provider_id", "") or "").strip()
     return provider_id or "unknown"
+
+
+def is_ohmypi_runtime_agent(agent: Any) -> bool:
+    if agent_runtime_provider_id(agent) == "ohmypi":
+        return True
+    module = str(getattr(type(agent), "__module__", "") or "")
+    return module.endswith("ohmypi_provider")
+
+
+def ohmypi_native_session_file(agent: Any) -> str:
+    if not is_ohmypi_runtime_agent(agent):
+        return ""
+    return str(getattr(agent, "native_session_file", "") or "").strip()
+
+
+def ohmypi_native_context_usage(agent: Any) -> dict[str, Any]:
+    if not is_ohmypi_runtime_agent(agent):
+        return {}
+    raw = getattr(agent, "native_context_usage", {}) or {}
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        tokens = max(0, int(raw.get("tokens", 0) or 0))
+    except (TypeError, ValueError):
+        tokens = 0
+    try:
+        context_window = max(0, int(raw.get("contextWindow", raw.get("context_window", 0)) or 0))
+    except (TypeError, ValueError):
+        context_window = 0
+    try:
+        percent = float(raw.get("percent", 0) or 0.0)
+    except (TypeError, ValueError):
+        percent = 0.0
+    if percent <= 0 and tokens > 0 and context_window > 0:
+        percent = tokens / context_window * 100.0
+    if tokens <= 0 and context_window <= 0:
+        return {}
+    return {"tokens": tokens, "contextWindow": context_window, "percent": max(0.0, percent)}
 
 
 def runtime_task_request_for_agent(
@@ -13176,6 +13245,28 @@ def current_model_lines(state: State, width: int) -> list[tuple[str, int]]:
 
 
 def current_token_lines(state: State, width: int) -> list[tuple[str, int]]:
+    native_usage = ohmypi_native_context_usage(state.agent)
+    if native_usage and (native_usage.get("tokens") or native_usage.get("contextWindow")):
+        tokens = int(native_usage.get("tokens") or 0)
+        context_window = int(native_usage.get("contextWindow") or 0)
+        percent = float(native_usage.get("percent") or 0.0)
+        if percent <= 0 and tokens > 0 and context_window > 0:
+            percent = tokens / context_window * 100.0
+        lines: list[tuple[str, int]] = [("TOKEN USAGE", cp(7) | curses.A_BOLD)]
+        if context_window > 0:
+            lines.append((f"ctx {human_tokens(tokens)}/{human_tokens(context_window)}  {percent:.0f}%", cp(2)))
+        else:
+            lines.append((f"ctx {human_tokens(tokens)}", cp(2)))
+        message_count = int(getattr(state.agent, "native_message_count", 0) or 0)
+        if message_count > 0:
+            lines.append((f"omp msgs {message_count}", cp(1)))
+        if cost_tracker is not None:
+            refresh_state_token_usage_registry(state)
+            prune_state_token_usage_registry(state)
+            stats = session_token_stats(state, state.agent)
+            if stats is not None and stats.total_tokens() > 0:
+                lines.append((f"total {human_tokens(stats.total_tokens())}  req {stats.requests}", cp(1)))
+        return [(truncate_cells(text, width - 2), attr) for text, attr in lines]
     if cost_tracker is None:
         return [("TOKEN USAGE", cp(7) | curses.A_BOLD), ("tracker unavailable", cp(5))]
     refresh_state_token_usage_registry(state)
@@ -15770,6 +15861,34 @@ def extract_recent_ui_messages_from_pairs(pairs: list[tuple[str, str]], rounds: 
     return [m for m in out if (m.get("content") or "").strip()]
 
 
+def ohmypi_session_file_for_history_path(path: str) -> str:
+    meta = load_session_meta_registry().get(session_key(path), {})
+    if not isinstance(meta, dict):
+        return ""
+    session_file = str(meta.get("ohmypi_session_file") or meta.get("omp_session_file") or "").strip()
+    if session_file and os.path.isfile(session_file):
+        return session_file
+    return ""
+
+
+def switch_ohmypi_runtime_to_history_session(agent: Any, path: str) -> tuple[bool, str]:
+    if not is_ohmypi_runtime_agent(agent):
+        return False, ""
+    session_file = ohmypi_session_file_for_history_path(path)
+    if not session_file:
+        return False, ""
+    switch_session = getattr(agent, "switch_runtime_session", None)
+    if not callable(switch_session):
+        return False, ""
+    try:
+        ok = bool(switch_session(session_file))
+    except Exception as exc:
+        return False, f"OMP 原生会话切换失败: {type(exc).__name__}: {exc}"
+    if not ok:
+        return False, "OMP 原生会话切换失败，已尝试旧式上下文恢复。"
+    return True, f"已切换到 OMP 原生会话：{os.path.basename(session_file)}"
+
+
 def restore_backend_and_recent_messages(agent: Any, path: str) -> tuple[list[Message], str, int, int, int]:
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -15781,14 +15900,20 @@ def restore_backend_and_recent_messages(agent: Any, path: str) -> tuple[list[Mes
         raise RuntimeError(f"{os.path.basename(path)} 为空或格式不符")
 
     history_messages, loaded_rounds, total_rounds = history_messages_from_pairs(pairs, RESTORE_DISPLAY_ROUNDS)
-    history = _parse_native_history(pairs)
-    if history is not None:
-        reset_agent_runtime_context_no_snapshot(agent, history)
-        restore_msg = f"已恢复完整上下文：{total_rounds} 轮；界面先显示最近 {loaded_rounds} 轮，滚到顶部会自动加载更早内容。"
+    switched_native, native_msg = switch_ohmypi_runtime_to_history_session(agent, path)
+    if switched_native:
+        restore_msg = f"{native_msg}；界面先显示最近 {loaded_rounds} 轮，滚到顶部会自动加载更早内容。"
     else:
-        reset_conversation(agent, message=None)
-        restore_msg, _ok = restore(agent, path)
-        restore_msg += f"\n界面先显示最近 {loaded_rounds} 轮，滚到顶部会自动加载更早内容。"
+        history = _parse_native_history(pairs)
+        if history is not None:
+            reset_agent_runtime_context_no_snapshot(agent, history)
+            restore_msg = f"已恢复完整上下文：{total_rounds} 轮；界面先显示最近 {loaded_rounds} 轮，滚到顶部会自动加载更早内容。"
+        else:
+            reset_conversation(agent, message=None)
+            restore_msg, _ok = restore(agent, path)
+            restore_msg += f"\n界面先显示最近 {loaded_rounds} 轮，滚到顶部会自动加载更早内容。"
+        if native_msg:
+            restore_msg = f"{native_msg}\n{restore_msg}"
     messages = list(history_messages)
     history_message_count = len(messages)
     durable_messages = durable_ui_system_messages_for_path(path)
@@ -17350,6 +17475,17 @@ def running_indicator(frame: int) -> str:
     return f"{RUN_FRAMES[frame % len(RUN_FRAMES)]} running..."
 
 
+def running_indicator_cell_width() -> int:
+    return max(cell_width(running_indicator(frame)) for frame in range(len(RUN_FRAMES)))
+
+
+def render_running_indicator_line(line: RenderLine, frame: int) -> str:
+    if line.kind != "running_indicator":
+        return line.text
+    prefix = " " * max(0, int(line.prefix_cells or 0))
+    return prefix + running_indicator(frame)
+
+
 def clear_selection(state: State) -> None:
     state.selection_active = False
     state.selection_start = None
@@ -17528,7 +17664,13 @@ def message_block_lines(
     for line in blocks[1:]:
         out.append(RenderLine(" " * cell_width(prefix) + line.text, line.attr))
     if msg.role == "assistant" and not msg.done:
-        out.append(RenderLine(" " * cell_width(prefix) + running_indicator(run_frame), cp(10) | curses.A_BOLD))
+        prefix_cells = cell_width(prefix)
+        out.append(RenderLine(
+            " " * prefix_cells + running_indicator(run_frame),
+            cp(10) | curses.A_BOLD,
+            kind="running_indicator",
+            prefix_cells=prefix_cells,
+        ))
     out.append(RenderLine(""))
     return out
 
@@ -17627,6 +17769,40 @@ def safe_add(win, y: int, x: int, text: str, width: int, attr: int = 0) -> None:
         win.addstr(y, x, truncate_cells(text, width), attr)
     except curses.error:
         pass
+
+
+def record_running_indicator_rect(state: State, y: int, x: int, width: int, line: RenderLine) -> None:
+    if line.kind != "running_indicator":
+        return
+    prefix_cells = max(0, int(line.prefix_cells or 0))
+    indicator_width = min(max(0, width - prefix_cells), running_indicator_cell_width())
+    if indicator_width <= 0:
+        return
+    state.running_indicator_rect = (y, x + prefix_cells, indicator_width, line.attr)
+
+
+def draw_running_indicator_frame(stdscr, state: State) -> bool:
+    if display_status(state) not in {"running", "aborting"}:
+        return False
+    if state.selection_active or state.session_popup_path:
+        return False
+    rect = state.running_indicator_rect
+    if rect is None:
+        return False
+    y, x, width, attr = rect
+    if width <= 0:
+        return False
+    safe_add(stdscr, y, x, pad_cells(running_indicator(state.run_frame), width), width, attr)
+    if state.input_cursor_screen is not None:
+        try:
+            stdscr.move(state.input_cursor_screen[0], state.input_cursor_screen[1])
+        except curses.error:
+            pass
+    try:
+        stdscr.refresh()
+    except curses.error:
+        return False
+    return True
 
 
 def left_sidebar_width(width: int) -> int:
@@ -18298,6 +18474,8 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     x0 = sidebar_w + 1
     right_x0 = width - rightbar_w if rightbar_w > 0 else width
     main_w = max(10, right_x0 - x0 - 1)
+    state.running_indicator_rect = None
+    state.input_cursor_screen = None
     secret_input = secret_password_entry_active(state)
     matches = [] if secret_input else command_matches(state.input_text, state)
     clamp_command_index(state, matches)
@@ -18329,9 +18507,11 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     for row in range(body_h):
         idx = state.scroll + row
         line = lines[idx] if idx < len(lines) else RenderLine("")
+        text = render_running_indicator_line(line, state.run_frame)
         safe_add(stdscr, row + 1, x0, " " * main_w, main_w)
-        selection = selection_span_for_line(state, idx, line.text)
-        draw_text_with_selection(stdscr, row + 1, x0, line.text, main_w, line.attr, selection)
+        selection = selection_span_for_line(state, idx, text)
+        draw_text_with_selection(stdscr, row + 1, x0, text, main_w, line.attr, selection)
+        record_running_indicator_rect(state, row + 1, x0, main_w, line)
     sep_y = height - input_h - 1
     safe_add(stdscr, sep_y, x0, "─" * main_w, main_w, cp(1))
     hint_y = sep_y + 1 + len(visible_commands)
@@ -18360,7 +18540,9 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     else:
         safe_add(stdscr, footer_y, x0, "Ctrl+Q quit; F2 rename; /agent manage; /memory inspect; Ctrl+N new; Ctrl+W close", main_w, cp(1))
     try:
-        stdscr.move(prompt_y + cursor_y, min(x0 + cursor_x, x0 + main_w - 1))
+        cursor_screen = (prompt_y + cursor_y, min(x0 + cursor_x, x0 + main_w - 1))
+        state.input_cursor_screen = cursor_screen
+        stdscr.move(cursor_screen[0], cursor_screen[1])
     except curses.error:
         pass
 
@@ -18369,6 +18551,8 @@ def redraw(stdscr, state: State) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     if height < 8 or width < 50:
+        state.running_indicator_rect = None
+        state.input_cursor_screen = None
         safe_add(stdscr, 0, 0, "Terminal too small", max(1, width - 1), curses.A_BOLD)
         stdscr.refresh()
         return
@@ -22784,6 +22968,7 @@ def process_ui_queue(state: State) -> bool:
                         source=bg.active_task_source,
                         temporary_session=bg.temporary_session,
                     )
+                    remember_ohmypi_native_session_for_path(state, bg.agent, agent_log_path(bg.agent))
                     apply_tui_controls_from_text(state, text, source="background-agent", default_target=getattr(bg.agent, "log_path", "") or "current")
                     if maybe_autoname_background_session(state, bg):
                         changed = True
@@ -22851,6 +23036,7 @@ def process_ui_queue(state: State) -> bool:
                     source=finished_source,
                     temporary_session=state.temporary_session,
                 )
+                remember_ohmypi_native_session_for_path(state, state.agent, agent_log_path(state.agent))
                 control_results = apply_tui_controls_from_text(state, text, source="agent", default_target="current")
                 if maybe_autoname_current_session(state):
                     state.dirty = True
@@ -23931,6 +24117,8 @@ def run(stdscr) -> dict[str, Any]:
             if display_status(state) in {"running", "aborting"} and now >= next_run_frame:
                 state.run_frame = (state.run_frame + 1) % len(RUN_FRAMES)
                 next_run_frame = now + 0.12
+                if not state.dirty:
+                    draw_running_indicator_frame(stdscr, state)
             if now >= next_history_refresh:
                 if load_history(state):
                     state.dirty = True
