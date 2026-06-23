@@ -465,6 +465,16 @@ def wait_for_queue_done(dq: queue.Queue, *, timeout: float = 2.0) -> tuple[dict,
     raise AssertionError("queue did not receive a done item")
 
 
+def assert_queue_has_no_done(dq: queue.Queue, *, timeout: float = 0.2) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            item = dq.get(timeout=0.02)
+        except queue.Empty:
+            continue
+        assert "done" not in item, item
+
+
 def assert_ohmypi_provider_module_boundary() -> None:
     assert omp.OhMyPiRuntimeAdapter.__module__ == "ga_tui.ohmypi_provider"
     provider_source = Path(omp.__file__).read_text(encoding="utf-8")
@@ -1821,6 +1831,153 @@ def assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn() -> None
     agent.close()
 
 
+def assert_ohmypi_rpc_host_tool_followup_activity_waits_for_final_answer() -> None:
+    processes: list[FakeRpcProcess] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    def handler(tool_name: str, args: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "ga-tui.query.v1",
+            "status": "ok",
+            "kind": "test.large_agent_list",
+            "tool_name": tool_name,
+            "agents": [
+                {"id": f"agent-{index}", "name": f"Agent {index}", "status": "idle"}
+                for index in range(40)
+            ],
+            "endpoint": str(args.get("endpoint") or ""),
+        }
+
+    tool = omp.RpcHostToolDefinition(
+        name="agent_list",
+        label="Agent List",
+        description="Read-only test agent listing",
+        parameters={"type": "object", "properties": {"endpoint": {"type": "string"}}},
+    )
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        host_tool_definitions=[tool],
+        host_tool_handler=handler,
+        startup_timeout=1,
+        terminal_grace_timeout=0.05,
+        host_tool_followup_timeout=0.1,
+    )
+    dq = agent.put_task("communicate with other models", source="test")
+    process = wait_for_process(processes)
+    wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt")
+
+    progress = "Started. Let me discover who's available - Shuheng agents and IRC peers."
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": progress},
+    })
+    process.stdout.push({
+        "type": "host_tool_call",
+        "id": "call-agent-list",
+        "toolCallId": "tc-agent-list",
+        "toolName": "agent_list",
+        "arguments": {"endpoint": "agents"},
+    })
+    wait_for_rpc_write(
+        process,
+        lambda frame: frame.get("type") == "host_tool_result" and frame.get("id") == "call-agent-list",
+    )
+
+    time.sleep(0.03)
+    process.stdout.push({
+        "type": "tool_execution_start",
+        "toolCallId": "tool-irc-1",
+        "toolName": "irc",
+        "args": {"message": "check peers"},
+    })
+    assert_queue_has_no_done(dq, timeout=0.09)
+
+    final_reply = "我查过了：当前没有其他可用代理，无法继续 IRC 通信。"
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": final_reply},
+    })
+    process.stdout.push({"type": "agent_end"})
+    done, _streamed = wait_for_queue_done(dq)
+    assert final_reply in done["done"], done
+    assert "模型没有继续生成最终回复" not in done["done"], done
+    assert agent.is_running is False
+    assert agent.task_queue.unfinished_tasks == 0
+    agent.close()
+
+
+def assert_ohmypi_rpc_host_tool_followup_ignores_pre_tool_progress_for_fallback() -> None:
+    processes: list[FakeRpcProcess] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    def handler(tool_name: str, args: dict[str, object]) -> dict[str, object]:
+        return {
+            "schema_version": "ga-tui.query.v1",
+            "status": "ok",
+            "kind": "test.agent_list",
+            "tool_name": tool_name,
+            "endpoint": str(args.get("endpoint") or ""),
+        }
+
+    tool = omp.RpcHostToolDefinition(
+        name="agent_list",
+        label="Agent List",
+        description="Read-only test agent listing",
+        parameters={"type": "object", "properties": {"endpoint": {"type": "string"}}},
+    )
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        host_tool_definitions=[tool],
+        host_tool_handler=handler,
+        startup_timeout=1,
+        terminal_grace_timeout=0.05,
+        host_tool_followup_timeout=0.05,
+    )
+    dq = agent.put_task("host tool with pre-tool progress", source="test")
+    process = wait_for_process(processes)
+    wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt")
+
+    progress = "Started. Let me discover who's available - Shuheng agents and IRC peers."
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": progress},
+    })
+    process.stdout.push({
+        "type": "host_tool_call",
+        "id": "call-pre-tool-progress",
+        "toolCallId": "tc-pre-tool-progress",
+        "toolName": "agent_list",
+        "arguments": {"endpoint": "agents"},
+    })
+    wait_for_rpc_write(
+        process,
+        lambda frame: frame.get("type") == "host_tool_result" and frame.get("id") == "call-pre-tool-progress",
+    )
+
+    done, _streamed = wait_for_queue_done(dq)
+    assert progress in done["done"], done
+    assert "Shuheng host tool `agent_list` 已完成" in done["done"], done
+    assert "模型没有继续生成最终回复" in done["done"], done
+    assert "agents" in done["done"], done
+    assert agent.is_running is False
+    assert agent.task_queue.unfinished_tasks == 0
+    signal = omp.ohmypi_memory_candidate_signal(done["done"], source="test", request_id="host-tool-pre-progress")
+    assert signal is None, signal
+    agent.close()
+
+
 def assert_ohmypi_rpc_process_blocks_fold_like_genericagent() -> None:
     processes: list[FakeRpcProcess] = []
 
@@ -2467,6 +2624,12 @@ def assert_ohmypi_memory_candidate_signal_filters() -> None:
     assert omp.ohmypi_memory_candidate_signal(secret_durable, source="secret-main:user") is None
     secret = "This output contains api_key: SHOULD_NOT_LEAK and must not be retained long term."
     assert omp.ohmypi_memory_candidate_signal(secret, source="test") is None
+    mixed_host_tool_fallback = (
+        "Started. Let me discover agents.\n\n"
+        "[Oh My Pi] Shuheng host tool `agent_list` 已完成，但模型没有继续生成最终回复。\n\n"
+        "工具结果摘要：{}"
+    )
+    assert omp.ohmypi_memory_candidate_signal(mixed_host_tool_fallback, source="test") is None
     durable = (
         "Validated durable lesson: when Oh My Pi runs under GenericAgent-TUI, "
         "the TUI must remain the memory approval owner and OMP should only emit candidates."
@@ -5188,6 +5351,8 @@ def run_checks() -> None:
     assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt()
     assert_ohmypi_rpc_tool_use_turn_end_waits_for_final_answer()
     assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn()
+    assert_ohmypi_rpc_host_tool_followup_activity_waits_for_final_answer()
+    assert_ohmypi_rpc_host_tool_followup_ignores_pre_tool_progress_for_fallback()
     assert_ohmypi_rpc_process_blocks_fold_like_genericagent()
     assert_ohmypi_rpc_env_model_switch_and_error_mapping()
     assert_ohmypi_host_tool_bridge()
