@@ -3652,6 +3652,58 @@ def assert_process_group_keeps_substantive_reply_before_housekeeping() -> None:
     assert "toolCallId" not in rendered, rendered
 
 
+def assert_process_group_keeps_enumeration_before_summary_housekeeping() -> None:
+    numbers = ", ".join(str(index) for index in range(1, 101))
+    restored = (
+        "**LLM Running (Turn 1) ...**\n"
+        "<summary>The user wants me to count from 1 to 100.</summary>\n"
+        "<thinking>Plan the simple counting task.</thinking>\n\n"
+        "**LLM Running (Turn 2) ...**\n"
+        "<summary>调用 OMP 工具: todo</summary>\n"
+        "🛠️ Tool: `todo` 📥 args:\n"
+        "````text\n"
+        '{"args":{"ops":[{"op":"init"}]}}\n'
+        "````\n\n"
+        "**LLM Running (Turn 3) ...**\n"
+        "<summary>OMP 工具结果: todo</summary>\n"
+        "🛠️ Tool: `todo` 📥 args:\n"
+        "````text\n"
+        '{"status":"ok","toolCallId":"call_todo"}\n'
+        "````\n"
+        "`````\n"
+        '{"content":[{"text":"Remaining items: count","type":"text"}]}\n'
+        "`````\n\n"
+        "**LLM Running (Turn 4) ...**\n"
+        "<summary>Now I'll count from 1 to 100.</summary>\n"
+        f"{numbers}\n\n"
+        "**LLM Running (Turn 5) ...**\n"
+        "<summary>调用 OMP 工具: todo</summary>\n"
+        "🛠️ Tool: `todo` 📥 args:\n"
+        "````text\n"
+        '{"args":{"ops":[{"op":"done"}]}}\n'
+        "````\n\n"
+        "**LLM Running (Turn 6) ...**\n"
+        "<summary>OMP 工具结果: todo</summary>\n"
+        "🛠️ Tool: `todo` 📥 args:\n"
+        "````text\n"
+        '{"status":"ok","toolCallId":"call_done"}\n'
+        "````\n"
+        "`````\n"
+        '{"content":[{"text":"Remaining items: none","type":"text"}]}\n'
+        "`````\n\n"
+        "**LLM Running (Turn 7) ...**\n"
+        "<summary>Task complete.</summary>\n"
+        "**Summary** | 从 1 到 100 已完整数完，共计 100 个自然数，无遗漏。任务完成。\n\n"
+        "**Confidence**: 1.0 - 枚举结果可直接验证，无歧义。"
+    )
+    rendered = a.render_assistant_text(restored, done=True, fold_process=True, message_index=4)
+    assert "过程组 G5" in rendered, rendered
+    assert numbers in rendered, rendered
+    assert "Summary | 从 1 到 100 已完整数完" not in rendered, rendered
+    assert "toolCallId" not in rendered, rendered
+    assert "Remaining items" not in rendered, rendered
+
+
 def assert_process_detail_line_not_swallowed_by_code_fence() -> None:
     restored = (
         "**LLM Running (Turn 1) ...**\n"
@@ -5369,6 +5421,7 @@ def run_checks() -> None:
     assert_restored_process_group_folds_intermediate_speech()
     assert_mixed_omp_process_turns_fold_into_single_group()
     assert_process_group_keeps_substantive_reply_before_housekeeping()
+    assert_process_group_keeps_enumeration_before_summary_housekeeping()
     assert_process_detail_line_not_swallowed_by_code_fence()
     assert_single_search_turn_keeps_final_reply_visible()
     assert_ask_user_tool_use_input_payload_visible()

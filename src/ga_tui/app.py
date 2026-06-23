@@ -17366,6 +17366,17 @@ def visible_reply_is_substantive(text: str) -> bool:
     return len(clean) >= 80 and any(marker in (text or "") for marker in markers)
 
 
+def visible_reply_is_housekeeping_summary(text: str) -> bool:
+    clean = strip_inline_markdown(clean_text(text or "")).strip()
+    if not clean:
+        return False
+    first_line = clean.splitlines()[0].strip()
+    starts_with_summary = bool(re.match(r"(?i)^(summary|摘要|总结)\s*[\|:：-]", first_line))
+    has_confidence = bool(re.search(r"(?im)^\s*(confidence|置信度)\s*[:：]", clean))
+    has_completion = any(marker in clean for marker in ("任务完成", "已完成", "complete"))
+    return starts_with_summary and (has_confidence or has_completion)
+
+
 def visible_reply_has_section_shape(text: str) -> bool:
     return bool(re.search(r"(?m)^#{1,3}\s+\S+", text or "")) or "结论" in (text or "")
 
@@ -17411,7 +17422,7 @@ def preferred_group_visible_reply(process_turns: list[tuple[str, str]]) -> str:
         if visible:
             visible_items.append(visible)
     chosen = visible_items[-1] if visible_items else ""
-    if chosen and not visible_reply_is_substantive(chosen):
+    if chosen and (not visible_reply_is_substantive(chosen) or visible_reply_is_housekeeping_summary(chosen)):
         chosen_len = len(strip_inline_markdown(clean_text(chosen)).strip())
         for candidate in reversed(visible_items[:-1]):
             candidate_len = len(strip_inline_markdown(clean_text(candidate)).strip())
