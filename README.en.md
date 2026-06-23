@@ -344,22 +344,46 @@ Type `/help` inside the TUI for the full command list.
 ├── pyproject.toml
 ├── docs/
 │   └── agent-harness-architecture.md
-└── src/
-    └── ga_tui/
-        ├── __main__.py
-        ├── __init__.py
-        ├── app.py
-        └── integration.py
+├── scripts/
+│   └── check_policy_gates.py
+├── src/
+│   └── ga_tui/
+│       ├── __main__.py
+│       ├── __init__.py
+│       ├── app.py
+│       ├── integration.py
+│       ├── runtime.py
+│       ├── scheduler.py
+│       ├── control_protocol.py
+│       ├── agent_bridge.py
+│       ├── ohmypi_provider.py
+│       ├── genericagent_provider.py
+│       └── compat_legacy.py
+└── tests/
+    ├── conftest.py
+    ├── test_cell_utils.py
+    ├── test_jsonl.py
+    ├── test_path_safety.py
+    ├── test_scheduler_parsing.py
+    ├── test_secret_crypto.py
+    └── test_time_path_helpers.py
 ```
 
 | File | Purpose |
 | --- | --- |
-| `README.md` | Default Chinese documentation |
-| `README.en.md` | English documentation |
-| `src/ga_tui/app.py` | Main curses TUI implementation |
-| `src/ga_tui/integration.py` | GenericAgent core discovery, doctor checks, launcher shim installation |
+| `src/ga_tui/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
+| `src/ga_tui/integration.py` | GenericAgent core discovery, doctor checks, launcher shim |
+| `src/ga_tui/runtime.py` | Runtime provider abstractions and registry |
+| `src/ga_tui/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
+| `src/ga_tui/control_protocol.py` | Agent task control protocol (v2) parsing |
+| `src/ga_tui/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
+| `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
+| `src/ga_tui/genericagent_provider.py` | GenericAgent runtime adapter |
+| `src/ga_tui/compat_legacy.py` | Legacy session/memory compatibility parsing |
+| `tests/` | pytest suite covering pure functions, crypto, and parsers |
+| `scripts/check_policy_gates.py` | Function-level smoke checks for harness policy gates |
 | `docs/agent-harness-architecture.md` | Long-term agent harness architecture baseline |
-| `pyproject.toml` | Python package metadata and command entry points |
+| `pyproject.toml` | Python package metadata, dependencies, and command entry points |
 
 ## Relationship With GenericAgent
 
@@ -412,8 +436,9 @@ Recommended checks before committing:
 
 ```bash
 git diff --check
-python -m py_compile src/ga_tui/app.py src/ga_tui/integration.py
+python -m py_compile src/ga_tui/*.py
 PYTHONPATH=src python -m ga_tui.integration doctor
+python -m pytest tests/ -q
 ```
 
 Before publishing, verify that no local absolute paths, secrets, model credentials, normal session logs, or Secret Vault content are added.

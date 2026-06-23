@@ -344,22 +344,46 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 ├── pyproject.toml
 ├── docs/
 │   └── agent-harness-architecture.md
-└── src/
-    └── ga_tui/
-        ├── __main__.py
-        ├── __init__.py
-        ├── app.py
-        └── integration.py
+├── scripts/
+│   └── check_policy_gates.py
+├── src/
+│   └── ga_tui/
+│       ├── __main__.py
+│       ├── __init__.py
+│       ├── app.py
+│       ├── integration.py
+│       ├── runtime.py
+│       ├── scheduler.py
+│       ├── control_protocol.py
+│       ├── agent_bridge.py
+│       ├── ohmypi_provider.py
+│       ├── genericagent_provider.py
+│       └── compat_legacy.py
+└── tests/
+    ├── conftest.py
+    ├── test_cell_utils.py
+    ├── test_jsonl.py
+    ├── test_path_safety.py
+    ├── test_scheduler_parsing.py
+    ├── test_secret_crypto.py
+    └── test_time_path_helpers.py
 ```
 
 | 文件 | 作用 |
 | --- | --- |
-| `README.md` | 默认中文说明 |
-| `README.en.md` | 英文说明 |
-| `src/ga_tui/app.py` | curses TUI 主实现 |
+| `src/ga_tui/app.py` | curses TUI 主实现、会话/记忆/审批/Secret Vault 核心逻辑 |
 | `src/ga_tui/integration.py` | GenericAgent 核心发现、doctor 检查和 launcher shim |
+| `src/ga_tui/runtime.py` | runtime provider 抽象层与注册表 |
+| `src/ga_tui/scheduler.py` | 定时任务注册表与触发判定(cron / interval / at) |
+| `src/ga_tui/control_protocol.py` | agent task 控制协议(v2)解析 |
+| `src/ga_tui/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
+| `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter(进程、host tool、usage 同步) |
+| `src/ga_tui/genericagent_provider.py` | GenericAgent runtime adapter |
+| `src/ga_tui/compat_legacy.py` | 历史会话/记忆的兼容解析 |
+| `tests/` | pytest 测试套件,覆盖纯函数与加解密、解析器 |
+| `scripts/check_policy_gates.py` | harness policy gate 的函数级 smoke 检查 |
 | `docs/agent-harness-architecture.md` | 长期 agent harness 架构基线 |
-| `pyproject.toml` | Python 包配置和命令入口 |
+| `pyproject.toml` | Python 包配置、依赖与命令入口 |
 
 ## 与 GenericAgent 的关系
 
@@ -412,8 +436,9 @@ shuheng-check
 
 ```bash
 git diff --check
-python -m py_compile src/ga_tui/app.py src/ga_tui/integration.py
+python -m py_compile src/ga_tui/*.py
 PYTHONPATH=src python -m ga_tui.integration doctor
+python -m pytest tests/ -q
 ```
 
 发布前确认不要把本地绝对路径、密钥、模型配置、普通会话日志或 Secret Vault 内容写进仓库。
