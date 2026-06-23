@@ -923,6 +923,8 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
     assert "Shuheng Layered Memory Guidance" in prompt_text, prompt_text
     assert "normal user-facing final reply" in prompt_text, prompt_text
     assert "memory-candidate submit/deferred notices are not a substitute" in prompt_text, prompt_text
+    assert "context packs and context refs as internal execution metadata" in prompt_text, prompt_text
+    assert "这个东西" in prompt_text and "recent visible conversation/task topic" in prompt_text, prompt_text
     assert "remember useful path" in prompt_text, prompt_text
     assert "global_mem.txt" in prompt_text, prompt_text
     assert "SHOULD_NOT_LEAK" not in prompt_text, prompt_text
@@ -1183,6 +1185,9 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
     assert "copied profile, OMP native task spawn, or IRC demo participant is only a clone" in first.prompt, first.prompt
     assert "final_reply_rule:" in first.prompt, first.prompt
     assert "memory-candidate submitted/deferred notices are not a substitute" in first.prompt, first.prompt
+    assert "deictic_reference_rule:" in first.prompt, first.prompt
+    assert "not as a user-visible conversation object" in first.prompt, first.prompt
+    assert "这个东西" in first.prompt and "most recent visible user-facing topic" in first.prompt, first.prompt
 
     runtime_state.status = "idle"
     runtime_state.active_task_id = None
@@ -1198,6 +1203,8 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
     assert "[GA TUI Context Ref]" in second.prompt, second.prompt
     assert "final_reply_rule:" in second.prompt, second.prompt
     assert "memory-candidate notices" in second.prompt, second.prompt
+    assert "deictic_reference_rule:" in second.prompt, second.prompt
+    assert "recent visible conversation/task topic, not to this context ref" in second.prompt, second.prompt
     assert second.context_pack_ref.startswith("artifact://"), second.context_pack_ref
 
     a.reset_agent_runtime_context_no_snapshot(runtime_agent)

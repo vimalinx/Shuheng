@@ -1941,6 +1941,7 @@ def build_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
         "Use this GenericAgent-style layered memory as routing context. Read referenced files only when needed and verify current repository state before acting when memory could be stale.",
         "Do not write long-term memory directly. If execution reveals a durable, verified lesson, submit or report a memory candidate with evidence refs.",
         "Always finish each user turn with a concise normal user-facing final reply in the user's language. Tool results, \"Result:\" summaries, and memory-candidate submit/deferred notices are not a substitute for that reply.",
+        "Treat Shuheng context packs and context refs as internal execution metadata, not user-visible conversation objects. User pronouns such as this, that, it, 这个, 这个东西, or 它 refer to the recent visible conversation/task topic unless the user explicitly names the context pack/ref.",
         "Never expose or store secrets. Treat redacted or credential-looking content as unavailable.",
         "",
         f"cwd = {os.path.join(harness_dir, 'runtime')} (./)",

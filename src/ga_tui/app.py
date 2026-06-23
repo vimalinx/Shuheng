@@ -6463,6 +6463,7 @@ output_contract: {", ".join(pack.get("output_contract") or [])}
 stop_condition: {task.get("stop_condition", "")}
 subagent_identity_rule: To claim you talked to a persistent Shuheng subagent, route the message to that existing agent_id through Shuheng subagent task/direct-chat controls. A copied profile, OMP native task spawn, or IRC demo participant is only a clone/persona simulation and must be reported as such.
 final_reply_rule: After tool use, runtime task execution, or memory-candidate submission attempts, always finish with a normal user-facing final reply in the user's language. Tool results, "Result:" status lines, and memory-candidate submitted/deferred notices are not a substitute for that reply.
+deictic_reference_rule: Treat this GA TUI Context Pack as internal execution metadata, not as a user-visible conversation object. User phrases such as "这个", "这个东西", "它", "this", or "that" refer to the most recent visible user-facing topic or message unless the user explicitly says "context pack" or "上下文包".
 
 Boundaries:
 {boundaries or "- (empty)"}
@@ -6512,6 +6513,7 @@ policy: This is a refreshed Shuheng context-pack artifact for the current turn.
 Do not treat older full context-pack blocks in OMP history as current if this ref is newer.
 Read the referenced artifact or call memory_context_get only when the task needs deeper context.
 final_reply_rule: Always finish with a normal user-facing final reply in the user's language; do not stop at tool results, "Result:" status lines, or memory-candidate notices.
+deictic_reference_rule: This GA TUI Context Ref is internal execution metadata. If the user says "这个", "它", "this", or "that", resolve it to the recent visible conversation/task topic, not to this context ref, unless the user explicitly names the context pack/ref.
 [/GA TUI Context Ref]
 """.strip()
 
