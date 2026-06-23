@@ -2083,8 +2083,8 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert "not clone its persona" in typed_agent_match_tool["description"], typed_agent_match_tool
     typed_memory_candidate_tool = next(item for item in all_tools if item["name"] == "memory_candidate_submit")
     assert "only when a concrete persistent subagent target is known" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
-    assert "Cloudflare traffic monitoring belongs to a CF/ops agent" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
-    assert "submitted/deferred status must never replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
+    assert "target_role, scope, or responsibility" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
+    assert "Submitted/deferred status must never replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
     typed_handler = a.ohmypi_tui_host_tool_handler(state)
     typed_agents = typed_handler("agent_list", {"limit": 5})
     assert typed_agents["schema_version"] == "ga-tui.query.v1", typed_agents
@@ -2199,33 +2199,62 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
     assert typed_memory["approval_ids"], typed_memory
 
     before_bad_approval_count = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
-    bad_ops_memory = handler("memory_candidate_submit", {
+    mismatched_memory = handler("memory_candidate_submit", {
         "target": target.agent_id,
         "statement": (
             "type: project\n"
-            "Cloudflare CF domain traffic monitoring for all hosted domains runs from a daily crontab, "
-            "records bandwidth analytics, and should belong to a dedicated CF/ops traffic agent."
+            "target_role: ops\n"
+            "scope: ops.monitoring\n"
+            "responsibility: recurring service telemetry analysis\n"
+            "Durable lesson: a recurring monitoring responsibility must be stored on a matching owner."
         ),
-        "evidence_ref": "runtime://provider/ohmypi/cf-traffic",
-        "task_id": "task_omp_bad_ops_memory",
+        "evidence_ref": "runtime://provider/ohmypi/target-mismatch",
+        "task_id": "task_omp_target_mismatch_memory",
     })
-    assert bad_ops_memory["schema_version"] == "ga-tui.proposal.v1", bad_ops_memory
-    assert bad_ops_memory["status"] == "ok", bad_ops_memory
-    assert bad_ops_memory["result_status"] == "rejected", bad_ops_memory
-    assert "target_mismatch_ops_memory_requires_ops_or_dedicated_agent" in bad_ops_memory["result_message"], bad_ops_memory
-    bad_candidate_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
-    assert bad_candidate_rows[-1]["status"] == "rejected", bad_candidate_rows[-1]
-    assert bad_candidate_rows[-1]["memory_candidate"]["rejected_reason"] == "target_mismatch_ops_memory_requires_ops_or_dedicated_agent", bad_candidate_rows[-1]
+    assert mismatched_memory["schema_version"] == "ga-tui.proposal.v1", mismatched_memory
+    assert mismatched_memory["status"] == "ok", mismatched_memory
+    assert mismatched_memory["result_status"] == "rejected", mismatched_memory
+    assert "target_mismatch_candidate_responsibility" in mismatched_memory["result_message"], mismatched_memory
+    mismatch_candidate_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
+    assert mismatch_candidate_rows[-1]["status"] == "rejected", mismatch_candidate_rows[-1]
+    assert mismatch_candidate_rows[-1]["memory_candidate"]["rejected_reason"] == "target_mismatch_candidate_responsibility", mismatch_candidate_rows[-1]
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == before_bad_approval_count, a.read_jsonl(a.AGENT_APPROVALS_PATH)
 
+    ops_target = a.create_subagent(
+        state,
+        "Monitoring Owner",
+        "Owns recurring service telemetry analysis and approval-gated operations.",
+        role="ops",
+        persistent=True,
+    )
+    matched_memory = handler("memory_candidate_submit", {
+        "target": ops_target.agent_id,
+        "statement": (
+            "type: project\n"
+            "target_role: ops\n"
+            "scope: ops.monitoring\n"
+            "responsibility: recurring service telemetry analysis\n"
+            "Durable lesson: a recurring monitoring responsibility must be stored on a matching owner."
+        ),
+        "evidence_ref": "runtime://provider/ohmypi/target-match",
+        "task_id": "task_omp_target_match_memory",
+    })
+    assert matched_memory["schema_version"] == "ga-tui.proposal.v1", matched_memory
+    assert matched_memory["status"] == "ok", matched_memory
+    assert matched_memory["result_status"] == "queued", matched_memory
+    assert matched_memory["target_subagent"] == ops_target.agent_id, matched_memory
+
     stale_text = (
-        "stale-target-mismatch-CF-traffic-should-not-land: Cloudflare domain traffic monitoring "
-        "uses daily cron and bandwidth analytics for hosted zones."
+        "type: project\n"
+        "target_role: ops\n"
+        "scope: ops.monitoring\n"
+        "responsibility: recurring service telemetry analysis\n"
+        "stale-target-mismatch-should-not-land: recurring telemetry ownership belongs to a matching owner."
     )
     stale_candidate = a.build_memory_candidate(target, stale_text, source="agent:ohmypi_host_tool")
     stale_approval_id = a.queue_approval(
         approval_type="memory_write_request",
-        summary="stale mismatched CF candidate",
+        summary="stale mismatched responsibility candidate",
         payload={"subagent_id": target.agent_id, "memory": stale_text, "memory_candidate": stale_candidate},
         source="Memory Curator",
         target=target.agent_id,
@@ -2233,8 +2262,8 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
     )
     stale_decision = a.decide_approval(state, stale_approval_id, True)
     assert "已批准但未写入记忆" in stale_decision, stale_decision
-    assert "target_mismatch_ops_memory_requires_ops_or_dedicated_agent" in stale_decision, stale_decision
-    assert "stale-target-mismatch-CF-traffic-should-not-land" not in a.subagent_memory_text(target), a.subagent_memory_text(target)
+    assert "target_mismatch_candidate_responsibility" in stale_decision, stale_decision
+    assert "stale-target-mismatch-should-not-land" not in a.subagent_memory_text(target), a.subagent_memory_text(target)
     stale_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
     assert stale_rows[-1]["status"] == "rejected", stale_rows[-1]
     assert stale_rows[-1]["approval_id"] == stale_approval_id, stale_rows[-1]

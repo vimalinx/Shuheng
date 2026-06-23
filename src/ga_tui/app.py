@@ -10055,56 +10055,178 @@ def memory_candidate_confidence(text: str, *, evidence_refs: list[str], task_id:
     return max(0.0, min(0.95, round(confidence, 2)))
 
 
-OPS_MEMORY_TEXT_MARKERS = (
-    "cloudflare",
-    "wrangler",
-    "domain traffic",
-    "traffic monitor",
-    "traffic analytics",
-    "cf traffic",
-    "dns",
-    "crontab",
-    "cron",
-    "scheduled",
-    "schedule",
-    "daily",
-    "bandwidth",
-    "域名",
-    "流量",
-    "带宽",
-    "监控",
-    "托管",
-    "调度",
-    "每日",
-)
-OPS_MEMORY_TARGET_MARKERS = (
-    "cloudflare",
-    "wrangler",
-    "dns",
-    "traffic",
-    "ops",
-    "运营",
-    "运维",
-    "域名",
-    "流量",
-    "监控",
-    "cf",
-)
-GENERIC_NON_OPS_MEMORY_ROLES = {"researcher", "code_reader", "reviewer", "verifier", "memory_curator"}
+MEMORY_CANDIDATE_TARGET_ROLE_KEYS = {
+    "target_role",
+    "owner_role",
+    "responsibility_role",
+    "agent_role",
+}
+MEMORY_CANDIDATE_SCOPE_KEYS = {
+    "scope",
+    "target_scope",
+    "memory_scope",
+    "owner_scope",
+}
+MEMORY_CANDIDATE_RESPONSIBILITY_KEYS = {
+    "responsibility",
+    "target_responsibility",
+    "owner_responsibility",
+    "domain",
+    "domain_scope",
+}
+MEMORY_CANDIDATE_GENERIC_TARGET_ROLES = {
+    "specialist",
+    "researcher",
+    "code_reader",
+    "reviewer",
+    "verifier",
+    "memory_curator",
+}
+MEMORY_CANDIDATE_RESPONSIBILITY_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "agent",
+    "candidate",
+    "context",
+    "current",
+    "durable",
+    "for",
+    "generic",
+    "lesson",
+    "long",
+    "memory",
+    "owner",
+    "persistent",
+    "project",
+    "responsibility",
+    "role",
+    "scope",
+    "subagent",
+    "target",
+    "task",
+    "term",
+    "the",
+    "to",
+    "verified",
+    "with",
+    "代理",
+    "范围",
+    "负责",
+    "候选",
+    "记忆",
+    "目标",
+    "任务",
+    "项目",
+    "长期",
+}
 
 
-def memory_candidate_target_mismatch_reason(target_sub: SubAgentRuntime, text: str, *, source: str = "") -> str:
-    combined = canonical_memory_statement(f"{text}\n{source}")
-    if not any(marker in combined for marker in OPS_MEMORY_TEXT_MARKERS):
-        return ""
+def memory_candidate_metadata_key(key: str) -> str:
+    key = unicodedata.normalize("NFKC", key or "").strip().lower()
+    key = re.sub(r"[\s-]+", "_", key)
+    key = re.sub(r"[^a-z0-9_]+", "", key)
+    return key
+
+
+def memory_candidate_metadata_values(text: str, keys: set[str]) -> list[str]:
+    values: list[str] = []
+    wanted = {memory_candidate_metadata_key(key) for key in keys}
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s*[-*]\s+", "", line)
+        match = re.match(r"^([A-Za-z][A-Za-z0-9 _-]{0,48})\s*[:=]\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        if memory_candidate_metadata_key(match.group(1)) not in wanted:
+            continue
+        value = match.group(2).strip().strip("`'\" ")
+        if value:
+            values.append(value[:240])
+    return values
+
+
+def memory_candidate_known_role(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "").strip().lower()
+    phrase = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    if phrase in ROLE_TEMPLATES:
+        return phrase
+    for token in re.split(r"[^a-z0-9_]+", normalized.replace("-", "_")):
+        token = token.strip("_")
+        if token in ROLE_TEMPLATES:
+            return token
+    return ""
+
+
+def memory_candidate_responsibility_tokens(value: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKC", value or "").lower()
+    normalized = normalized.replace("_", " ").replace("-", " ")
+    tokens = set(re.findall(r"[a-z0-9]{2,}|[\u4e00-\u9fff]{2,}", normalized))
+    return {token for token in tokens if token not in MEMORY_CANDIDATE_RESPONSIBILITY_STOPWORDS}
+
+
+def memory_candidate_target_tokens(target_sub: SubAgentRuntime) -> set[str]:
     role = normalized_role(target_sub.role)
-    target_text = canonical_memory_statement(
-        f"{target_sub.agent_id}\n{target_sub.name}\n{subagent_profile_text(target_sub)}"
-    )
-    if role == "ops" or any(marker in target_text for marker in OPS_MEMORY_TARGET_MARKERS):
-        return ""
-    if role in GENERIC_NON_OPS_MEMORY_ROLES:
-        return "target_mismatch_ops_memory_requires_ops_or_dedicated_agent"
+    role_description = str(role_template(role).get("description") or "")
+    target_text = "\n".join([
+        target_sub.agent_id,
+        target_sub.name,
+        role,
+        role_description,
+        subagent_profile_text(target_sub),
+    ])
+    return memory_candidate_responsibility_tokens(target_text)
+
+
+def memory_candidate_scope_targets_subagent(scope: str, target_sub: SubAgentRuntime) -> bool:
+    normalized = unicodedata.normalize("NFKC", scope or "").strip().lower()
+    normalized = normalized.replace(":", ".").replace("/", ".")
+    parts = [part for part in re.split(r"[.\s]+", normalized) if part]
+    if len(parts) < 2:
+        return False
+    return parts[0] in {"subagent", "agent"} and parts[1] == target_sub.agent_id.lower()
+
+
+def memory_candidate_target_mismatch_reason(
+    target_sub: SubAgentRuntime,
+    text: str,
+    *,
+    source: str = "",
+    candidate: Optional[dict[str, Any]] = None,
+) -> str:
+    del source
+    statement = text or ""
+    declared_role_values = memory_candidate_metadata_values(statement, MEMORY_CANDIDATE_TARGET_ROLE_KEYS)
+    declared_scope_values = memory_candidate_metadata_values(statement, MEMORY_CANDIDATE_SCOPE_KEYS)
+    declared_responsibility_values = memory_candidate_metadata_values(statement, MEMORY_CANDIDATE_RESPONSIBILITY_KEYS)
+    if candidate is not None:
+        candidate_scope = str(candidate.get("scope") or "").strip()
+        if candidate_scope and not memory_candidate_scope_targets_subagent(candidate_scope, target_sub):
+            declared_scope_values.append(candidate_scope)
+
+    target_role = normalized_role(target_sub.role)
+    target_tokens = memory_candidate_target_tokens(target_sub)
+    declared_roles: list[str] = []
+    for value in declared_role_values + declared_scope_values:
+        role = memory_candidate_known_role(value)
+        if role:
+            declared_roles.append(role)
+    for role in declared_roles:
+        if role != target_role and role not in target_tokens:
+            return "target_mismatch_candidate_responsibility"
+
+    responsibility_tokens: set[str] = set()
+    for value in declared_responsibility_values:
+        responsibility_tokens.update(memory_candidate_responsibility_tokens(value))
+    if (
+        responsibility_tokens
+        and not declared_roles
+        and target_role in MEMORY_CANDIDATE_GENERIC_TARGET_ROLES
+        and not (responsibility_tokens & target_tokens)
+    ):
+        return "target_mismatch_candidate_responsibility"
     return ""
 
 
@@ -10220,6 +10342,7 @@ def memory_candidate_rejection_reason(candidate: dict[str, Any], *, target_sub: 
             target_sub,
             statement,
             source=str(candidate.get("source") or ""),
+            candidate=candidate,
         )
         if target_mismatch:
             return target_mismatch
@@ -12487,8 +12610,8 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
                 "Submit a memory candidate to the Shuheng human approval queue only when a concrete persistent "
                 "subagent target is known; never writes long-term memory directly. Do not call for generic runtime "
                 "lessons without a target. The target's role/name/profile must match the candidate's responsibility "
-                "(for example Cloudflare traffic monitoring belongs to a CF/ops agent, not a generic search agent), "
-                "and submitted/deferred status must never replace the final user reply."
+                "declared by fields such as target_role, scope, or responsibility; mismatched targets are rejected. "
+                "Submitted/deferred status must never replace the final user reply."
             ),
             parameters={
                 "type": "object",
