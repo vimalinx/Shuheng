@@ -6464,6 +6464,7 @@ stop_condition: {task.get("stop_condition", "")}
 subagent_identity_rule: To claim you talked to a persistent Shuheng subagent, route the message to that existing agent_id through Shuheng subagent task/direct-chat controls. A copied profile, OMP native task spawn, or IRC demo participant is only a clone/persona simulation and must be reported as such.
 final_reply_rule: After tool use, runtime task execution, or memory-candidate submission attempts, always finish with a normal user-facing final reply in the user's language. Tool results, "Result:" status lines, and memory-candidate submitted/deferred notices are not a substitute for that reply.
 deictic_reference_rule: Treat this GA TUI Context Pack as internal execution metadata, not as a user-visible conversation object. User phrases such as "这个", "这个东西", "它", "this", or "that" refer to the most recent visible user-facing topic or message unless the user explicitly says "context pack" or "上下文包".
+persistent_agent_request_rule: If the user explicitly asks to create/build a persistent/long-term agent, first emit or execute agent.create with lifecycle:"persistent" or persistent:true for a dedicated matching agent, or reuse an existing matching persistent agent by id. Do not satisfy that request with only scripts, schedules, memory candidates, or a suggestion to create the agent later.
 
 Boundaries:
 {boundaries or "- (empty)"}
@@ -6514,6 +6515,7 @@ Do not treat older full context-pack blocks in OMP history as current if this re
 Read the referenced artifact or call memory_context_get only when the task needs deeper context.
 final_reply_rule: Always finish with a normal user-facing final reply in the user's language; do not stop at tool results, "Result:" status lines, or memory-candidate notices.
 deictic_reference_rule: This GA TUI Context Ref is internal execution metadata. If the user says "这个", "它", "this", or "that", resolve it to the recent visible conversation/task topic, not to this context ref, unless the user explicitly names the context pack/ref.
+persistent_agent_request_rule: Explicit user requests to create a persistent/long-term agent require agent.create lifecycle:"persistent" or persistent:true before reporting success; scripts/schedules alone are not enough.
 [/GA TUI Context Ref]
 """.strip()
 
@@ -10053,6 +10055,59 @@ def memory_candidate_confidence(text: str, *, evidence_refs: list[str], task_id:
     return max(0.0, min(0.95, round(confidence, 2)))
 
 
+OPS_MEMORY_TEXT_MARKERS = (
+    "cloudflare",
+    "wrangler",
+    "domain traffic",
+    "traffic monitor",
+    "traffic analytics",
+    "cf traffic",
+    "dns",
+    "crontab",
+    "cron",
+    "scheduled",
+    "schedule",
+    "daily",
+    "bandwidth",
+    "域名",
+    "流量",
+    "带宽",
+    "监控",
+    "托管",
+    "调度",
+    "每日",
+)
+OPS_MEMORY_TARGET_MARKERS = (
+    "cloudflare",
+    "wrangler",
+    "dns",
+    "traffic",
+    "ops",
+    "运营",
+    "运维",
+    "域名",
+    "流量",
+    "监控",
+    "cf",
+)
+GENERIC_NON_OPS_MEMORY_ROLES = {"researcher", "code_reader", "reviewer", "verifier", "memory_curator"}
+
+
+def memory_candidate_target_mismatch_reason(target_sub: SubAgentRuntime, text: str, *, source: str = "") -> str:
+    combined = canonical_memory_statement(f"{text}\n{source}")
+    if not any(marker in combined for marker in OPS_MEMORY_TEXT_MARKERS):
+        return ""
+    role = normalized_role(target_sub.role)
+    target_text = canonical_memory_statement(
+        f"{target_sub.agent_id}\n{target_sub.name}\n{subagent_profile_text(target_sub)}"
+    )
+    if role == "ops" or any(marker in target_text for marker in OPS_MEMORY_TARGET_MARKERS):
+        return ""
+    if role in GENERIC_NON_OPS_MEMORY_ROLES:
+        return "target_mismatch_ops_memory_requires_ops_or_dedicated_agent"
+    return ""
+
+
 def memory_candidate_scope(target_sub: SubAgentRuntime, text: str = "") -> str:
     match = re.search(r"\bscope\s*:\s*([a-zA-Z0-9_.:-]+)", text or "", flags=re.IGNORECASE)
     if match:
@@ -10144,7 +10199,7 @@ def build_memory_candidate(
     }
 
 
-def memory_candidate_rejection_reason(candidate: dict[str, Any]) -> str:
+def memory_candidate_rejection_reason(candidate: dict[str, Any], *, target_sub: Optional[SubAgentRuntime] = None) -> str:
     statement = clean_text(str(candidate.get("statement") or "")).strip()
     canonical = canonical_memory_statement(statement)
     if not canonical:
@@ -10160,6 +10215,14 @@ def memory_candidate_rejection_reason(candidate: dict[str, Any]) -> str:
         return "too_temporary_or_too_short"
     if float(candidate.get("confidence") or 0.0) < 0.5:
         return "low_confidence"
+    if target_sub is not None:
+        target_mismatch = memory_candidate_target_mismatch_reason(
+            target_sub,
+            statement,
+            source=str(candidate.get("source") or ""),
+        )
+        if target_mismatch:
+            return target_mismatch
     return ""
 
 
@@ -10369,7 +10432,7 @@ def queue_curated_memory_candidate(
         task_id=task_id,
         curator=curator,
     )
-    rejection_reason = memory_candidate_rejection_reason(candidate)
+    rejection_reason = memory_candidate_rejection_reason(candidate, target_sub=target_sub)
     if rejection_reason:
         candidate["rejected_reason"] = rejection_reason
         append_memory_candidate_record(candidate, status="rejected")
@@ -12423,7 +12486,9 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
             description=(
                 "Submit a memory candidate to the Shuheng human approval queue only when a concrete persistent "
                 "subagent target is known; never writes long-term memory directly. Do not call for generic runtime "
-                "lessons without a target, and never let submitted/deferred status replace the final user reply."
+                "lessons without a target. The target's role/name/profile must match the candidate's responsibility "
+                "(for example Cloudflare traffic monitoring belongs to a CF/ops agent, not a generic search agent), "
+                "and submitted/deferred status must never replace the final user reply."
             ),
             parameters={
                 "type": "object",
@@ -21267,6 +21332,32 @@ def decide_approval(state: State, approval_id: str, approved: bool) -> str:
             return f"已批准但找不到目标子 agent：{match_id}"
         candidate = payload.get("memory_candidate") if isinstance(payload.get("memory_candidate"), dict) else {}
         memory_text = str(candidate.get("statement") or payload.get("memory") or "")
+        candidate_target = str(candidate.get("target_subagent") or payload.get("subagent_id") or row.get("target") or "")
+        rejection_reason = ""
+        if candidate and candidate_target and candidate_target != sub.agent_id:
+            rejection_reason = "target_mismatch_candidate_payload"
+        elif candidate:
+            rejection_reason = memory_candidate_rejection_reason(candidate, target_sub=sub)
+        if rejection_reason:
+            if candidate:
+                rejected_candidate = dict(candidate)
+                rejected_candidate["rejected_reason"] = rejection_reason
+                append_memory_candidate_record(
+                    rejected_candidate,
+                    status="rejected",
+                    approval_id=match_id,
+                    artifact_refs=list(payload.get("artifact_refs") or []),
+                )
+            append_agent_mail(
+                from_agent="human",
+                to_type="agent",
+                target=str(row.get("source") or ""),
+                intent="memory_candidate_rejected",
+                status="rejected",
+                payload={"approval_id": match_id, "reason": rejection_reason, "memory_candidate": candidate},
+            )
+            clear_pending_approval_interaction(state, match_id)
+            return f"已批准但未写入记忆：{rejection_reason}"
         result = append_subagent_memory(sub, memory_text, source="approved", policy_approved=True, state=state)
         if candidate:
             append_memory_candidate_record(candidate, status="approved", approval_id=match_id, artifact_refs=list(payload.get("artifact_refs") or []))

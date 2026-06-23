@@ -925,6 +925,8 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
     assert "memory-candidate submit/deferred notices are not a substitute" in prompt_text, prompt_text
     assert "context packs and context refs as internal execution metadata" in prompt_text, prompt_text
     assert "这个东西" in prompt_text and "recent visible conversation/task topic" in prompt_text, prompt_text
+    assert "agent.create with lifecycle:\"persistent\"" in prompt_text, prompt_text
+    assert "Scripts, schedules, or future suggestions alone do not satisfy" in prompt_text, prompt_text
     assert "remember useful path" in prompt_text, prompt_text
     assert "global_mem.txt" in prompt_text, prompt_text
     assert "SHOULD_NOT_LEAK" not in prompt_text, prompt_text
@@ -1188,6 +1190,9 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
     assert "deictic_reference_rule:" in first.prompt, first.prompt
     assert "not as a user-visible conversation object" in first.prompt, first.prompt
     assert "这个东西" in first.prompt and "most recent visible user-facing topic" in first.prompt, first.prompt
+    assert "persistent_agent_request_rule:" in first.prompt, first.prompt
+    assert "agent.create with lifecycle:\"persistent\"" in first.prompt, first.prompt
+    assert "scripts, schedules, memory candidates" in first.prompt, first.prompt
 
     runtime_state.status = "idle"
     runtime_state.active_task_id = None
@@ -1205,6 +1210,8 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
     assert "memory-candidate notices" in second.prompt, second.prompt
     assert "deictic_reference_rule:" in second.prompt, second.prompt
     assert "recent visible conversation/task topic, not to this context ref" in second.prompt, second.prompt
+    assert "persistent_agent_request_rule:" in second.prompt, second.prompt
+    assert "scripts/schedules alone are not enough" in second.prompt, second.prompt
     assert second.context_pack_ref.startswith("artifact://"), second.context_pack_ref
 
     a.reset_agent_runtime_context_no_snapshot(runtime_agent)
@@ -2076,7 +2083,8 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert "not clone its persona" in typed_agent_match_tool["description"], typed_agent_match_tool
     typed_memory_candidate_tool = next(item for item in all_tools if item["name"] == "memory_candidate_submit")
     assert "only when a concrete persistent subagent target is known" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
-    assert "never let submitted/deferred status replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
+    assert "Cloudflare traffic monitoring belongs to a CF/ops agent" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
+    assert "submitted/deferred status must never replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
     typed_handler = a.ohmypi_tui_host_tool_handler(state)
     typed_agents = typed_handler("agent_list", {"limit": 5})
     assert typed_agents["schema_version"] == "ga-tui.query.v1", typed_agents
@@ -2189,6 +2197,47 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
     assert typed_memory["status"] == "ok", typed_memory
     assert typed_memory["kind"] == "memory_candidate", typed_memory
     assert typed_memory["approval_ids"], typed_memory
+
+    before_bad_approval_count = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    bad_ops_memory = handler("memory_candidate_submit", {
+        "target": target.agent_id,
+        "statement": (
+            "type: project\n"
+            "Cloudflare CF domain traffic monitoring for all hosted domains runs from a daily crontab, "
+            "records bandwidth analytics, and should belong to a dedicated CF/ops traffic agent."
+        ),
+        "evidence_ref": "runtime://provider/ohmypi/cf-traffic",
+        "task_id": "task_omp_bad_ops_memory",
+    })
+    assert bad_ops_memory["schema_version"] == "ga-tui.proposal.v1", bad_ops_memory
+    assert bad_ops_memory["status"] == "ok", bad_ops_memory
+    assert bad_ops_memory["result_status"] == "rejected", bad_ops_memory
+    assert "target_mismatch_ops_memory_requires_ops_or_dedicated_agent" in bad_ops_memory["result_message"], bad_ops_memory
+    bad_candidate_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
+    assert bad_candidate_rows[-1]["status"] == "rejected", bad_candidate_rows[-1]
+    assert bad_candidate_rows[-1]["memory_candidate"]["rejected_reason"] == "target_mismatch_ops_memory_requires_ops_or_dedicated_agent", bad_candidate_rows[-1]
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == before_bad_approval_count, a.read_jsonl(a.AGENT_APPROVALS_PATH)
+
+    stale_text = (
+        "stale-target-mismatch-CF-traffic-should-not-land: Cloudflare domain traffic monitoring "
+        "uses daily cron and bandwidth analytics for hosted zones."
+    )
+    stale_candidate = a.build_memory_candidate(target, stale_text, source="agent:ohmypi_host_tool")
+    stale_approval_id = a.queue_approval(
+        approval_type="memory_write_request",
+        summary="stale mismatched CF candidate",
+        payload={"subagent_id": target.agent_id, "memory": stale_text, "memory_candidate": stale_candidate},
+        source="Memory Curator",
+        target=target.agent_id,
+        approval_required_for="write_long_term_memory",
+    )
+    stale_decision = a.decide_approval(state, stale_approval_id, True)
+    assert "已批准但未写入记忆" in stale_decision, stale_decision
+    assert "target_mismatch_ops_memory_requires_ops_or_dedicated_agent" in stale_decision, stale_decision
+    assert "stale-target-mismatch-CF-traffic-should-not-land" not in a.subagent_memory_text(target), a.subagent_memory_text(target)
+    stale_rows = a.read_jsonl(a.AGENT_MEMORY_CANDIDATES_PATH)
+    assert stale_rows[-1]["status"] == "rejected", stale_rows[-1]
+    assert stale_rows[-1]["approval_id"] == stale_approval_id, stale_rows[-1]
 
     typed_schedule = handler("schedule_create", {
         "schedule_id": "sched_omp_typed_digest",

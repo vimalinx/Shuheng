@@ -930,6 +930,8 @@ configure_genericagent_provider_runtime(
 - OMP `tool_execution_start` / `tool_execution_end` frames and GA-TUI `host_tool_call` / `host_tool_result` bridge activity must become bounded, redacted tool process turns so tool args/results are folded by default while the final reply remains visible.
 - Generated OMP context packs, context refs, memory append prompts, and `memory_candidate_submit` descriptions must tell OMP to finish every user turn with a normal user-facing reply in the user's language. Tool results, `Result:` status lines, and memory-candidate submitted/deferred notices must not replace the final reply.
 - Generated OMP context packs, context refs, and memory append prompts must mark Shuheng context metadata as internal execution metadata. Follow-up pronouns such as `这个`, `这个东西`, `它`, `this`, or `that` must resolve to the recent visible conversation/task topic unless the user explicitly names the context pack/ref.
+- Generated OMP context packs, context refs, and memory append prompts must treat explicit user requests to create a persistent/long-term Shuheng agent as an executable control requirement: success requires `agent.create` with `lifecycle:"persistent"` / `persistent:true`, or reuse of a matching existing persistent `agent_id`. Scripts, schedules, memory candidates, or future-agent suggestions alone do not satisfy the request.
+- OMP memory-candidate governance must reject obvious target mismatches. Cloudflare/domain traffic/monitoring/scheduled ops memory must target an `ops` or clearly dedicated Cloudflare/domain/traffic agent; it must not be queued or approved into generic researcher/search agents.
 - Process normalization belongs inside `ohmypi_provider.py`; `app.py` must not contain OMP-specific RPC parsing or a second OMP renderer.
 - OMP process args/results included in assistant text must be bounded and secret-redacted before entering the display queue, history, artifacts, traces, or memory-candidate extraction.
 - OMP memory-candidate signal extraction must strip normalized process markers, `<thinking>` blocks, tool args, and tool result fences before deciding whether a durable candidate exists.
@@ -1032,6 +1034,7 @@ configure_genericagent_provider_runtime(
 - OMP host tool calls/results -> active TUI queue receives folded GA-style tool process turns while RPC still receives matching `host_tool_result` frames.
 - OMP memory-candidate signal extraction over normalized process output -> candidate statement contains only the final durable reply, not thinking text, tool args, or tool results.
 - OMP follow-up `这个是啥啊？` after a visible BSpace Agent Arcade URL/task -> answer about the Agent Arcade/game/API task, not about the GA TUI Context Pack/Ref.
+- OMP memory candidate about Cloudflare/domain traffic monitoring targeting `搜索代理` or another generic `researcher` -> rejected with `target_mismatch_ops_memory_requires_ops_or_dedicated_agent` and no subagent memory append occurs, even if a stale approval row is later approved.
 - `put_runtime_task(RuntimeTaskRequest)` -> provider emits at least `runtime_task_requested` and a terminal `runtime_task_completed`, `runtime_task_failed`, or `runtime_task_aborted` event carrying the original request and context-pack artifact refs.
 
 ### 5. Good/Base/Bad Cases
@@ -1061,6 +1064,7 @@ configure_genericagent_provider_runtime(
 - Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
 - Tests must assert generated OMP context packs/context refs, memory append prompts, and memory-candidate tool descriptions contain the final-reply rule so memory-candidate status cannot become the only visible completion.
 - Tests must assert generated OMP context packs/context refs and memory append prompts contain the deictic-reference rule that prevents `这个`/`this` from resolving to internal context metadata by default.
+- Tests must assert generated OMP context packs/context refs and memory append prompts contain the persistent-agent request rule, and that ops/Cloudflare memory candidates targeting generic search/research agents are rejected both at queue time and approval time.
 - Tests must assert OMP command construction discovers `$HOME/.bun/bin/omp` when `omp` is absent from `PATH`, while explicit `GA_TUI_OHMYPI_BIN` remains authoritative.
 - Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, secret-looking, and Secret-context outputs are skipped.
 - Tests must assert a fake RPC process maps `ready`, `prompt` ack, `message_update` deltas, and `agent_end` into queue `next`/`done` items.
