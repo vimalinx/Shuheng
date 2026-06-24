@@ -4654,11 +4654,12 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert approval_id not in home_text, home_text
 
     a.submit(state, "hello from home")
-    assert state.selected_session == a.subagent_home_session_key(sub.agent_id), state.selected_session
-    assert sub.agent.prompts == [], sub.agent.prompts
-    assert "/chat" in state.last_error, state.last_error
-    assert a.switch_home_to_chat(state) == f"已切到代理聊天：{sub.name}"
     assert state.selected_session == sub.agent_id, state.selected_session
+    assert len(sub.agent.prompts) == 1, sub.agent.prompts
+    assert sub.agent.prompts[0][1] == f"subagent-chat:{sub.agent_id}", sub.agent.prompts
+    assert "hello from home" in sub.agent.prompts[0][0], sub.agent.prompts
+    drain_ui(state)
+    assert state.status == "idle", state.status
     assert a.show_home_for_current_scope(state) == f"已打开代理主页：{sub.name}"
 
     dashboard_control = ga_control({

@@ -257,7 +257,7 @@ S01 修复左栏历史会话标题
 - Default home pages must not dump raw governance ledgers below the fixed card. Task titles, approval ids, artifact URIs, schedule records, and internal owner ids stay behind deliberate `/tasks`, `/approvals`, `/artifacts`, and `/schedules` drill-down panels unless an agent explicitly declares a readable dashboard section.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
-- Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home remains read-only gated; the user must switch with `/chat` before direct subagent chat. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
+- Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home auto-switches to that agent's chat interface and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
 
 ### 4. Validation & Error Matrix
 
@@ -291,7 +291,7 @@ S01 修复左栏历史会话标题
 - Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
 - Tests must assert unsupported section types and executable-looking fields are ignored.
 - Tests must assert old transcript-only behavior explicitly selects `"main"` when testing main chat rendering.
-- Tests must assert plain text on main home auto-switches to `selected_session == "main"` after starting a main task, while plain text on persistent-agent homes is read-only gated and requires `/chat` before chat input.
+- Tests must assert plain text on main home auto-switches to `selected_session == "main"` after starting a main task, while plain text on persistent-agent homes auto-switches to the corresponding subagent chat and sends the input without requiring `/chat`.
 - Tests must keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
 ### 7. Wrong vs Correct

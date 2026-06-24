@@ -20068,7 +20068,7 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
         safe_add(stdscr, footer_y, x0, state.last_error, main_w, cp(5))
     elif selected_home_subagent(state) is not None:
         sub = selected_home_subagent(state)
-        safe_add(stdscr, footer_y, x0, f"Agent home: {sub.agent_id}; /chat 切到聊天；主页只读显示共享账本/定时任务/artifact", main_w, cp(1))
+        safe_add(stdscr, footer_y, x0, f"Agent home: {sub.agent_id}; 输入直接发给 {sub.name}; /chat 显示聊天; 主页显示共享账本/定时任务/artifact", main_w, cp(1))
     elif is_main_home_session_key(state.selected_session):
         safe_add(stdscr, footer_y, x0, "Home: 主 agent 主页；输入任务会进入任务界面；/tasks /schedules /approvals /artifacts 打开面板", main_w, cp(1))
     elif selected_subagent(state) is not None:
@@ -22979,7 +22979,8 @@ def submit(state: State, text: str) -> None:
     active_sub = selected_subagent(state)
     home_sub = selected_home_subagent(state)
     if home_sub is not None and not text.startswith("/"):
-        state.last_error = f"当前是 {home_sub.name} 主页；输入 /chat 后再和该代理聊天。"
+        set_selected_interface(state, home_sub.agent_id)
+        state.last_error = start_subagent_chat(state, home_sub, text, source="subagent_chat")
         mark_dirty(state)
         return
     if active_sub is not None and not text.startswith("/"):
@@ -25275,7 +25276,7 @@ def handle_mouse(state: State, mx: int, my: int, bstate: int, width: int) -> Non
                 if sub is not None:
                     if sub.persistent:
                         state.selected_session = subagent_home_session_key(sub.agent_id)
-                        state.last_error = f"已进入代理主页：{sub.name} · {sub.status}；/chat 切到聊天"
+                        state.last_error = f"已进入代理主页：{sub.name} · {sub.status}；普通输入会直接发给它"
                     else:
                         state.selected_session = key
                         state.last_error = f"已进入临时子 agent 聊天：{sub.name} · {sub.status}；普通输入会直接发给它"
