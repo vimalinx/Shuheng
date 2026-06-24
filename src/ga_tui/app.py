@@ -10617,8 +10617,6 @@ def append_subagent_memory(sub: SubAgentRuntime, text: str, source: str = "manua
 
 
 def set_subagent_default_model(state: State, sub: SubAgentRuntime, model_name: str) -> tuple[bool, str]:
-    if not sub.persistent:
-        return False, f"{sub.name} 是临时会话子 agent，不支持默认模型；请创建持久子 agent。"
     model_name = str(model_name or "").strip()
     if model_name.lower() in {"inherit", "default", "global", "none", "clear", "-", "继承", "默认", "全局", "清除"}:
         model_name = ""
@@ -12479,6 +12477,13 @@ def set_agent_to_model_name(agent: Any, model_name: str) -> tuple[bool, str]:
     return ok, msg
 
 
+def configured_global_default_entry() -> Optional[LLMConfigEntry]:
+    entries, mixin, _preserved, error = load_llm_config_entries()
+    if error or not entries:
+        return None
+    return entries[default_entry_index(entries, mixin)]
+
+
 def reset_agent_instance_to_default_llm(agent: Any) -> tuple[bool, str]:
     if agent is None:
         return False, "agent 不存在。"
@@ -12487,6 +12492,13 @@ def reset_agent_instance_to_default_llm(agent: Any) -> tuple[bool, str]:
         agent.load_llm_sessions()
     except Exception:
         pass
+    default_entry = configured_global_default_entry()
+    if default_entry is not None:
+        index = find_agent_llm_index(agent, default_entry)
+        if index >= 0:
+            ok, msg = set_agent_llm_index(agent, index)
+            set_agent_log_path(agent, log_path)
+            return ok, msg
     ok, msg = set_agent_llm_index(agent, 0)
     set_agent_log_path(agent, log_path)
     return ok, msg
@@ -14872,8 +14884,8 @@ AGENT_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
     ("list", "", "列出子 agent", True),
     ("new", "[persistent:] [role:]<name> [| profile]", "新建临时子 agent；加 persistent: 创建持久 agent", False),
     ("role", "<agent> <role>", "设置子 agent 角色", False),
-    ("settings", "<agent>", "打开持久 agent 详细设置", False),
-    ("model", "<agent> [model|inherit]", "设置持久 agent 默认模型", False),
+    ("settings", "<agent>", "打开 agent 详细设置", False),
+    ("model", "<agent> [model|inherit]", "设置 agent 默认模型", False),
     ("templates", "", "列出角色模板", True),
     ("ask", "<agent> <prompt>", "让子 agent 执行任务", False),
     ("run", "<agent> <prompt>", "ask 的别名", False),
@@ -22029,10 +22041,11 @@ def draw_subagent_settings(
 ) -> None:
     height, width = stdscr.getmaxyx()
     y0, x0, h, w = popup_geometry(height, width, min_h=18, min_w=92)
-    draw_popup(stdscr, y0, x0, h, w, "持久 Agent 详细设置")
+    draw_popup(stdscr, y0, x0, h, w, "Agent 详细设置")
     inner_w = w - 4
     current = sub.default_model or "(继承全局默认)"
-    safe_add(stdscr, y0 + 2, x0 + 2, f"{sub.name} ({sub.agent_id})  role={sub.role}  默认模型={current}", inner_w, cp(2))
+    scope = "持久" if sub.persistent else "临时"
+    safe_add(stdscr, y0 + 2, x0 + 2, f"{sub.name} ({sub.agent_id})  {scope}  role={sub.role}  默认模型={current}", inner_w, cp(2))
     safe_add(stdscr, y0 + 3, x0 + 2, "↑↓ 选择模型  Enter 设为该 agent 默认  c 继承全局默认  r 重载模型配置  Esc 返回", inner_w, cp(1))
     options = subagent_settings_options(entries)
     list_y = y0 + 5
@@ -22060,10 +22073,6 @@ def open_subagent_settings(stdscr, state: State, sub: SubAgentRuntime) -> None:
     try:
         stdscr.timeout(-1)
         redraw(stdscr, state)
-        if not sub.persistent:
-            draw_modal_notice(stdscr, state, "Agent 设置", [f"{sub.name} 是临时会话子 agent，不支持默认模型。"])
-            modal_read_key(stdscr)
-            return
         entries, _mixin, _preserved, error = load_llm_config_entries()
         options = subagent_settings_options(entries)
         selected = max(0, options.index(sub.default_model) if sub.default_model in options else 0)
@@ -22730,6 +22739,7 @@ def apply_subagent_control(
             name = target
         profile = str(control.get("profile") or control.get("description") or control.get("system") or "").strip()
         role, role_note = subagent_role_request(str(control.get("role") or "specialist"))
+        requested_model = str(control.get("model") or control.get("default_model") or control.get("model_name") or "").strip()
         persistent, temporary = subagent_control_persistence_intent(control, target, value, name, profile)
         if not name:
             return "缺少子 agent 名称。"
@@ -22751,7 +22761,11 @@ def apply_subagent_control(
                 maybe_complete_plan_after_step(step_id)
             scope = "持久" if reused.persistent else "临时"
             suffix = f" {role_note}" if role_note else ""
-            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role}){suffix}"
+            model_suffix = ""
+            if requested_model:
+                ok_model, model_msg = set_subagent_default_model(state, reused, requested_model)
+                model_suffix = f"；{model_msg}" if ok_model else f"；默认模型设置失败：{model_msg}"
+            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role}){suffix}{model_suffix}"
         sub = create_subagent(state, name, profile, role=role, persistent=persistent)
         register_subagent_control_aliases(
             control_aliases,
@@ -22768,7 +22782,11 @@ def apply_subagent_control(
             maybe_complete_plan_after_step(step_id)
         scope = "持久" if sub.persistent else "临时"
         suffix = f" {role_note}" if role_note else ""
-        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role}){suffix}"
+        model_suffix = ""
+        if requested_model:
+            ok_model, model_msg = set_subagent_default_model(state, sub, requested_model)
+            model_suffix = f"；{model_msg}" if ok_model else f"；默认模型设置失败：{model_msg}"
+        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role}){suffix}{model_suffix}"
 
     sub = resolve_subagent(state, target)
     if sub is None:

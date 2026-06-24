@@ -2798,6 +2798,7 @@ def create_agent_action(
     persistent: bool | None = None,
     temporary: bool | None = None,
     force_new: bool = False,
+    default_model: str = "",
     parent_task_id: str = "",
     plan_step_id: str = "",
 ) -> dict:
@@ -2811,6 +2812,8 @@ def create_agent_action(
     if force_new:
         action["reuse_policy"] = "force_new"
         action["force_new"] = True
+    if default_model:
+        action["default_model"] = default_model
     if parent_task_id:
         action["parent_task_id"] = parent_task_id
     if plan_step_id:
@@ -4373,6 +4376,31 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert len(lifecycle_matches) == 2, [(sub.agent_id, sub.persistent) for sub in lifecycle_matches]
     assert {sub.persistent for sub in lifecycle_matches} == {False, True}, lifecycle_matches
 
+    old_mykey_path = a.mykey_path
+    try:
+        mykey_file = os.path.join(root, "mykey.py")
+        Path(mykey_file).write_text(
+            "\n".join([
+                "mixin_config = {'llm_nos': ['beta'], 'max_retries': 10, 'base_delay': 0.5}",
+                "native_oai_config = {'name': 'alpha', 'apikey': 'k', 'apibase': 'https://example.invalid/v1', 'model': 'model-alpha'}",
+                "native_oai_config_1 = {'name': 'beta', 'apikey': 'k', 'apibase': 'https://example.invalid/v1', 'model': 'model-beta'}",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        a.mykey_path = lambda: mykey_file
+        a.apply_tui_controls_from_text(
+            state,
+            ga_control(create_agent_action("Model Routed Agent", persistent=True, role="researcher", default_model="beta")),
+            source="agent",
+        )
+        model_agent = a.resolve_subagent(state, "Model Routed Agent")
+        assert model_agent is not None, state.subagents
+        assert model_agent.default_model == "beta", model_agent
+        assert a.load_subagent_meta(model_agent.agent_id).get("default_model") == "beta"
+    finally:
+        a.mykey_path = old_mykey_path
+
     assert a.normalized_role("main_orchestrator") == "main_orchestrator"
     assert a.normalized_subagent_role("main_orchestrator") == "specialist"
     parsed_name, parsed_profile, parsed_role, parsed_persistent, parsed_note = a.parse_subagent_new_body(
@@ -5902,7 +5930,20 @@ def run_checks() -> None:
         ok_sub_model, sub_model_msg = a.set_subagent_default_model(sub_state, sub, "inherit")
         assert ok_sub_model, sub_model_msg
         assert sub.default_model == ""
-        assert sub.agent.llm_no == 0
+        assert sub.agent.llm_no == 2
+
+        temp_sub = a.create_subagent(sub_state, "Temp Model Agent", role="researcher", persistent=False)
+        temp_sub.agent = FakeLLMAgent()
+        ok_temp_model, temp_model_msg = a.set_subagent_default_model(sub_state, temp_sub, "alpha")
+        assert ok_temp_model, temp_model_msg
+        assert temp_sub.default_model == "alpha"
+        assert temp_sub.agent.llm_no == 1
+        assert a.load_subagent_meta_file(os.path.join(temp_sub.home, "meta.json")).get("default_model") == "alpha"
+        temp_reloaded = a.State(agent=FakeLLMAgent())
+        assert a.load_subagents(temp_reloaded) is True
+        temp_reloaded_sub = a.resolve_subagent(temp_reloaded, temp_sub.agent_id)
+        assert temp_reloaded_sub is not None
+        assert temp_reloaded_sub.default_model == "alpha"
     finally:
         a.mykey_path = old_mykey_path
 

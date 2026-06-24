@@ -584,6 +584,9 @@ token panel -> OMP get_state.contextUsage
 - `delegate.create` must carry `routing`, `work_order`, `capability_contract`, `context_contract`, and `output_contract`.
 - `delegate.create.work_order.objective` is the policy-gate source of truth. Capability fields such as `tools_forbidden:["deploy","email.send"]` must not trigger deployment or external-send approval by themselves.
 - `agent.create` is ephemeral by default. Long-running, scheduled, recurring, or dedicated responsibilities must be expressed with explicit structured fields such as `lifecycle:"persistent"` or `persistent:true`; the runtime must not infer lifecycle from `name`, `profile`, visible prose, or other natural-language descriptions.
+- `agent.create` may carry `model`, `default_model`, or `model_name`; after create-or-reuse the runtime applies that value as the target subagent's default model through the same validation path as `agent.model.update`.
+- `agent.model.update` / `/agent model <agent> <model|inherit>` can target persistent or temporary subagents. Persistent subagents save the default model in persistent metadata; temporary subagents save it in their session-scoped temp metadata.
+- Clearing a subagent default model with `inherit` / `global` / `clear` must restore the configured global default model from `/model` (`mixin_config.llm_nos[0]`) when the runtime has that model available, not blindly switch to model index 0.
 - `main_orchestrator` is reserved for the main Shuheng runtime only. Any subagent creation, subagent role update, subagent command parsing, or loaded subagent metadata that requests `main_orchestrator` must normalize the subagent role to `specialist` and surface a bounded user-visible note instead of creating a main-orchestrator subagent.
 - Reuse intent must be explicit. `reuse_policy:"force_new"` / `force_new:true` forces a new agent; visible prose such as "do not reuse" is not a runtime signal unless the model also emits the structured field.
 - Plan binding must be explicit. Controls that belong to a plan step must carry `plan_step_id`, `parent_task_id`, or an equivalent explicit step reference; the runtime must not bind steps by matching words like "self-introduction", "chat", or "summary".
@@ -611,6 +614,9 @@ token panel -> OMP get_state.contextUsage
 - `agent.role.update` or `/agent role ... main_orchestrator` -> never assigns `main_orchestrator` to a subagent; the requested role is normalized to `specialist`.
 - `agent.create` with recurring/daily/archive-building responsibility language but without explicit persistent lifecycle fields -> remains ephemeral.
 - `agent.create` with `lifecycle:"persistent"` / `persistent:true` -> creates a persistent subagent under `SUBAGENTS_DIR`.
+- `agent.create` with `default_model:"beta"` -> creates or reuses the subagent and applies `beta` as that agent's default model if the model config exists.
+- `agent.model.update` on a temporary subagent -> updates session-scoped temp metadata and applies the model to its live agent when idle.
+- `agent.model.update` with `inherit` -> clears the subagent override and applies the current global default model when available.
 - `ga-control` JSON that only misses trailing `}` / `]` closers -> repair the missing tail and execute if it parses into known actions.
 - Visible prose containing inline-code `` `<ga-control>` `` followed by a real control block -> parse and execute only the real control block, keep the inline label visible, and do not report parse_error.
 - Unrepairable `ga-control` JSON -> add an `Agent 控制结果` parse-error message instead of silently swallowing the control block.
@@ -639,6 +645,7 @@ token panel -> OMP get_state.contextUsage
 - `scripts/check_policy_gates.py` must assert inline-code `<ga-control>` labels do not capture later real control blocks.
 - `scripts/check_policy_gates.py` must assert ordinary code/tool-output fences containing literal `<ga-control>` examples are not extracted, stripped, or reported as parse errors.
 - `scripts/check_policy_gates.py` must assert subagent creation, `/agent new` role parsing, role updates, saved metadata, and loaded metadata normalize `main_orchestrator` to `specialist` for subagents while preserving the main runtime's `main_orchestrator` role.
+- `scripts/check_policy_gates.py` must assert per-subagent default models can be set for persistent and temporary subagents, persist to the correct metadata scope, apply to the live runtime when idle, and clear back to the configured global default.
 - `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `ga_tui.control_protocol` and that the protocol module does not import curses.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py scripts/check_policy_gates.py` must pass.
 - `python3 scripts/check_policy_gates.py` must pass.

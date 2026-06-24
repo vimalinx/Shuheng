@@ -254,6 +254,7 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
             "name": control.get("name") or selector.get("name") or control.get("title") or selector.get("role") or "subagent",
             "profile": control.get("profile") or control.get("description") or selector.get("profile") or selector.get("description") or "",
             "role": control.get("role") or selector.get("role") or "specialist",
+            "model": control.get("model") or control.get("default_model") or control.get("model_name") or selector.get("model") or selector.get("default_model") or "",
             "plan_step_id": control.get("plan_step_id") or control.get("parent_task_id") or control.get("step") or "",
             "force_new": force_new_from_v2(control),
         })
