@@ -73,14 +73,14 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 ### 3. Contracts
 
-- Process-only summaries must not become `preview`, `description`, `ui_preview_messages`, `state.history_names`, or AI title-generation context.
+- Process-only summaries must not become `preview`, `description`, `ui_preview_messages`, `state.history_names`, or AI metadata context.
 - If a response contains process markers, `<summary>` content belongs to process rendering, not session naming.
 - For process-marked responses, sidebar title fallback should prefer the first user message, then visible final assistant prose.
 - Existing cached metadata that already contains process-only preview text must be invalidated and recomputed from the raw model response file.
 - Explicit user names in `session_names.json` win unless they are process-only labels such as `OMP 思考`.
-- Automatic AI session titles should be re-evaluated whenever the user/assistant content signature changes, so each completed round can refine the visible session name.
-- Main-runtime agents may maintain the current title by emitting `session.rename`; those model-owned title changes are recorded as `title_source:"ai"`.
-- Manual `/rename` or history rename writes `title_source:"manual"` and must not be overwritten by later automatic AI title reviews.
+- Main-runtime agents own persisted title maintenance by emitting `session.rename`; those model-owned title changes are recorded as `title_source:"ai"`.
+- Inline metadata jobs may maintain descriptions and categories when supported, but they must not author persisted session titles.
+- Manual `/rename` or history rename writes `title_source:"manual"` and must not be overwritten by later model-owned `session.rename`.
 - Standalone progress-dot deltas from OMP (`.` on its own line) are process noise and must not render in the transcript.
 - Current OMP thinking process summaries should use a compact excerpt of the thinking text, not the fixed label `OMP 思考`.
 - Legacy process blocks with `<summary>OMP 思考</summary>` should render a compact excerpt from the `<thinking>` body.
@@ -89,9 +89,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - Raw response has `<summary>OMP 思考</summary>` plus final visible prose -> sidebar title uses the user task, not `OMP 思考`.
 - Cached metadata has `preview:"OMP 思考"` and matching file mtime/size -> cache is treated stale and recomputed.
-- AI title context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
-- AI title review sees a new content signature after another completed round -> a new title job can run and update the AI-owned session title.
-- AI title review sees `title_source:"manual"` -> it does not start or overwrite the title.
+- AI metadata context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
+- New user/assistant content by itself does not persist a new title; the title changes only when the main runtime emits `session.rename`.
+- Model-owned `session.rename` sees `title_source:"manual"` -> it does not overwrite the title.
 - Main-runtime `session.rename` changes an unlocked AI-owned title -> title source remains `ai`; the same control against a manual title is skipped.
 - Main transcript renderer sees process blocks -> folded process UI still shows the process label.
 - Main transcript renderer sees a legacy thinking block plus a standalone `.` line -> renders the thinking excerpt and suppresses the dot line.
@@ -113,8 +113,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - `scripts/check_policy_gates.py` must assert OMP process summaries do not title history rows.
 - The test must seed a stale `session_meta.json` cache with `preview:"OMP 思考"` to prove cache invalidation.
-- The test must assert restored preview messages and AI title context exclude process-only summary and hidden reasoning.
-- Tests must assert AI-owned session titles are reviewed again when content signatures change, while manual titles remain stable.
+- The test must assert restored preview messages and AI metadata context exclude process-only summary and hidden reasoning.
+- Tests must assert automatic persisted title maintenance uses model-owned `session.rename`, while metadata refresh alone does not write titles and manual titles remain stable.
 - Tests must assert model-owned `session.rename` updates are marked AI-owned and do not override manual titles.
 - Tests must assert OMP thinking summaries use thinking excerpts, legacy `OMP 思考` summaries render from `<thinking>`, and standalone dot deltas/lines are suppressed.
 - Tests must assert mixed OMP process turns, including thinking-only summaries, tool turns, and short progress prose, collapse into one expandable process group while the final response stays visible.
@@ -421,7 +421,7 @@ draw_running_indicator_frame(stdscr, state)
 - OMP isolated runtime config must be written under the Shuheng-owned harness runtime directory and must not mutate the user's system OMP config.
 - OMP isolated runtime config defaults `tools.approvalMode` to `yolo`, so OMP runtime tools do not stop for OMP approval prompts.
 - If OMP still emits an RPC extension-UI approval prompt, it may be auto-approved when the active runtime request has `permission_profile:"full"` and the requested tool maps to an allowed capability.
-- OMP RPC backend does not expose `raw_ask`; inline AI metadata jobs such as automatic title and description generation must skip OMP instead of surfacing UI errors.
+- OMP RPC backend does not expose `raw_ask`; inline AI metadata jobs such as automatic description generation must skip OMP instead of surfacing UI errors.
 - Sidebar session category is Shuheng-owned index metadata. When `raw_ask` is unavailable, Shuheng must still maintain a bounded local category fallback from visible user/assistant text, cached title/description, and existing category labels without opening an OMP metadata turn.
 - Manual category metadata remains locked: `category_source:"manual"` must not be overwritten by AI or local automatic category refresh.
 
@@ -435,7 +435,7 @@ draw_running_indicator_frame(stdscr, state)
 - OMP RPC approval select for safe `bash` under full profile -> respond `Approve`.
 - OMP RPC approval select for risky `rm -rf` under full profile -> respond `Approve`.
 - OMP RPC approval select under `standard` profile -> respond `Deny`.
-- OMP active session completes a normal task -> automatic title/description workers are not started through unsupported `raw_ask`, no `AI title: RuntimeError` appears, and sidebar category still lands in `session_meta.json` through the local fallback.
+- OMP active session completes a normal task -> inline description workers are not started through unsupported `raw_ask`, no metadata `RuntimeError` appears, and sidebar category still lands in `session_meta.json` through the local fallback.
 - OMP process summaries, hidden thinking text, tool calls, and `model_responses*.txt` basenames -> do not influence the local sidebar category.
 
 ### 5. Good/Base/Bad Cases
@@ -596,7 +596,7 @@ token panel -> OMP get_state.contextUsage
 - Plan binding must be explicit. Controls that belong to a plan step must carry `plan_step_id`, `parent_task_id`, or an equivalent explicit step reference; the runtime must not bind steps by matching words like "self-introduction", "chat", or "summary".
 - Executable `<ga-control>` blocks are only for real operations. Capability explanations, tutorials, and examples must not include literal executable tags; use escaped text such as `&lt;ga-control&gt;...&lt;/ga-control&gt;` or show only the JSON payload.
 - Literal `<ga-control>` snippets inside ordinary Markdown/code/tool-output fences are display text, not executable control blocks, and must not emit parse-error system messages. Only top-level hidden tags, explicit `ga-control` fences, and opt-in JSON recovery fences are executable.
-- Automatic current-session title maintenance is an allowed `session.rename` control exception: the main runtime may emit it at the end of a normal reply when the title is stale or misleading, and must stay silent when the title is already accurate.
+- Automatic current-session title maintenance is an allowed `session.rename` control exception and the only automatic persisted-title path: the main runtime may emit it at the end of a normal reply when the title is stale or misleading, and must stay silent when the title is already accurate.
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
 - `install_tui_control_hint()` must replace any previous GenericAgent-TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
@@ -1608,7 +1608,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 
 - Good: A fresh `shuheng` launch creates and reads sidebar history, harness ledgers, subagents, Secret Vault, and OMP isolated runtime files under `~/.shuheng` and leaves `/home/vimalinx/Programs/GenericAgent/memory` and `temp/model_responses` untouched.
 - Good: A user upgrades from old GenericAgent-backed storage; Shuheng copies missing sessions, global memory files, and persistent subagents into `~/.shuheng`, then the sidebar reads only the copied Shuheng-owned paths.
-- Good: `/rename`, AI title jobs, `/continue` parsing, and cached round counts all use Shuheng-owned sidecars.
+- Good: `/rename`, model-owned `session.rename`, `/continue` parsing, and cached round counts all use Shuheng-owned sidecars.
 - Base: The GenericAgent checkout still supplies `continue_cmd.py` and `session_names.py` code, but their storage globals are retargeted at runtime.
 - Base: Operators can disable implicit bootstrap with `SHUHENG_DISABLE_LEGACY_IMPORT=1` or force it in custom-home tests with `SHUHENG_IMPORT_LEGACY=1`.
 - Base: Test harnesses may retarget `MODEL_RESPONSES_DIR` to a temp directory, but must call `configure_frontend_history_storage()` after changing the path constants.
@@ -1738,7 +1738,7 @@ pack["workspace_context"] = workspace_context
 ### 1. Scope / Trigger
 
 - Trigger: A user enters `/temp` to start a temporary main-agent session.
-- Applies to: command routing, main-agent log path binding, session metadata, automatic naming/description/category jobs, durable UI system messages, memory candidate creation, token usage persistence, and background session switching.
+- Applies to: command routing, main-agent log path binding, session metadata, automatic local naming, description/category jobs, durable UI system messages, memory candidate creation, token usage persistence, and background session switching.
 - Non-goal: This is not a Secret Vault session and does not encrypt or restore temporary content. It is an in-memory session that disappears when closed or replaced.
 
 ### 2. Signatures
@@ -1752,7 +1752,7 @@ pack["workspace_context"] = workspace_context
 
 - `/temp` starts a fresh main-agent context and binds the active agent plus LLM backends to `os.devnull`.
 - Temporary sessions must not create `model_responses*.txt` history logs.
-- Temporary sessions must not write `session_meta.json`, session names, automatic title/description/category metadata, durable UI system messages, token usage registry rows, memory candidates, or direct subagent memory updates.
+- Temporary sessions must not write `session_meta.json`, session names, automatic description/category metadata, model-owned persisted title renames, durable UI system messages, token usage registry rows, memory candidates, or direct subagent memory updates.
 - If a normal task is running, `/temp` may park it as a background session and then open a temporary active session.
 - If a temporary session is parked in the background and later restored, it remains temporary and keeps `os.devnull` as its backend log path.
 - `/new` exits temporary mode and creates a normal persistent session log path under the Shuheng-owned `MODEL_RESPONSES_DIR`.

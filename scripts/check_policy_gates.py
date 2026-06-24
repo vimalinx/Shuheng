@@ -1067,14 +1067,13 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert "3 个模型" in refresh_msg, refresh_msg
         assert len(ohmypi_agent.configured_models) == 3, ohmypi_agent.configured_models
         assert ohmypi_agent.configured_models[2].model_id == "model-gamma", ohmypi_agent.configured_models
-        title_state = a.State(agent=ohmypi_agent)
-        title_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_ohmypi_title.txt")
-        a.set_agent_log_path(ohmypi_agent, title_path)
-        title_messages = [a.Message("user", "给这个会话起名"), a.Message("assistant", "这是回答")]
+        metadata_state = a.State(agent=ohmypi_agent)
+        metadata_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_ohmypi_metadata.txt")
+        a.set_agent_log_path(ohmypi_agent, metadata_path)
+        metadata_messages = [a.Message("user", "给这个会话维护简介"), a.Message("assistant", "这是回答")]
         assert a.agent_supports_inline_ai_metadata(ohmypi_agent) is False
-        assert a.generate_ai_session_title(ohmypi_agent, title_messages) == ""
-        assert a.maybe_start_ai_title_job(title_state, title_path, title_messages, ohmypi_agent) is False
-        assert title_state.title_jobs == set(), title_state.title_jobs
+        assert a.maybe_start_ai_description_job(metadata_state, metadata_path, metadata_messages, ohmypi_agent) is False
+        assert metadata_state.description_jobs == set(), metadata_state.description_jobs
         record = adapter.spec.to_record()
         assert record["model_routing"]["isolated_agent_dir"] == runtime_config.agent_dir, record
         assert record["model_routing"]["configured_model_count"] == 2, record
@@ -4479,6 +4478,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
     assert "回复末尾隐藏块" in a.TUI_AGENT_CONTROL_HINT
     assert "会话标题维护" in a.TUI_AGENT_CONTROL_HINT
+    assert "持久标题只由当前主控 runtime 自己通过 `session.rename` 写入" in a.TUI_AGENT_CONTROL_HINT
     assert "session.rename" in a.TUI_AGENT_CONTROL_HINT
     assert "secret_subagents" in a.TUI_AGENT_CONTROL_HINT
     assert "Shuheng `SUBAGENTS_DIR`" in a.TUI_AGENT_CONTROL_HINT
@@ -5147,14 +5147,14 @@ def assert_history_curator_skill_uses_progressive_disclosure() -> None:
     assert any("没有可策展的历史会话" in msg.content for msg in empty_state.messages), empty_state.messages
 
 
-def assert_ai_session_title_review_runs_each_content_signature() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_ai_title_review_")
+def assert_model_owned_session_rename_is_title_path() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_model_title_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     if a.session_names is None:
         return
 
-    agent = ScriptedMetadataAgent(["初始需求梳理", "标题重评更新", "不应覆盖手动"])
+    agent = ScriptedMetadataAgent(["后台标题不应消费"])
     path = a.new_session_log_path()
     a.set_agent_log_path(agent, path)
     state = a.State(agent=agent)
@@ -5166,21 +5166,18 @@ def assert_ai_session_title_review_runs_each_content_signature() -> None:
 
     assert a.maybe_autoname_current_session(state) is True
     drain_ui(state)
-    assert a.session_names.name_for(path) == "初始需求梳理", a.session_names._load()
-    first_meta = a.load_session_meta_registry()[os.path.basename(path)]
-    assert first_meta["title_source"] == "ai", first_meta
-    first_signature = first_meta["title_signature"]
+    assert a.session_names.name_for(path) != "后台标题不应消费", a.session_names._load()
+    assert agent.llmclient.backend.title_queue == ["后台标题不应消费"], agent.llmclient.backend.title_queue
+    assert not any("生成一个简短标题" in prompt for prompt in agent.llmclient.backend.raw_prompts), agent.llmclient.backend.raw_prompts
 
     state.messages.extend([
-        a.Message("user", "第二轮：现在需要每轮都让 AI 重看标题。"),
-        a.Message("assistant", "已改成按内容签名重新评估。"),
+        a.Message("user", "第二轮：现在由主 runtime 自己维护标题。"),
+        a.Message("assistant", "我会在需要时用 session.rename 维护标题。"),
     ])
     assert a.maybe_autoname_current_session(state) is True
     drain_ui(state)
-    assert a.session_names.name_for(path) == "标题重评更新", a.session_names._load()
-    second_meta = a.load_session_meta_registry()[os.path.basename(path)]
-    assert second_meta["title_source"] == "ai", second_meta
-    assert second_meta["title_signature"] != first_signature, second_meta
+    assert agent.llmclient.backend.title_queue == ["后台标题不应消费"], agent.llmclient.backend.title_queue
+    assert not any("生成一个简短标题" in prompt for prompt in agent.llmclient.backend.raw_prompts), agent.llmclient.backend.raw_prompts
 
     a.apply_tui_controls_from_text(
         state,
@@ -5190,6 +5187,7 @@ def assert_ai_session_title_review_runs_each_content_signature() -> None:
     assert a.session_names.name_for(path) == "智能控制标题", a.session_names._load()
     control_meta = a.load_session_meta_registry()[os.path.basename(path)]
     assert control_meta["title_source"] == "ai", control_meta
+    assert not control_meta.get("title_signature"), control_meta
 
     rename_result = a.rename_current_session(state, "固定手动标题")
     assert "已持久化" in rename_result, rename_result
@@ -5197,7 +5195,8 @@ def assert_ai_session_title_review_runs_each_content_signature() -> None:
         a.Message("user", "第三轮：这个手动标题不要被自动覆盖。"),
         a.Message("assistant", "手动标题应保持。"),
     ])
-    assert a.maybe_start_ai_title_job(state, path, state.messages, agent) is False
+    assert a.maybe_autoname_current_session(state) is True
+    drain_ui(state)
     a.apply_tui_controls_from_text(
         state,
         ga_control({"action": "session.rename", "target": "current", "value": "不应覆盖手动"}),
@@ -5263,11 +5262,11 @@ def assert_ohmypi_process_summary_does_not_title_history() -> None:
 
     messages = [a.Message("user", user_text), a.Message("assistant", assistant_text)]
     assert a.suggested_session_title(messages) == user_text
-    title_context = a.ai_title_context(messages)
-    assert user_text in title_context, title_context
-    assert final_text in title_context, title_context
-    assert "OMP 思考" not in title_context, title_context
-    assert "Hidden OMP reasoning" not in title_context, title_context
+    metadata_context = a.ai_metadata_context(messages)
+    assert user_text in metadata_context, metadata_context
+    assert final_text in metadata_context, metadata_context
+    assert "OMP 思考" not in metadata_context, metadata_context
+    assert "Hidden OMP reasoning" not in metadata_context, metadata_context
 
 
 def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
@@ -5298,7 +5297,6 @@ def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
     ]
     assert a.append_model_response_transcript_turn(path, state.messages[0].content, assistant_text)
     assert a.agent_supports_inline_ai_metadata(agent) is False
-    assert a.maybe_start_ai_title_job(state, path, state.messages, agent) is False
     assert a.maybe_start_ai_category_job(state, path, agent, messages=state.messages) is True
     assert state.category_jobs == set(), state.category_jobs
     meta = a.load_session_meta_registry()[os.path.basename(path)]
@@ -5829,7 +5827,7 @@ def run_checks() -> None:
     assert_single_search_turn_keeps_final_reply_visible()
     assert_ask_user_tool_use_input_payload_visible()
     assert_ask_user_multiline_tool_args_payload_visible()
-    assert_ai_session_title_review_runs_each_content_signature()
+    assert_model_owned_session_rename_is_title_path()
     assert_aux_mouse_buttons_do_not_start_selection()
     assert_subagent_result_context_update_from_notice()
     assert_live_subagent_result_reaches_main_context()

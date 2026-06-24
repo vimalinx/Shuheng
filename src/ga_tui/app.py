@@ -874,8 +874,6 @@ class State:
     token_usage_registry: dict[str, dict[str, int]] = field(default_factory=dict)
     token_live_offsets: dict[str, dict[str, int]] = field(default_factory=dict)
     main_dashboard: dict[str, Any] = field(default_factory=dict)
-    title_jobs: set[str] = field(default_factory=set)
-    title_signatures: dict[str, str] = field(default_factory=dict)
     description_jobs: set[str] = field(default_factory=set)
     description_signatures: dict[str, str] = field(default_factory=dict)
     category_jobs: set[str] = field(default_factory=set)
@@ -16266,7 +16264,7 @@ def history_cache_has_process_only_preview(meta: dict[str, Any]) -> bool:
     return False
 
 
-def message_text_for_title_context(msg: Message) -> str:
+def message_text_for_metadata_context(msg: Message) -> str:
     if msg.role == "assistant":
         return latest_visible_reply_text(msg.content or "")
     text = clean_text(strip_tui_controls(msg.content or ""))
@@ -16326,13 +16324,13 @@ def suggested_session_title(messages: list[Message]) -> str:
     return ""
 
 
-def ai_title_context(messages: list[Message], max_chars: int = 3600) -> str:
+def ai_metadata_context(messages: list[Message], max_chars: int = 3600) -> str:
     chunks: list[str] = []
     for msg in messages:
         if msg.role not in {"user", "assistant"}:
             continue
         role = "用户" if msg.role == "user" else "助手"
-        text = message_text_for_title_context(msg)
+        text = message_text_for_metadata_context(msg)
         if not text:
             continue
         chunks.append(f"{role}: {truncate_cells(text, 900)}")
@@ -16348,7 +16346,7 @@ def session_content_signature(messages: list[Message]) -> str:
     for msg in messages:
         if msg.role not in {"user", "assistant"}:
             continue
-        content = message_text_for_title_context(msg)
+        content = message_text_for_metadata_context(msg)
         if not content:
             continue
         seen = True
@@ -16357,18 +16355,6 @@ def session_content_signature(messages: list[Message]) -> str:
         digest.update(content.encode("utf-8", errors="ignore"))
         digest.update(b"\0")
     return digest.hexdigest() if seen else ""
-
-
-def clean_ai_title(title: str) -> str:
-    title = clean_text(title)
-    title = title.splitlines()[0] if title.splitlines() else title
-    title = re.sub(r"^(标题|会话标题|Session title|Title)\s*[:：]\s*", "", title, flags=re.I)
-    title = title.strip(" \t\"'“”‘’`#*-:：。,.，")
-    title = re.sub(r"\s+", " ", title)
-    title = short_session_title(title, "")
-    if title.lower().startswith(("!!!error", "[error")):
-        return ""
-    return title
 
 
 def clean_ai_description(description: str) -> str:
@@ -16470,7 +16456,7 @@ def local_category_text(title: str, description: str, messages: Optional[list[Me
     for msg in messages or []:
         if msg.role not in {"user", "assistant"}:
             continue
-        text = compact_description(message_text_for_title_context(msg), 900)
+        text = compact_description(message_text_for_metadata_context(msg), 900)
         if text:
             chunks.append(text)
     return "\n".join(chunk for chunk in chunks if chunk).casefold()
@@ -16519,53 +16505,10 @@ def generate_local_session_category(
     return category_label_from_existing("杂项", categories)
 
 
-def generate_ai_session_title(agent: Any, messages: list[Message]) -> str:
-    if not agent_supports_inline_ai_metadata(agent):
-        return ""
-    context = ai_title_context(messages)
-    if not context:
-        return ""
-    source_backend = agent.llmclient.backend
-    try:
-        source_backend = source_backend.primary
-    except Exception:
-        pass
-    backend = copy.copy(source_backend)
-    try:
-        backend.history = []
-        backend.system = ""
-        backend.tools = None
-        backend.stream = False
-        backend.temperature = 0
-        backend.max_tokens = min(int(getattr(backend, "max_tokens", 64) or 64), 64)
-    except Exception:
-        pass
-    prompt = (
-        "请根据下面的对话内容，为这个会话生成一个简短标题。\n"
-        "要求：中文优先，9个字左右，最多12个字；只输出标题本身；不要引号、标点、解释或换行。\n\n"
-        f"{context}"
-    )
-    request = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-    content = ""
-    blocks: Any = None
-    gen = backend.raw_ask(request)
-    try:
-        while True:
-            chunk = next(gen)
-            if isinstance(chunk, str):
-                content += chunk
-    except StopIteration as exc:
-        blocks = exc.value
-    if not content and isinstance(blocks, list):
-        parts = [str(block.get("text") or "") for block in blocks if isinstance(block, dict) and block.get("type") == "text"]
-        content = "\n".join(parts)
-    return clean_ai_title(content)
-
-
 def generate_ai_session_description(agent: Any, messages: list[Message]) -> str:
     if not agent_supports_inline_ai_metadata(agent):
         return ""
-    context = ai_title_context(messages, max_chars=5200)
+    context = ai_metadata_context(messages, max_chars=5200)
     if not context:
         return ""
     source_backend = agent.llmclient.backend
@@ -16660,24 +16603,6 @@ def generate_ai_session_category(agent: Any, title: str, description: str, categ
     return clean_ai_category(content)
 
 
-def ai_title_worker(ui_queue: queue.Queue, path: str, messages: list[Message], agent: Any, signature: str) -> None:
-    old_name = threading.current_thread().name
-    thread_name = token_thread_name(agent)
-    if thread_name:
-        threading.current_thread().name = thread_name
-    title = ""
-    error = ""
-    try:
-        title = generate_ai_session_title(agent, messages)
-        if not title:
-            error = "empty title"
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-    finally:
-        threading.current_thread().name = old_name
-    ui_queue.put(("title_done", os.path.basename(path), path, title, error, signature))
-
-
 def ai_description_worker(
     ui_queue: queue.Queue,
     path: str,
@@ -16726,43 +16651,6 @@ def ai_category_worker(
     finally:
         threading.current_thread().name = old_name
     ui_queue.put(("category_done", os.path.basename(path), path, category, error, signature))
-
-
-def maybe_start_ai_title_job(state: State, path: str, messages: list[Message], agent: Any, force: bool = False) -> bool:
-    if state.temporary_session or agent_log_path_is_devnull(agent):
-        return False
-    if not agent_supports_inline_ai_metadata(agent):
-        return False
-    if session_names is None or not path or agent is None:
-        return False
-    key = os.path.basename(path)
-    signature = session_content_signature(messages)
-    if not key or not signature or key in state.title_jobs:
-        return False
-    try:
-        state.session_meta = load_session_meta_registry()
-    except Exception:
-        pass
-    meta = state.session_meta.get(session_key(path), {})
-    if not force and str(meta.get("title_source") or "") == "manual":
-        return False
-    if not force and (
-        state.title_signatures.get(key) == signature
-        or (meta.get("title_signature") == signature and str(meta.get("title_source") or "") == "ai")
-    ):
-        return False
-    if not ai_title_context(messages):
-        return False
-    state.title_jobs.add(key)
-    state.title_signatures[key] = signature
-    snapshot = [Message(msg.role, msg.content, msg.done) for msg in messages]
-    threading.Thread(
-        target=ai_title_worker,
-        args=(state.ui_queue, path, snapshot, agent, signature),
-        daemon=True,
-        name=token_thread_name(agent) or "ga-title-worker",
-    ).start()
-    return True
 
 
 def maybe_start_ai_description_job(state: State, path: str, messages: list[Message], agent: Any, force: bool = False) -> bool:
@@ -16947,10 +16835,9 @@ def maybe_autoname_current_session(state: State, force: bool = False) -> bool:
     if not current and title and state.current_title in {"", "main", "运行中会话", "空闲会话"}:
         state.current_title = title
         changed = True
-    title_started = maybe_start_ai_title_job(state, path, state.messages, state.agent, force=force)
     description_started = maybe_start_ai_description_job(state, path, state.messages, state.agent, force=force)
     category_started = maybe_start_ai_category_job(state, path, state.agent, force=force, messages=state.messages)
-    return title_started or description_started or category_started or changed
+    return description_started or category_started or changed
 
 
 def maybe_autoname_background_session(state: State, bg: BackgroundSession, force: bool = False) -> bool:
@@ -16981,10 +16868,9 @@ def maybe_autoname_background_session(state: State, bg: BackgroundSession, force
     if not current and title and bg.title in {"", "main", "运行中会话", "空闲会话"}:
         bg.title = title
         changed = True
-    title_started = maybe_start_ai_title_job(state, path, bg.messages, bg.agent, force=force)
     description_started = maybe_start_ai_description_job(state, path, bg.messages, bg.agent, force=force)
     category_started = maybe_start_ai_category_job(state, path, bg.agent, force=force, messages=bg.messages)
-    return title_started or description_started or category_started or changed
+    return description_started or category_started or changed
 
 
 def save_unlocked_secret_background_sessions(state: State, source: str = "secret-background") -> int:
@@ -24528,51 +24414,6 @@ def process_ui_queue(state: State) -> bool:
                     if sub.security_context != "secret":
                         maybe_queue_orchestrator_plan_continuation(state, f"subagent_completed:{sub.name}")
                 mark_subagent_messages_changed(state, sub)
-            changed = True
-            state.dirty = True
-            continue
-
-        if kind == "title_done":
-            _kind, key, path, title, error, signature = item
-            state.title_jobs.discard(key)
-            active_key = token_session_key(state.agent)
-            if title and session_names is not None:
-                try:
-                    state.session_meta = load_session_meta_registry()
-                    entry = dict(state.session_meta.get(session_key(path), {}))
-                    if str(entry.get("title_source") or "") != "manual":
-                        title = short_session_title(title, "")
-                        session_names.set_name(path, title)
-                        entry["title_source"] = "ai"
-                        entry["title_signature"] = signature
-                        entry["title_updated_at"] = time.time()
-                        entry["title_reviewed_at"] = time.time()
-                        state.session_meta[session_key(path)] = entry
-                        save_session_meta_registry(state.session_meta)
-                        if active_key == key:
-                            state.current_title = title
-                        for bg in state.background_sessions.values():
-                            if token_session_key(bg.agent) == key:
-                                bg.title = title
-                        load_history(state, force=True)
-                        if active_key == key and not path_is_active_history_view(state, path):
-                            maybe_start_ai_category_job(state, path, state.agent, messages=state.messages)
-                        else:
-                            for bg in state.background_sessions.values():
-                                if token_session_key(bg.agent) == key:
-                                    maybe_start_ai_category_job(state, path, bg.agent, messages=bg.messages)
-                                    break
-                except Exception as exc:
-                    state.last_error = f"AI title save: {type(exc).__name__}: {exc}"
-            elif error and active_key == key:
-                state.last_error = f"AI title: {error}"
-            if active_key == key:
-                persist_agent_token_usage(state, state.agent)
-            else:
-                for bg in state.background_sessions.values():
-                    if token_session_key(bg.agent) == key:
-                        persist_agent_token_usage(state, bg.agent)
-                        break
             changed = True
             state.dirty = True
             continue

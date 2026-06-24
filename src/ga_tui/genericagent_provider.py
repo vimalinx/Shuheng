@@ -34,7 +34,7 @@ TUI_AGENT_CONTROL_HINT = """
 
 在决定创建、复用、停止、委派子 agent 或更新任务前，优先调用只读查询工具获取当前事实：`agent_list`、`agent_get`、`agent_match`、`task_list`、`task_get`、`approval_list`、`artifact_list`、`capability_list`。这些工具只读取 TUI 仪表盘/账本，不会修改状态；查清后才在回复末尾输出真实 `<ga-control>`。
 当用户要求创建或查看定时任务时，优先调用 TUI 调度工具：`schedule_create`、`schedule_list`。`schedule_create` 是受 TUI 控制面治理的状态变更工具；`schedule_list` 只读取 TUI 调度注册表。
-会话标题维护是上述规则的一个例外：每轮正常回复结束前，静默评估当前会话标题是否仍准确；如果本轮让主题或目标明显变化，回复末尾追加 `session.rename` 控制块把当前会话改成简短中文标题；如果标题已经准确，不要输出控制块，也不要在正文解释标题维护。
+会话标题维护是上述规则的一个例外，并且持久标题只由当前主控 runtime 自己通过 `session.rename` 写入：每轮正常回复结束前，静默评估当前会话标题是否仍准确；如果本轮让主题或目标明显变化，回复末尾追加 `session.rename` 控制块把当前会话改成简短中文标题；如果标题已经准确，不要输出控制块，也不要在正文解释标题维护。
 
 控制块必须是 `schema_version:"ga-control.v2"`，批量动作放在 `actions` 里；每个动作使用强类型 dotted action 名称。
 
