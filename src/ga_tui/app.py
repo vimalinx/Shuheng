@@ -501,7 +501,7 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/help", "", "显示命令帮助", True),
     ("/fold", "", "切换过程自动折叠", True),
     ("/md", "", "切换轻量 Markdown 渲染", True),
-    ("/model", "", "管理模型配置/切换/提取/验活/默认", True),
+    ("/model", "", "管理模型配置/切换/提取/验活/子代理默认", True),
     ("/agents", "", "列出持久子 agent", True),
     ("/agent", "<cmd>", "管理/运行持久子 agent", False),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
@@ -15101,6 +15101,19 @@ def active_subagent_view(state: State) -> Optional[SubAgentRuntime]:
     return selected_subagent(state) or selected_home_subagent(state)
 
 
+def model_manager_subagent_targets(state: State) -> list[SubAgentRuntime]:
+    active = active_subagent_view(state)
+    targets: list[SubAgentRuntime] = []
+    if active is not None and active.status != "deleted":
+        targets.append(active)
+    active_id = active.agent_id if active is not None else ""
+    for sub in state.subagents.values():
+        if sub.agent_id == active_id or sub.status == "deleted":
+            continue
+        targets.append(sub)
+    return targets
+
+
 def set_selected_interface(state: State, key: Any, *, follow_bottom: bool = True) -> None:
     state.selected_session = key
     if follow_bottom:
@@ -20198,6 +20211,9 @@ def draw_model_manager(
     manage_configs: bool = False,
     active_category: str = "",
     category_index: Optional[ModelManagerCategoryIndex] = None,
+    subagent_target: Optional[SubAgentRuntime] = None,
+    subagent_target_index: int = 0,
+    subagent_target_count: int = 0,
 ) -> None:
     height, width = stdscr.getmaxyx()
     y0, x0, h, w = popup_geometry(height, width, min_w=82)
@@ -20212,11 +20228,21 @@ def draw_model_manager(
     recent_names = recent_names or []
     recent_text = " / ".join(recent_names[:3]) if recent_names else "(无)"
     safe_add(stdscr, y0 + 2, x0 + 2, f"当前对话: {current}    默认新对话: {primary or '(未设置)'}    最近: {recent_text}", inner_w, cp(2))
-    if manage_configs:
-        help_text = "Tab/←→ 切供应商  Enter 当前对话  d 默认  u 最近  a 新增  e 编辑  p 提取  t 测试  v 验活  x 删除  r 重载"
+    if subagent_target is not None:
+        sub_scope = "持久" if subagent_target.persistent else "临时"
+        sub_default = subagent_target.default_model or "继承全局"
+        sub_count = f"{subagent_target_index + 1}/{subagent_target_count}" if subagent_target_count > 1 else "1/1"
+        sub_line = f"子代理默认: {subagent_target.name} · {sub_scope} · {sub_default}    目标 {sub_count}    o 切目标  g 设选中模型  c 继承"
+        sub_attr = cp(2)
     else:
-        help_text = "Tab/←→ 切供应商  Enter 当前对话  d 默认  u 最近  t 测试  v 验活  r 重载  Esc 返回"
-    safe_add(stdscr, y0 + 3, x0 + 2, help_text, inner_w, cp(1))
+        sub_line = "子代理默认: 当前没有可设置目标    g/c 需要先创建子 agent"
+        sub_attr = cp(1)
+    safe_add(stdscr, y0 + 3, x0 + 2, sub_line, inner_w, sub_attr)
+    if manage_configs:
+        help_text = "Tab供应商 Enter对话 d全局默认 g子代理默认 c继承 o目标 u最近 a新增 e编辑 p提取 t测试 v验活 x删 r重载"
+    else:
+        help_text = "Tab供应商 Enter对话 d全局默认 g子代理默认 c继承 o目标 u最近 t测试 v验活 r重载 Esc返回"
+    safe_add(stdscr, y0 + 4, x0 + 2, help_text, inner_w, cp(1))
     category_index = category_index or model_manager_category_index(entries, recent_names, health)
     categories = category_index.categories
     if active_category not in categories:
@@ -20224,10 +20250,10 @@ def draw_model_manager(
     provider_w = min(24, max(16, inner_w // 4))
     model_x = x0 + 2 + provider_w + 3
     model_w = max(20, inner_w - provider_w - 3)
-    safe_add(stdscr, y0 + 4, x0 + 2, "供应商", provider_w, cp(7) | curses.A_BOLD)
-    safe_add(stdscr, y0 + 4, model_x, "模型", model_w, cp(7) | curses.A_BOLD)
-    start_y = y0 + 6
-    list_h = max(1, h - 9)
+    safe_add(stdscr, y0 + 5, x0 + 2, "供应商", provider_w, cp(7) | curses.A_BOLD)
+    safe_add(stdscr, y0 + 5, model_x, "模型", model_w, cp(7) | curses.A_BOLD)
+    start_y = y0 + 7
+    list_h = max(1, h - 10)
     visible_indices = category_index.indices_by_category.get(active_category, [])
     if entries and selected not in visible_indices and visible_indices:
         selected = visible_indices[0]
@@ -20237,7 +20263,7 @@ def draw_model_manager(
         active_provider_row = 0
     provider_start = max(0, min(active_provider_row - list_h + 1, max(0, len(categories) - list_h)))
     separator_x = x0 + 2 + provider_w + 1
-    for y in range(y0 + 4, y0 + h - 2):
+    for y in range(y0 + 5, y0 + h - 2):
         safe_add(stdscr, y, separator_x, "│", 1, cp(10))
     for row, category in enumerate(categories[provider_start:provider_start + list_h]):
         provider_indices = category_index.indices_by_category.get(category, [])
@@ -21712,6 +21738,8 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
         selected = model_manager_initial_index(state, entries, mixin, recent_names)
         category_index = model_manager_category_index(entries, recent_names, health)
         active_category = category_index.preferred_category_by_index.get(selected, category_index.categories[0]) if entries else category_index.categories[0]
+        subagent_targets = model_manager_subagent_targets(state)
+        subagent_target_index = 0
         message = error or ("还没有已配置模型；用 /model 添加供应商/API。" if not entries else "")
         title = "模型 / Provider 管理" if manage_configs else "当前对话模型切换"
         while True:
@@ -21723,6 +21751,9 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
             visible_indices = category_index.indices_by_category.get(active_category, [])
             if entries and visible_indices and selected not in visible_indices:
                 selected = visible_indices[0]
+            subagent_targets = model_manager_subagent_targets(state)
+            subagent_target_index = max(0, min(subagent_target_index, max(0, len(subagent_targets) - 1)))
+            subagent_target = subagent_targets[subagent_target_index] if subagent_targets else None
             draw_model_manager(
                 stdscr,
                 state,
@@ -21736,6 +21767,9 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                 manage_configs=manage_configs,
                 active_category=active_category,
                 category_index=category_index,
+                subagent_target=subagent_target,
+                subagent_target_index=subagent_target_index,
+                subagent_target_count=len(subagent_targets),
             )
             message = ""
             try:
@@ -21795,6 +21829,15 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                     category_index = model_manager_category_index(entries, recent_names, health)
                     active_category = MODEL_FAVORITES_CATEGORY if MODEL_FAVORITES_CATEGORY in category_index.categories else model_entry_category(entries[selected])
                     message = f"已跳到最近模型：{config_display_name(entries[selected])}"
+                continue
+            if key in ("o", "O"):
+                subagent_targets = model_manager_subagent_targets(state)
+                if not subagent_targets:
+                    message = "当前没有可设置默认模型的子 agent。"
+                else:
+                    subagent_target_index = (subagent_target_index + 1) % len(subagent_targets)
+                    sub = subagent_targets[subagent_target_index]
+                    message = f"子代理目标已切到：{sub.name}。"
                 continue
             if manage_configs and key in ("a", "A", "+"):
                 new_entry = run_model_form(stdscr, state, entries)
@@ -21938,6 +21981,9 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                     title=title,
                     manage_configs=manage_configs,
                     active_category=active_category,
+                    subagent_target=subagent_target,
+                    subagent_target_index=subagent_target_index,
+                    subagent_target_count=len(subagent_targets),
                 )
                 max_workers = min(4, max(1, total))
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ga-model-validate")
@@ -21981,6 +22027,9 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                                 title=title,
                                 manage_configs=manage_configs,
                                 active_category=active_category,
+                                subagent_target=subagent_target,
+                                subagent_target_index=subagent_target_index,
+                                subagent_target_count=len(subagent_targets),
                             )
                 finally:
                     executor.shutdown(wait=False, cancel_futures=True)
@@ -21996,7 +22045,27 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                 active_category = category_index.preferred_category_by_index.get(selected, category_index.categories[0])
                 message = f"验活完成：{alive} 个可用，{dead} 个不可用；已按 OK/BAD 分组。"
                 continue
+            if key in ("c", "C"):
+                if subagent_target is None:
+                    message = "当前没有可设置默认模型的子 agent。"
+                    continue
+                ok, message = set_subagent_default_model(state, subagent_target, "")
+                if ok:
+                    final_message = message
+                continue
             if not entries:
+                continue
+            if key in ("g", "G"):
+                if subagent_target is None:
+                    message = "当前没有可设置默认模型的子 agent。"
+                    continue
+                ok, message = set_subagent_default_model(state, subagent_target, config_display_name(entries[selected]))
+                if ok:
+                    _recent_ok, recent_msg = remember_recent_model_entry(entries[selected], entries)
+                    recent_names = load_recent_model_names(entries)
+                    if not _recent_ok:
+                        message = f"{message} {recent_msg}"
+                    final_message = message
                 continue
             if key in ("\n", "\r", curses.KEY_ENTER, "s", "S"):
                 ok, message = switch_agent_to_entry(state, entries[selected])
@@ -23028,7 +23097,7 @@ def submit(state: State, text: str) -> None:
         add_system(state, f"轻量 Markdown 渲染已{'开启' if state.markdown else '关闭'}。")
         return
     if text.lower() in {"/llm", "/models", "/model"}:
-        add_system(state, "在输入框回车执行 /model 可管理模型配置、按供应商切换、提取 models、验活、选择当前对话模型、最近模型、设置默认新对话模型；/llm 与 /models 是兼容别名。")
+        add_system(state, "在输入框回车执行 /model 可管理模型配置、按供应商切换、提取 models、验活、选择当前对话模型、最近模型、设置默认新对话模型、设置子代理默认模型；/llm 与 /models 是兼容别名。")
         return
     m_secret = re.match(r"/secret(?:\s+(.+))?\s*$", text, re.I)
     if m_secret:

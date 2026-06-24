@@ -5944,6 +5944,42 @@ def run_checks() -> None:
         temp_reloaded_sub = a.resolve_subagent(temp_reloaded, temp_sub.agent_id)
         assert temp_reloaded_sub is not None
         assert temp_reloaded_sub.default_model == "alpha"
+
+        panel_state = a.State(agent=FakeLLMAgent())
+        panel_state.running = True
+        panel_first = a.create_subagent(panel_state, "Panel First", role="researcher", persistent=True)
+        panel_second = a.create_subagent(panel_state, "Panel Second", role="researcher", persistent=True)
+        panel_state.selected_session = panel_first.agent_id
+        panel_targets = a.model_manager_subagent_targets(panel_state)
+        assert [sub.agent_id for sub in panel_targets[:2]] == [panel_first.agent_id, panel_second.agent_id], panel_targets
+
+        old_redraw = a.redraw
+        old_modal_read_key = a.modal_read_key
+        old_draw_model_manager = a.draw_model_manager
+        try:
+            pressed = iter(["g", "o", "g", "c", "q"])
+            drawn_targets: list[str] = []
+
+            def fake_modal_read_key(_stdscr):
+                return next(pressed)
+
+            def fake_draw_model_manager(*_args, **kwargs):
+                target = kwargs.get("subagent_target")
+                drawn_targets.append(target.agent_id if target is not None else "")
+
+            a.redraw = lambda _stdscr, _state: None
+            a.modal_read_key = fake_modal_read_key
+            a.draw_model_manager = fake_draw_model_manager
+            a.open_model_manager(TimeoutFakeScreen(), panel_state, manage_configs=True)
+        finally:
+            a.redraw = old_redraw
+            a.modal_read_key = old_modal_read_key
+            a.draw_model_manager = old_draw_model_manager
+        assert drawn_targets[:3] == [panel_first.agent_id, panel_first.agent_id, panel_second.agent_id], drawn_targets
+        assert panel_first.default_model == "alpha"
+        assert panel_second.default_model == ""
+        assert a.load_subagent_meta(panel_first.agent_id).get("default_model") == "alpha"
+        assert a.load_subagent_meta(panel_second.agent_id).get("default_model") == ""
     finally:
         a.mykey_path = old_mykey_path
 
@@ -6023,6 +6059,8 @@ def run_checks() -> None:
         draw_texts = [text for _y, _x, text, _attr in model_draw_screen.calls]
         assert any(text == "供应商" for text in draw_texts), draw_texts
         assert not any("供应商 Tabs:" in text for text in draw_texts), draw_texts
+        assert any("子代理默认:" in text for text in draw_texts), draw_texts
+        assert any("g子代理默认" in text and "o目标" in text for text in draw_texts), draw_texts
         assert any("  常用 (2)" in text for text in draw_texts), draw_texts
         assert any("  DeepSeek (1)" in text for text in draw_texts), draw_texts
         assert any("› OpenAI (1)" in text for text in draw_texts), draw_texts

@@ -784,6 +784,8 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - `/model`, `/llm`, and `/models` all open the unified model manager with config-management actions enabled.
 - `/model` add/edit forms must expose a manual `context_win` field after the model id; saving must persist it as an integer in the existing model config entry.
 - The unified manager must keep current-session switching, default selection, recent-model jumping, add/edit/delete, model extraction, single-model test, batch health check, and reload actions.
+- The unified manager must also let the user set per-subagent default models from the same `/model` panel: `g` assigns the selected model to the current subagent target, `c` clears that target back to global inheritance, and `o` cycles the target across available subagents.
+- The subagent target row must initialize to the active subagent chat/home when present, otherwise to the first available subagent, and must show readable name/scope/default-model state without dumping opaque internal ids into the normal panel.
 - Adding a provider must not require `/models` endpoint compatibility when the user has supplied a concrete manual `Model`. If `/models` probing fails but the new entry has a complete Base URL and Model, save the single manual entry, show the probe failure as a warning, and direct the user to `t` test or Enter switch.
 - Manual fallback saving is only for the add-provider path. Existing-row model extraction with `p` must keep the stricter behavior: a failed `/models` probe does not mutate the configured model list.
 - Model rows are grouped by concrete provider tabs, not broad protocol categories.
@@ -813,6 +815,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 ### 5. Good/Base/Bad Cases
 
 - Good: `/model` opens one panel where the user can switch the current dialogue model, set the default, add a provider, extract provider models, test a model, and batch validate all models grouped by supplier.
+- Good: `/model` lets a user keep the selected model row and choose whether it applies to the current dialogue, the global default, or a selected subagent default without leaving the model manager.
 - Good: `/model` lets a user set `context_win:1050000` for a large-window OpenAI-compatible model without editing `mykey.py` by hand.
 - Good: A custom OpenAI-compatible provider whose `/models` route is unavailable still appears in the model list when the user filled the exact model id manually.
 - Good: Providers render as a left-side vertical list, and the filtered model list renders to the right.
@@ -822,6 +825,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - Base: A custom endpoint such as `https://api.example.invalid/v1` appears under a stable `example.invalid` tab.
 - Bad: `/llm` appears as a normal command row, because that splits the visible command ontology again.
 - Bad: `/model` opens a switch-only panel that cannot add/edit/delete or probe provider models.
+- Bad: Forcing users to leave `/model` and type `/agent model <id> <model>` for ordinary per-subagent model assignment, because model routing would be split across two daily-use surfaces.
 - Bad: Treating a failed `/models` probe during add as a hard failure when the user already supplied a manual Model, because many OpenAI-compatible gateways support chat/responses but not model listing.
 - Bad: The model panel shows every known provider template as an empty tab.
 - Bad: Provider labels are rendered as one long horizontal tab line that truncates useful providers on narrower terminals.
@@ -835,6 +839,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - `scripts/check_policy_gates.py` must assert add-provider manual fallback saves a complete manual entry after `/models` probe failure and refuses duplicate Base URL + Model pairs.
 - `scripts/check_policy_gates.py` must assert model category helpers group OpenAI, DeepSeek, custom endpoint, common-provider, and non-common configured providers correctly.
 - `scripts/check_policy_gates.py` must assert the model manager renders a vertical provider rail and does not render the old horizontal `供应商 Tabs:` line.
+- `scripts/check_policy_gates.py` must assert the model manager renders subagent default-model controls and that `/model` key handling can assign, cycle, and clear a subagent default model.
 - `scripts/check_policy_gates.py` must assert the model manager exposes `常用` as a virtual category and renders provider rail status colors for configured, empty, and failed categories.
 - `scripts/check_policy_gates.py` must assert `draw_model_manager(...)` can render from a supplied precomputed category index without recalculating provider categories.
 - README command tables must document `/model` as the single visible model command.
