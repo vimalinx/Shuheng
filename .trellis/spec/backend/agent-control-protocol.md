@@ -1102,6 +1102,7 @@ configure_genericagent_provider_runtime(
 - OMP binary discovery order is explicit `binary` argument, `GA_TUI_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
 - Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
 - Generated OMP `models.yml` must represent complete GA-TUI OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
+- Generated OMP API protocol must be inferred from explicit `api_mode` and known endpoint shape, not only from the historical config variable prefix. In particular, `https://open.bigmodel.cn/api/coding/paas/v4` and `https://api.z.ai/api/paas/v4` are OpenAI-compatible PAAS v4 bases and must generate `api:"openai-completions"` unless `api_mode:"responses"` explicitly requests Responses; `https://open.bigmodel.cn/api/anthropic` remains Anthropic Messages.
 - Generated OMP `models.yml` must project `/model` `context_win` to OMP `models[].contextWindow`; if `max_tokens` is configured, it must project to `models[].maxTokens`.
 - Incomplete GA-TUI model entries without API key, base URL, or model id are skipped when generating OMP model providers.
 - OMP runtime model rows exposed to the TUI must preserve enough provider/model/base URL metadata for `/model` current-session switching to call OMP `set_model` with structured `provider` and `modelId`.
@@ -1154,6 +1155,8 @@ configure_genericagent_provider_runtime(
 - OMP `host_tool_call` whose callback raises -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_cancel` -> provider records the cancellation safely and continues normal prompt handling.
 - Complete GA-TUI model entry -> isolated OMP `models.yml` gets one provider/model mapping and the child env gets a matching `GA_TUI_OMP_API_KEY_<digest>` value.
+- Complete GA-TUI model entry with historical `native_claude_config_*` name but PAAS v4 base such as `https://open.bigmodel.cn/api/coding/paas/v4` -> isolated OMP `models.yml` uses `api:"openai-completions"`, validation/probe use Bearer auth and `/chat/completions` / `/models`, and no `/v1/messages` suffix is appended.
+- Complete GA-TUI model entry with Anthropic base such as `https://open.bigmodel.cn/api/anthropic` -> isolated OMP `models.yml` uses `api:"anthropic-messages"` and validation/probe use `x-api-key` plus Anthropic Messages endpoints.
 - Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
 - Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
@@ -1236,6 +1239,7 @@ configure_genericagent_provider_runtime(
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
 - Tests must assert the OMP runtime adapter subprocess `cwd` is the GenericAgent-TUI app root, not the GenericAgent harness root.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
+- Tests must assert PAAS v4 OpenAI-compatible bases such as `https://open.bigmodel.cn/api/coding/paas/v4` do not inherit Anthropic `/v1/messages` routing from a historical `native_claude_config_*` variable name.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
 - Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, `OhMyPiRpcAgent` initializes to the projected default model selector, stale `get_state` model payloads and normal `set_model` confirmations cannot corrupt the current configured model display, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.

@@ -1082,6 +1082,50 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert record["policy"]["runtime_tool_approval_mode"] == "yolo", record
         command = getattr(adapter, "command")
         assert "--model" in command and runtime_config.default_model in command, command
+        Path(mykey_file).write_text(
+            "\n".join([
+                "mixin_config = {'llm_nos': ['zhipu-glm'], 'max_retries': 10, 'base_delay': 0.5}",
+                "native_claude_config = {'name': 'zhipu-glm', 'apikey': 'key-zhipu', 'apibase': 'https://open.bigmodel.cn/api/coding/paas/v4', 'model': 'glm-5.2'}",
+                "native_claude_config_1 = {'name': 'zhipu-anthropic', 'apikey': 'key-zhipu', 'apibase': 'https://open.bigmodel.cn/api/anthropic', 'model': 'GLM-5.1-Cloud'}",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        zhipu_runtime_config = a.build_ohmypi_runtime_config(base_env={})
+        zhipu_provider = next(
+            provider for provider in json.loads(Path(zhipu_runtime_config.models_path).read_text(encoding="utf-8"))["providers"].values()
+            if provider["models"][0]["id"] == "glm-5.2"
+        )
+        assert zhipu_provider["api"] == "openai-completions", zhipu_provider
+        assert a.models_endpoint_for_config(
+            "native_claude",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            {"apibase": "https://open.bigmodel.cn/api/coding/paas/v4"},
+        ) == "https://open.bigmodel.cn/api/coding/paas/v4/models"
+        assert a.models_endpoint_for_config(
+            "native_claude",
+            "https://open.bigmodel.cn/api/anthropic",
+            {"apibase": "https://open.bigmodel.cn/api/anthropic"},
+        ) == "https://open.bigmodel.cn/api/anthropic/v1/models"
+        zhipu_entry = a.LLMConfigEntry(
+            "native_claude_config",
+            "native_claude",
+            {"name": "zhipu-glm", "apikey": "key-zhipu", "apibase": "https://open.bigmodel.cn/api/coding/paas/v4", "model": "glm-5.2"},
+        )
+        calls: list[tuple[str, dict[str, str], dict[str, object]]] = []
+        old_post_json = a.post_json_for_validation
+        try:
+            def fake_post_json(url, headers, payload, timeout):
+                calls.append((url, dict(headers), dict(payload)))
+                return True, "ok"
+
+            a.post_json_for_validation = fake_post_json
+            ok_validate, validate_msg = a.validate_model_entry(zhipu_entry)
+        finally:
+            a.post_json_for_validation = old_post_json
+        assert ok_validate, validate_msg
+        assert calls and calls[0][0] == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions", calls
+        assert "Authorization" in calls[0][1] and "x-api-key" not in calls[0][1], calls
         if before_hash:
             after_hash = hashlib.sha256(system_config.read_bytes()).hexdigest()
             assert after_hash == before_hash, (before_hash, after_hash)

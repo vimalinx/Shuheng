@@ -12151,11 +12151,11 @@ def default_config_from_provider(provider: dict[str, Any]) -> tuple[str, dict[st
     return cfg_type, cfg
 
 
-def models_endpoint_for_config(cfg_type: str, apibase: str) -> str:
+def models_endpoint_for_config(cfg_type: str, apibase: str, cfg: Optional[dict[str, Any]] = None) -> str:
     base = (apibase or "").strip().rstrip("/")
     if not base:
         return ""
-    if cfg_type in {"native_claude", "claude"}:
+    if model_config_uses_anthropic_messages(cfg_type, cfg or {"apibase": apibase}):
         if base.endswith("/v1/models"):
             return base
         if base.endswith("/v1"):
@@ -12173,11 +12173,11 @@ def probe_models_for_config(cfg_type: str, cfg: dict[str, Any], timeout: float =
     apibase = str(cfg.get("apibase") or "").strip()
     if not apikey or not apibase:
         return False, [], "API Key 和 Base URL 不能为空。"
-    url = models_endpoint_for_config(cfg_type, apibase)
+    url = models_endpoint_for_config(cfg_type, apibase, cfg)
     if not url:
         return False, [], "Base URL 为空。"
     headers = {"User-Agent": "Shuheng/1.0"}
-    if cfg_type in {"native_claude", "claude"}:
+    if model_config_uses_anthropic_messages(cfg_type, cfg):
         headers.update({"x-api-key": apikey, "anthropic-version": "2023-06-01"})
     else:
         headers["Authorization"] = f"Bearer {apikey}"
@@ -12221,6 +12221,48 @@ def endpoint_base(apibase: str) -> str:
         if base.endswith(suffix):
             base = base[: -len(suffix)]
     return base.rstrip("/")
+
+
+def normalized_model_api_mode(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
+def base_url_uses_openai_paas_v4(apibase: str) -> bool:
+    base = endpoint_base(apibase).lower()
+    if not base:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(base if "://" in base else f"https://{base}")
+        path = parsed.path.rstrip("/")
+    except Exception:
+        path = base.rstrip("/")
+    return bool(re.search(r"/api/(?:coding/)?paas/v4$", path))
+
+
+def base_url_uses_anthropic_messages(apibase: str) -> bool:
+    base = endpoint_base(apibase).lower()
+    if not base:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(base if "://" in base else f"https://{base}")
+        path = parsed.path.rstrip("/")
+    except Exception:
+        path = base.rstrip("/")
+    return path.endswith("/anthropic") or "/anthropic/" in path
+
+
+def model_config_uses_anthropic_messages(cfg_type: str, cfg: dict[str, Any]) -> bool:
+    mode = normalized_model_api_mode(cfg.get("api_mode"))
+    if mode in {"chat_completions", "completions", "openai_completions", "responses", "response", "openai_responses"}:
+        return False
+    if mode in {"messages", "anthropic", "anthropic_messages"}:
+        return True
+    apibase = str(cfg.get("apibase") or "")
+    if base_url_uses_openai_paas_v4(apibase):
+        return False
+    if base_url_uses_anthropic_messages(apibase):
+        return True
+    return "claude" in str(cfg_type or "").lower()
 
 
 def anthropic_messages_endpoint(apibase: str) -> str:
@@ -12295,7 +12337,7 @@ def validate_model_entry(entry: LLMConfigEntry, timeout: float = 12.0) -> tuple[
         return False, "缺少 model"
     cfg_type = str(entry.cfg_type or "").lower()
     headers = {"User-Agent": "Shuheng/1.0", "Content-Type": "application/json"}
-    if "claude" in cfg_type:
+    if model_config_uses_anthropic_messages(cfg_type, cfg):
         url = anthropic_messages_endpoint(str(cfg.get("apibase") or ""))
         if not url:
             return False, "缺少 Base URL"
@@ -13080,9 +13122,9 @@ def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None):
 
 def ohmypi_model_api_for_entry(entry: LLMConfigEntry) -> str:
     cfg_type = str(entry.cfg_type or "").lower()
-    if "claude" in cfg_type:
+    if model_config_uses_anthropic_messages(cfg_type, entry.cfg):
         return "anthropic-messages"
-    if str(entry.cfg.get("api_mode") or "").strip() == "responses":
+    if normalized_model_api_mode(entry.cfg.get("api_mode")) in {"responses", "response", "openai_responses"}:
         return "openai-responses"
     return "openai-completions"
 
