@@ -608,6 +608,7 @@ class OhMyPiRpcAgent:
         host_tool_handler: HostToolHandler | None = None,
         runtime_event_sink: RuntimeEventSink | None = None,
         configured_models: list[OhMyPiRuntimeModel] | None = None,
+        default_model: str | None = None,
         startup_timeout: float = 10.0,
         stop_timeout: float = 3.0,
         terminal_grace_timeout: float = 1.0,
@@ -639,10 +640,12 @@ class OhMyPiRpcAgent:
         self.log_path = ""
         self.history: list[str] = []
         self.handler = None
-        self.llm_no = 0
         self.configured_models = list(configured_models or [])
         self.llmclients = self._clients_from_models(self.configured_models)
+        self.llm_no = self._model_index_for_selector(default_model or "")
         self.llmclient = self.llmclients[0]
+        if 0 <= self.llm_no < len(self.llmclients):
+            self.llmclient = self.llmclients[self.llm_no]
         self._process: Any = None
         self._ready = threading.Event()
         self._send_lock = threading.Lock()
@@ -684,12 +687,42 @@ class OhMyPiRpcAgent:
             clients.append(_OhMyPiClient(backend))
         return clients
 
+    def _model_index_for_selector(self, selector: str) -> int:
+        selector = str(selector or "").strip()
+        if not selector or not self.configured_models:
+            return 0
+        for idx, model in enumerate(self.configured_models):
+            if model.selector == selector:
+                return idx
+        return 0
+
+    def _model_index_for_runtime_model(self, model: dict[str, Any]) -> int:
+        if not self.configured_models:
+            return -1
+        provider = str(model.get("provider") or "").strip()
+        model_id = str(model.get("id") or model.get("modelId") or "").strip()
+        base_url = str(model.get("baseUrl") or model.get("base_url") or "").strip().rstrip("/")
+        fallback = -1
+        for idx, configured in enumerate(self.configured_models):
+            configured_base = str(configured.base_url or "").strip().rstrip("/")
+            if provider and model_id and configured.provider == provider and configured.model_id == model_id:
+                return idx
+            if (
+                fallback < 0
+                and model_id
+                and configured.model_id == model_id
+                and (not base_url or not configured_base or base_url == configured_base)
+            ):
+                fallback = idx
+        return fallback
+
     def refresh_configured_models(
         self,
         models: list[OhMyPiRuntimeModel],
         *,
         env: dict[str, str] | None = None,
         command: list[str] | None = None,
+        default_model: str | None = None,
     ) -> None:
         """Refresh the Shuheng-owned OMP model projection without importing app state."""
         if env is not None:
@@ -708,7 +741,7 @@ class OhMyPiRpcAgent:
         current_base = str(getattr(backend, "apibase", "") or getattr(backend, "base_url", "") or "").rstrip("/")
         self.configured_models = list(models or [])
         self.llmclients = self._clients_from_models(self.configured_models)
-        self.llm_no = 0
+        self.llm_no = self._model_index_for_selector(default_model or "")
         for idx, model in enumerate(self.configured_models):
             model_base = str(model.base_url or "").rstrip("/")
             if current_selector and model.selector == current_selector:
@@ -1130,7 +1163,7 @@ class OhMyPiRpcAgent:
         if command in {"get_state", "set_model"} and isinstance(data, dict):
             self._update_session_state(data)
             model = data.get("model")
-            if isinstance(model, dict):
+            if isinstance(model, dict) and (command != "get_state" or not self.configured_models):
                 self._update_model(model)
         if command in {"new_session", "switch_session", "compact"} and isinstance(data, dict):
             if not bool(data.get("cancelled")):
@@ -1161,6 +1194,18 @@ class OhMyPiRpcAgent:
             setattr(backend, "current_context_percent", float(context_usage.get("percent") or 0.0))
 
     def _update_model(self, model: dict[str, Any]) -> None:
+        if self.configured_models:
+            idx = self._model_index_for_runtime_model(model)
+            if idx < 0:
+                self._remember_stderr(f"runtime model not in Shuheng projection: {model}")
+                return
+            self.llm_no = idx
+            self.llmclient = self.llmclients[idx]
+            context_window = _positive_int(model.get("contextWindow") or model.get("context_window") or 0)
+            if context_window > 0:
+                setattr(self.llmclient.backend, "context_win", context_window)
+                setattr(self.llmclient.backend, "contextWindow", context_window)
+            return
         provider = str(model.get("provider") or self.llmclient.backend.name or "Oh My Pi")
         model_id = str(model.get("id") or model.get("modelId") or self.llmclient.backend.model or "unknown")
         name = str(model.get("name") or provider or "Oh My Pi")
@@ -1943,6 +1988,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         runtime_event_sink: RuntimeEventSink | None = None,
         env: dict[str, str] | None = None,
         configured_models: list[OhMyPiRuntimeModel] | None = None,
+        default_model: str | None = None,
     ) -> None:
         super().__init__(spec)
         self.command = command
@@ -1955,6 +2001,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
         self.host_tool_handler = host_tool_handler
         self.runtime_event_sink = runtime_event_sink
         self.configured_models = list(configured_models or [])
+        self.default_model = str(default_model or "")
 
     def create_agent(self) -> OhMyPiRpcAgent:
         return OhMyPiRpcAgent(
@@ -1968,6 +2015,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
             host_tool_handler=self.host_tool_handler,
             runtime_event_sink=self.runtime_event_sink,
             configured_models=self.configured_models,
+            default_model=self.default_model,
         )
 
     def prepare_agent(self, agent: Any, *, state: Any = None) -> None:

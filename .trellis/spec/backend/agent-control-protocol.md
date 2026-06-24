@@ -1095,6 +1095,9 @@ configure_genericagent_provider_runtime(
 - `app.py` owns translation from GA-TUI `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, OMP binary discovery, command construction, and RPC behavior.
 - After `/model` save, edit, delete, default selection, or reload while the TUI is idle, Shuheng must rebuild the isolated OMP config files and refresh the current OMP wrapper's configured model list, child env, and command without requiring a TUI restart.
 - `OhMyPiRpcAgent.load_llm_sessions()` must not overwrite Shuheng-projected `configured_models` with RPC `get_available_models` results when the app has already supplied a configured list. OMP's internal model discovery is only a fallback for unconfigured wrappers.
+- `OhMyPiRpcAgent` must initialize its active local `llmclient` from the projected default model selector so the TUI model panel and status card do not depend on a later OMP `get_state` response to display the default.
+- When Shuheng has supplied `configured_models`, OMP `get_state` responses may update native session/context usage but must not overwrite the current local model selection. Otherwise a stale state response can mix an old provider/model id with the newly selected entry's base URL.
+- When Shuheng has supplied `configured_models`, OMP `set_model` / `cycle_model` confirmations may move the active index to a matching configured model and refresh context-window metadata, but must preserve Shuheng-projected display fields such as provider label, model id, and base URL.
 - Refreshing `OhMyPiRpcAgent.configured_models` must preserve the current model by selector, display name, provider/model id, or model/base URL where possible, and update any pending model switch so the next lazy RPC startup sends the refreshed provider/model pair.
 - OMP binary discovery order is explicit `binary` argument, `GA_TUI_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
 - Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
@@ -1155,6 +1158,8 @@ configure_genericagent_provider_runtime(
 - Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
 - Existing OMP wrapper + changed `mykey.py` -> `refresh_agent_runtime_model_config(agent)` updates wrapper `configured_models`, regenerated env, command `--model`, and isolated files before the next switch/prompt.
+- Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
+- Existing OMP wrapper + `set_model` confirmation after a current-session switch -> the status card keeps the configured provider label/base URL while accepting matching context-window metadata.
 - Existing OMP wrapper with an already selected model -> refresh keeps the matching selected model when it still exists and sends the refreshed provider/model id before the next prompt.
 - New Shuheng main or temporary session -> active OMP RPC session receives a `new_session` reset when the process is running, and a later first runtime task may inject one fresh full context pack.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
@@ -1232,7 +1237,7 @@ configure_genericagent_provider_runtime(
 - Tests must assert the OMP runtime adapter subprocess `cwd` is the GenericAgent-TUI app root, not the GenericAgent harness root.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
-- Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
+- Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, `OhMyPiRpcAgent` initializes to the projected default model selector, stale `get_state` model payloads and normal `set_model` confirmations cannot corrupt the current configured model display, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
 - Tests must assert system `~/.omp/agent/config.yml` hash remains unchanged when present.

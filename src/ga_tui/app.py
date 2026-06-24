@@ -13228,7 +13228,7 @@ def refresh_agent_runtime_model_config(agent: Any) -> str:
         model=runtime_config.default_model,
         approval_mode=runtime_config.approval_mode,
     )
-    refresh(runtime_config.models, env=runtime_config.env, command=command)
+    refresh(runtime_config.models, env=runtime_config.env, command=command, default_model=runtime_config.default_model)
     return f"OMP runtime 模型配置已刷新（{len(runtime_config.models)} 个模型）。"
 
 
@@ -13266,6 +13266,7 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         cwd=APP_ROOT_DIR,
         env=ohmypi_runtime_config.env,
         configured_models=ohmypi_runtime_config.models,
+        default_model=ohmypi_runtime_config.default_model,
         memory_candidate_sink=append_ohmypi_memory_candidate_signal,
         host_tool_definitions=ohmypi_tui_host_tool_definitions(),
         host_tool_handler=ohmypi_tui_host_tool_handler(None),

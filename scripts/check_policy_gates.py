@@ -1051,6 +1051,8 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert getattr(adapter, "env")["PI_CODING_AGENT_DIR"] == runtime_config.agent_dir
         ohmypi_agent = adapter.create_agent()
         setattr(ohmypi_agent, "_ga_tui_runtime_provider_id", "ohmypi")
+        assert ohmypi_agent.llm_no == 1, ohmypi_agent.llm_no
+        assert ohmypi_agent.get_llm_name(model=True) == "model-beta", ohmypi_agent.get_llm_name(model=True)
         Path(mykey_file).write_text(
             "\n".join([
                 "mixin_config = {'llm_nos': ['gamma'], 'max_retries': 10, 'base_delay': 0.5}",
@@ -2158,6 +2160,32 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert agent.get_llm_name(model=True) == "model-beta"
     pending_model = getattr(agent, "_pending_model", None)
     assert pending_model is not None and pending_model.provider == "ga-tui-beta" and pending_model.model_id == "model-beta", pending_model
+    agent._handle_response({
+        "type": "response",
+        "command": "get_state",
+        "success": True,
+        "data": {
+            "model": {"provider": "ga-tui-alpha", "id": "model-alpha"},
+            "contextUsage": {"tokens": 10, "contextWindow": 100, "percent": 10},
+        },
+    })
+    assert agent.llm_no == 1
+    assert agent.get_llm_name(model=True) == "model-beta"
+    assert agent.get_llm_name(model=False) == "OhMyPi/beta"
+    assert getattr(agent.llmclient.backend, "apibase", "") == "https://beta.example.invalid/v1"
+    agent._handle_response({
+        "type": "response",
+        "command": "set_model",
+        "success": True,
+        "data": {
+            "model": {"provider": "ga-tui-beta", "id": "model-beta", "contextWindow": 200},
+        },
+    })
+    assert agent.llm_no == 1
+    assert agent.get_llm_name(model=True) == "model-beta"
+    assert agent.get_llm_name(model=False) == "OhMyPi/beta"
+    assert getattr(agent.llmclient.backend, "apibase", "") == "https://beta.example.invalid/v1"
+    assert getattr(agent.llmclient.backend, "contextWindow", 0) == 200
     refreshed_models = [
         omp.OhMyPiRuntimeModel(provider="ga-tui-gamma", model_id="model-gamma", display_name="gamma", base_url="https://gamma.example.invalid/v1"),
         omp.OhMyPiRuntimeModel(provider="ga-tui-beta-new", model_id="model-beta", display_name="beta-new", base_url="https://beta.example.invalid/v1"),
