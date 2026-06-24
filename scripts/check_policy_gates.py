@@ -4452,11 +4452,18 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     state.running = True
 
     assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
-    main_lines = [line.text for line in a.home_lines(state, 100)]
+    main_render_lines = a.home_lines(state, 100)
+    main_lines = [line.text for line in main_render_lines]
     assert any("Shuheng 主 agent 主页" in line for line in main_lines), main_lines
     assert any("╭─ 主控运行概览" in line for line in main_lines), main_lines
-    assert any("├─ 核心指标" in line for line in main_lines), main_lines
-    assert any("状态" in line and "活跃任务" in line and "待审批" in line for line in main_lines), main_lines
+    assert any("▸ 核心指标" in line and "已折叠" in line for line in main_lines), main_lines
+    assert not any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_lines), main_lines
+    state.line_cache = main_render_lines
+    metrics_idx = next(idx for idx, line in enumerate(main_lines) if "核心指标" in line)
+    assert a.toggle_process_at_line(state, metrics_idx)
+    main_expanded_lines = [line.text for line in a.home_lines(state, 100)]
+    assert any("▾ 核心指标" in line and "已展开" in line for line in main_expanded_lines), main_expanded_lines
+    assert any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_expanded_lines), main_expanded_lines
     assert any("├─ 运行详情" in line for line in main_lines), main_lines
     assert not any("| 状态" in line or "| ----" in line for line in main_lines[:14]), main_lines[:14]
     assert not any(line.startswith("- 状态:") for line in main_lines[:14]), main_lines[:14]
@@ -4503,13 +4510,21 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert state.selected_session == a.subagent_home_session_key(sub.agent_id), state.selected_session
     assert a.active_subagent_view(state) is sub
     assert a.display_scope_key(state) == f"home:sub:{sub.agent_id}"
-    home_text = "\n".join(line.text for line in a.home_lines(state, 100))
+    home_render_lines = a.home_lines(state, 100)
+    home_text = "\n".join(line.text for line in home_render_lines)
     assert "Dashboard Agent 主页" in home_text, home_text
     assert "固定状态卡" in home_text, home_text
     assert "╭─ Dashboard Agent / researcher" in home_text, home_text
     top_card = home_text.split("╭─ 详情入口", 1)[0]
-    assert "├─ 核心指标" in top_card and "├─ 运行详情" in top_card, home_text
-    assert "状态" in top_card and "生命周期" in top_card and "任务队列" in top_card, home_text
+    assert "核心指标" in top_card and "├─ 运行详情" in top_card, home_text
+    assert "▸ 核心指标" in top_card and "已折叠" in top_card, home_text
+    assert "生命周期 persistent" not in top_card and "任务队列 0" not in top_card, home_text
+    state.line_cache = home_render_lines
+    metrics_idx = next(idx for idx, line in enumerate(home_render_lines) if "核心指标" in line.text)
+    assert a.toggle_process_at_line(state, metrics_idx)
+    expanded_home_text = "\n".join(line.text for line in a.home_lines(state, 100))
+    expanded_top_card = expanded_home_text.split("╭─ 详情入口", 1)[0]
+    assert "▾ 核心指标" in expanded_top_card and "生命周期 persistent" in expanded_top_card and "任务队列 0" in expanded_top_card, expanded_home_text
     assert "| 状态" not in top_card and "| ----" not in top_card, home_text
     assert "- ID:" not in top_card, home_text
     assert "╭─ 详情入口" in home_text, home_text
