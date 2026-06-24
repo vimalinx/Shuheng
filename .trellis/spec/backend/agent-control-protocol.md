@@ -211,6 +211,111 @@ S01 修复左栏历史会话标题
 /curate-history cat:Shuheng limit=5 -> index artifact + cached summaries -> candidate recommendations + subagent recommendations -> user-approved follow-up actions
 ```
 
+## Scenario: Dashboard Home Pages And dashboard.update
+
+### 1. Scope / Trigger
+
+- Trigger: The TUI has dedicated home pages for the main Shuheng Orchestrator and persistent subagents, plus a governed `dashboard.update` control action.
+- Applies to: startup `State.selected_session`, left/right sidebar selection, `/home`, `/chat`, `/agent-dashboard`, `dashboard.v1` parsing, subagent metadata persistence, main home rendering, persistent-subagent home rendering, and TUI control extraction.
+- Non-goal: This does not create a new scheduler implementation, a new artifact store, executable UI widgets, direct memory writes, or dashboard-driven approval decisions.
+
+### 2. Signatures
+
+- UI-only home keys:
+  - Main home: `MAIN_HOME_SESSION_KEY == "__home__:main"`.
+  - Persistent subagent home: `subagent_home_session_key(agent_id) == "__home__:sub:<safe-agent-id>"`.
+- Commands:
+  - `/home [agent]` opens the main home, current persistent-agent home, or named persistent-agent home.
+  - `/chat` switches from the current home page back to the corresponding chat view.
+  - `/agent-dashboard <agent>` opens a named persistent-agent home.
+- Control action:
+  - External action: `{"action":"dashboard.update", ...}`.
+  - Internal execution action: `dashboard_update`.
+- Persistent storage:
+  - Persistent and Secret subagent metadata may contain `dashboard: {...}`.
+  - Main Orchestrator dashboard declaration is process-local in the MVP unless a later persistence task adds a main-home store.
+
+### 3. Contracts
+
+- Fresh non-Secret `State` starts on `MAIN_HOME_SESSION_KEY`; runtime navigation is held in `state.selected_session` only.
+- Persistent-agent selection from the right sidebar opens the persistent-agent home by default; temporary-agent selection keeps chat-first behavior.
+- Dashboard declarations normalize to:
+  - `schema_version: "dashboard.v1"`
+  - `updated_at`
+  - `source`
+  - `target`
+  - `provenance.task_id`
+  - `provenance.artifact_refs`
+  - `sections`
+  - optional `status_narrative`
+  - optional `todos`
+  - optional `markdown`
+- Supported section types are `function`, `status_narrative`, `todos`, `schedules`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
+- Shuheng owns the fixed top status card. Agent declarations may control lower-page section order, labels, bounded Markdown, status narrative, and todo text.
+- Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
+- Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
+- Plain text input on a persistent-agent home does not start direct chat; the user must switch with `/chat`. Main home may still accept normal main-agent input.
+
+### 4. Validation & Error Matrix
+
+- Unknown dashboard target -> user-visible `找不到子 agent`.
+- Temporary subagent target -> dashboard update is skipped with a temporary-agent message.
+- Missing or invalid `dashboard.v1` spec -> render safe default sections.
+- Unsupported section type or unsupported fields -> ignore those parts and keep supported sections.
+- Home keys passed to selected-history resolution -> not treated as filesystem session paths.
+- Secret Vault lock/reset or normal new-session reset -> return to main home, not an arbitrary historical chat.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows status, function, todos, schedules, tasks, artifacts, and approvals from shared registries.
+- Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
+- Base: `/chat` from a persistent-agent home switches to the agent chat session without changing the stored dashboard declaration.
+- Bad: Treating a home key as a path for `selected` history operations.
+- Bad: Rendering agent-provided script/code as executable UI behavior.
+- Bad: Letting a temporary agent persist a dashboard declaration.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
+- Tests must assert persistent-agent home rendering includes shared task, schedule, artifact, and approval rows.
+- Tests must assert temporary agents do not persist dashboard declarations.
+- Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
+- Tests must assert unsupported section types and executable-looking fields are ignored.
+- Tests must assert old transcript-only behavior explicitly selects `"main"` when testing main chat rendering.
+- Tests must keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```json
+{
+  "action": "dashboard.update",
+  "target": "temporary-agent",
+  "sections": [{"type": "script", "body": "run this UI code"}]
+}
+```
+
+#### Correct
+
+```json
+{
+  "action": "dashboard.update",
+  "target": "agent-researcher",
+  "dashboard": {
+    "sections": [
+      {"type": "status_narrative", "title": "当前状态"},
+      {"type": "todos", "title": "待办"},
+      {"type": "schedules", "title": "最近定时任务"},
+      {"type": "artifacts", "title": "产物引用"}
+    ],
+    "status_narrative": "正在整理最近定时任务结果。",
+    "todos": ["复核共享任务账本", "更新 artifact refs"]
+  },
+  "artifact_refs": ["artifact://artifacts/reports/example.md"]
+}
+```
+
 ## Scenario: Running Indicator Rendering
 
 ### 1. Scope / Trigger

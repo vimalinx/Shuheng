@@ -476,12 +476,18 @@ AUTO_PLAN_CONTINUE_MAX_PER_SIGNATURE = 1
 AUTO_PLAN_CONTINUE_MAX_PER_PLAN = 12
 AUTO_CONTROL_CONTINUE_MAX_PER_SIGNATURE = 1
 AUTO_CONTROL_CONTINUE_MAX_PER_SESSION = 8
+HOME_SESSION_PREFIX = "__home__:"
+MAIN_HOME_SESSION_KEY = HOME_SESSION_PREFIX + "main"
+SUBAGENT_HOME_SESSION_PREFIX = HOME_SESSION_PREFIX + "sub:"
 PASTE_START = "\x1b[200~"
 PASTE_END = "\x1b[201~"
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 _AGENT_COUNTER = itertools.count(1)
 _SESSION_LOG_COUNTER = itertools.count(1)
 COMMANDS: list[tuple[str, str, str, bool]] = [
+    ("/home", "[agent]", "打开主/代理主页", True),
+    ("/chat", "", "从主页切回聊天", True),
+    ("/agent-dashboard", "<agent>", "打开持久代理主页", False),
     ("/continue", "[n]", "列出或恢复历史会话", True),
     ("/sessions", "", "列出历史会话", True),
     ("/curate-history", "[scope]", "用历史策展 skill 总结分类/记忆候选/子代理建议", True),
@@ -692,6 +698,7 @@ class SubAgentRuntime:
     updated_at: float = field(default_factory=time.time)
     profile_text: str = field(default="", repr=False)
     memory_text: str = field(default="", repr=False)
+    dashboard: dict[str, Any] = field(default_factory=dict)
     encrypted_ref: str = ""
 
 
@@ -801,7 +808,7 @@ class State:
     restore_lock: threading.Lock = field(default_factory=threading.Lock)
     restore_token: int = 0
     current_title: str = "main"
-    selected_session: Any = "main"
+    selected_session: Any = MAIN_HOME_SESSION_KEY
     temporary_session: bool = False
     command_index: int = 0
     fold_process: bool = True
@@ -860,6 +867,7 @@ class State:
     secret_active_origin: dict[str, Any] = field(default_factory=dict)
     token_usage_registry: dict[str, dict[str, int]] = field(default_factory=dict)
     token_live_offsets: dict[str, dict[str, int]] = field(default_factory=dict)
+    main_dashboard: dict[str, Any] = field(default_factory=dict)
     title_jobs: set[str] = field(default_factory=set)
     title_signatures: dict[str, str] = field(default_factory=dict)
     description_jobs: set[str] = field(default_factory=set)
@@ -874,6 +882,27 @@ def cp(index: int) -> int:
         return curses.color_pair(index)
     except curses.error:
         return 0
+
+
+def subagent_home_session_key(agent_id: str) -> str:
+    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", agent_id or "agent").strip("-") or "agent"
+    return f"{SUBAGENT_HOME_SESSION_PREFIX}{safe_agent}"
+
+
+def home_subagent_id_from_key(key: Any) -> str:
+    text = str(key or "")
+    if not text.startswith(SUBAGENT_HOME_SESSION_PREFIX):
+        return ""
+    return text[len(SUBAGENT_HOME_SESSION_PREFIX):]
+
+
+def is_main_home_session_key(key: Any) -> bool:
+    return str(key or "") == MAIN_HOME_SESSION_KEY
+
+
+def is_home_session_key(key: Any) -> bool:
+    text = str(key or "")
+    return text == MAIN_HOME_SESSION_KEY or text.startswith(SUBAGENT_HOME_SESSION_PREFIX)
 
 
 def expire_last_error_if_needed(state: State, ttl: float = 4.0) -> bool:
@@ -998,7 +1027,7 @@ def queue_input_draft_for_interrupt(state: State) -> bool:
 
 
 def queued_user_input_hint_lines(state: State, width: int) -> list[tuple[str, int]]:
-    sub = selected_subagent(state)
+    sub = active_subagent_view(state)
     queued_inputs = sub.chat_queue if sub is not None else state.queued_user_inputs
     interrupted = sub.chat_queue_interrupt_requested if sub is not None else state.queued_user_input_interrupt_requested
     if not queued_inputs:
@@ -4912,7 +4941,7 @@ def lock_secret_vault(state: State, reason: str = "manual") -> str:
     clear_all_queued_inputs(state)
     reset_input_history_browse(state)
     state.current_title = "main"
-    state.selected_session = "main"
+    state.selected_session = MAIN_HOME_SESSION_KEY
     state.temporary_session = False
     cancel_normal_history_restore(state)
     set_input_text(state, "")
@@ -9666,6 +9695,7 @@ def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) ->
         "chat_queued": len(sub.chat_queue),
         "chat_session_id": sub.chat_session_id,
         "chat_title": sub.chat_title,
+        "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
         "memory_ref": secret_virtual_ref(SECRET_SUBAGENT_MEMORY_KIND, sub.agent_id) if sub.persistent else "",
     }
     meta.update(fields)
@@ -9711,6 +9741,7 @@ def save_subagent_meta(sub: SubAgentRuntime, state: Optional[State] = None, **fi
         "chat_queued": len(sub.chat_queue),
         "chat_session_id": sub.chat_session_id,
         "chat_title": sub.chat_title,
+        "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
     })
     meta.update(fields)
     os.makedirs(sub.home, exist_ok=True)
@@ -9789,6 +9820,7 @@ def load_secret_subagents(state: State) -> bool:
         persistent = bool(meta.get("persistent", True))
         chat_session_id = str(meta.get("chat_session_id") or "")
         chat_title = str(meta.get("chat_title") or "")
+        dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
         memory_text = load_secret_subagent_memory(state, agent_id) if persistent else ""
         if not memory_text and persistent:
             memory_text = str(payload.get("memory") or "")
@@ -9807,6 +9839,7 @@ def load_secret_subagents(state: State) -> bool:
             existing.updated_at = float(meta.get("updated_at") or existing.updated_at)
             existing.profile_text = str(payload.get("profile") or "")
             existing.memory_text = memory_text if persistent else ""
+            existing.dashboard = dict(dashboard)
             existing.encrypted_ref = secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id)
             if not existing.chat_session_id:
                 existing.chat_session_id = chat_session_id
@@ -9829,6 +9862,7 @@ def load_secret_subagents(state: State) -> bool:
                 updated_at=float(meta.get("updated_at") or time.time()),
                 profile_text=str(payload.get("profile") or ""),
                 memory_text=memory_text if persistent else "",
+                dashboard=dict(dashboard),
                 encrypted_ref=secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id),
                 chat_session_id=chat_session_id,
                 chat_title=chat_title,
@@ -9860,6 +9894,7 @@ def load_subagents(state: State) -> bool:
         persistent = bool(meta.get("persistent", os.path.commonpath([SUBAGENTS_DIR, home]) == SUBAGENTS_DIR))
         chat_session_id = str(meta.get("chat_session_id") or "")
         chat_title = str(meta.get("chat_title") or "")
+        dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
         existing = state.subagents.get(agent_id)
         if existing:
             existing.name = display_name
@@ -9875,6 +9910,7 @@ def load_subagents(state: State) -> bool:
                 existing.chat_session_id = chat_session_id
             if not existing.chat_title:
                 existing.chat_title = chat_title
+            existing.dashboard = dict(dashboard)
             if not existing.messages and existing.status not in {"running", "aborting"}:
                 load_subagent_chat_session(state, existing, existing.chat_session_id)
             loaded[agent_id] = existing
@@ -9892,6 +9928,7 @@ def load_subagents(state: State) -> bool:
                 updated_at=float(meta.get("updated_at") or time.time()),
                 chat_session_id=chat_session_id,
                 chat_title=chat_title,
+                dashboard=dict(dashboard),
             )
             load_subagent_chat_session(state, sub, sub.chat_session_id)
             loaded[agent_id] = sub
@@ -14209,7 +14246,7 @@ def clear_active_session_after_meta_action(state: State, message: str, *, persis
     reset_agent_token_session(state, state.agent)
     state.messages.clear()
     state.current_title = "main"
-    state.selected_session = "main"
+    state.selected_session = MAIN_HOME_SESSION_KEY
     state.temporary_session = False
     state.status = "idle"
     state.active_task_id = None
@@ -14298,7 +14335,7 @@ def resolve_session_target(
     if not target or target.lower() in {"current", "now", "当前"}:
         path = current_session_path(state)
         return (path, "") if path else (None, "当前会话没有日志路径。")
-    if target.lower() == "selected" and isinstance(state.selected_session, str) and state.selected_session != "main":
+    if target.lower() == "selected" and isinstance(state.selected_session, str) and state.selected_session != "main" and not is_home_session_key(state.selected_session):
         return state.selected_session, ""
     if os.path.isabs(target) and os.path.exists(target):
         return target, ""
@@ -14579,6 +14616,33 @@ def apply_task_control(state: State, action: str, target: str, value: str, contr
     return None
 
 
+def apply_dashboard_control(state: State, action: str, target: str, value: str, control: dict[str, Any], source: str = "agent") -> Optional[str]:
+    del value
+    action = (action or "").strip().lower().replace("-", "_")
+    if action != "dashboard_update":
+        return None
+    target = str(target or control.get("target") or control.get("agent_id") or control.get("agent") or "").strip()
+    if not target or target in {"current", "now", "selected"}:
+        home_sub = selected_home_subagent(state)
+        chat_sub = selected_subagent(state)
+        target = home_sub.agent_id if home_sub is not None else (chat_sub.agent_id if chat_sub is not None else "main")
+    if target.lower() in {"main", "orchestrator", "orchestrator.main", "主", "主控", "主agent", "主代理"}:
+        state.main_dashboard = normalize_dashboard_spec_payload(control, source=source, target="orchestrator.main")
+        mark_dirty(state)
+        return "已更新主 agent 主页声明。"
+    sub = resolve_subagent(state, target)
+    if sub is None:
+        return f"找不到子 agent: {target}"
+    if not sub.persistent:
+        return "临时子 agent 不持久化主页声明。"
+    sub.dashboard = normalize_dashboard_spec_payload(control, source=source, target=sub.agent_id)
+    sub.updated_at = time.time()
+    save_subagent_meta(sub, state)
+    append_subagent_event(sub, "dashboard.update", "dashboard.v1 updated", state=state)
+    mark_dirty(state)
+    return f"已更新代理主页声明：{sub.name}"
+
+
 def format_agent_control_result(action: str, target: str, result: str) -> str:
     action_label = (action or "control").strip() or "control"
     target_label = (target or "").strip()
@@ -14628,6 +14692,10 @@ def apply_tui_controls_from_text(state: State, text: str, source: str = "agent",
             and normalized_action not in {"subagent_create", "agent_create", "create_subagent", "new_subagent"}
         ):
             target = resolve_subagent_control_alias(subagent_control_aliases, target)
+        dashboard_result = apply_dashboard_control(state, action, target, value, control, source=source)
+        if dashboard_result is not None:
+            record_control_result(action, display_target, dashboard_result)
+            continue
         schedule_result = apply_schedule_control(state, action, target, value, control, source=source)
         if schedule_result is not None:
             record_control_result(action, display_target, schedule_result)
@@ -14917,6 +14985,79 @@ def selected_subagent(state: State) -> Optional[SubAgentRuntime]:
     return state.subagents.get(str(state.selected_session or ""))
 
 
+def selected_home_subagent(state: State) -> Optional[SubAgentRuntime]:
+    agent_id = home_subagent_id_from_key(state.selected_session)
+    if not agent_id:
+        return None
+    return state.subagents.get(agent_id)
+
+
+def active_subagent_view(state: State) -> Optional[SubAgentRuntime]:
+    return selected_subagent(state) or selected_home_subagent(state)
+
+
+def set_selected_interface(state: State, key: Any, *, follow_bottom: bool = True) -> None:
+    state.selected_session = key
+    if follow_bottom:
+        state.follow_bottom = True
+    state.scroll = 0
+    mark_dirty(state)
+
+
+def show_main_home(state: State, *, message: str = "") -> None:
+    set_selected_interface(state, MAIN_HOME_SESSION_KEY, follow_bottom=False)
+    if message:
+        state.last_error = message
+
+
+def show_subagent_home(state: State, sub: SubAgentRuntime, *, message: str = "") -> None:
+    if not sub.persistent:
+        set_selected_interface(state, sub.agent_id)
+        state.last_error = message or f"{sub.name} 是临时会话代理，默认显示聊天。"
+        return
+    set_selected_interface(state, subagent_home_session_key(sub.agent_id), follow_bottom=False)
+    if message:
+        state.last_error = message
+
+
+def show_home_for_current_scope(state: State, target: str = "") -> str:
+    target = str(target or "").strip()
+    if target:
+        if target.lower() in {"main", "orchestrator", "orchestrator.main", "主", "主控", "主agent", "主代理"}:
+            show_main_home(state)
+            return "已打开主 agent 主页。"
+        sub = resolve_subagent(state, target)
+        if sub is None:
+            return f"找不到子 agent: {target}"
+        if not sub.persistent:
+            return f"{sub.name} 是临时会话代理，没有持久主页。"
+        show_subagent_home(state, sub)
+        return f"已打开代理主页：{sub.name}"
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        show_subagent_home(state, home_sub)
+        return f"已打开代理主页：{home_sub.name}"
+    chat_sub = selected_subagent(state)
+    if chat_sub is not None:
+        if not chat_sub.persistent:
+            return f"{chat_sub.name} 是临时会话代理，没有持久主页。"
+        show_subagent_home(state, chat_sub)
+        return f"已打开代理主页：{chat_sub.name}"
+    show_main_home(state)
+    return "已打开主 agent 主页。"
+
+
+def switch_home_to_chat(state: State) -> str:
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        set_selected_interface(state, home_sub.agent_id)
+        return f"已切到代理聊天：{home_sub.name}"
+    if is_main_home_session_key(state.selected_session):
+        set_selected_interface(state, "main")
+        return "已切到主 agent 聊天。"
+    return "当前已经是聊天或历史界面。"
+
+
 def mark_subagent_messages_changed(state: State, sub: SubAgentRuntime, *, follow_bottom: bool = True) -> None:
     if selected_subagent(state) is sub:
         if follow_bottom:
@@ -14984,7 +15125,7 @@ def request_subagent_interrupt(state: State, sub: SubAgentRuntime, prefix: str =
 
 
 def request_visible_interrupt(state: State, prefix: str = "Ctrl+C") -> None:
-    sub = selected_subagent(state)
+    sub = active_subagent_view(state)
     if sub is not None:
         request_subagent_interrupt(state, sub, prefix=prefix)
     else:
@@ -15004,6 +15145,11 @@ def display_status(state: State) -> str:
         if sub.pending_interaction or is_approval_interaction(state.pending_interaction):
             return "waiting-input"
         return sub.status
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        if home_sub.pending_interaction or is_approval_interaction(state.pending_interaction):
+            return "waiting-input"
+        return home_sub.status
     return "waiting-input" if state.pending_interaction else state.status
 
 
@@ -15011,6 +15157,11 @@ def display_title(state: State) -> str:
     sub = selected_subagent(state)
     if sub is not None:
         return f"SubAgent {sub.name}"
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        return f"Agent Home {home_sub.name}"
+    if is_main_home_session_key(state.selected_session):
+        return "Shuheng Home"
     return "GenericAgent"
 
 
@@ -15018,6 +15169,11 @@ def top_bar_session_id(state: State) -> str:
     sub = selected_subagent(state)
     if sub is not None:
         return sub.agent_id or sub.name or "subagent"
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        return subagent_home_session_key(home_sub.agent_id)
+    if is_main_home_session_key(state.selected_session):
+        return "home:main"
     if state.temporary_session:
         return "temp"
     return active_ui_session_key(state) or "main"
@@ -15040,6 +15196,11 @@ def top_bar_header(state: State, timestamp: Optional[float] = None) -> str:
     if sub is not None:
         session_title = compact_title(sub.chat_title or sub.chat_session_id or "current", 28)
         return f"当前时间: {current_time} | 子 agent: {sub.name} | 会话ID: {sub.agent_id} | 子会话: {session_title or '-'} | 当前轮次: {top_bar_round_label(state)}{secret}"
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        return f"当前时间: {current_time} | 代理主页: {home_sub.name} | ID: {home_sub.agent_id} | 状态: {home_sub.status}{secret}"
+    if is_main_home_session_key(state.selected_session):
+        return f"当前时间: {current_time} | 主 agent 主页 | 状态: {state.status} | 当前轮次: {top_bar_round_label(state)}{secret}"
     return f"当前时间: {current_time} | 会话ID: {top_bar_session_id(state)} | 当前轮次: {top_bar_round_label(state)}{secret}"
 
 
@@ -15047,6 +15208,11 @@ def display_scope_key(state: State) -> str:
     sub = selected_subagent(state)
     if sub is not None:
         return f"sub:{sub.agent_id}"
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None:
+        return f"home:sub:{home_sub.agent_id}"
+    if is_main_home_session_key(state.selected_session):
+        return "home:main"
     if state.temporary_session:
         return "session:temp"
     return f"session:{str(state.selected_session or 'main')}"
@@ -15067,12 +15233,463 @@ def subagent_meta_key(state: State, label: str) -> str:
 
 
 def current_interaction_payload(state: State) -> Optional[dict[str, Any]]:
-    sub = selected_subagent(state)
+    sub = active_subagent_view(state)
     if sub is not None and sub.pending_interaction:
         return sub.pending_interaction
     if sub is not None and not is_approval_interaction(state.pending_interaction):
         return None
     return state.pending_interaction
+
+
+SUPPORTED_DASHBOARD_SECTIONS = {
+    "function",
+    "status_narrative",
+    "todos",
+    "schedules",
+    "tasks",
+    "artifacts",
+    "approvals",
+    "memory",
+    "markdown",
+}
+
+
+DEFAULT_DASHBOARD_SECTIONS = [
+    {"type": "function", "title": "功能描述"},
+    {"type": "status_narrative", "title": "当前状态"},
+    {"type": "todos", "title": "待办事项"},
+    {"type": "schedules", "title": "最近定时任务"},
+    {"type": "tasks", "title": "最近任务"},
+    {"type": "artifacts", "title": "相关产物"},
+    {"type": "approvals", "title": "待审批"},
+]
+
+
+def dashboard_spec_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
+    raw = sub.dashboard if isinstance(sub.dashboard, dict) else {}
+    if str(raw.get("schema_version") or "") != "dashboard.v1":
+        return {}
+    return raw
+
+
+def bounded_dashboard_text(value: Any, limit: int = 2000) -> str:
+    return clean_text(str(value or "")).strip()[:limit]
+
+
+def normalize_dashboard_sections(raw_sections: Any) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    source = raw_sections if isinstance(raw_sections, list) else []
+    for item in source[:12]:
+        if isinstance(item, str):
+            item = {"type": item}
+        if not isinstance(item, dict):
+            continue
+        section_type = str(item.get("type") or item.get("section") or "").strip().lower()
+        if section_type not in SUPPORTED_DASHBOARD_SECTIONS:
+            continue
+        section = {
+            "type": section_type,
+            "title": bounded_dashboard_text(item.get("title") or item.get("label") or section_type, 80),
+        }
+        markdown = bounded_dashboard_text(item.get("markdown") or item.get("body") or "", 3000)
+        if markdown:
+            section["markdown"] = markdown
+        sections.append(section)
+    return sections
+
+
+def dashboard_sections_for_subagent(sub: SubAgentRuntime) -> list[dict[str, Any]]:
+    spec = dashboard_spec_for_subagent(sub)
+    sections = normalize_dashboard_sections(spec.get("sections")) if spec else []
+    return sections or list(DEFAULT_DASHBOARD_SECTIONS)
+
+
+def dashboard_spec_for_main(state: State) -> dict[str, Any]:
+    raw = state.main_dashboard if isinstance(state.main_dashboard, dict) else {}
+    if str(raw.get("schema_version") or "") != "dashboard.v1":
+        return {}
+    return raw
+
+
+def dashboard_sections_for_main(state: State) -> list[dict[str, Any]]:
+    spec = dashboard_spec_for_main(state)
+    sections = normalize_dashboard_sections(spec.get("sections")) if spec else []
+    return sections or list(DEFAULT_DASHBOARD_SECTIONS)
+
+
+def normalize_dashboard_spec_payload(control: dict[str, Any], *, source: str, target: str) -> dict[str, Any]:
+    raw = control.get("dashboard") if isinstance(control.get("dashboard"), dict) else control
+    sections = normalize_dashboard_sections(raw.get("sections") if isinstance(raw, dict) else [])
+    markdown = bounded_dashboard_text(raw.get("markdown") if isinstance(raw, dict) else control.get("markdown"), 5000)
+    status = bounded_dashboard_text(
+        (raw.get("status_narrative") or raw.get("status")) if isinstance(raw, dict) else control.get("status_narrative"),
+        1000,
+    )
+    todos_raw = raw.get("todos") if isinstance(raw, dict) else control.get("todos")
+    todos: list[str] = []
+    if isinstance(todos_raw, list):
+        for item in todos_raw[:20]:
+            if isinstance(item, dict):
+                text = bounded_dashboard_text(item.get("text") or item.get("title") or item.get("task"), 180)
+            else:
+                text = bounded_dashboard_text(item, 180)
+            if text:
+                todos.append(text)
+    payload = {
+        "schema_version": "dashboard.v1",
+        "updated_at": now_iso(),
+        "source": source,
+        "target": target,
+        "provenance": {
+            "task_id": str(control.get("task_id") or control.get("parent_task_id") or ""),
+            "artifact_refs": [str(ref) for ref in (control.get("artifact_refs") or []) if str(ref).strip()][:12],
+        },
+        "sections": sections,
+    }
+    if status:
+        payload["status_narrative"] = status
+    if todos:
+        payload["todos"] = todos
+    if markdown:
+        payload["markdown"] = markdown
+    return payload
+
+
+def dashboard_status_for_subagent(sub: SubAgentRuntime) -> str:
+    spec = dashboard_spec_for_subagent(sub)
+    return bounded_dashboard_text(
+        spec.get("status_narrative")
+        or spec.get("status")
+        or f"{sub.name} 当前状态为 {sub.status}。"
+    )
+
+
+def dashboard_todos_for_subagent(sub: SubAgentRuntime) -> list[str]:
+    spec = dashboard_spec_for_subagent(sub)
+    raw = spec.get("todos") if spec else []
+    todos: list[str] = []
+    if isinstance(raw, list):
+        for item in raw[:12]:
+            if isinstance(item, dict):
+                text = bounded_dashboard_text(item.get("text") or item.get("title") or item.get("task"), 180)
+            else:
+                text = bounded_dashboard_text(item, 180)
+            if text:
+                todos.append(text)
+    return todos
+
+
+def dashboard_status_for_main(state: State, *, open_tasks: list[dict[str, Any]], approvals: list[dict[str, Any]], schedule_registry: dict[str, Any]) -> str:
+    spec = dashboard_spec_for_main(state)
+    return bounded_dashboard_text(
+        spec.get("status_narrative")
+        or spec.get("status")
+        or (
+            f"主 agent 当前状态为 {state.status}；"
+            f"有 {len(open_tasks)} 个未终态任务、{len(approvals)} 个待审批、"
+            f"{schedule_registry.get('active_job_count', 0)} 个启用定时任务。"
+        )
+    )
+
+
+def dashboard_todos_for_main(state: State) -> list[str]:
+    spec = dashboard_spec_for_main(state)
+    raw = spec.get("todos") if spec else []
+    todos: list[str] = []
+    if isinstance(raw, list):
+        for item in raw[:12]:
+            if isinstance(item, dict):
+                text = bounded_dashboard_text(item.get("text") or item.get("title") or item.get("task"), 180)
+            else:
+                text = bounded_dashboard_text(item, 180)
+            if text:
+                todos.append(text)
+    return todos
+
+
+def profile_summary_for_subagent(sub: SubAgentRuntime, limit: int = 800) -> str:
+    profile = subagent_profile_text(sub)
+    if not profile:
+        profile = sub.profile_text
+    return bounded_dashboard_text(profile, limit)
+
+
+def memory_summary_for_subagent(sub: SubAgentRuntime, limit: int = 800) -> str:
+    memory = subagent_memory_text(sub)
+    return bounded_dashboard_text(memory, limit)
+
+
+def agent_task_rows(agent_id: str, *, include_terminal: bool = True, limit: int = 8) -> list[dict[str, Any]]:
+    rows = [
+        row for row in latest_task_records().values()
+        if str(row.get("assigned_agent") or "") == agent_id
+    ]
+    if not include_terminal:
+        rows = [row for row in rows if not terminal_task_status(str(row.get("status") or ""))]
+    rows.sort(key=row_timestamp, reverse=True)
+    return rows[:limit]
+
+
+def schedule_row_targets_agent(row: dict[str, Any], agent_id: str) -> bool:
+    if str(row.get("target") or "") == agent_id:
+        return True
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    if schedule_execution_target(execution) == agent_id:
+        return True
+    control = schedule_agenttask_control(row)
+    routing = control.get("routing") if isinstance(control.get("routing"), dict) else {}
+    selector = routing.get("target_selector") if isinstance(routing.get("target_selector"), dict) else {}
+    return str(routing.get("selected_agent") or selector.get("agent_id") or selector.get("target") or "") == agent_id
+
+
+def agent_schedule_rows(agent_id: str, limit: int = 8) -> list[dict[str, Any]]:
+    rows = [
+        row for row in latest_schedule_records().values()
+        if schedule_row_targets_agent(row, agent_id)
+    ]
+    rows.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+    return rows[:limit]
+
+
+def latest_run_for_schedule(schedule_id: str) -> dict[str, Any]:
+    for row in reversed(latest_schedule_run_records(limit=1000)):
+        if str(row.get("schedule_id") or "") == schedule_id:
+            return row
+    return {}
+
+
+def agent_artifact_rows(agent_id: str, limit: int = 8) -> list[dict[str, Any]]:
+    task_ids = {str(row.get("task_id") or "") for row in agent_task_rows(agent_id, limit=40)}
+    rows = [
+        row for row in artifact_index_latest().values()
+        if str(row.get("source_task_id") or "") in task_ids
+    ]
+    rows.sort(key=lambda row: row_timestamp(row) or float(row.get("mtime") or 0.0), reverse=True)
+    return rows[:limit]
+
+
+def agent_approval_rows(state: Optional[State], agent_id: str, limit: int = 8) -> list[dict[str, Any]]:
+    task_ids = {str(row.get("task_id") or "") for row in agent_task_rows(agent_id, limit=40)}
+    rows = []
+    for row in pending_approvals(state):
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        target = str(row.get("target") or payload.get("subagent_id") or payload.get("target_subagent") or "")
+        task_id = str(payload.get("task_id") or "")
+        if target == agent_id or task_id in task_ids:
+            rows.append(row)
+    rows.sort(key=row_timestamp, reverse=True)
+    return rows[:limit]
+
+
+def append_home_line(lines: list[RenderLine], text: str = "", attr: int = 0, *, width: int = 80) -> None:
+    for part in wrap_cells(text, width):
+        lines.append(RenderLine(part, attr))
+
+
+def append_home_section(lines: list[RenderLine], title: str, body: list[str], width: int) -> None:
+    lines.append(RenderLine(""))
+    lines.append(RenderLine(f"## {title}", cp(7) | curses.A_BOLD))
+    if not body:
+        lines.append(RenderLine("  - 暂无", cp(9)))
+        return
+    for raw in body:
+        append_home_line(lines, raw, cp(2), width=width)
+
+
+def main_home_section_body(
+    state: State,
+    section: dict[str, Any],
+    *,
+    task_rows: list[dict[str, Any]],
+    open_tasks: list[dict[str, Any]],
+    approvals: list[dict[str, Any]],
+    schedule_registry: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> list[str]:
+    section_type = str(section.get("type") or "")
+    if section_type == "function":
+        markdown = bounded_dashboard_text(section.get("markdown"), 1200)
+        if markdown:
+            return markdown.splitlines()[:30]
+        return [
+            "- 枢衡主 agent 是强 Orchestrator：负责接收用户意图、拆解任务、调度受限子 agent、维护共享账本并串联审批门禁。",
+            "- 子 agent 主页、任务、定时任务、审批、trace、artifact 都从共享治理数据读取；主页本身不直接执行任务或审批。",
+        ]
+    if section_type == "status_narrative":
+        return [dashboard_status_for_main(state, open_tasks=open_tasks, approvals=approvals, schedule_registry=schedule_registry)]
+    if section_type == "todos":
+        todos = dashboard_todos_for_main(state)
+        if not todos:
+            todos = [
+                f"{task_display_title(row, state)} · {row.get('status') or '-'} · owner:{row.get('assigned_agent') or '-'}"
+                for row in open_tasks[:8]
+            ]
+        return [f"- {item}" for item in todos]
+    if section_type == "schedules":
+        jobs = list(schedule_registry.get("jobs") or [])
+        jobs.sort(key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""), reverse=True)
+        return [
+            f"- {row.get('name') or row.get('schedule_id')} · {row.get('status') or 'enabled'} · "
+            f"{row.get('trigger') or row.get('cron') or row.get('interval') or row.get('at') or '-'}"
+            for row in jobs[:8]
+        ]
+    if section_type == "tasks":
+        return [
+            f"- {task_display_title(row, state)} · {row.get('status') or '-'} · {row.get('timestamp') or ''}"
+            for row in task_rows[:8]
+        ]
+    if section_type == "artifacts":
+        artifacts.sort(key=lambda row: row_timestamp(row) or float(row.get("mtime") or 0.0), reverse=True)
+        return [
+            f"- {row.get('uri') or row.get('path') or row.get('artifact_id')} · {row.get('type') or '-'}"
+            for row in artifacts[:8]
+        ]
+    if section_type == "approvals":
+        return [
+            f"- {row.get('approval_id') or '-'} · {row.get('type') or '-'} · {row.get('summary') or '-'}"
+            for row in approvals[:8]
+        ]
+    if section_type == "memory":
+        return [
+            "- 主 agent 长期上下文由 Shuheng 记忆、历史会话摘要和共享治理账本提供。",
+            "- 记忆写入仍需要候选与审批流程；主页只展示摘要，不直接写入长期记忆。",
+        ]
+    if section_type == "markdown":
+        spec = dashboard_spec_for_main(state)
+        markdown = bounded_dashboard_text(section.get("markdown") or spec.get("markdown"), 3000)
+        return markdown.splitlines()[:80] if markdown else []
+    return []
+
+
+def main_home_lines(state: State, width: int) -> list[RenderLine]:
+    task_rows = list(latest_task_records().values())
+    task_rows.sort(key=row_timestamp, reverse=True)
+    open_tasks = [row for row in task_rows if not terminal_task_status(str(row.get("status") or ""))]
+    approvals = pending_approvals(state)
+    schedule_registry = scheduled_task_registry(state)
+    artifacts = list(artifact_index_latest().values())
+    provider = "-"
+    try:
+        provider = str(state.agent.get_llm_name(model=True))
+    except Exception:
+        provider = agent_current_backend_name(state.agent) or "-"
+    lines = [
+        RenderLine("Shuheng 主 agent 主页", cp(7) | curses.A_BOLD),
+        RenderLine("固定状态卡", cp(1) | curses.A_BOLD),
+        RenderLine(f"- 状态: {state.status}", cp(2)),
+        RenderLine(f"- 当前会话: {state.current_title or 'main'}", cp(2)),
+        RenderLine(f"- 运行模型: {provider}", cp(2)),
+        RenderLine(f"- 后台会话: {len(state.background_sessions)}", cp(2)),
+        RenderLine(f"- 待审批: {len(approvals)}", cp(2)),
+        RenderLine(f"- 活跃任务: {len(open_tasks)}", cp(2)),
+        RenderLine(f"- 定时任务: {schedule_registry.get('active_job_count', 0)} active / {schedule_registry.get('job_count', 0)} total", cp(2)),
+        RenderLine(f"- Artifact: {len(artifacts)}", cp(2)),
+    ]
+    for section in dashboard_sections_for_main(state):
+        title = str(section.get("title") or section.get("type") or "section")
+        body = main_home_section_body(
+            state,
+            section,
+            task_rows=task_rows,
+            open_tasks=open_tasks,
+            approvals=approvals,
+            schedule_registry=schedule_registry,
+            artifacts=list(artifacts),
+        )
+        append_home_section(lines, title, body, width)
+    append_home_section(lines, "快捷操作", [
+        "- /chat 切到主 agent 聊天",
+        "- /tasks /schedules /approvals /artifacts 打开治理面板",
+        "- 点击右侧持久 agent 进入对应主页",
+    ], width)
+    return lines
+
+
+def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict[str, Any]) -> list[str]:
+    section_type = str(section.get("type") or "")
+    if section_type == "function":
+        profile = profile_summary_for_subagent(sub)
+        return profile.splitlines()[:20] if profile else [f"- 角色: {sub.role}", f"- 写策略: {role_template(sub.role).get('write_policy', 'none')}"]
+    if section_type == "status_narrative":
+        return [dashboard_status_for_subagent(sub)]
+    if section_type == "todos":
+        todos = dashboard_todos_for_subagent(sub)
+        if not todos:
+            todos = [
+                f"{task_display_title(row, state)} · {row.get('status') or '-'}"
+                for row in agent_task_rows(sub.agent_id, include_terminal=False, limit=8)
+            ]
+        return [f"- {item}" for item in todos]
+    if section_type == "schedules":
+        rows = []
+        for row in agent_schedule_rows(sub.agent_id):
+            run = latest_run_for_schedule(str(row.get("schedule_id") or ""))
+            rows.append(
+                f"- {row.get('name') or row.get('schedule_id')} · {row.get('status') or 'enabled'} · "
+                f"{row.get('trigger') or row.get('cron') or row.get('interval') or row.get('at') or '-'} · "
+                f"last:{run.get('status') or '-'}"
+            )
+        return rows
+    if section_type == "tasks":
+        return [
+            f"- {task_display_title(row, state)} · {row.get('status') or '-'} · {row.get('timestamp') or ''}"
+            for row in agent_task_rows(sub.agent_id)
+        ]
+    if section_type == "artifacts":
+        return [
+            f"- {row.get('uri') or row.get('path') or row.get('artifact_id')} · {row.get('type') or '-'}"
+            for row in agent_artifact_rows(sub.agent_id)
+        ]
+    if section_type == "approvals":
+        return [
+            f"- {row.get('approval_id') or '-'} · {row.get('type') or '-'} · {row.get('summary') or '-'}"
+            for row in agent_approval_rows(state, sub.agent_id)
+        ]
+    if section_type == "memory":
+        memory = memory_summary_for_subagent(sub)
+        return memory.splitlines()[:20] if memory else []
+    if section_type == "markdown":
+        markdown = bounded_dashboard_text(section.get("markdown") or dashboard_spec_for_subagent(sub).get("markdown"), 3000)
+        return markdown.splitlines()[:80] if markdown else []
+    return []
+
+
+def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[RenderLine]:
+    lines = [
+        RenderLine(f"{sub.name} 主页", cp(7) | curses.A_BOLD),
+        RenderLine("固定状态卡", cp(1) | curses.A_BOLD),
+        RenderLine(f"- ID: {sub.agent_id}", cp(2)),
+        RenderLine(f"- 角色: {sub.role}", cp(2)),
+        RenderLine(f"- 生命周期: {'persistent' if sub.persistent else 'temporary'}", cp(2)),
+        RenderLine(f"- 状态: {sub.status}", cp(2)),
+        RenderLine(f"- 安全上下文: {sub.security_context}", cp(2)),
+        RenderLine(f"- 默认模型: {sub.default_model or '-'}", cp(2)),
+        RenderLine(f"- 队列: task={len(sub.task_queue)} chat={len(sub.chat_queue)}", cp(2)),
+        RenderLine(f"- 活跃任务: {sub.active_bus_task_id or '-'}", cp(2)),
+        RenderLine(f"- 最近更新: {rel_age(sub.updated_at)}", cp(2)),
+    ]
+    if not sub.persistent:
+        append_home_section(lines, "临时代理", ["- 临时会话代理不持久化主页；使用 /chat 继续聊天。"], width)
+        return lines
+    for section in dashboard_sections_for_subagent(sub):
+        title = str(section.get("title") or section.get("type") or "section")
+        body = subagent_home_section_body(state, sub, section)
+        append_home_section(lines, title, body, width)
+    append_home_section(lines, "快捷操作", [
+        "- /chat 切到该代理聊天",
+        "- /agent settings 打开代理设置",
+        "- /agent-dashboard <agent> 从任意位置打开代理主页",
+    ], width)
+    return lines
+
+
+def home_lines(state: State, width: int) -> list[RenderLine]:
+    sub = selected_home_subagent(state)
+    if sub is not None:
+        return subagent_home_lines(state, sub, width)
+    if is_main_home_session_key(state.selected_session):
+        return main_home_lines(state, width)
+    return []
 
 
 def message_cache_signature(messages: list[Message]) -> tuple[tuple[int, str, int, bool], ...]:
@@ -16026,7 +16643,7 @@ def reset_active_session(state: State, title: str = "main", agent: Any = None) -
     state.scroll = 0
     state.follow_bottom = True
     state.current_title = title
-    state.selected_session = "main"
+    state.selected_session = MAIN_HOME_SESSION_KEY
     state.temporary_session = False
     mark_messages_changed(state)
 
@@ -16250,7 +16867,7 @@ def new_current_session(state: State, keep_running: bool = True) -> bool:
         reset_agent_token_session(state, state.agent)
     state.messages.clear()
     state.current_title = "main"
-    state.selected_session = "main"
+    state.selected_session = MAIN_HOME_SESSION_KEY
     state.temporary_session = False
     state.status = "idle"
     state.active_task_id = None
@@ -18620,10 +19237,17 @@ def subagent_sidebar_rows(state: State, sub: SubAgentRuntime, sidebar_w: int) ->
     current_key = subagent_session_sidebar_key(sub.agent_id, sub.chat_session_id)
     current_title = truncate_cells(subagent_chat_title_for_messages(sub).replace("\n", " "), sidebar_w - 12)
     rows: list[tuple[str, Any, str, str]] = [
+        ("label", None, " AGENT HOME", ""),
+    ]
+    if sub.persistent:
+        rows.append(("subagent_home", subagent_home_session_key(sub.agent_id), f"◆ {truncate_cells(sub.name, sidebar_w - 12)} 主页", "home"))
+    else:
+        rows.append(("muted", None, "  临时代理无持久主页", ""))
+    rows.extend([
         ("label", None, " AGENT SESSIONS (1)", ""),
         ("subagent_session", current_key, f"● {current_title}", "input" if sub.pending_interaction else sub.status),
         ("blank", None, "", ""),
-    ]
+    ])
     entries = [
         entry for entry in subagent_chat_session_entries(state, sub)
         if str(entry.get("session_id") or "") != sub.chat_session_id
@@ -18722,20 +19346,26 @@ def render_sidebar_rows(
             attr = cp(8) | curses.A_BOLD
         elif kind == "background":
             attr = cp(8) if right in {"running", "aborting"} else cp(9)
-        elif kind in {"history", "secret_history", "secret_session", "subagent_session"}:
+        elif kind in {"history", "secret_history", "secret_session", "subagent_session", "subagent_home"}:
             attr = cp(1) if kind in {"secret_history", "secret_session", "subagent_session"} and right == "err" else cp(9)
         elif kind == "muted":
             attr = cp(9)
         elif kind == "blank":
             safe_add(stdscr, screen_y, 0, " " * sidebar_w, sidebar_w, cp(6))
             continue
-        selected_sub = selected_subagent(state)
+        selected_sub = active_subagent_view(state)
         subagent_selected = (
             kind == "subagent_session"
             and selected_sub is not None
             and key == subagent_session_sidebar_key(selected_sub.agent_id, selected_sub.chat_session_id)
         )
-        if (key == state.selected_session and kind in {"session", "history", "background", "secret_history", "secret_session"}) or subagent_selected:
+        subagent_home_selected = (
+            kind == "subagent_home"
+            and selected_sub is not None
+            and key == subagent_home_session_key(selected_sub.agent_id)
+            and is_home_session_key(state.selected_session)
+        )
+        if (key == state.selected_session and kind in {"session", "history", "background", "secret_history", "secret_session"}) or subagent_selected or subagent_home_selected:
             attr = cp(11) | curses.A_BOLD
         safe_add(stdscr, screen_y, 0, " " * sidebar_w, sidebar_w, attr)
         safe_add(stdscr, screen_y, 1, left, sidebar_w - 10, attr)
@@ -18758,7 +19388,7 @@ def draw_sidebar(stdscr, state: State, height: int, width: int) -> int:
     panel_h = min(TOKEN_PANEL_H, max(0, height - 8))
     list_h = max(1, height - panel_h)
     rows: list[tuple[str, Any, str, str]] = []
-    active_sub = selected_subagent(state)
+    active_sub = active_subagent_view(state)
     if active_sub is not None:
         rows.extend(subagent_sidebar_rows(state, active_sub, sidebar_w))
         return render_sidebar_rows(stdscr, state, height, sidebar_w, panel_h, list_h, rows)
@@ -18766,10 +19396,12 @@ def draw_sidebar(stdscr, state: State, height: int, width: int) -> int:
         bg for bg in state.background_sessions.values()
         if (bg.security_context == "secret") == bool(state.secret_vault.unlocked)
     ]
-    current_count = 1 + len(visible_backgrounds)
+    current_count = (1 if state.secret_vault.unlocked else 2) + len(visible_backgrounds)
     rows.append(("label", None, f" CURRENT SESSIONS ({current_count})", ""))
     current = truncate_cells((state.current_title or "main").replace("\n", " "), sidebar_w - 12)
     current_key = secret_session_sidebar_key(state.secret_vault.session_id) if state.secret_vault.unlocked else "main"
+    if not state.secret_vault.unlocked:
+        rows.append(("session", MAIN_HOME_SESSION_KEY, "◆ 主 agent 主页", "home"))
     rows.append(("session", current_key, f"● {current}", "input" if state.pending_interaction else state.status))
     if visible_backgrounds:
         for bg in visible_backgrounds:
@@ -18920,7 +19552,7 @@ def draw_rightbar(stdscr, state: State, height: int, width: int) -> int:
     task_area_h = max(3, height - agent_area_h)
 
     agent_rows: list[tuple[str, Any, str, str]] = [("label", None, f" AGENTS ({len(agents) + 1})", "")]
-    agent_rows.append(("right_main", "main", "● 主 agent", "input" if state.pending_interaction else state.status))
+    agent_rows.append(("right_main", "main", "◆ 主 agent", "input" if state.pending_interaction else state.status))
 
     def append_agent_section(section_title: str, section: list[SubAgentRuntime]) -> None:
         agent_rows.append(("divider", None, f" {section_title} ({len(section)})", ""))
@@ -18954,13 +19586,13 @@ def draw_rightbar(stdscr, state: State, height: int, width: int) -> int:
         if kind in {"label", "divider"}:
             attr = cp(7) | curses.A_BOLD
         elif kind == "right_main":
-            active = selected_subagent(state) is None
+            active = is_main_home_session_key(state.selected_session) or str(state.selected_session or "") == "main"
             attr = cp(8) if state.status in {"running", "aborting", "waiting-input"} else cp(9)
             if active:
                 attr = cp(11) | curses.A_BOLD
         elif kind == "right_agent":
             sub = state.subagents.get(str(key))
-            active = str(key) == str(state.selected_session)
+            active = str(key) == str(state.selected_session) or subagent_home_session_key(str(key)) == str(state.selected_session)
             status = sub.status if sub is not None else ""
             attr = cp(8) if status in {"running", "aborting", "waiting-input"} or (sub is not None and sub.task_queue) else cp(9)
             if active:
@@ -19126,7 +19758,13 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     input_lines, cursor_y, cursor_x = input_layout(input_text, main_w, max_input_lines, state.input_cursor, input_prompt)
     input_h = 2 + len(visible_commands) + len(interaction_lines) + len(queued_lines) + len(input_lines)
     body_h = max(1, height - input_h - 2)
-    lines = message_lines_cached(state, main_w)
+    home_view_lines = home_lines(state, main_w)
+    if home_view_lines:
+        lines = home_view_lines
+        state.line_cache = lines
+        state.line_cache_key = ("home", str(state.selected_session or ""), main_w, len(lines))
+    else:
+        lines = message_lines_cached(state, main_w)
     state.main_x0 = x0
     state.main_width = main_w
     state.body_top = 1
@@ -19167,6 +19805,11 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     footer_y = prompt_y + len(input_lines)
     if state.last_error:
         safe_add(stdscr, footer_y, x0, state.last_error, main_w, cp(5))
+    elif selected_home_subagent(state) is not None:
+        sub = selected_home_subagent(state)
+        safe_add(stdscr, footer_y, x0, f"Agent home: {sub.agent_id}; /chat 切到聊天；主页只读显示共享账本/定时任务/artifact", main_w, cp(1))
+    elif is_main_home_session_key(state.selected_session):
+        safe_add(stdscr, footer_y, x0, "Home: 主 agent 主页；直接输入给主 agent；/chat 切到聊天视图", main_w, cp(1))
     elif selected_subagent(state) is not None:
         sub = selected_subagent(state)
         safe_add(stdscr, footer_y, x0, f"SubAgent chat: {sub.agent_id}; 输入直接发给 {sub.name}; /agent ask 才委派任务; 右侧主 agent 返回", main_w, cp(1))
@@ -21750,8 +22393,8 @@ def soft_delete_subagent(state: State, sub: SubAgentRuntime, *, source: str = "a
     save_subagent_meta(sub, state, deleted=True, status="deleted", deleted_at=deleted_at, deleted_by=source)
     state.subagents.pop(sub.agent_id, None)
     state.expanded_subagent_meta.discard(sub.agent_id)
-    if str(state.selected_session or "") == sub.agent_id:
-        state.selected_session = "main"
+    if str(state.selected_session or "") in {sub.agent_id, subagent_home_session_key(sub.agent_id)}:
+        state.selected_session = MAIN_HOME_SESSION_KEY
         mark_messages_changed(state)
     else:
         mark_dirty(state)
@@ -21983,9 +22626,9 @@ def submit(state: State, text: str) -> None:
         if result:
             add_system(state, result)
         return
-    active_sub = selected_subagent(state)
-    if active_sub is not None and active_sub.pending_interaction and not text.startswith("/"):
-        answer = accept_subagent_interaction_input(state, active_sub, raw_text)
+    active_visible_sub = active_subagent_view(state)
+    if active_visible_sub is not None and active_visible_sub.pending_interaction and not text.startswith("/"):
+        answer = accept_subagent_interaction_input(state, active_visible_sub, raw_text)
         if answer is None:
             return
         text = answer.strip()
@@ -21994,7 +22637,7 @@ def submit(state: State, text: str) -> None:
         if result:
             add_system(state, result)
         return
-    elif active_sub is None and state.pending_interaction and not text.startswith("/"):
+    elif active_visible_sub is None and state.pending_interaction and not text.startswith("/"):
         answer = accept_interaction_input(state, raw_text)
         if answer is None:
             return
@@ -22010,11 +22653,23 @@ def submit(state: State, text: str) -> None:
         state.exit_reason = "已退出枢衡。"
         state.running = False
         return
+    m_home = re.match(r"/(?:home|agent-dashboard)(?:\s+([\s\S]*))?\s*$", text, re.I)
+    if m_home:
+        add_system(state, show_home_for_current_scope(state, m_home.group(1) or ""))
+        return
+    if text == "/chat":
+        add_system(state, switch_home_to_chat(state))
+        return
     if handle_workspace_command(state, text):
         return
     if handle_subagent_command(state, text):
         return
     active_sub = selected_subagent(state)
+    home_sub = selected_home_subagent(state)
+    if home_sub is not None and not text.startswith("/"):
+        state.last_error = f"当前是 {home_sub.name} 主页；输入 /chat 后再和该代理聊天。"
+        mark_dirty(state)
+        return
     if active_sub is not None and not text.startswith("/"):
         state.last_error = start_subagent_chat(state, active_sub, text, source="subagent_chat")
         mark_dirty(state)
@@ -24278,16 +24933,20 @@ def handle_mouse(state: State, mx: int, my: int, bstate: int, width: int) -> Non
             kind, key, left, right = state.rightbar_rows[idx]
             if kind == "right_main":
                 hide_session_info_popup(state)
-                state.selected_session = secret_session_sidebar_key(state.secret_vault.session_id) if state.secret_vault.unlocked else "main"
-                state.last_error = "已回到主 agent。"
+                state.selected_session = secret_session_sidebar_key(state.secret_vault.session_id) if state.secret_vault.unlocked else MAIN_HOME_SESSION_KEY
+                state.last_error = "已回到主 agent 主页。" if not state.secret_vault.unlocked else "已回到 Secret 会话。"
                 mark_dirty(state)
                 return
             if kind == "right_agent":
                 hide_session_info_popup(state)
-                state.selected_session = key
                 sub = state.subagents.get(str(key))
                 if sub is not None:
-                    state.last_error = f"已进入子 agent 聊天：{sub.name} · {sub.status}；普通输入会直接发给它"
+                    if sub.persistent:
+                        state.selected_session = subagent_home_session_key(sub.agent_id)
+                        state.last_error = f"已进入代理主页：{sub.name} · {sub.status}；/chat 切到聊天"
+                    else:
+                        state.selected_session = key
+                        state.last_error = f"已进入临时子 agent 聊天：{sub.name} · {sub.status}；普通输入会直接发给它"
                 mark_dirty(state)
                 return
             if kind == "right_task":
@@ -24342,6 +25001,14 @@ def handle_mouse(state: State, mx: int, my: int, bstate: int, width: int) -> Non
                     state.follow_bottom = True
                     mark_subagent_messages_changed(state, sub)
                     state.last_error = f"已切换到子 agent 会话：{sub.name}"
+            elif kind == "subagent_home":
+                hide_session_info_popup(state)
+                agent_id = home_subagent_id_from_key(key)
+                sub = state.subagents.get(agent_id)
+                if sub is None:
+                    state.last_error = "代理主页不存在。"
+                else:
+                    show_subagent_home(state, sub, message=f"已切换到代理主页：{sub.name}")
             elif kind == "category":
                 hide_session_info_popup(state)
                 state.last_error = toggle_category_collapsed(state, str(key))

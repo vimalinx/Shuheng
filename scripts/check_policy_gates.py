@@ -4026,7 +4026,7 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert any(row[0] == "right_main" for row in reloaded.rightbar_rows), reloaded.rightbar_rows
     a.handle_mouse(reloaded, 139, 1, getattr(curses, "BUTTON1_CLICKED", 0), 140)
     assert a.selected_subagent(reloaded) is None
-    assert reloaded.selected_session == "main", reloaded.selected_session
+    assert reloaded.selected_session == a.MAIN_HOME_SESSION_KEY, reloaded.selected_session
     reloaded.selected_session = reloaded_sub.agent_id
 
     state.pending_interaction = {"tool": "ask_user", "question": "Main pending", "candidates": ["Main"]}
@@ -4361,6 +4361,131 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     a.apply_tui_controls_from_text(state, inline_control_label_then_real_control, source="agent")
     assert a.resolve_subagent(state, "Inline Label Safe") is not None
     assert "parse_error" not in state.messages[-1].content, state.messages[-1].content
+
+
+def assert_persistent_agent_dashboard_home_pages() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
+    retarget_harness(root)
+    state = a.State(agent=ContextFakeAgent())
+    state.running = True
+
+    assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
+    main_lines = [line.text for line in a.home_lines(state, 100)]
+    assert any("Shuheng 主 agent 主页" in line for line in main_lines), main_lines
+    assert any("功能描述" in line for line in main_lines), main_lines
+    assert any("待审批" in line for line in main_lines), main_lines
+    assert a.display_scope_key(state) == "home:main"
+    assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
+    assert state.selected_session == "main", state.selected_session
+    assert a.show_home_for_current_scope(state) == "已打开主 agent 主页。"
+    assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
+
+    sub = a.create_subagent(
+        state,
+        "Dashboard Agent",
+        "负责整理主页状态、定时任务摘要和待办事项。",
+        role="researcher",
+        persistent=True,
+    )
+    sub.agent = SequencedFakeAgent(["should not run from home"])
+    a.append_task_ledger("task_dashboard_agent", status="working", assigned_agent=sub.agent_id, title="主页任务", objective="Show dashboard task")
+    a.append_schedule_record({
+        "schedule_id": "sched_dashboard_agent",
+        "name": "主页巡检",
+        "status": "enabled",
+        "target": sub.agent_id,
+        "trigger": "daily",
+    })
+    artifact_path = Path(a.AGENT_ARTIFACTS_DIR, "dashboard-agent.md")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("dashboard artifact", encoding="utf-8")
+    a.append_artifact_index(str(artifact_path), artifact_type="subagent-results", source_task_id="task_dashboard_agent")
+    approval_id = a.queue_approval(
+        approval_type="policy_approval_request",
+        summary="Dashboard approval",
+        payload={"subagent_id": sub.agent_id, "task_id": "task_dashboard_agent"},
+        source="test",
+        target=sub.agent_id,
+    )
+
+    a.show_subagent_home(state, sub)
+    assert state.selected_session == a.subagent_home_session_key(sub.agent_id), state.selected_session
+    assert a.active_subagent_view(state) is sub
+    assert a.display_scope_key(state) == f"home:sub:{sub.agent_id}"
+    home_text = "\n".join(line.text for line in a.home_lines(state, 100))
+    assert "Dashboard Agent 主页" in home_text, home_text
+    assert "固定状态卡" in home_text, home_text
+    assert "主页任务" in home_text, home_text
+    assert "主页巡检" in home_text, home_text
+    assert "artifact://" in home_text, home_text
+    assert approval_id in home_text, home_text
+
+    a.submit(state, "hello from home")
+    assert sub.agent.prompts == [], sub.agent.prompts
+    assert "/chat" in state.last_error, state.last_error
+    assert a.switch_home_to_chat(state) == f"已切到代理聊天：{sub.name}"
+    assert state.selected_session == sub.agent_id, state.selected_session
+    assert a.show_home_for_current_scope(state) == f"已打开代理主页：{sub.name}"
+
+    dashboard_control = ga_control({
+        "action": "dashboard.update",
+        "target": sub.agent_id,
+        "dashboard": {
+            "sections": [
+                {"type": "markdown", "title": "声明区", "markdown": "安全主页内容"},
+                {"type": "unsupported-widget", "title": "ignored", "script": "ignored"},
+                {"type": "todos", "title": "自定义待办"},
+            ],
+            "status_narrative": "正在维护自己的主页。",
+            "todos": [{"text": "复核共享账本"}, "同步 artifact refs"],
+            "markdown": "全局声明备用内容",
+            "script": "ignored",
+        },
+        "artifact_refs": ["artifact://artifacts/dashboard-agent.md"],
+    })
+    extracted = a.extract_tui_controls(dashboard_control)
+    assert len(extracted) == 1, extracted
+    assert extracted[0]["action"] == "dashboard_update", extracted
+    a.apply_tui_controls_from_text(state, dashboard_control, source="agent")
+    assert sub.dashboard["schema_version"] == "dashboard.v1", sub.dashboard
+    assert sub.dashboard["target"] == sub.agent_id, sub.dashboard
+    assert [section["type"] for section in sub.dashboard["sections"]] == ["markdown", "todos"], sub.dashboard
+    assert "script" not in json.dumps(sub.dashboard, ensure_ascii=False), sub.dashboard
+    assert sub.dashboard["provenance"]["artifact_refs"] == ["artifact://artifacts/dashboard-agent.md"], sub.dashboard
+    persisted = a.load_subagent_meta(sub.agent_id)
+    assert persisted["dashboard"]["status_narrative"] == "正在维护自己的主页。", persisted
+    updated_home_text = "\n".join(line.text for line in a.subagent_home_lines(state, sub, 100))
+    assert "声明区" in updated_home_text and "安全主页内容" in updated_home_text, updated_home_text
+    assert "自定义待办" in updated_home_text and "复核共享账本" in updated_home_text, updated_home_text
+    assert "unsupported-widget" not in updated_home_text, updated_home_text
+
+    main_control = {
+        "action": "dashboard_update",
+        "target": "main",
+        "sections": [
+            {"type": "markdown", "title": "主声明", "markdown": "主 agent 自定义主页"},
+            {"type": "tasks", "title": "任务流"},
+        ],
+        "todos": ["检查 orchestrator 面板"],
+    }
+    assert "已更新主 agent 主页声明" in a.apply_dashboard_control(state, "dashboard_update", "main", "", main_control, source="test")
+    a.show_main_home(state)
+    main_updated_text = "\n".join(line.text for line in a.home_lines(state, 100))
+    assert "主声明" in main_updated_text and "主 agent 自定义主页" in main_updated_text, main_updated_text
+    assert "任务流" in main_updated_text, main_updated_text
+
+    temp = a.create_subagent(state, "Temporary Dashboard", role="researcher", persistent=False)
+    temp_result = a.show_home_for_current_scope(state, temp.agent_id)
+    assert "没有持久主页" in temp_result, temp_result
+    temp_update = a.apply_dashboard_control(state, "dashboard_update", temp.agent_id, "", {"target": temp.agent_id, "sections": [{"type": "markdown"}]}, source="test")
+    assert "不持久化主页" in temp_update, temp_update
+    assert temp.dashboard == {}, temp.dashboard
+
+    sub_fields = set(a.SubAgentRuntime.__dataclass_fields__)
+    assert "dashboard" in sub_fields, sub_fields
+    registry = a.scheduled_task_registry(state)
+    assert registry["owner"] == "ga-tui.control_plane", registry
+    assert any(row.get("schedule_id") == "sched_dashboard_agent" for row in registry.get("jobs", [])), registry
 
 
 def assert_temp_subagent_current_fallback_is_reloadable() -> None:
@@ -5077,6 +5202,10 @@ def assert_top_bar_header_requested_fields() -> None:
         a.Message("user", "second"),
     ]
     expected_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(0))
+    home_header = a.top_bar_header(state, timestamp=0)
+    assert "主 agent 主页" in home_header, home_header
+    assert "当前轮次: 2" in home_header, home_header
+    state.selected_session = "main"
     header = a.top_bar_header(state, timestamp=0)
     assert header == f"当前时间: {expected_time} | 会话ID: session-alpha.jsonl | 当前轮次: 2", header
     for removed_field in ("GenericAgent", "curses TUI", "open:", "view:", "hist:", "fold:", "md:"):
@@ -5166,6 +5295,7 @@ def assert_long_secret_render_reuses_stable_message_blocks() -> None:
 
 def assert_running_indicator_uses_lightweight_row_refresh() -> None:
     state = a.State(agent=None)
+    state.selected_session = "main"
     state.status = "running"
     state.messages.append(a.Message("assistant", "streaming response", done=False))
     screen = FakeDrawScreen()
@@ -5303,7 +5433,7 @@ def assert_temp_session_is_non_persistent() -> None:
 
     a.submit(state, "/new")
     assert state.temporary_session is False
-    assert state.selected_session == "main"
+    assert state.selected_session == a.MAIN_HOME_SESSION_KEY
     assert not a.agent_log_path_is_devnull(state.agent)
     assert os.path.basename(a.agent_log_path(state.agent)).startswith("model_responses_")
 
@@ -5433,6 +5563,7 @@ def run_checks() -> None:
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
+    assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()
     assert_tui_query_tools_expose_dashboard_state()
     assert_historical_subagent_result_quarantine_backfill()

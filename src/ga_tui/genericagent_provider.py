@@ -52,6 +52,7 @@ TUI_AGENT_CONTROL_HINT = """
 - `session.pin|session.unpin|session.category|session.filter|session.clear_filter|session.collapse_category|session.expand_category|session.archive|session.unarchive|session.delete|session.rename|session.show_archived|session.hide_archived`
 - `task.plan.create`, `task.update`, `task.done`, `task.start`, `task.fail`, `task.cancel`
 - `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, `schedule.delete`
+- `dashboard.update`
 - `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`, `agent.delete`
 - `delegate.create`
 - `memory.candidate`

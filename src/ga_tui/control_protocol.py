@@ -43,6 +43,7 @@ CURRENT_TUI_CONTROL_ACTIONS = {
     "schedule.enable",
     "schedule.disable",
     "schedule.delete",
+    "dashboard.update",
     "agent.create",
     "agent.profile.update",
     "agent.role.update",
@@ -234,6 +235,12 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
         mapped.update(common)
         mapped["action"] = action
         mapped["target"] = control.get("target") or control.get("schedule_id") or control.get("id") or ""
+        return mapped
+    if action == "dashboard_update":
+        mapped = dict(control)
+        mapped.update(common)
+        mapped["action"] = "dashboard_update"
+        mapped["target"] = control.get("target") or control.get("agent_id") or control.get("agent") or ""
         return mapped
     if action == "agent_create":
         selector = agenttask_target_selector(control)
