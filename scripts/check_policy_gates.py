@@ -4460,8 +4460,11 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert any("├─ 运行详情" in line for line in main_lines), main_lines
     assert not any("| 状态" in line or "| ----" in line for line in main_lines[:14]), main_lines[:14]
     assert not any(line.startswith("- 状态:") for line in main_lines[:14]), main_lines[:14]
-    assert any("功能描述" in line for line in main_lines), main_lines
-    assert any("待审批" in line for line in main_lines), main_lines
+    main_home_text = "\n".join(main_lines)
+    assert "╭─ 详情入口" in main_home_text, main_home_text
+    assert "## 功能描述" not in main_home_text, main_home_text
+    assert "## 待办事项" not in main_home_text, main_home_text
+    assert "## 待审批" not in main_home_text, main_home_text
     assert a.display_scope_key(state) == "home:main"
     assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
     assert state.selected_session == "main", state.selected_session
@@ -4504,15 +4507,16 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "Dashboard Agent 主页" in home_text, home_text
     assert "固定状态卡" in home_text, home_text
     assert "╭─ Dashboard Agent / researcher" in home_text, home_text
-    top_card = home_text.split("## 功能描述", 1)[0]
+    top_card = home_text.split("╭─ 详情入口", 1)[0]
     assert "├─ 核心指标" in top_card and "├─ 运行详情" in top_card, home_text
     assert "状态" in top_card and "生命周期" in top_card and "任务队列" in top_card, home_text
     assert "| 状态" not in top_card and "| ----" not in top_card, home_text
-    assert "- ID:" not in home_text.split("## 功能描述", 1)[0], home_text
-    assert "主页任务" in home_text, home_text
-    assert "主页巡检" in home_text, home_text
-    assert "artifact://" in home_text, home_text
-    assert approval_id in home_text, home_text
+    assert "- ID:" not in top_card, home_text
+    assert "╭─ 详情入口" in home_text, home_text
+    assert "主页任务" not in home_text, home_text
+    assert "主页巡检" not in home_text, home_text
+    assert "artifact://" not in home_text, home_text
+    assert approval_id not in home_text, home_text
 
     a.submit(state, "hello from home")
     assert sub.agent.prompts == [], sub.agent.prompts

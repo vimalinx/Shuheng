@@ -15282,15 +15282,7 @@ SUPPORTED_DASHBOARD_SECTIONS = {
 }
 
 
-DEFAULT_DASHBOARD_SECTIONS = [
-    {"type": "function", "title": "功能描述"},
-    {"type": "status_narrative", "title": "当前状态"},
-    {"type": "todos", "title": "待办事项"},
-    {"type": "schedules", "title": "最近定时任务"},
-    {"type": "tasks", "title": "最近任务"},
-    {"type": "artifacts", "title": "相关产物"},
-    {"type": "approvals", "title": "待审批"},
-]
+DEFAULT_DASHBOARD_SECTIONS: list[dict[str, str]] = []
 
 
 def dashboard_spec_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
@@ -15629,6 +15621,28 @@ def append_status_card(
     lines.append(RenderLine(status_card_footer_line(card_width), cp(10)))
 
 
+def append_home_action_panel(lines: list[RenderLine], title: str, actions: list[tuple[str, str]], width: int) -> None:
+    card_width = max(32, min(width, 110))
+    inner_width = max(24, card_width - 4)
+    cleaned = [
+        (str(label or "").strip(), str(value or "").strip())
+        for label, value in actions
+        if str(label or "").strip() or str(value or "").strip()
+    ]
+    if not cleaned:
+        return
+    label_width = min(12, max(4, max((cell_width(label) for label, _value in cleaned), default=4)))
+    lines.append(RenderLine(""))
+    lines.append(RenderLine(status_card_header_line(title, card_width), cp(10) | curses.A_BOLD))
+    for label, value in cleaned:
+        value_width = max(8, inner_width - label_width - 3)
+        wrapped = wrap_cells(value or "-", value_width)
+        for idx, part in enumerate(wrapped):
+            prefix = pad_cells(label, label_width) + "   " if idx == 0 else " " * (label_width + 3)
+            lines.append(RenderLine(status_card_content_line(prefix + part, card_width), cp(2)))
+    lines.append(RenderLine(status_card_footer_line(card_width), cp(10)))
+
+
 def main_home_section_body(
     state: State,
     section: dict[str, Any],
@@ -15747,10 +15761,10 @@ def main_home_lines(state: State, width: int) -> list[RenderLine]:
             artifacts=list(artifacts),
         )
         append_home_section(lines, title, body, width)
-    append_home_section(lines, "快捷操作", [
-        "- /chat 切到主 agent 聊天",
-        "- /tasks /schedules /approvals /artifacts 打开治理面板",
-        "- 点击右侧持久 agent 进入对应主页",
+    append_home_action_panel(lines, "详情入口", [
+        ("继续对话", "/chat"),
+        ("治理面板", "/tasks  /schedules  /approvals  /artifacts"),
+        ("代理主页", "点击右侧持久 agent"),
     ], width)
     return lines
 
@@ -15842,10 +15856,10 @@ def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[
         title = str(section.get("title") or section.get("type") or "section")
         body = subagent_home_section_body(state, sub, section)
         append_home_section(lines, title, body, width)
-    append_home_section(lines, "快捷操作", [
-        "- /chat 切到该代理聊天",
-        "- /agent settings 打开代理设置",
-        "- /agent-dashboard <agent> 从任意位置打开代理主页",
+    append_home_action_panel(lines, "详情入口", [
+        ("继续对话", "/chat"),
+        ("代理设置", "/agent settings"),
+        ("返回主页", "/agent-dashboard <agent>"),
     ], width)
     return lines
 
