@@ -455,7 +455,6 @@ FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*
 PROCESS_GROUP_TOGGLE_RE = re.compile(r"过程组\s+(G\d+)")
 PROCESS_TURN_TOGGLE_RE = re.compile(r"过程\s+(G\d+T\d+)")
 SUBAGENT_META_TOGGLE_RE = re.compile(r"元信息\s+(S[0-9a-f]{8})")
-DASHBOARD_METRICS_TOGGLE_RE = re.compile(r"[▸▾]\s+核心指标")
 LONG_FENCE_RE = re.compile(r"`{4,5}[^\n]*\n[\s\S]*?\n`{4,5}", re.MULTILINE)
 DETAIL_FENCE_RE = re.compile(r"`{3,}[^\n]*\n[\s\S]*?\n`{3,}", re.MULTILINE)
 FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
@@ -819,7 +818,6 @@ class State:
     expanded_process_groups: set[str] = field(default_factory=set)
     expanded_process_turns: set[str] = field(default_factory=set)
     expanded_subagent_meta: set[str] = field(default_factory=set)
-    expanded_dashboard_metrics: set[str] = field(default_factory=set)
     line_cache_key: tuple[Any, ...] = (0, 0, True, True, 0)
     line_cache: list[RenderLine] = field(default_factory=list)
     message_block_cache: dict[tuple[Any, ...], list[RenderLine]] = field(default_factory=dict)
@@ -15365,10 +15363,6 @@ def subagent_meta_key(state: State, label: str) -> str:
     return f"{display_scope_key(state)}:submeta:{label}"
 
 
-def dashboard_metrics_key(state: State) -> str:
-    return f"{display_scope_key(state)}:status_card_metrics"
-
-
 def current_interaction_payload(state: State) -> Optional[dict[str, Any]]:
     sub = active_subagent_view(state)
     if sub is not None and sub.pending_interaction:
@@ -15391,7 +15385,13 @@ SUPPORTED_DASHBOARD_SECTIONS = {
 }
 
 
-DEFAULT_DASHBOARD_SECTIONS: list[dict[str, str]] = []
+DEFAULT_DASHBOARD_SECTIONS: list[dict[str, str]] = [
+    {"type": "function", "title": "功能描述"},
+    {"type": "status_narrative", "title": "当前状态"},
+    {"type": "todos", "title": "待办事项"},
+    {"type": "schedules", "title": "最近定时任务"},
+    {"type": "tasks", "title": "最近任务"},
+]
 
 
 def dashboard_spec_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
@@ -15679,11 +15679,9 @@ def status_card_metric_rows(items: list[tuple[str, str]], inner_width: int) -> l
     return rows
 
 
-def status_card_metric_header(metrics: list[tuple[str, str]], expanded: bool) -> str:
+def status_card_metric_header(metrics: list[tuple[str, str]]) -> str:
     count = sum(1 for label, value in metrics if str(label or "").strip() or str(value or "").strip())
-    icon = "▾" if expanded else "▸"
-    status = "已展开，点击收起" if expanded else "已折叠，点击展开"
-    return f"{icon} 核心指标（{count} 项，{status}）"
+    return f"核心指标（{count} 项）"
 
 
 def status_card_detail_rows(items: list[tuple[str, str]], inner_width: int) -> list[str]:
@@ -15721,7 +15719,6 @@ def append_status_card(
     metrics: list[tuple[str, str]],
     details: list[tuple[str, str]],
     width: int,
-    metrics_expanded: bool = False,
 ) -> None:
     card_width = max(32, min(width, 110))
     inner_width = max(24, card_width - 4)
@@ -15729,10 +15726,9 @@ def append_status_card(
     lines.append(RenderLine(status_card_header_line(title, card_width), cp(10) | curses.A_BOLD))
     for wrapped in wrap_cells(summary, inner_width):
         lines.append(RenderLine(status_card_content_line(wrapped, card_width), cp(2)))
-    lines.append(RenderLine(status_card_divider_line(status_card_metric_header(metrics, metrics_expanded), card_width), cp(10)))
-    if metrics_expanded:
-        for row in status_card_metric_rows(metrics, inner_width):
-            lines.append(RenderLine(status_card_content_line(row, card_width), cp(7) | curses.A_BOLD))
+    lines.append(RenderLine(status_card_divider_line(status_card_metric_header(metrics), card_width), cp(10)))
+    for row in status_card_metric_rows(metrics, inner_width):
+        lines.append(RenderLine(status_card_content_line(row, card_width), cp(7) | curses.A_BOLD))
     lines.append(RenderLine(status_card_divider_line("运行详情", card_width), cp(10)))
     for row in status_card_detail_rows(details, inner_width):
         lines.append(RenderLine(status_card_content_line(row, card_width), cp(2)))
@@ -15866,7 +15862,6 @@ def main_home_lines_uncached(state: State, width: int) -> list[RenderLine]:
             ("主页模式", "main orchestrator"),
         ],
         width=width,
-        metrics_expanded=dashboard_metrics_key(state) in state.expanded_dashboard_metrics,
     )
     for section in dashboard_sections_for_main(state):
         title = str(section.get("title") or section.get("type") or "section")
@@ -15967,7 +15962,6 @@ def subagent_home_lines_uncached(state: State, sub: SubAgentRuntime, width: int)
             ("最近更新", rel_age(sub.updated_at)),
         ],
         width=width,
-        metrics_expanded=dashboard_metrics_key(state) in state.expanded_dashboard_metrics,
     )
     if not sub.persistent:
         append_home_section(lines, "临时代理", ["- 临时会话代理不持久化主页；使用 /chat 继续聊天。"], width)
@@ -16013,7 +16007,6 @@ def home_registry_signature() -> tuple[tuple[int, int], ...]:
 
 def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
     selected = str(state.selected_session or "")
-    expanded = tuple(sorted(state.expanded_dashboard_metrics))
     registry_signature = home_registry_signature()
     sub = selected_home_subagent(state)
     if sub is not None:
@@ -16048,7 +16041,6 @@ def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
     return (
         selected,
         int(width),
-        expanded,
         bool(state.secret_vault.unlocked),
         registry_signature,
         scope_signature,
@@ -25176,17 +25168,6 @@ def toggle_process_at_line(state: State, line_idx: int) -> bool:
     if line_idx < 0 or line_idx >= len(state.line_cache):
         return False
     text = state.line_cache[line_idx].text
-    if is_home_session_key(state.selected_session) and DASHBOARD_METRICS_TOGGLE_RE.search(text):
-        key = dashboard_metrics_key(state)
-        if key in state.expanded_dashboard_metrics:
-            state.expanded_dashboard_metrics.remove(key)
-            state.last_error = "已折叠核心指标。"
-        else:
-            state.expanded_dashboard_metrics.add(key)
-            state.last_error = "已展开核心指标。"
-        state.follow_bottom = False
-        mark_dirty(state)
-        return True
     subagent_meta_match = SUBAGENT_META_TOGGLE_RE.search(text)
     if subagent_meta_match:
         key = subagent_meta_key(state, subagent_meta_match.group(1))

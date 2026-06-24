@@ -252,9 +252,9 @@ S01 修复左栏历史会话标题
   - optional `markdown`
 - Supported section types are `function`, `status_narrative`, `todos`, `schedules`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - Shuheng owns the fixed top status card. Agent declarations may control lower-page section order, labels, bounded Markdown, status narrative, and todo text.
-- The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, a collapsible compact short-metric grid, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
-- The status-card metric grid must default to a folded `▸ 核心指标` header and expand/collapse through the same click-to-toggle path used by process groups. Expanded metrics are scoped per current home page, so main and persistent-agent homes do not share expansion state.
-- Default home pages must not dump raw governance ledgers below the fixed card. Task titles, approval ids, artifact URIs, schedule records, and internal owner ids stay behind deliberate `/tasks`, `/approvals`, `/artifacts`, and `/schedules` drill-down panels unless an agent explicitly declares a readable dashboard section.
+- The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, a visible compact short-metric grid, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
+- The status-card metric grid must default to visible content under a plain `核心指标` divider. The current default should not show `▸/▾` collapsed-state chrome for the whole metric grid.
+- Default home pages should show readable function, status, todo, schedule, and recent-task sections below the fixed card. Approval ids, artifact URIs, and internal owner ids stay behind deliberate `/approvals`, `/artifacts`, and drill-down panels unless an agent explicitly declares a readable dashboard section.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
@@ -272,9 +272,9 @@ S01 修复左栏历史会话标题
 
 ### 5. Good/Base/Bad Cases
 
-- Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows the fixed status card plus concise detail-entry actions, without dumping raw task, schedule, artifact, or approval rows by default.
+- Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows the fixed status card, readable default schedule/task sections, and concise detail-entry actions without dumping artifact URIs or approval ids by default.
 - Good: Repainting the same home page during typing, mouse movement, or scroll reuses the cached rendered home lines until a relevant ledger file signature, dashboard declaration, selected home, width, or expanded-state key changes.
-- Good: The fixed status card uses native TUI panel separators such as `├─ ▸ 核心指标` / `├─ ▾ 核心指标`; only the expanded state renders aligned metric tiles, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
+- Good: The fixed status card uses native TUI panel separators such as `├─ 核心指标`; aligned metric tiles are visible by default, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
 - Good: A persistent agent may explicitly declare readable lower sections such as `markdown` or `todos`; those sections render below the card while unsupported fields are dropped.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
 - Base: `/chat` from a home page switches to the corresponding chat session without changing the stored dashboard declaration.
@@ -286,10 +286,10 @@ S01 修复左栏历史会话标题
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
-- Tests must assert the main and persistent-agent fixed status cards keep collapsible native TUI metric-grid rows and lower detail rows instead of flat label/value rows or raw Markdown table text.
-- Tests must assert default metric grids are folded, click/toggle expands them, and expansion is scoped per home page.
+- Tests must assert the main and persistent-agent fixed status cards keep native TUI metric-grid rows visible by default, plus lower detail rows instead of flat label/value rows or raw Markdown table text.
+- Tests must assert default home pages show readable function/status/todo/schedule/recent-task sections while keeping artifact URIs and approval ids out of the default view.
 - Tests must assert repeated `home_lines(...)` calls for an unchanged home page reuse the cached render instead of rereading the task ledger.
-- Tests must assert default main and persistent-agent home rendering hides raw shared task, schedule, artifact, and approval rows while keeping detail-entry actions.
+- Tests must assert default main and persistent-agent home rendering shows readable task and schedule rows while keeping raw artifact and approval rows behind detail-entry actions.
 - Tests must assert explicitly declared readable dashboard sections still render from persisted dashboard declarations.
 - Tests must assert temporary agents do not persist dashboard declarations.
 - Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.

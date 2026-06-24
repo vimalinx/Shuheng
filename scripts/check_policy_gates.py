@@ -4593,8 +4593,9 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     main_lines = [line.text for line in main_render_lines]
     assert any("Shuheng 主 agent 主页" in line for line in main_lines), main_lines
     assert any("╭─ 主控运行概览" in line for line in main_lines), main_lines
-    assert any("▸ 核心指标" in line and "已折叠" in line for line in main_lines), main_lines
-    assert not any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_lines), main_lines
+    assert any("├─ 核心指标" in line and "已折叠" not in line for line in main_lines), main_lines
+    assert not any("▸ 核心指标" in line or "▾ 核心指标" in line for line in main_lines), main_lines
+    assert any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_lines), main_lines
     old_latest_task_records = a.latest_task_records
     try:
         def fail_latest_task_records():
@@ -4605,19 +4606,16 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     finally:
         a.latest_task_records = old_latest_task_records
     assert cached_main_lines == main_lines, cached_main_lines
-    state.line_cache = main_render_lines
-    metrics_idx = next(idx for idx, line in enumerate(main_lines) if "核心指标" in line)
-    assert a.toggle_process_at_line(state, metrics_idx)
-    main_expanded_lines = [line.text for line in a.home_lines(state, 100)]
-    assert any("▾ 核心指标" in line and "已展开" in line for line in main_expanded_lines), main_expanded_lines
-    assert any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_expanded_lines), main_expanded_lines
     assert any("├─ 运行详情" in line for line in main_lines), main_lines
     assert not any("| 状态" in line or "| ----" in line for line in main_lines[:14]), main_lines[:14]
     assert not any(line.startswith("- 状态:") for line in main_lines[:14]), main_lines[:14]
     main_home_text = "\n".join(main_lines)
     assert "╭─ 详情入口" in main_home_text, main_home_text
-    assert "## 功能描述" not in main_home_text, main_home_text
-    assert "## 待办事项" not in main_home_text, main_home_text
+    assert "## 功能描述" in main_home_text, main_home_text
+    assert "## 当前状态" in main_home_text, main_home_text
+    assert "## 待办事项" in main_home_text, main_home_text
+    assert "## 最近定时任务" in main_home_text, main_home_text
+    assert "## 最近任务" in main_home_text, main_home_text
     assert "## 待审批" not in main_home_text, main_home_text
     assert a.display_scope_key(state) == "home:main"
     assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
@@ -4673,21 +4671,15 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "Dashboard Agent 主页" in home_text, home_text
     assert "固定状态卡" in home_text, home_text
     assert "╭─ Dashboard Agent / researcher" in home_text, home_text
-    top_card = home_text.split("╭─ 详情入口", 1)[0]
+    top_card = home_text.split("## 功能描述", 1)[0]
     assert "核心指标" in top_card and "├─ 运行详情" in top_card, home_text
-    assert "▸ 核心指标" in top_card and "已折叠" in top_card, home_text
-    assert "生命周期 persistent" not in top_card and "任务队列 0" not in top_card, home_text
-    state.line_cache = home_render_lines
-    metrics_idx = next(idx for idx, line in enumerate(home_render_lines) if "核心指标" in line.text)
-    assert a.toggle_process_at_line(state, metrics_idx)
-    expanded_home_text = "\n".join(line.text for line in a.home_lines(state, 100))
-    expanded_top_card = expanded_home_text.split("╭─ 详情入口", 1)[0]
-    assert "▾ 核心指标" in expanded_top_card and "生命周期 persistent" in expanded_top_card and "任务队列 0" in expanded_top_card, expanded_home_text
+    assert "▸ 核心指标" not in top_card and "▾ 核心指标" not in top_card and "已折叠" not in top_card, home_text
+    assert "生命周期 persistent" in top_card and "任务队列 0" in top_card, home_text
     assert "| 状态" not in top_card and "| ----" not in top_card, home_text
     assert "- ID:" not in top_card, home_text
     assert "╭─ 详情入口" in home_text, home_text
-    assert "主页任务" not in home_text, home_text
-    assert "主页巡检" not in home_text, home_text
+    assert "## 最近定时任务" in home_text and "主页巡检" in home_text, home_text
+    assert "## 最近任务" in home_text and "主页任务" in home_text, home_text
     assert "artifact://" not in home_text, home_text
     assert approval_id not in home_text, home_text
 
