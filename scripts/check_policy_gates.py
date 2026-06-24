@@ -4595,6 +4595,16 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert any("╭─ 主控运行概览" in line for line in main_lines), main_lines
     assert any("▸ 核心指标" in line and "已折叠" in line for line in main_lines), main_lines
     assert not any("活跃任务" in line and "待审批" in line and "定时任务" in line for line in main_lines), main_lines
+    old_latest_task_records = a.latest_task_records
+    try:
+        def fail_latest_task_records():
+            raise AssertionError("home_lines should reuse the cached home render before rereading task ledger")
+
+        a.latest_task_records = fail_latest_task_records
+        cached_main_lines = [line.text for line in a.home_lines(state, 100)]
+    finally:
+        a.latest_task_records = old_latest_task_records
+    assert cached_main_lines == main_lines, cached_main_lines
     state.line_cache = main_render_lines
     metrics_idx = next(idx for idx, line in enumerate(main_lines) if "核心指标" in line)
     assert a.toggle_process_at_line(state, metrics_idx)

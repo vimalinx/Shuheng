@@ -257,6 +257,7 @@ S01 修复左栏历史会话标题
 - Default home pages must not dump raw governance ledgers below the fixed card. Task titles, approval ids, artifact URIs, schedule records, and internal owner ids stay behind deliberate `/tasks`, `/approvals`, `/artifacts`, and `/schedules` drill-down panels unless an agent explicitly declares a readable dashboard section.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
+- Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home auto-switches to that agent's chat interface and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
 
 ### 4. Validation & Error Matrix
@@ -272,11 +273,13 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows the fixed status card plus concise detail-entry actions, without dumping raw task, schedule, artifact, or approval rows by default.
+- Good: Repainting the same home page during typing, mouse movement, or scroll reuses the cached rendered home lines until a relevant ledger file signature, dashboard declaration, selected home, width, or expanded-state key changes.
 - Good: The fixed status card uses native TUI panel separators such as `├─ ▸ 核心指标` / `├─ ▾ 核心指标`; only the expanded state renders aligned metric tiles, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
 - Good: A persistent agent may explicitly declare readable lower sections such as `markdown` or `todos`; those sections render below the card while unsupported fields are dropped.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
 - Base: `/chat` from a home page switches to the corresponding chat session without changing the stored dashboard declaration.
 - Bad: Treating a home key as a path for `selected` history operations.
+- Bad: Running `latest_task_records()`, `pending_approvals()`, `scheduled_task_registry()`, and `artifact_index_latest()` on every repaint when the home-page inputs are unchanged.
 - Bad: Rendering agent-provided script/code as executable UI behavior.
 - Bad: Letting a temporary agent persist a dashboard declaration.
 
@@ -285,6 +288,7 @@ S01 修复左栏历史会话标题
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
 - Tests must assert the main and persistent-agent fixed status cards keep collapsible native TUI metric-grid rows and lower detail rows instead of flat label/value rows or raw Markdown table text.
 - Tests must assert default metric grids are folded, click/toggle expands them, and expansion is scoped per home page.
+- Tests must assert repeated `home_lines(...)` calls for an unchanged home page reuse the cached render instead of rereading the task ledger.
 - Tests must assert default main and persistent-agent home rendering hides raw shared task, schedule, artifact, and approval rows while keeping detail-entry actions.
 - Tests must assert explicitly declared readable dashboard sections still render from persisted dashboard declarations.
 - Tests must assert temporary agents do not persist dashboard declarations.

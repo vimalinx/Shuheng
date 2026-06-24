@@ -344,6 +344,7 @@ SUBAGENT_SESSION_PREFIX = "subagent_session:"
 SECRET_PROXY_ENV_KEYS = ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy")
 TOKEN_STAT_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
 TUI_POLL_TIMEOUT_MS = 25
+HOME_LINE_CACHE_TTL_SECONDS = 0.75
 STREAM_UI_FLUSH_INTERVAL = 0.05
 for path in (ROOT_DIR, FRONTENDS_DIR):
     if path not in sys.path:
@@ -822,6 +823,9 @@ class State:
     line_cache_key: tuple[Any, ...] = (0, 0, True, True, 0)
     line_cache: list[RenderLine] = field(default_factory=list)
     message_block_cache: dict[tuple[Any, ...], list[RenderLine]] = field(default_factory=dict)
+    home_line_cache_key: tuple[Any, ...] = ()
+    home_line_cache: list[RenderLine] = field(default_factory=list)
+    home_line_cache_loaded_at: float = 0.0
     main_x0: int = 0
     main_width: int = 0
     body_top: int = 1
@@ -2666,6 +2670,9 @@ def short_uid(prefix: str) -> str:
 
 _JSONL_APPEND_LOCKS_GUARD = threading.Lock()
 _JSONL_APPEND_LOCKS: dict[str, threading.Lock] = {}
+_LATEST_RECORDS_CACHE_LOCK = threading.Lock()
+_LATEST_RECORDS_CACHE: dict[tuple[str, str], tuple[tuple[int, int], dict[str, dict[str, Any]]]] = {}
+LATEST_RECORDS_CACHE_LIMIT = 64
 
 
 def _jsonl_append_lock(path: str) -> threading.Lock:
@@ -2713,6 +2720,11 @@ def append_jsonl(path: str, payload: dict[str, Any]) -> None:
                     fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
                 except (OSError, ValueError):
                     pass
+    normalized = os.path.normpath(path)
+    with _LATEST_RECORDS_CACHE_LOCK:
+        stale_keys = [key for key in _LATEST_RECORDS_CACHE if key[0] == normalized]
+        for cache_key in stale_keys:
+            _LATEST_RECORDS_CACHE.pop(cache_key, None)
 
 
 def write_bytes_atomic(path: str, data: bytes) -> None:
@@ -4037,12 +4049,16 @@ def read_jsonl(path: str, limit: int = 0) -> list[dict[str, Any]]:
     return rows
 
 
-def task_ledger_signature() -> tuple[int, int]:
+def jsonl_file_signature(path: str) -> tuple[int, int]:
     try:
-        stat = os.stat(AGENT_TASK_LEDGER_PATH)
+        stat = os.stat(path)
     except OSError:
         return (0, 0)
     return (int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def task_ledger_signature() -> tuple[int, int]:
+    return jsonl_file_signature(AGENT_TASK_LEDGER_PATH)
 
 
 def harness_artifact_uri(path: str) -> str:
@@ -4103,12 +4119,7 @@ def append_artifact_index(
 
 
 def artifact_index_latest() -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
-    for row in read_jsonl(AGENT_ARTIFACT_INDEX_PATH):
-        uri = str(row.get("uri") or "")
-        if uri:
-            latest[uri] = row
-    return latest
+    return latest_records_by_id(AGENT_ARTIFACT_INDEX_PATH, "uri")
 
 
 def write_harness_artifact(
@@ -5357,12 +5368,23 @@ def policy_gate_for_subagent_task(
 
 
 def latest_records_by_id(path: str, key: str) -> dict[str, dict[str, Any]]:
+    normalized = os.path.normpath(path)
+    cache_key = (normalized, key)
+    signature = jsonl_file_signature(normalized)
+    with _LATEST_RECORDS_CACHE_LOCK:
+        cached = _LATEST_RECORDS_CACHE.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return {row_id: dict(row) for row_id, row in cached[1].items()}
     latest: dict[str, dict[str, Any]] = {}
-    for row in read_jsonl(path):
+    for row in read_jsonl(normalized):
         row_id = str(row.get(key) or "")
         if row_id:
             latest[row_id] = row
-    return latest
+    with _LATEST_RECORDS_CACHE_LOCK:
+        _LATEST_RECORDS_CACHE[cache_key] = (signature, {row_id: dict(row) for row_id, row in latest.items()})
+        while len(_LATEST_RECORDS_CACHE) > LATEST_RECORDS_CACHE_LIMIT:
+            _LATEST_RECORDS_CACHE.pop(next(iter(_LATEST_RECORDS_CACHE)))
+    return {row_id: dict(row) for row_id, row in latest.items()}
 
 
 def latest_task_records() -> dict[str, dict[str, Any]]:
@@ -9212,12 +9234,7 @@ def queue_approval(
 
 
 def approval_latest_records() -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
-    for row in read_jsonl(AGENT_APPROVALS_PATH):
-        approval_id = str(row.get("approval_id") or "")
-        if approval_id:
-            latest[approval_id] = row
-    return latest
+    return latest_records_by_id(AGENT_APPROVALS_PATH, "approval_id")
 
 
 def secret_memory_candidate_approval_id(candidate_id: str) -> str:
@@ -15811,7 +15828,7 @@ def main_home_section_body(
     return []
 
 
-def main_home_lines(state: State, width: int) -> list[RenderLine]:
+def main_home_lines_uncached(state: State, width: int) -> list[RenderLine]:
     task_rows = list(latest_task_records().values())
     task_rows.sort(key=row_timestamp, reverse=True)
     open_tasks = [row for row in task_rows if not terminal_task_status(str(row.get("status") or ""))]
@@ -15923,7 +15940,7 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
     return []
 
 
-def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[RenderLine]:
+def subagent_home_lines_uncached(state: State, sub: SubAgentRuntime, width: int) -> list[RenderLine]:
     role = normalized_subagent_role(sub.role)
     active_tasks = agent_task_rows(sub.agent_id, include_terminal=False, limit=20)
     schedule_rows = agent_schedule_rows(sub.agent_id)
@@ -15969,12 +15986,99 @@ def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[
     return lines
 
 
-def home_lines(state: State, width: int) -> list[RenderLine]:
+def main_home_lines(state: State, width: int) -> list[RenderLine]:
+    return main_home_lines_uncached(state, width)
+
+
+def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[RenderLine]:
+    return subagent_home_lines_uncached(state, sub, width)
+
+
+def dashboard_cache_signature(raw: Any) -> str:
+    if not raw:
+        return ""
+    try:
+        return json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return str(raw)
+
+
+def home_registry_signature() -> tuple[tuple[int, int], ...]:
+    return (
+        jsonl_file_signature(AGENT_TASK_LEDGER_PATH),
+        jsonl_file_signature(AGENT_APPROVALS_PATH),
+        jsonl_file_signature(AGENT_ARTIFACT_INDEX_PATH),
+        jsonl_file_signature(AGENT_SCHEDULES_PATH),
+        jsonl_file_signature(AGENT_SCHEDULE_RUNS_PATH),
+    )
+
+
+def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
+    selected = str(state.selected_session or "")
+    expanded = tuple(sorted(state.expanded_dashboard_metrics))
+    registry_signature = home_registry_signature()
     sub = selected_home_subagent(state)
     if sub is not None:
-        return subagent_home_lines(state, sub, width)
+        scope_signature: tuple[Any, ...] = (
+            "sub",
+            sub.agent_id,
+            sub.name,
+            sub.role,
+            sub.status,
+            sub.default_model,
+            sub.security_context,
+            sub.persistent,
+            len(sub.task_queue),
+            len(sub.chat_queue),
+            sub.active_bus_task_id,
+            round(float(sub.updated_at or 0.0), 3),
+            dashboard_cache_signature(sub.dashboard),
+        )
+    else:
+        try:
+            model_name = str(state.agent.get_llm_name(model=True))
+        except Exception:
+            model_name = agent_current_backend_name(state.agent) or ""
+        scope_signature = (
+            "main",
+            state.status,
+            state.current_title,
+            len(state.background_sessions),
+            model_name,
+            dashboard_cache_signature(state.main_dashboard),
+        )
+    return (
+        selected,
+        int(width),
+        expanded,
+        bool(state.secret_vault.unlocked),
+        registry_signature,
+        scope_signature,
+    )
+
+
+def home_lines(state: State, width: int) -> list[RenderLine]:
+    cache_key = home_line_cache_key(state, width)
+    now = time.time()
+    if (
+        state.home_line_cache
+        and state.home_line_cache_key == cache_key
+        and now - state.home_line_cache_loaded_at < HOME_LINE_CACHE_TTL_SECONDS
+    ):
+        return list(state.home_line_cache)
+    lines = home_lines_uncached(state, width)
+    state.home_line_cache_key = cache_key
+    state.home_line_cache = list(lines)
+    state.home_line_cache_loaded_at = now
+    return lines
+
+
+def home_lines_uncached(state: State, width: int) -> list[RenderLine]:
+    sub = selected_home_subagent(state)
+    if sub is not None:
+        return subagent_home_lines_uncached(state, sub, width)
     if is_main_home_session_key(state.selected_session):
-        return main_home_lines(state, width)
+        return main_home_lines_uncached(state, width)
     return []
 
 
