@@ -4455,9 +4455,10 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     main_lines = [line.text for line in a.home_lines(state, 100)]
     assert any("Shuheng 主 agent 主页" in line for line in main_lines), main_lines
     assert any("╭─ 主控运行概览" in line for line in main_lines), main_lines
-    assert any("| 状态" in line and "活跃任务" in line and "待审批" in line for line in main_lines), main_lines
-    assert any("| 运行详情" in line for line in main_lines), main_lines
-    assert not any(line.startswith("├─") for line in main_lines[:14]), main_lines[:14]
+    assert any("├─ 核心指标" in line for line in main_lines), main_lines
+    assert any("状态" in line and "活跃任务" in line and "待审批" in line for line in main_lines), main_lines
+    assert any("├─ 运行详情" in line for line in main_lines), main_lines
+    assert not any("| 状态" in line or "| ----" in line for line in main_lines[:14]), main_lines[:14]
     assert not any(line.startswith("- 状态:") for line in main_lines[:14]), main_lines[:14]
     assert any("功能描述" in line for line in main_lines), main_lines
     assert any("待审批" in line for line in main_lines), main_lines
@@ -4503,9 +4504,10 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "Dashboard Agent 主页" in home_text, home_text
     assert "固定状态卡" in home_text, home_text
     assert "╭─ Dashboard Agent / researcher" in home_text, home_text
-    assert "| 状态" in home_text and "生命周期" in home_text and "任务队列" in home_text, home_text
-    assert "| 运行详情" in home_text, home_text
-    assert "├─" not in home_text.split("## 功能描述", 1)[0], home_text
+    top_card = home_text.split("## 功能描述", 1)[0]
+    assert "├─ 核心指标" in top_card and "├─ 运行详情" in top_card, home_text
+    assert "状态" in top_card and "生命周期" in top_card and "任务队列" in top_card, home_text
+    assert "| 状态" not in top_card and "| ----" not in top_card, home_text
     assert "- ID:" not in home_text.split("## 功能描述", 1)[0], home_text
     assert "主页任务" in home_text, home_text
     assert "主页巡检" in home_text, home_text

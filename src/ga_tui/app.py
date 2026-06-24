@@ -15524,12 +15524,31 @@ def append_home_section(lines: list[RenderLine], title: str, body: list[str], wi
         append_home_line(lines, raw, cp(2), width=width)
 
 
-def markdown_table_row(cells: list[str], widths: list[int]) -> str:
-    return "| " + " | ".join(pad_cells(cell, width) for cell, width in zip(cells, widths)) + " |"
+def status_card_header_line(title: str, card_width: int) -> str:
+    prefix = "╭─ "
+    suffix = "╮"
+    title_width = max(1, card_width - cell_width(prefix) - cell_width(suffix) - 1)
+    label = truncate_cells(str(title or "").strip(), title_width)
+    base = f"{prefix}{label} "
+    return base + ("─" * max(0, card_width - cell_width(base) - cell_width(suffix))) + suffix
 
 
-def markdown_table_separator(widths: list[int]) -> str:
-    return "| " + " | ".join("-" * max(3, width) for width in widths) + " |"
+def status_card_divider_line(title: str, card_width: int) -> str:
+    prefix = "├─ "
+    suffix = "┤"
+    title_width = max(1, card_width - cell_width(prefix) - cell_width(suffix) - 1)
+    label = truncate_cells(str(title or "").strip(), title_width)
+    base = f"{prefix}{label} "
+    return base + ("─" * max(0, card_width - cell_width(base) - cell_width(suffix))) + suffix
+
+
+def status_card_content_line(text: str, card_width: int) -> str:
+    inner_width = max(1, card_width - 4)
+    return f"│ {pad_cells(text, inner_width)} │"
+
+
+def status_card_footer_line(card_width: int) -> str:
+    return "╰" + ("─" * max(0, card_width - 2)) + "╯"
 
 
 def status_card_metric_rows(items: list[tuple[str, str]], inner_width: int) -> list[str]:
@@ -15540,42 +15559,49 @@ def status_card_metric_rows(items: list[tuple[str, str]], inner_width: int) -> l
         if str(label or "").strip() or str(value or "").strip()
     ]
     if not cleaned:
-        return ["| 暂无指标 |", "| --- |"]
+        return ["暂无指标"]
     max_cols = 4 if inner_width >= 86 else (3 if inner_width >= 66 else (2 if inner_width >= 42 else 1))
+    layout_cols = max_cols
+    while layout_cols > 1 and ((inner_width - (3 * (layout_cols - 1))) // layout_cols) < 12:
+        layout_cols -= 1
+    tile_width = max(8, (inner_width - (3 * (layout_cols - 1))) // layout_cols)
     index = 0
     while index < len(cleaned):
-        cols = min(max_cols, len(cleaned) - index)
-        while cols > 1:
-            sample = cleaned[index:index + cols]
-            widths = [min(18, max(4, cell_width(label), cell_width(value))) for label, value in sample]
-            if sum(widths) + (3 * cols) + 1 <= inner_width:
-                break
-            cols -= 1
+        cols = min(layout_cols, len(cleaned) - index)
         chunk = cleaned[index:index + cols]
-        widths = [min(18, max(4, cell_width(label), cell_width(value))) for label, value in chunk]
-        rows.append(markdown_table_row([label for label, _value in chunk], widths))
-        rows.append(markdown_table_separator(widths))
-        rows.append(markdown_table_row([value or "-" for _label, value in chunk], widths))
+        tiles = [
+            pad_cells(f"{label} {value or '-'}", tile_width)
+            for label, value in chunk
+        ]
+        rows.append(" │ ".join(tiles))
         index += cols
     return rows
 
 
 def status_card_detail_rows(items: list[tuple[str, str]], inner_width: int) -> list[str]:
-    cell_width_limit = max(12, inner_width - 4)
-    rows = [markdown_table_row(["运行详情"], [cell_width_limit]), markdown_table_separator([cell_width_limit])]
+    rows: list[str] = []
     cleaned = [
         (str(label or "").strip(), str(value or "").strip())
         for label, value in items
         if str(label or "").strip() or str(value or "").strip()
     ]
     if not cleaned:
-        rows.append(markdown_table_row(["暂无详情"], [cell_width_limit]))
-        return rows
+        return ["暂无详情"]
+    label_width = min(14, max(4, max((cell_width(label) for label, _value in cleaned), default=4)))
     for label, value in cleaned:
-        prefix = f"{label}: " if label else ""
-        wrapped = wrap_cells(prefix + (value or "-"), cell_width_limit)
+        value = value or "-"
+        if not label or inner_width < label_width + 8:
+            wrapped = wrap_cells((f"{label}: " if label else "") + value, inner_width)
+            rows.extend(wrapped)
+            continue
+        value_width = max(8, inner_width - label_width - 3)
+        label_text = pad_cells(label, label_width)
+        wrapped = wrap_cells(value, value_width)
         for idx, part in enumerate(wrapped):
-            rows.append(markdown_table_row([part if idx == 0 else f"  {part}"], [cell_width_limit]))
+            if idx == 0:
+                rows.append(f"{label_text}   {part}")
+            else:
+                rows.append((" " * (label_width + 3)) + part)
     return rows
 
 
@@ -15591,16 +15617,16 @@ def append_status_card(
     card_width = max(32, min(width, 110))
     inner_width = max(24, card_width - 4)
     lines.append(RenderLine("固定状态卡", cp(1) | curses.A_BOLD))
-    lines.append(RenderLine(f"╭─ {truncate_cells(title, inner_width)}", cp(10) | curses.A_BOLD))
+    lines.append(RenderLine(status_card_header_line(title, card_width), cp(10) | curses.A_BOLD))
     for wrapped in wrap_cells(summary, inner_width):
-        lines.append(RenderLine(f"│ {wrapped}", cp(2)))
-    lines.append(RenderLine("│", cp(10)))
+        lines.append(RenderLine(status_card_content_line(wrapped, card_width), cp(2)))
+    lines.append(RenderLine(status_card_divider_line("核心指标", card_width), cp(10)))
     for row in status_card_metric_rows(metrics, inner_width):
-        lines.append(RenderLine(f"│ {row}", cp(7) | curses.A_BOLD))
-    lines.append(RenderLine("│", cp(10)))
+        lines.append(RenderLine(status_card_content_line(row, card_width), cp(7) | curses.A_BOLD))
+    lines.append(RenderLine(status_card_divider_line("运行详情", card_width), cp(10)))
     for row in status_card_detail_rows(details, inner_width):
-        lines.append(RenderLine(f"│ {row}", cp(2)))
-    lines.append(RenderLine("╰─", cp(10)))
+        lines.append(RenderLine(status_card_content_line(row, card_width), cp(2)))
+    lines.append(RenderLine(status_card_footer_line(card_width), cp(10)))
 
 
 def main_home_section_body(

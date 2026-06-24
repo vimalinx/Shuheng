@@ -252,7 +252,7 @@ S01 修复左栏历史会话标题
   - optional `markdown`
 - Supported section types are `function`, `status_narrative`, `todos`, `schedules`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - Shuheng owns the fixed top status card. Agent declarations may control lower-page section order, labels, bounded Markdown, status narrative, and todo text.
-- The fixed top status card must render as an authored status layout, not a flat list of equal-weight label/value lines. It should keep a title, status narrative, Markdown-table-like short metric rows, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
+- The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, compact short-metric grid rows, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Plain text input on a persistent-agent home does not start direct chat; the user must switch with `/chat`. Main home may still accept normal main-agent input.
@@ -269,7 +269,7 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows status, function, todos, schedules, tasks, artifacts, and approvals from shared registries.
-- Good: The fixed status card uses Markdown-table-like rows such as `| 状态 | 活跃任务 | 待审批 |`, and renders long values below in a single `运行详情` column instead of squeezing everything into one horizontal line.
+- Good: The fixed status card uses native TUI panel separators such as `├─ 核心指标` and aligned metric tiles, and renders long values below in a single `运行详情` section instead of squeezing everything into one horizontal line.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
 - Base: `/chat` from a persistent-agent home switches to the agent chat session without changing the stored dashboard declaration.
 - Bad: Treating a home key as a path for `selected` history operations.
@@ -279,7 +279,7 @@ S01 修复左栏历史会话标题
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
-- Tests must assert the main and persistent-agent fixed status cards keep Markdown-table-like metric rows and lower detail rows instead of flat label/value rows.
+- Tests must assert the main and persistent-agent fixed status cards keep native TUI metric-grid rows and lower detail rows instead of flat label/value rows or raw Markdown table text.
 - Tests must assert persistent-agent home rendering includes shared task, schedule, artifact, and approval rows.
 - Tests must assert temporary agents do not persist dashboard declarations.
 - Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
