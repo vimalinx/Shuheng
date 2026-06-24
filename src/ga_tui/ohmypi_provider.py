@@ -684,6 +684,48 @@ class OhMyPiRpcAgent:
             clients.append(_OhMyPiClient(backend))
         return clients
 
+    def refresh_configured_models(
+        self,
+        models: list[OhMyPiRuntimeModel],
+        *,
+        env: dict[str, str] | None = None,
+        command: list[str] | None = None,
+    ) -> None:
+        """Refresh the Shuheng-owned OMP model projection without importing app state."""
+        if env is not None:
+            self.env = dict(env)
+        if command is not None:
+            self.command = list(command)
+        backend = getattr(self.llmclient, "backend", None)
+        current_selector = (
+            self.configured_models[self.llm_no].selector
+            if self.configured_models and 0 <= self.llm_no < len(self.configured_models)
+            else ""
+        )
+        current_name = str(getattr(backend, "name", "") or "")
+        current_provider = str(getattr(backend, "provider", "") or "")
+        current_model = str(getattr(backend, "model_id", "") or getattr(backend, "model", "") or "")
+        current_base = str(getattr(backend, "apibase", "") or getattr(backend, "base_url", "") or "").rstrip("/")
+        self.configured_models = list(models or [])
+        self.llmclients = self._clients_from_models(self.configured_models)
+        self.llm_no = 0
+        for idx, model in enumerate(self.configured_models):
+            model_base = str(model.base_url or "").rstrip("/")
+            if current_selector and model.selector == current_selector:
+                self.llm_no = idx
+                break
+            if current_name and model.display_name == current_name:
+                self.llm_no = idx
+                break
+            if current_provider and current_model and model.provider == current_provider and model.model_id == current_model:
+                self.llm_no = idx
+                break
+            if current_model and model.model_id == current_model and (not current_base or not model_base or current_base == model_base):
+                self.llm_no = idx
+                break
+        self.llmclient = self.llmclients[self.llm_no]
+        self._pending_model = self.configured_models[self.llm_no] if self.configured_models else None
+
     def configure_host_tools(
         self,
         *,
@@ -707,7 +749,8 @@ class OhMyPiRpcAgent:
 
     def load_llm_sessions(self) -> None:
         if self._process is not None:
-            self._send({"id": self._next_request_id("models"), "type": "get_available_models"})
+            if not self.configured_models:
+                self._send({"id": self._next_request_id("models"), "type": "get_available_models"})
             self.request_runtime_state()
 
     def request_runtime_state(self, *, wait: bool = False, timeout: float = 5.0) -> bool:

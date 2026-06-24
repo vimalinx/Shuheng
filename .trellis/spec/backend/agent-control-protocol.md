@@ -257,7 +257,7 @@ S01 修复左栏历史会话标题
 - Default home pages must not dump raw governance ledgers below the fixed card. Task titles, approval ids, artifact URIs, schedule records, and internal owner ids stay behind deliberate `/tasks`, `/approvals`, `/artifacts`, and `/schedules` drill-down panels unless an agent explicitly declares a readable dashboard section.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
-- Plain text input on a persistent-agent home does not start direct chat; the user must switch with `/chat`. Main home may still accept normal main-agent input.
+- Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home remains read-only gated; the user must switch with `/chat` before direct subagent chat. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
 
 ### 4. Validation & Error Matrix
 
@@ -267,6 +267,7 @@ S01 修复左栏历史会话标题
 - Unsupported section type or unsupported fields -> ignore those parts and keep supported sections.
 - Home keys passed to selected-history resolution -> not treated as filesystem session paths.
 - Secret Vault lock/reset or normal new-session reset -> return to main home, not an arbitrary historical chat.
+- Main home plain text input -> starts or queues the main Orchestrator task as before and auto-switches to the main task/chat transcript.
 
 ### 5. Good/Base/Bad Cases
 
@@ -274,7 +275,7 @@ S01 修复左栏历史会话标题
 - Good: The fixed status card uses native TUI panel separators such as `├─ ▸ 核心指标` / `├─ ▾ 核心指标`; only the expanded state renders aligned metric tiles, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
 - Good: A persistent agent may explicitly declare readable lower sections such as `markdown` or `todos`; those sections render below the card while unsupported fields are dropped.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
-- Base: `/chat` from a persistent-agent home switches to the agent chat session without changing the stored dashboard declaration.
+- Base: `/chat` from a home page switches to the corresponding chat session without changing the stored dashboard declaration.
 - Bad: Treating a home key as a path for `selected` history operations.
 - Bad: Rendering agent-provided script/code as executable UI behavior.
 - Bad: Letting a temporary agent persist a dashboard declaration.
@@ -290,6 +291,7 @@ S01 修复左栏历史会话标题
 - Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
 - Tests must assert unsupported section types and executable-looking fields are ignored.
 - Tests must assert old transcript-only behavior explicitly selects `"main"` when testing main chat rendering.
+- Tests must assert plain text on main home auto-switches to `selected_session == "main"` after starting a main task, while plain text on persistent-agent homes is read-only gated and requires `/chat` before chat input.
 - Tests must keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
 ### 7. Wrong vs Correct
@@ -775,6 +777,8 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - `/model`, `/llm`, and `/models` all open the unified model manager with config-management actions enabled.
 - `/model` add/edit forms must expose a manual `context_win` field after the model id; saving must persist it as an integer in the existing model config entry.
 - The unified manager must keep current-session switching, default selection, recent-model jumping, add/edit/delete, model extraction, single-model test, batch health check, and reload actions.
+- Adding a provider must not require `/models` endpoint compatibility when the user has supplied a concrete manual `Model`. If `/models` probing fails but the new entry has a complete Base URL and Model, save the single manual entry, show the probe failure as a warning, and direct the user to `t` test or Enter switch.
+- Manual fallback saving is only for the add-provider path. Existing-row model extraction with `p` must keep the stricter behavior: a failed `/models` probe does not mutate the configured model list.
 - Model rows are grouped by concrete provider tabs, not broad protocol categories.
 - Provider labels must render as a vertical provider rail inside the model manager, with model rows rendered beside the rail. Do not collapse providers back into one horizontal `供应商 Tabs: A / B / C` line.
 - Recent/frequently used models must render as a `常用` virtual rail category parallel to provider categories when matching configured models exist.
@@ -791,6 +795,8 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - User requests command completion for `/ll` or `/models` -> do not show hidden aliases.
 - No configured models -> `/model` manager displays an empty-state message that says to add a provider/API with `/model`.
 - User edits `Context Win` -> the saved `context_win` value survives `mykey.py` round-trip and is available to runtime providers.
+- Add provider with a working manual `Model` but a 404/unsupported `/models` endpoint -> the provider/model is still saved once, the warning says `/models 提取失败`, and no duplicate is created if the same Base URL + Model already exists.
+- Add provider with no manual `Model` and a failed `/models` endpoint -> no entry is saved, because runtime providers cannot route an empty model id.
 - Selected row belongs to a different active tab after reload/edit/delete -> normalize selection to the first visible row in the active category.
 - Active provider tab has no visible rows -> display a no-models-in-provider message and keep navigation safe.
 - Active `常用` tab -> display configured recent models in recent order and keep provider switching/navigation behavior unchanged.
@@ -801,6 +807,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 
 - Good: `/model` opens one panel where the user can switch the current dialogue model, set the default, add a provider, extract provider models, test a model, and batch validate all models grouped by supplier.
 - Good: `/model` lets a user set `context_win:1050000` for a large-window OpenAI-compatible model without editing `mykey.py` by hand.
+- Good: A custom OpenAI-compatible provider whose `/models` route is unavailable still appears in the model list when the user filled the exact model id manually.
 - Good: Providers render as a left-side vertical list, and the filtered model list renders to the right.
 - Good: `常用` appears as a peer rail item when recent configured models exist, while empty common providers stay grey until configured.
 - Good: DeepSeek and OpenAI-compatible entries with known template base URLs appear under `DeepSeek` and `OpenAI`, not together under one broad `OpenAI` protocol category.
@@ -808,6 +815,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - Base: A custom endpoint such as `https://api.example.invalid/v1` appears under a stable `example.invalid` tab.
 - Bad: `/llm` appears as a normal command row, because that splits the visible command ontology again.
 - Bad: `/model` opens a switch-only panel that cannot add/edit/delete or probe provider models.
+- Bad: Treating a failed `/models` probe during add as a hard failure when the user already supplied a manual Model, because many OpenAI-compatible gateways support chat/responses but not model listing.
 - Bad: The model panel shows every known provider template as an empty tab.
 - Bad: Provider labels are rendered as one long horizontal tab line that truncates useful providers on narrower terminals.
 
@@ -817,6 +825,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - `scripts/check_policy_gates.py` must assert `/mo` completes to `/model` and hidden aliases do not complete.
 - `scripts/check_policy_gates.py` must assert `/llm`, `/model`, and `/models` help text describes the unified manager and compatibility aliases.
 - `scripts/check_policy_gates.py` must assert `/model` exposes `context_win` and saving/reloading model config preserves it.
+- `scripts/check_policy_gates.py` must assert add-provider manual fallback saves a complete manual entry after `/models` probe failure and refuses duplicate Base URL + Model pairs.
 - `scripts/check_policy_gates.py` must assert model category helpers group OpenAI, DeepSeek, custom endpoint, common-provider, and non-common configured providers correctly.
 - `scripts/check_policy_gates.py` must assert the model manager renders a vertical provider rail and does not render the old horizontal `供应商 Tabs:` line.
 - `scripts/check_policy_gates.py` must assert the model manager exposes `常用` as a virtual category and renders provider rail status colors for configured, empty, and failed categories.
@@ -1015,6 +1024,8 @@ configure_genericagent_provider_runtime(
 - Runtime adapter: `OhMyPiRuntimeAdapter(RuntimeAdapter)`.
 - Queue-compatible wrapper: `OhMyPiRpcAgent`.
 - Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
+- App-layer refresh helper: `refresh_agent_runtime_model_config(agent)`.
+- Provider-local refresh method: `OhMyPiRpcAgent.refresh_configured_models(models, env=None, command=None)`.
 - Provider-neutral runtime envelopes: `RuntimeTaskRequest` and `RuntimeTaskEvent` in `src/ga_tui/runtime.py`.
 - RPC command helpers: `resolve_ohmypi_binary(binary=None)` and `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
 - Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
@@ -1082,6 +1093,9 @@ configure_genericagent_provider_runtime(
 - Embedded OMP must use a Shuheng-owned runtime root and must not read or write system-level `~/.omp/agent/config.yml`, `~/.omp/agent/models.yml`, sessions, auth storage, or cache as its active agent directory.
 - Embedded OMP must run with the GenericAgent-TUI repository root as its subprocess `cwd`, while Shuheng harness paths, memory, ledgers, isolated OMP runtime files, and provider metadata use the `SHUHENG_HOME` / `${AGENT_HARNESS_DIR}` ownership boundary.
 - `app.py` owns translation from GA-TUI `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, OMP binary discovery, command construction, and RPC behavior.
+- After `/model` save, edit, delete, default selection, or reload while the TUI is idle, Shuheng must rebuild the isolated OMP config files and refresh the current OMP wrapper's configured model list, child env, and command without requiring a TUI restart.
+- `OhMyPiRpcAgent.load_llm_sessions()` must not overwrite Shuheng-projected `configured_models` with RPC `get_available_models` results when the app has already supplied a configured list. OMP's internal model discovery is only a fallback for unconfigured wrappers.
+- Refreshing `OhMyPiRpcAgent.configured_models` must preserve the current model by selector, display name, provider/model id, or model/base URL where possible, and update any pending model switch so the next lazy RPC startup sends the refreshed provider/model pair.
 - OMP binary discovery order is explicit `binary` argument, `GA_TUI_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
 - Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
 - Generated OMP `models.yml` must represent complete GA-TUI OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
@@ -1140,6 +1154,8 @@ configure_genericagent_provider_runtime(
 - Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
 - Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
+- Existing OMP wrapper + changed `mykey.py` -> `refresh_agent_runtime_model_config(agent)` updates wrapper `configured_models`, regenerated env, command `--model`, and isolated files before the next switch/prompt.
+- Existing OMP wrapper with an already selected model -> refresh keeps the matching selected model when it still exists and sends the refreshed provider/model id before the next prompt.
 - New Shuheng main or temporary session -> active OMP RPC session receives a `new_session` reset when the process is running, and a later first runtime task may inject one fresh full context pack.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
 - OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
@@ -1166,6 +1182,7 @@ configure_genericagent_provider_runtime(
 - Good: unset `GA_TUI_RUNTIME_PROVIDER` selects `OhMyPiRuntimeAdapter`, starts `omp --mode rpc` lazily with the generated memory append prompt, streams text deltas into the existing TUI message renderer, and keeps GenericAgent available as an explicit fallback.
 - Good: `/model` entries are projected into `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent/models.yml`, OMP is launched with `PI_CODING_AGENT_DIR` pointing at that directory, and system `~/.omp/agent/config.yml` is untouched.
 - Good: generated `models.yml` stores `apiKey: GA_TUI_OMP_API_KEY_<digest>` while the secret value is supplied only in the child process env.
+- Good: After adding a provider in `/model`, the running Shuheng wrapper's model list immediately includes it and a later selection uses the refreshed OMP provider id instead of a stale pending model.
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
 - Base: `/runtimes` shows both `genericagent` and `ohmypi`, while the experiment-branch default is `ohmypi`.
 - Base: Oh My Pi can query bounded TUI governance facts through `ga_tui_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
@@ -1177,6 +1194,8 @@ configure_genericagent_provider_runtime(
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
 - Bad: Embedded OMP inherits `~/.omp/agent` or uses the user's system OMP `modelRoles.default`, because `/model` would no longer be the single GA-TUI settings surface.
 - Bad: Generated OMP `models.yml` writes raw API key values.
+- Bad: Saving `mykey.py` but leaving the active `OhMyPiRpcAgent.llmclients` list unchanged until a full TUI restart, because `/model` then appears to do nothing.
+- Bad: Letting an RPC `get_available_models` response from an already-running process replace the Shuheng-projected `/model` list after a save.
 - Bad: The adapter enables arbitrary OMP host tools, host URI schemes, writable operations, or auto-approval before TUI policy gates can audit and approve those operations.
 - Bad: `app.py` contains Oh My Pi RPC parsing logic instead of provider-local parsing.
 
@@ -1213,6 +1232,7 @@ configure_genericagent_provider_runtime(
 - Tests must assert the OMP runtime adapter subprocess `cwd` is the GenericAgent-TUI app root, not the GenericAgent harness root.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
+- Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
 - Tests must assert system `~/.omp/agent/config.yml` hash remains unchanged when present.

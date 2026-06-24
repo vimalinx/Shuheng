@@ -1051,6 +1051,20 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert getattr(adapter, "env")["PI_CODING_AGENT_DIR"] == runtime_config.agent_dir
         ohmypi_agent = adapter.create_agent()
         setattr(ohmypi_agent, "_ga_tui_runtime_provider_id", "ohmypi")
+        Path(mykey_file).write_text(
+            "\n".join([
+                "mixin_config = {'llm_nos': ['gamma'], 'max_retries': 10, 'base_delay': 0.5}",
+                "native_oai_config = {'name': 'alpha', 'apikey': 'key-alpha', 'apibase': 'https://alpha.example.invalid/v1', 'model': 'model-alpha'}",
+                "native_oai_config_1 = {'name': 'beta', 'apikey': 'key-beta', 'apibase': 'https://beta.example.invalid/v1', 'model': 'model-beta', 'api_mode': 'responses', 'context_win': 1050000, 'max_tokens': 128000}",
+                "native_oai_config_2 = {'name': 'gamma', 'apikey': 'key-gamma', 'apibase': 'https://gamma.example.invalid/v1', 'model': 'model-gamma'}",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        refresh_msg = a.refresh_agent_runtime_model_config(ohmypi_agent)
+        assert "3 个模型" in refresh_msg, refresh_msg
+        assert len(ohmypi_agent.configured_models) == 3, ohmypi_agent.configured_models
+        assert ohmypi_agent.configured_models[2].model_id == "model-gamma", ohmypi_agent.configured_models
         title_state = a.State(agent=ohmypi_agent)
         title_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_ohmypi_title.txt")
         a.set_agent_log_path(ohmypi_agent, title_path)
@@ -2105,11 +2119,13 @@ def assert_ohmypi_rpc_process_blocks_fold_like_genericagent() -> None:
 
 def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     processes: list[FakeRpcProcess] = []
+    popen_args: list[list[str]] = []
     popen_kwargs: list[dict[str, object]] = []
 
     def process_factory(*_args, **kwargs):
         process = FakeRpcProcess(auto_finish=False)
         processes.append(process)
+        popen_args.append(list(_args[0]) if _args else [])
         popen_kwargs.append(dict(kwargs))
         return process
 
@@ -2127,15 +2143,36 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
         startup_timeout=1,
     )
     assert agent.list_llms() == [(0, "OhMyPi/alpha", True), (1, "OhMyPi/beta", False)], agent.list_llms()
-    agent.next_llm(1)
+    switch_state = a.State(agent=agent)
+    switch_state.running = True
+    ok_switch, switch_msg = a.switch_agent_to_entry(
+        switch_state,
+        a.LLMConfigEntry(
+            "native_oai_config_1",
+            "native_oai",
+            {"name": "beta", "apikey": "k", "apibase": "https://beta.example.invalid/v1", "model": "model-beta"},
+        ),
+    )
+    assert ok_switch, switch_msg
     assert agent.llm_no == 1
     assert agent.get_llm_name(model=True) == "model-beta"
+    pending_model = getattr(agent, "_pending_model", None)
+    assert pending_model is not None and pending_model.provider == "ga-tui-beta" and pending_model.model_id == "model-beta", pending_model
+    refreshed_models = [
+        omp.OhMyPiRuntimeModel(provider="ga-tui-gamma", model_id="model-gamma", display_name="gamma", base_url="https://gamma.example.invalid/v1"),
+        omp.OhMyPiRuntimeModel(provider="ga-tui-beta-new", model_id="model-beta", display_name="beta-new", base_url="https://beta.example.invalid/v1"),
+    ]
+    refreshed_env = {"PI_CODING_AGENT_DIR": "/tmp/ga-tui-omp-agent-refreshed", "GA_TUI_OMP_API_KEY_TEST_2": "key2"}
+    agent.refresh_configured_models(refreshed_models, env=refreshed_env, command=["/fake/omp-new", "--mode", "rpc"])
+    assert agent.llm_no == 1
+    assert agent.list_llms() == [(0, "OhMyPi/gamma", False), (1, "OhMyPi/beta-new", True)], agent.list_llms()
     dq = agent.put_task("hello", source="test")
     process = wait_for_process(processes)
-    assert popen_kwargs[0]["env"] == env, popen_kwargs
+    assert popen_args[0] == ["/fake/omp-new", "--mode", "rpc"], popen_args
+    assert popen_kwargs[0]["env"] == refreshed_env, popen_kwargs
     set_model = wait_for_rpc_write(process, lambda frame: frame.get("type") == "set_model")
     prompt = wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt")
-    assert set_model["provider"] == "ga-tui-beta", set_model
+    assert set_model["provider"] == "ga-tui-beta-new", set_model
     assert set_model["modelId"] == "model-beta", set_model
     assert process.stdin.writes.index(set_model) < process.stdin.writes.index(prompt), process.stdin.writes
 
@@ -4448,7 +4485,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
 def assert_persistent_agent_dashboard_home_pages() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
     retarget_harness(root)
-    state = a.State(agent=ContextFakeAgent())
+    state = a.State(agent=FakeAgent())
     state.running = True
 
     assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
@@ -4475,6 +4512,17 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert a.display_scope_key(state) == "home:main"
     assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
     assert state.selected_session == "main", state.selected_session
+    assert a.show_home_for_current_scope(state) == "已打开主 agent 主页。"
+    assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
+
+    a.submit(state, "hello from main home")
+    assert state.selected_session == "main", state.selected_session
+    assert state.agent.prompts == [("hello from main home", "user")], state.agent.prompts
+    assert a.display_scope_key(state) == "session:main"
+    drain_ui(state)
+    assert state.status == "idle", state.status
+    assert state.selected_session == "main", state.selected_session
+    assert a.display_scope_key(state) == "session:main"
     assert a.show_home_for_current_scope(state) == "已打开主 agent 主页。"
     assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
 
@@ -4534,6 +4582,7 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert approval_id not in home_text, home_text
 
     a.submit(state, "hello from home")
+    assert state.selected_session == a.subagent_home_session_key(sub.agent_id), state.selected_session
     assert sub.agent.prompts == [], sub.agent.prompts
     assert "/chat" in state.last_error, state.last_error
     assert a.switch_home_to_chat(state) == f"已切到代理聊天：{sub.name}"
@@ -5790,6 +5839,20 @@ def run_checks() -> None:
         ok_probe, added_models, probe_msg = a.probe_and_merge_models(llm_entries[0], llm_entries)
         assert ok_probe, probe_msg
         assert [entry.cfg["model"] for entry in added_models] == ["model-gamma"], added_models
+        manual_entry = a.LLMConfigEntry(
+            "native_oai_config_2",
+            "native_oai",
+            {"name": "manual", "apikey": "k", "apibase": "https://manual.example.invalid/v1", "model": "model-manual"},
+        )
+        ok_manual, saved_manual, manual_msg = a.manual_entry_after_probe_failure(manual_entry, llm_entries, "HTTP 404")
+        assert ok_manual, manual_msg
+        assert saved_manual is not None
+        assert saved_manual.cfg["model"] == "model-manual", saved_manual
+        assert "/models 提取失败" in manual_msg, manual_msg
+        ok_manual, saved_manual, manual_msg = a.manual_entry_after_probe_failure(llm_entries[0], llm_entries, "HTTP 404")
+        assert not ok_manual
+        assert saved_manual is None
+        assert "已存在" in manual_msg, manual_msg
     finally:
         a.probe_models_for_config = old_probe_models
     old_config_providers = a.CONFIG_PROVIDERS

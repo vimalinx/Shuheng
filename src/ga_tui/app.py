@@ -12469,6 +12469,7 @@ def reload_agent_llms(state: State, *, preserve_current: bool = False) -> tuple[
     try:
         log_path = getattr(state.agent, "log_path", "")
         current_name = agent_current_backend_name(state.agent) if preserve_current else ""
+        refresh_msg = refresh_agent_runtime_model_config(state.agent)
         state.agent.load_llm_sessions()
         target_index = 0
         if preserve_current and current_name:
@@ -12478,7 +12479,9 @@ def reload_agent_llms(state: State, *, preserve_current: bool = False) -> tuple[
                     break
         ok, msg = set_agent_llm_index(state.agent, target_index)
         set_agent_log_path(state.agent, log_path)
-        return (ok, msg) if ok else (False, msg)
+        if not ok:
+            return False, msg
+        return True, f"{refresh_msg}{msg}" if refresh_msg else msg
     except Exception as exc:
         return False, f"重载模型失败: {type(exc).__name__}: {exc}"
 
@@ -13210,6 +13213,23 @@ def build_ohmypi_runtime_config(*, write_files: bool = True, base_env: Optional[
         models_path=paths["models_path"],
         approval_mode=approval_mode,
     )
+
+
+def refresh_agent_runtime_model_config(agent: Any) -> str:
+    if agent is None or not is_ohmypi_runtime_agent(agent):
+        return ""
+    refresh = getattr(agent, "refresh_configured_models", None)
+    if not callable(refresh):
+        return ""
+    runtime_config = build_ohmypi_runtime_config(write_files=True)
+    append_prompt_path = write_ohmypi_memory_prompt(root_dir=SHUHENG_HOME, harness_dir=AGENT_HARNESS_DIR)
+    command = ohmypi_rpc_command(
+        append_system_prompt=append_prompt_path,
+        model=runtime_config.default_model,
+        approval_mode=runtime_config.approval_mode,
+    )
+    refresh(runtime_config.models, env=runtime_config.env, command=command)
+    return f"OMP runtime 模型配置已刷新（{len(runtime_config.models)} 个模型）。"
 
 
 def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeRegistry:
@@ -20007,7 +20027,7 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
         sub = selected_home_subagent(state)
         safe_add(stdscr, footer_y, x0, f"Agent home: {sub.agent_id}; /chat 切到聊天；主页只读显示共享账本/定时任务/artifact", main_w, cp(1))
     elif is_main_home_session_key(state.selected_session):
-        safe_add(stdscr, footer_y, x0, "Home: 主 agent 主页；直接输入给主 agent；/chat 切到聊天视图", main_w, cp(1))
+        safe_add(stdscr, footer_y, x0, "Home: 主 agent 主页；输入任务会进入任务界面；/tasks /schedules /approvals /artifacts 打开面板", main_w, cp(1))
     elif selected_subagent(state) is not None:
         sub = selected_subagent(state)
         safe_add(stdscr, footer_y, x0, f"SubAgent chat: {sub.agent_id}; 输入直接发给 {sub.name}; /agent ask 才委派任务; 右侧主 agent 返回", main_w, cp(1))
@@ -21593,6 +21613,37 @@ def probe_and_merge_models(base_entry: LLMConfigEntry, entries: list[LLMConfigEn
     return True, added, probe_msg
 
 
+def manual_entry_after_probe_failure(
+    base_entry: LLMConfigEntry,
+    entries: list[LLMConfigEntry],
+    probe_msg: str,
+) -> tuple[bool, Optional[LLMConfigEntry], str]:
+    model = str(base_entry.cfg.get("model") or "").strip()
+    apibase = str(base_entry.cfg.get("apibase") or "").strip()
+    if not model:
+        return False, None, f"{probe_msg}；未填写 Model，无法按手填模型保存。"
+    if not apibase:
+        return False, None, f"{probe_msg}；Base URL 为空，无法保存为可用供应商。"
+    target_pair = (endpoint_base(apibase), model)
+    for entry in entries:
+        pair = (endpoint_base(str(entry.cfg.get("apibase") or "")), str(entry.cfg.get("model") or "").strip())
+        if pair == target_pair:
+            return False, None, f"{probe_msg}；手填模型 {model} 已存在，未重复保存。"
+    var_name = base_entry.var_name or unique_config_var_name(entries, base_entry.cfg_type)
+    if any(entry.var_name == var_name for entry in entries):
+        var_name = unique_config_var_name(entries, base_entry.cfg_type)
+    cfg = dict(base_entry.cfg)
+    cfg["model"] = model
+    cfg["apibase"] = apibase
+    if str(cfg.get("name") or "").strip():
+        cfg["name"] = str(cfg["name"]).strip()
+    return (
+        True,
+        LLMConfigEntry(var_name, base_entry.cfg_type, cfg),
+        f"{probe_msg} /models 提取失败，已按手填 Model 保存；可按 t 测试，按 Enter 切换当前对话。",
+    )
+
+
 def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> None:
     clear_selection(state)
     old_timeout = TUI_POLL_TIMEOUT_MS
@@ -21711,7 +21762,16 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                     continue
                 ok_probe, added, probe_msg = probe_result
                 if not ok_probe:
-                    message = probe_msg
+                    ok_manual, manual_entry, manual_msg = manual_entry_after_probe_failure(new_entry, entries, probe_msg)
+                    if not ok_manual or manual_entry is None:
+                        message = manual_msg
+                        continue
+                    entries.append(manual_entry)
+                    selected = len(entries) - 1
+                    active_category = model_entry_category(entries[selected])
+                    recent_names = load_recent_model_names(entries)
+                    _ok_save, persist_msg = save_model_manager_entries(state, entries, mixin, preserved)
+                    message = f"{manual_msg}{persist_msg}"
                     continue
                 if added:
                     entries.extend(added)
@@ -23138,7 +23198,8 @@ def submit(state: State, text: str) -> None:
         queue_user_input_for_current_step(state, text)
         return
 
-    start_main_agent_task(
+    switch_to_main_task = is_main_home_session_key(state.selected_session)
+    started = start_main_agent_task(
         state,
         text,
         source="user",
@@ -23146,6 +23207,8 @@ def submit(state: State, text: str) -> None:
         remember_user=True,
         clear_history=True,
     )
+    if started and switch_to_main_task:
+        set_selected_interface(state, "main")
 
 
 def queue_subagent_task(
