@@ -14,6 +14,7 @@ except Exception:
 TUI_CONTROL_RE = re.compile(r"(?<!`)<ga[-_]control>\s*([\s\S]*?)\s*</ga[-_]control>", re.IGNORECASE)
 TUI_CONTROL_FENCE_RE = re.compile(r"```ga[-_]control\s*([\s\S]*?)```", re.IGNORECASE)
 TUI_CONTROL_JSON_FENCE_RE = re.compile(r"```(?:json|js|javascript|code)?[ \t]*\n([\s\S]*?)(?:^```|\Z)", re.IGNORECASE | re.MULTILINE)
+TUI_GENERIC_CODE_FENCE_RE = re.compile(r"```[^\n`]*\n[\s\S]*?(?:^```[ \t]*(?:\n|\Z)|\Z)", re.MULTILINE)
 
 GA_CONTROL_SCHEMA = "ga-control.v2"
 AGENT_TASK_SCHEMA = "agenttask.v2"
@@ -403,9 +404,56 @@ def controls_from_json_text(raw: str, *, require_known: bool = False) -> list[di
     return controls_from_json_payload(payload, require_known=require_known)
 
 
+def _code_fence_spans(text: str) -> list[tuple[int, int]]:
+    return [match.span() for match in TUI_GENERIC_CODE_FENCE_RE.finditer(text or "")]
+
+
+def _outside_code_fence_regions(text: str) -> list[tuple[int, int]]:
+    regions: list[tuple[int, int]] = []
+    cursor = 0
+    for start, end in _code_fence_spans(text):
+        if cursor < start:
+            regions.append((cursor, start))
+        cursor = max(cursor, end)
+    if cursor < len(text):
+        regions.append((cursor, len(text)))
+    return regions
+
+
+def _tag_control_blocks_outside_code_fences(text: str) -> list[str]:
+    blocks: list[str] = []
+    for start, end in _outside_code_fence_regions(text or ""):
+        blocks.extend(TUI_CONTROL_RE.findall((text or "")[start:end]))
+    return blocks
+
+
+def _executable_control_blocks(text: str) -> list[str]:
+    text = text or ""
+    return _tag_control_blocks_outside_code_fences(text) + TUI_CONTROL_FENCE_RE.findall(text)
+
+
+def _sub_outside_code_fences(pattern: re.Pattern[str], repl: str, text: str) -> str:
+    text = text or ""
+    if not text:
+        return ""
+    spans = _code_fence_spans(text)
+    if not spans:
+        return pattern.sub(repl, text)
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        if cursor < start:
+            pieces.append(pattern.sub(repl, text[cursor:start]))
+        pieces.append(text[start:end])
+        cursor = end
+    if cursor < len(text):
+        pieces.append(pattern.sub(repl, text[cursor:]))
+    return "".join(pieces)
+
+
 def tui_control_parse_errors(text: str, *, allow_json_fences: bool = False) -> list[str]:
     errors: list[str] = []
-    blocks = TUI_CONTROL_RE.findall(text or "") + TUI_CONTROL_FENCE_RE.findall(text or "")
+    blocks = _executable_control_blocks(text or "")
     if allow_json_fences:
         blocks.extend(TUI_CONTROL_JSON_FENCE_RE.findall(text or ""))
     for raw in blocks:
@@ -430,7 +478,7 @@ def extract_tui_controls(text: str, *, allow_json_fences: bool = False) -> list[
             seen.add(signature)
             controls.append(control)
 
-    for raw in TUI_CONTROL_RE.findall(text or "") + TUI_CONTROL_FENCE_RE.findall(text or ""):
+    for raw in _executable_control_blocks(text or ""):
         add(raw)
     if allow_json_fences:
         for raw in TUI_CONTROL_JSON_FENCE_RE.findall(text or ""):
@@ -447,9 +495,9 @@ def strip_tui_controls(text: str, *, allow_json_fences: bool = False) -> str:
                 return ""
             return match.group(0)
         text = TUI_CONTROL_JSON_FENCE_RE.sub(strip_json_control_fence, text)
-    text = TUI_CONTROL_RE.sub("", text)
+    text = _sub_outside_code_fences(TUI_CONTROL_RE, "", text)
     text = TUI_CONTROL_FENCE_RE.sub("", text)
     text = strip_retired_tui_markup(text)
-    text = re.sub(r"(?<!`)<ga[-_]control>[\s\S]*$", "", text, flags=re.IGNORECASE)
+    text = _sub_outside_code_fences(re.compile(r"(?<!`)<ga[-_]control>[\s\S]*$", re.IGNORECASE), "", text)
     text = re.sub(r"```ga[-_]control[\s\S]*$", "", text, flags=re.IGNORECASE)
     return text.strip()

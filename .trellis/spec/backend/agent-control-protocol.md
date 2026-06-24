@@ -252,6 +252,7 @@ S01 修复左栏历史会话标题
   - optional `markdown`
 - Supported section types are `function`, `status_narrative`, `todos`, `schedules`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - Shuheng owns the fixed top status card. Agent declarations may control lower-page section order, labels, bounded Markdown, status narrative, and todo text.
+- The fixed top status card must render as an authored status layout, not a flat list of equal-weight label/value lines. It should keep a title, status narrative, grouped metrics, and grouped runtime/governance details so the user can scan current state, workload, ownership, and next context separately.
 - Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Plain text input on a persistent-agent home does not start direct chat; the user must switch with `/chat`. Main home may still accept normal main-agent input.
@@ -268,6 +269,7 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows status, function, todos, schedules, tasks, artifacts, and approvals from shared registries.
+- Good: The fixed status card uses a composed layout with `指标` and `运行与治理` groups; it does not render as `- 状态`, `- ID`, `- 默认模型` flat rows.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
 - Base: `/chat` from a persistent-agent home switches to the agent chat session without changing the stored dashboard declaration.
 - Bad: Treating a home key as a path for `selected` history operations.
@@ -277,6 +279,7 @@ S01 修复左栏历史会话标题
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
+- Tests must assert the main and persistent-agent fixed status cards keep structured status-card sections instead of flat label/value rows.
 - Tests must assert persistent-agent home rendering includes shared task, schedule, artifact, and approval rows.
 - Tests must assert temporary agents do not persist dashboard declarations.
 - Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
@@ -574,9 +577,11 @@ token panel -> OMP get_state.contextUsage
 - `delegate.create` must carry `routing`, `work_order`, `capability_contract`, `context_contract`, and `output_contract`.
 - `delegate.create.work_order.objective` is the policy-gate source of truth. Capability fields such as `tools_forbidden:["deploy","email.send"]` must not trigger deployment or external-send approval by themselves.
 - `agent.create` is ephemeral by default. Long-running, scheduled, recurring, or dedicated responsibilities must be expressed with explicit structured fields such as `lifecycle:"persistent"` or `persistent:true`; the runtime must not infer lifecycle from `name`, `profile`, visible prose, or other natural-language descriptions.
+- `main_orchestrator` is reserved for the main Shuheng runtime only. Any subagent creation, subagent role update, subagent command parsing, or loaded subagent metadata that requests `main_orchestrator` must normalize the subagent role to `specialist` and surface a bounded user-visible note instead of creating a main-orchestrator subagent.
 - Reuse intent must be explicit. `reuse_policy:"force_new"` / `force_new:true` forces a new agent; visible prose such as "do not reuse" is not a runtime signal unless the model also emits the structured field.
 - Plan binding must be explicit. Controls that belong to a plan step must carry `plan_step_id`, `parent_task_id`, or an equivalent explicit step reference; the runtime must not bind steps by matching words like "self-introduction", "chat", or "summary".
 - Executable `<ga-control>` blocks are only for real operations. Capability explanations, tutorials, and examples must not include literal executable tags; use escaped text such as `&lt;ga-control&gt;...&lt;/ga-control&gt;` or show only the JSON payload.
+- Literal `<ga-control>` snippets inside ordinary Markdown/code/tool-output fences are display text, not executable control blocks, and must not emit parse-error system messages. Only top-level hidden tags, explicit `ga-control` fences, and opt-in JSON recovery fences are executable.
 - Automatic current-session title maintenance is an allowed `session.rename` control exception: the main runtime may emit it at the end of a normal reply when the title is stale or misleading, and must stay silent when the title is already accurate.
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
@@ -593,7 +598,10 @@ token panel -> OMP get_state.contextUsage
 - Previous system hint block present in a backend extra prompt -> removed before the current hint is installed.
 - Current hint already present in a backend extra prompt -> do not append another copy.
 - Invalid JSON -> ignored.
+- Invalid JSON inside an ordinary code/tool-output fence -> ignored as display text without a parse-error system message.
 - `agent.create` with explicit lifecycle markers such as `lifecycle:"ephemeral"` / `temporary:true` -> creates an ephemeral session agent.
+- `agent.create` with `role:"main_orchestrator"` -> creates a bounded `specialist` subagent with a note that `main_orchestrator` is main-runtime only.
+- `agent.role.update` or `/agent role ... main_orchestrator` -> never assigns `main_orchestrator` to a subagent; the requested role is normalized to `specialist`.
 - `agent.create` with recurring/daily/archive-building responsibility language but without explicit persistent lifecycle fields -> remains ephemeral.
 - `agent.create` with `lifecycle:"persistent"` / `persistent:true` -> creates a persistent subagent under `SUBAGENTS_DIR`.
 - `ga-control` JSON that only misses trailing `}` / `]` closers -> repair the missing tail and execute if it parses into known actions.
@@ -608,6 +616,8 @@ token panel -> OMP get_state.contextUsage
 
 - Good: Batch envelope creates a plan, creates a researcher, then delegates with full routing/work/output contracts.
 - Good: A user asks "what can subagents do?" and the assistant answers in visible prose without emitting `<ga-control>`.
+- Good: A search result shows source code containing `f'<ga-control>{{...` inside a `python` fence; Shuheng keeps it as text and emits no parse-error control result.
+- Good: A model mistakenly requests `role:"main_orchestrator"` for a persistent subagent; Shuheng creates a `specialist` subagent and reports that the main-orchestrator role is reserved.
 - Base: Single `agenttask.v2` action in a JSON fence is extracted only when the action is known.
 - Bad: A visible "example" section contains a literal `<ga-control>` block; the runtime will execute and strip it, leaving the section blank.
 - Base: A visible diagnosis says `` `<ga-control>` 标签没正确闭合 `` and then appends a real `<ga-control>{...}</ga-control>` block; the inline label is display text only.
@@ -620,6 +630,8 @@ token panel -> OMP get_state.contextUsage
 - Quarantine checks may assert that historical hidden markup is stripped but must not treat it as an executable protocol.
 - `scripts/check_policy_gates.py` must assert common missing-tail JSON repair for `<ga-control>` and visible parse-error reporting for unrepairable control JSON.
 - `scripts/check_policy_gates.py` must assert inline-code `<ga-control>` labels do not capture later real control blocks.
+- `scripts/check_policy_gates.py` must assert ordinary code/tool-output fences containing literal `<ga-control>` examples are not extracted, stripped, or reported as parse errors.
+- `scripts/check_policy_gates.py` must assert subagent creation, `/agent new` role parsing, role updates, saved metadata, and loaded metadata normalize `main_orchestrator` to `specialist` for subagents while preserving the main runtime's `main_orchestrator` role.
 - `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `ga_tui.control_protocol` and that the protocol module does not import curses.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py scripts/check_policy_gates.py` must pass.
 - `python3 scripts/check_policy_gates.py` must pass.

@@ -4264,8 +4264,77 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert len(lifecycle_matches) == 2, [(sub.agent_id, sub.persistent) for sub in lifecycle_matches]
     assert {sub.persistent for sub in lifecycle_matches} == {False, True}, lifecycle_matches
 
+    assert a.normalized_role("main_orchestrator") == "main_orchestrator"
+    assert a.normalized_subagent_role("main_orchestrator") == "specialist"
+    parsed_name, parsed_profile, parsed_role, parsed_persistent, parsed_note = a.parse_subagent_new_body(
+        "persistent:main_orchestrator:留学生获客运营官 | 负责留学生获客运营。"
+    )
+    assert parsed_name == "留学生获客运营官", (parsed_name, parsed_role, parsed_note)
+    assert parsed_profile == "负责留学生获客运营。", parsed_profile
+    assert parsed_role == "specialist", parsed_role
+    assert parsed_persistent is True
+    assert "主 agent 专属角色" in parsed_note, parsed_note
+
+    a.apply_tui_controls_from_text(
+        state,
+        ga_control(create_agent_action("主控误用检查", persistent=True, role="main_orchestrator")),
+        source="agent",
+    )
+    bad_role_agent = a.resolve_subagent(state, "主控误用检查")
+    assert bad_role_agent is not None, state.subagents
+    assert bad_role_agent.role == "specialist", bad_role_agent
+    assert "主 agent 专属角色" in state.messages[-1].content, state.messages[-1].content
+    bad_role_meta = a.load_subagent_meta(bad_role_agent.agent_id)
+    assert bad_role_meta.get("role") == "specialist", bad_role_meta
+
+    secret_role_agent = a.SubAgentRuntime(
+        agent_id="agent-secret-role-check",
+        name="Secret Role Check",
+        home="secret://subagents/agent-secret-role-check",
+        role="researcher",
+        persistent=True,
+        security_context="secret",
+        profile_text="role update check",
+    )
+    state.subagents[secret_role_agent.agent_id] = secret_role_agent
+    role_result = a.apply_subagent_control(
+        state,
+        "subagent_role",
+        secret_role_agent.agent_id,
+        "",
+        {"role": "main_orchestrator"},
+        source="agent",
+    )
+    assert secret_role_agent.role == "specialist", secret_role_agent
+    assert role_result and "主 agent 专属角色" in role_result, role_result
+
+    bad_role_agent.role = "main_orchestrator"
+    a.save_subagent_meta(bad_role_agent)
+    polluted_meta = a.load_subagent_meta(bad_role_agent.agent_id)
+    polluted_meta["role"] = "main_orchestrator"
+    a.write_text_atomic(a.subagent_meta_file(bad_role_agent), json.dumps(polluted_meta, ensure_ascii=False))
+    state.subagents = {}
+    assert a.load_subagents(state) is True
+    reloaded_bad_role_agent = a.resolve_subagent(state, bad_role_agent.agent_id)
+    assert reloaded_bad_role_agent is not None, state.subagents
+    assert reloaded_bad_role_agent.role == "specialist", reloaded_bad_role_agent
+    dirty_runtime_agent = a.SubAgentRuntime(
+        agent_id="agent-dirty-main-role",
+        name="Dirty Main Role",
+        home="/tmp/agent-dirty-main-role",
+        role="main_orchestrator",
+        persistent=True,
+    )
+    dirty_record = a.tui_query_agent_record(dirty_runtime_agent, detail=True)
+    assert dirty_record["role"] == "specialist", dirty_record
+    assert dirty_record["permissions"]["role"] == "specialist", dirty_record
+    dirty_card = a.a2a_agent_card_for_subagent(dirty_runtime_agent)
+    assert dirty_card["role"] == "specialist", dirty_card
+    assert dirty_card["permissions"]["role"] == "specialist", dirty_card
+
     assert "schema_version:\"ga-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
     assert "agent.delete" in a.TUI_AGENT_CONTROL_HINT
+    assert "当前主控 runtime 专属 role" in a.TUI_AGENT_CONTROL_HINT
     assert "TUI 不会从 name/profile 自然语言里猜生命周期" in a.TUI_AGENT_CONTROL_HINT
     assert "TUI 不会从可见正文里猜复用策略" in a.TUI_AGENT_CONTROL_HINT
     assert "delegate.create" in a.TUI_AGENT_CONTROL_HINT
@@ -4305,6 +4374,19 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     non_control_json = "```json\n{\"note\":\"not a TUI action\"}\n```"
     assert a.extract_tui_controls(non_control_json, allow_json_fences=True) == []
     assert a.strip_tui_controls(non_control_json, allow_json_fences=True) == non_control_json
+    code_snippet_with_control_example = (
+        "搜索结果里出现源码示例：\n"
+        "```python\n"
+        "example = f'<ga-control>{{\"schema_version\":\"ga-control.v2\",\"actions\":[{{\"action\":\"agent.create\"}}]}}</ga-control>'\n"
+        "```\n"
+        "这只是展示，不是执行。"
+    )
+    assert a.extract_tui_controls(code_snippet_with_control_example) == []
+    assert a.tui_control_parse_errors(code_snippet_with_control_example) == []
+    assert "<ga-control>" in a.strip_tui_controls(code_snippet_with_control_example), code_snippet_with_control_example
+    code_snippet_message_count = len(state.messages)
+    a.apply_tui_controls_from_text(state, code_snippet_with_control_example, source="agent")
+    assert len(state.messages) == code_snippet_message_count, state.messages[-3:]
 
     long_running_create = ga_control({
         "action": "agent.create",
@@ -4372,6 +4454,10 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
     main_lines = [line.text for line in a.home_lines(state, 100)]
     assert any("Shuheng 主 agent 主页" in line for line in main_lines), main_lines
+    assert any("╭─ 主控运行概览" in line for line in main_lines), main_lines
+    assert any(line == "├─ 指标" for line in main_lines), main_lines
+    assert any(line == "├─ 运行与治理" for line in main_lines), main_lines
+    assert not any(line.startswith("- 状态:") for line in main_lines[:14]), main_lines[:14]
     assert any("功能描述" in line for line in main_lines), main_lines
     assert any("待审批" in line for line in main_lines), main_lines
     assert a.display_scope_key(state) == "home:main"
@@ -4415,6 +4501,10 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     home_text = "\n".join(line.text for line in a.home_lines(state, 100))
     assert "Dashboard Agent 主页" in home_text, home_text
     assert "固定状态卡" in home_text, home_text
+    assert "╭─ Dashboard Agent / researcher" in home_text, home_text
+    assert "├─ 指标" in home_text, home_text
+    assert "├─ 运行与治理" in home_text, home_text
+    assert "- ID:" not in home_text.split("## 功能描述", 1)[0], home_text
     assert "主页任务" in home_text, home_text
     assert "主页巡检" in home_text, home_text
     assert "artifact://" in home_text, home_text

@@ -4466,6 +4466,21 @@ def normalized_role(role: str) -> str:
     return role if role in ROLE_TEMPLATES else "specialist"
 
 
+def normalized_subagent_role(role: str) -> str:
+    role = normalized_role(role)
+    if role == "main_orchestrator":
+        return "specialist"
+    return role
+
+
+def subagent_role_request(role: str) -> tuple[str, str]:
+    requested = clean_subagent_id(role or "specialist").replace("-", "_")
+    normalized = normalized_subagent_role(role)
+    if requested == "main_orchestrator":
+        return normalized, "main_orchestrator 是主 agent 专属角色，子 agent 已使用 specialist。"
+    return normalized, ""
+
+
 def role_template(role: str) -> dict[str, Any]:
     return dict(ROLE_TEMPLATES.get(normalized_role(role), ROLE_TEMPLATES["specialist"]))
 
@@ -5196,15 +5211,16 @@ def subagent_task_schema_kwargs(
     *,
     decision: Optional[PolicyDecision] = None,
 ) -> dict[str, Any]:
-    contract = task_contract_for_role(sub.role, objective)
+    role = normalized_subagent_role(sub.role)
+    contract = task_contract_for_role(role, objective)
     action = decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, objective)
     return {
-        "budget": default_task_budget(sub.role),
+        "budget": default_task_budget(role),
         "stop_condition": str(contract.get("stop_condition") or ""),
         "boundaries": list(contract.get("boundaries") or []),
-        "permissions": permissions_for_role(sub.role, security_context=sub.security_context),
+        "permissions": permissions_for_role(role, security_context=sub.security_context),
         "context_policy": context_policy_for_task(objective, security_context=sub.security_context),
-        "risks": risks_for_action(action, sub.role, objective),
+        "risks": risks_for_action(action, role, objective),
         "approval": approval_metadata(decision=decision) if decision is not None else approval_metadata(),
         "output_contract": dict(contract.get("output_contract") or {}),
         "non_goals": list(contract.get("non_goals") or []),
@@ -5284,9 +5300,10 @@ def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> 
     for action, tokens in checks:
         if any(token in text for token in tokens):
             return action
-    if sub.role == "ops" and any(token in text for token in ("sudo", "root", "systemctl", "pacman", "docker", "firewall", "ufw", "iptables", "内核", "服务", "重启")):
+    role = normalized_subagent_role(sub.role)
+    if role == "ops" and any(token in text for token in ("sudo", "root", "systemctl", "pacman", "docker", "firewall", "ufw", "iptables", "内核", "服务", "重启")):
         return "long_running_privilege_escalation"
-    if role_write_policy(sub.role) == "single_writer":
+    if role_write_policy(role) == "single_writer":
         return "repo_write"
     return "read_only"
 
@@ -5306,7 +5323,7 @@ def policy_gate_for_subagent_task(
     decision = evaluate_policy_action(
         action,
         subject=sub.agent_id,
-        role=sub.role,
+        role=normalized_subagent_role(sub.role),
         source=source,
         target=sub.agent_id,
         payload={
@@ -5479,7 +5496,7 @@ def acquire_single_writer_lock(sub: SubAgentRuntime, task_id: str, objective: st
         "task_id": task_id,
         "agent_id": sub.agent_id,
         "agent_name": sub.name,
-        "role": sub.role,
+        "role": normalized_subagent_role(sub.role),
         "objective": truncate_cells(objective, 240),
         "acquired_at": now_iso(),
     }
@@ -5755,7 +5772,7 @@ def append_task_checkpoint(
         sub_snapshot = {
             "agent_id": sub.agent_id,
             "name": sub.name,
-            "role": sub.role,
+            "role": normalized_subagent_role(sub.role),
             "status": sub.status,
             "active_task_id": sub.active_task_id,
             "active_bus_task_id": sub.active_bus_task_id,
@@ -5890,12 +5907,13 @@ def append_trace(task_id: str, event: str, *, agent_id: str = "", status: str = 
 
 
 def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, artifact_ref: str = "") -> dict[str, Any]:
+    role = normalized_subagent_role(sub.role)
     clean = clean_text(display_text)
     audit_refs = collect_task_audit_refs(task_id)
     if artifact_ref and artifact_ref not in audit_refs["artifacts"]:
         audit_refs["artifacts"].append(artifact_ref)
     task_row = latest_task_records().get(task_id, {})
-    budget = task_row.get("budget") if isinstance(task_row.get("budget"), dict) else default_task_budget(sub.role)
+    budget = task_row.get("budget") if isinstance(task_row.get("budget"), dict) else default_task_budget(role)
     max_tools = max(1, int(budget.get("max_tool_calls") or 1))
     tool_calls = len(audit_refs["tool_calls"])
     approval_count = len(audit_refs["approvals"])
@@ -5904,7 +5922,7 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
     source_quality = bounded_score(0.85 if artifact_count else 0.4)
     factual_accuracy = bounded_score(0.78 if artifact_count else (0.55 if clean.strip() else 0.0))
     tool_efficiency = bounded_score(1.0 - min(tool_calls / max_tools, 1.0) * 0.25)
-    policy_compliance = bounded_score(0.85 if approval_count and sub.role in {"coder", "ops"} else 1.0)
+    policy_compliance = bounded_score(0.85 if approval_count and role in {"coder", "ops"} else 1.0)
     human_takeover_cost = bounded_score(min(1.0, approval_count / 3.0))
     row = {
         "schema_version": "agenteval.v2",
@@ -5913,7 +5931,7 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
         "context_id": "ga-tui",
         "timestamp": now_iso(),
         "agent_id": sub.agent_id,
-        "role": sub.role,
+        "role": role,
         "scores": {
             "completion": 1.0 if clean.strip() else 0.0,
             "factual_accuracy": factual_accuracy,
@@ -5924,7 +5942,7 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
             "human_takeover_cost": human_takeover_cost,
             "evidence_quality": 0.85 if artifact_count else 0.45,
             "artifact_recorded": 1.0 if artifact_ref else 0.0,
-            "needs_review": 1.0 if approval_count or sub.role in {"coder", "ops"} else 0.0,
+            "needs_review": 1.0 if approval_count or role in {"coder", "ops"} else 0.0,
         },
         "audit_refs": audit_refs,
         "coverage": {
@@ -5941,7 +5959,7 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
             "has_evidence": bool(artifact_count),
             "has_citation": bool(artifact_count),
             "has_risk_signal": bool(approval_count),
-            "requires_review": bool(approval_count or sub.role in {"coder", "ops"}),
+            "requires_review": bool(approval_count or role in {"coder", "ops"}),
         },
         "policy": {
             "approval_count": approval_count,
@@ -6014,9 +6032,10 @@ def append_orchestrator_plan(
     error: str = "",
 ) -> dict[str, Any]:
     objective = objective or ""
+    role = normalized_subagent_role(sub.role)
     action = decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, objective)
     schema = subagent_task_schema_kwargs(sub, objective, decision=decision)
-    contract = task_contract_for_role(sub.role, objective)
+    contract = task_contract_for_role(role, objective)
     approval = schema["approval"]
     approval_required = []
     if decision is not None and decision.approval_required:
@@ -6025,12 +6044,12 @@ def append_orchestrator_plan(
         approval_required = list(approval.get("approval_required_for") or [])
     delegation_contract = {
         "agent_id": sub.agent_id,
-        "role": normalized_role(sub.role),
+        "role": role,
         "objective": objective,
         "budget": schema["budget"],
         "permissions": schema["permissions"],
         "context_policy": schema["context_policy"],
-        "source_policy": source_policy_for_role(sub.role, security_context=sub.security_context),
+        "source_policy": source_policy_for_role(role, security_context=sub.security_context),
         "task": {
             "objective": objective,
             "non_goals": list(contract.get("non_goals") or []),
@@ -6043,7 +6062,7 @@ def append_orchestrator_plan(
         "approval": approval,
         "stop_condition": schema["stop_condition"],
     }
-    route_pattern = "single_writer_code_squad" if role_write_policy(sub.role) == "single_writer" else "agent_as_tool"
+    route_pattern = "single_writer_code_squad" if role_write_policy(role) == "single_writer" else "agent_as_tool"
     row = {
         "schema_version": "orchestrator.plan.v1",
         "plan_id": short_uid("plan"),
@@ -6064,7 +6083,7 @@ def append_orchestrator_plan(
         "split_reason": "A bounded subagent gets an isolated context pack while the Orchestrator keeps routing, approval, and synthesis responsibility.",
         "architecture_pattern": "orchestrator_worker",
         "task_plan": [
-            {"step": "route", "status": "done", "detail": f"Selected {sub.agent_id} as {normalized_role(sub.role)}."},
+            {"step": "route", "status": "done", "detail": f"Selected {sub.agent_id} as {normalized_subagent_role(sub.role)}."},
             {"step": "gate", "status": "done" if status != "approval_required" else "waiting", "detail": f"Policy action: {action}."},
             {"step": "hydrate_context", "status": "done" if context_ref else "pending", "artifact_ref": context_ref},
             {"step": "delegate", "status": status, "detail": "Run only inside the recorded delegation contract."},
@@ -6073,7 +6092,7 @@ def append_orchestrator_plan(
         "routing_decision": {
             "mode": route_pattern,
             "selected_agent": sub.agent_id,
-            "selected_role": normalized_role(sub.role),
+            "selected_role": normalized_subagent_role(sub.role),
             "policy_action": action,
             "reason": "Use controlled delegation instead of free-form agent chat.",
             "alternatives_considered": ["single_agent", "handoff", "a2a_team"],
@@ -6206,7 +6225,9 @@ def context_layers_for_task(
     memory_pack: dict[str, Any],
     layered_memory: Optional[dict[str, Any]] = None,
     workspace_context: Optional[dict[str, Any]] = None,
+    role: str = "",
 ) -> dict[str, Any]:
+    role = normalized_role(role) if role else normalized_subagent_role(sub.role)
     layered_memory = layered_memory or shuheng_layered_memory_payload()
     workspace_context = workspace_context or {}
     if sub.security_context == "secret":
@@ -6265,7 +6286,7 @@ def context_layers_for_task(
             "included": True,
             "objective": objective,
             "task": task_contract,
-            "source_policy": source_policy_for_role(sub.role, security_context=sub.security_context),
+            "source_policy": source_policy_for_role(role, security_context=sub.security_context),
         },
         "L4_plan_ledger": {
             "included": True,
@@ -6316,14 +6337,16 @@ def build_context_pack(
     parent_task_id: str = "",
     *,
     permission_profile: str = PERMISSION_PROFILE_STANDARD,
+    role_override: str = "",
 ) -> tuple[dict[str, Any], str]:
-    template = role_template(sub.role)
+    role = normalized_role(role_override) if role_override else normalized_subagent_role(sub.role)
+    template = role_template(role)
     profile = subagent_profile_text(sub).strip()
     memory = subagent_memory_text(sub).strip() if sub.persistent else ""
     recent_mail = [] if sub.security_context == "secret" else read_jsonl(AGENT_MAIL_PATH, limit=8)
-    task_contract = task_contract_for_role(sub.role, objective)
+    task_contract = task_contract_for_role(role, objective)
     context_policy = context_policy_for_task(objective, security_context=sub.security_context)
-    permissions = permissions_for_role(sub.role, security_context=sub.security_context, permission_profile=permission_profile)
+    permissions = permissions_for_role(role, security_context=sub.security_context, permission_profile=permission_profile)
     layered_memory = shuheng_layered_memory_payload()
     workspace_context = workspace_context_payload(security_context=sub.security_context)
     memory_pack = memory_hydration_pack(
@@ -6347,6 +6370,7 @@ def build_context_pack(
         memory_pack=memory_pack,
         layered_memory=layered_memory,
         workspace_context=workspace_context,
+        role=role,
     )
     pack = {
         "schema_version": "contextpack.v1",
@@ -6357,13 +6381,13 @@ def build_context_pack(
         "for_agent": {
             "id": sub.agent_id,
             "name": sub.name,
-            "role": sub.role,
+            "role": role,
             "home": sub.home,
             "security_context": sub.security_context,
         },
         "objective": objective,
         "role_template": template,
-        "budget": default_task_budget(sub.role),
+        "budget": default_task_budget(role),
         "permission_profile": permissions.get("permission_profile", PERMISSION_PROFILE_STANDARD),
         "permissions": permissions,
         "context_policy": context_policy,
@@ -6375,16 +6399,16 @@ def build_context_pack(
             "boundaries": task_contract.get("boundaries", []),
             "stop_condition": task_contract.get("stop_condition", ""),
             "output_contract": task_contract.get("output_contract", {}),
-            "source_policy": source_policy_for_role(sub.role, security_context=sub.security_context),
+            "source_policy": source_policy_for_role(role, security_context=sub.security_context),
         },
-        "source_policy": source_policy_for_role(sub.role, security_context=sub.security_context),
+        "source_policy": source_policy_for_role(role, security_context=sub.security_context),
         "layered_memory": layered_memory,
         "memory_pack": memory_pack,
         "workspace_context": workspace_context,
         "layers": layers,
-        "risks": risks_for_action("read_only", sub.role, objective),
+        "risks": risks_for_action("read_only", role, objective),
         "approval": approval_metadata(),
-        "output_contract": role_output_contract(sub.role),
+        "output_contract": role_output_contract(role),
         "profile_excerpt": profile[:4000],
         "memory_excerpt": memory[:4000],
         "recent_agent_mail_refs": [
@@ -6414,7 +6438,7 @@ def build_context_pack(
         path,
         artifact_type="context_pack",
         source_task_id=task_id,
-        provenance={"generated_by": "orchestrator.main", "for_agent": sub.agent_id, "role": sub.role},
+        provenance={"generated_by": "orchestrator.main", "for_agent": sub.agent_id, "role": role},
         content_type="application/json",
     )
     return pack, harness_artifact_uri(path)
@@ -6449,6 +6473,7 @@ def build_main_runtime_context_pack(
         task_id,
         parent_task_id=parent_task_id,
         permission_profile=permission_profile,
+        role_override="main_orchestrator",
     )
 
 
@@ -6694,7 +6719,8 @@ def a2a_part_from_text(text: str, *, metadata: Optional[dict[str, Any]] = None) 
 
 
 def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
-    permissions = permissions_for_role(sub.role, security_context=sub.security_context)
+    role = normalized_subagent_role(sub.role)
+    permissions = permissions_for_role(role, security_context=sub.security_context)
     return {
         "schema_version": "a2a.agent_card.v1",
         "agent_id": sub.agent_id,
@@ -6710,17 +6736,17 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
             "human_approval": True,
         },
         "auth": {"type": "local_runtime", "policy": "inherits TUI policy gate"},
-        "role": normalized_role(sub.role),
+        "role": role,
         "security_context": sub.security_context,
         "status": sub.status,
-        "skills": role_tools_allowed(sub.role),
-        "write_policy": role_write_policy(sub.role),
+        "skills": role_tools_allowed(role),
+        "write_policy": role_write_policy(role),
         "permissions": permissions,
         "input_modes": ["text/plain"],
         "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
         "examples": [
             {
-                "input": f"Delegate a bounded {normalized_role(sub.role)} task.",
+                "input": f"Delegate a bounded {role} task.",
                 "output": "summary, findings, evidence_refs, risks, artifact_refs, confidence",
             }
         ],
@@ -6873,9 +6899,9 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
         agents = [
             {
                 "agent_id": sub.agent_id,
-                "role": normalized_role(sub.role),
+                "role": normalized_subagent_role(sub.role),
                 "security_context": sub.security_context,
-                "capabilities_ref": f"capability://role/{normalized_role(sub.role)}",
+                "capabilities_ref": f"capability://role/{normalized_subagent_role(sub.role)}",
                 "status": sub.status,
                 "active_task_id": sub.active_bus_task_id,
             }
@@ -9683,7 +9709,7 @@ def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) ->
     meta = {
         "id": sub.agent_id,
         "name": sub.name,
-        "role": normalized_role(sub.role),
+        "role": normalized_subagent_role(sub.role),
         "default_model": sub.default_model,
         "security_context": "secret",
         "owner_session": sub.owner_session,
@@ -9729,7 +9755,7 @@ def save_subagent_meta(sub: SubAgentRuntime, state: Optional[State] = None, **fi
     meta.update({
         "id": sub.agent_id,
         "name": sub.name,
-        "role": normalized_role(sub.role),
+        "role": normalized_subagent_role(sub.role),
         "default_model": sub.default_model,
         "security_context": normalized_security_context(sub.security_context),
         "owner_session": sub.owner_session,
@@ -9814,7 +9840,7 @@ def load_secret_subagents(state: State) -> bool:
             continue
         agent_id = str(meta.get("id") or os.path.basename(path).removesuffix(".secret"))
         display_name = str(meta.get("name") or agent_id)
-        role = normalized_role(str(meta.get("role") or "specialist"))
+        role = normalized_subagent_role(str(meta.get("role") or "specialist"))
         default_model = str(meta.get("default_model") or "")
         owner_session = str(meta.get("owner_session") or "")
         persistent = bool(meta.get("persistent", True))
@@ -9887,7 +9913,7 @@ def load_subagents(state: State) -> bool:
             continue
         agent_id = str(meta.get("id") or os.path.basename(home))
         display_name = str(meta.get("name") or agent_id)
-        role = normalized_role(str(meta.get("role") or "specialist"))
+        role = normalized_subagent_role(str(meta.get("role") or "specialist"))
         default_model = str(meta.get("default_model") or "")
         security_context = normalized_security_context(str(meta.get("security_context") or "standard"))
         owner_session = str(meta.get("owner_session") or "")
@@ -9941,7 +9967,7 @@ def load_subagents(state: State) -> bool:
 
 def create_subagent(state: State, name: str, profile: str = "", role: str = "specialist", persistent: bool = True) -> SubAgentRuntime:
     name = (name or "").strip() or "subagent"
-    role = normalized_role(role)
+    role = normalized_subagent_role(role)
     security_context = "secret" if state.secret_vault.unlocked else "standard"
     if security_context == "secret":
         if not state.secret_vault.key:
@@ -10001,23 +10027,24 @@ def create_subagent(state: State, name: str, profile: str = "", role: str = "spe
 
 
 def subagent_prompt_block(sub: SubAgentRuntime) -> str:
+    role = normalized_subagent_role(sub.role)
     profile = subagent_profile_text(sub).strip()
     memory = subagent_memory_text(sub).strip() if sub.persistent else ""
-    template = role_template(sub.role)
+    template = role_template(role)
     return f"""
 [GA TUI SubAgent Profile]
 你是一个{'持久' if sub.persistent else '临时会话'}子 agent。
 Name: {sub.name}
 ID: {sub.agent_id}
-Role: {sub.role}
+Role: {role}
 Default model: {sub.default_model or "(global default)"}
 Security context: {sub.security_context}
 Home: {sub.home}
 Persistence: {'persistent' if sub.persistent else 'ephemeral-session'}
 Role description: {template.get("description", "")}
 Write policy: {template.get("write_policy", "none")}
-Tools allowed: {", ".join(role_tools_allowed(sub.role))}
-Output contract: {", ".join(role_output_contract(sub.role))}
+Tools allowed: {", ".join(role_tools_allowed(role))}
+Output contract: {", ".join(role_output_contract(role))}
 
 Profile:
 {profile or "(empty)"}
@@ -10555,7 +10582,7 @@ def append_subagent_memory(sub: SubAgentRuntime, text: str, source: str = "manua
         decision = evaluate_policy_action(
             "write_long_term_memory",
             subject=sub.agent_id,
-            role=sub.role,
+            role=normalized_subagent_role(sub.role),
             source=source,
             target=sub.agent_id,
             payload={
@@ -10855,7 +10882,7 @@ def resolve_subagent_exact(state: State, token: str) -> Optional[SubAgentRuntime
 def reusable_subagent_score(sub: SubAgentRuntime, name: str, profile: str, role: str) -> int:
     del profile
     requested_name = name or ""
-    requested_role = normalized_role(role)
+    requested_role = normalized_subagent_role(role)
     score = 0
     if requested_name and requested_name.strip().lower() == sub.agent_id.lower():
         score += 120
@@ -10865,7 +10892,7 @@ def reusable_subagent_score(sub: SubAgentRuntime, name: str, profile: str, role:
         return 0
     if requested_role != "specialist" and requested_role != sub.role:
         return 0
-    if normalized_role(role) != "specialist" and normalized_role(role) == sub.role:
+    if normalized_subagent_role(role) != "specialist" and normalized_subagent_role(role) == sub.role:
         score += 12
     if sub.persistent:
         score += 3
@@ -11023,18 +11050,19 @@ def subagent_interaction_modes(sub: SubAgentRuntime) -> dict[str, Any]:
 
 
 def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dict[str, Any]:
-    permissions = permissions_for_role(sub.role, security_context=sub.security_context)
+    role = normalized_subagent_role(sub.role)
+    permissions = permissions_for_role(role, security_context=sub.security_context)
     record: dict[str, Any] = {
         "agent_id": sub.agent_id,
         "name": sub.name,
-        "role": normalized_role(sub.role),
+        "role": role,
         "lifecycle": tui_query_agent_lifecycle(sub),
         "persistent": bool(sub.persistent),
         "status": sub.status,
         "busy_reason": tui_query_agent_busy_reason(sub),
         "security_context": sub.security_context,
-        "capabilities": role_tools_allowed(sub.role),
-        "write_policy": role_write_policy(sub.role),
+        "capabilities": role_tools_allowed(role),
+        "write_policy": role_write_policy(role),
         "permissions": permissions,
         "default_model": sub.default_model,
         "queue_length": len(sub.task_queue),
@@ -11062,7 +11090,7 @@ def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dic
         record.update({
             "profile": truncate_cells(clean_text(subagent_profile_text(sub)), 1600),
             "memory_summary": tui_query_text_summary(subagent_memory_text(sub), 420),
-            "output_contract": role_output_contract(sub.role),
+            "output_contract": role_output_contract(role),
             "task_queue_preview": [
                 {
                     "prompt": tui_query_text_summary(item[0], 160) if item else "",
@@ -11098,8 +11126,8 @@ def tui_tool_agent_list(state: Optional[State], args: dict[str, Any]) -> dict[st
     limit = tui_query_limit(args.get("limit"), 50)
     agents = list(state.subagents.values())
     if role_filter:
-        role = normalized_role(role_filter)
-        agents = [sub for sub in agents if normalized_role(sub.role) == role]
+        role = normalized_subagent_role(role_filter)
+        agents = [sub for sub in agents if normalized_subagent_role(sub.role) == role]
     if status_filter:
         agents = [sub for sub in agents if sub.status.lower() == status_filter]
     if not include_ephemeral:
@@ -11148,7 +11176,7 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
     if not objective:
         return tui_query_error("objective is required.")
     explicit_target = str(args.get("target") or args.get("agent_id") or args.get("name") or "").strip()
-    requested_role = normalized_role(str(args.get("role") or "specialist"))
+    requested_role = normalized_subagent_role(str(args.get("role") or "specialist"))
     reuse_policy = str(args.get("reuse_policy") or "prefer_existing").strip().lower()
     security_context = normalized_security_context(str(args.get("security_context") or "standard"))
     required_caps = [str(item) for item in (args.get("capabilities_required") or []) if str(item).strip()]
@@ -11170,7 +11198,7 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
             score -= 80
             reasons.append(f"security_context_mismatch:{sub.security_context}")
         if requested_role != "specialist":
-            if normalized_role(sub.role) == requested_role:
+            if normalized_subagent_role(sub.role) == requested_role:
                 score += 40
                 reasons.append(f"role_match:{requested_role}")
             else:
@@ -11178,7 +11206,7 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
                 reasons.append(f"role_mismatch:{sub.role}")
         elif explicit_target:
             reasons.append("role_not_requested")
-        available_caps = role_tools_allowed(sub.role)
+        available_caps = role_tools_allowed(normalized_subagent_role(sub.role))
         for cap in required_caps:
             if tui_query_capability_matches(cap, available_caps):
                 score += 20
@@ -15496,6 +15524,69 @@ def append_home_section(lines: list[RenderLine], title: str, body: list[str], wi
         append_home_line(lines, raw, cp(2), width=width)
 
 
+def status_card_metric_rows(items: list[tuple[str, str]], inner_width: int) -> list[str]:
+    rows: list[str] = []
+    current = ""
+    for label, value in items:
+        chunk = f"{label} {value}".strip()
+        if not chunk:
+            continue
+        if not current:
+            current = chunk
+            continue
+        candidate = f"{current}   {chunk}"
+        if cell_width(candidate) <= inner_width:
+            current = candidate
+        else:
+            rows.append(current)
+            current = chunk
+    if current:
+        rows.append(current)
+    return rows or ["暂无指标"]
+
+
+def status_card_detail_rows(items: list[tuple[str, str]], inner_width: int) -> list[str]:
+    rows: list[str] = []
+    if inner_width >= 64:
+        col_width = max(24, (inner_width - 3) // 2)
+        for index in range(0, len(items), 2):
+            left_label, left_value = items[index]
+            left = f"{left_label} {left_value}".strip()
+            if index + 1 < len(items):
+                right_label, right_value = items[index + 1]
+                right = f"{right_label} {right_value}".strip()
+                rows.append(f"{pad_cells(left, col_width)} │ {pad_cells(right, col_width)}")
+            else:
+                rows.append(left)
+    else:
+        rows = [f"{label} {value}".strip() for label, value in items]
+    return rows or ["暂无详情"]
+
+
+def append_status_card(
+    lines: list[RenderLine],
+    *,
+    title: str,
+    summary: str,
+    metrics: list[tuple[str, str]],
+    details: list[tuple[str, str]],
+    width: int,
+) -> None:
+    card_width = max(32, min(width, 110))
+    inner_width = max(24, card_width - 4)
+    lines.append(RenderLine("固定状态卡", cp(1) | curses.A_BOLD))
+    lines.append(RenderLine(f"╭─ {truncate_cells(title, inner_width)}", cp(10) | curses.A_BOLD))
+    for wrapped in wrap_cells(summary, inner_width):
+        lines.append(RenderLine(f"│ {wrapped}", cp(2)))
+    lines.append(RenderLine("├─ 指标", cp(10)))
+    for row in status_card_metric_rows(metrics, inner_width):
+        lines.append(RenderLine(f"│ {row}", cp(7) | curses.A_BOLD))
+    lines.append(RenderLine("├─ 运行与治理", cp(10)))
+    for row in status_card_detail_rows(details, inner_width):
+        lines.append(RenderLine(f"│ {row}", cp(2)))
+    lines.append(RenderLine("╰─", cp(10)))
+
+
 def main_home_section_body(
     state: State,
     section: dict[str, Any],
@@ -15575,16 +15666,33 @@ def main_home_lines(state: State, width: int) -> list[RenderLine]:
         provider = agent_current_backend_name(state.agent) or "-"
     lines = [
         RenderLine("Shuheng 主 agent 主页", cp(7) | curses.A_BOLD),
-        RenderLine("固定状态卡", cp(1) | curses.A_BOLD),
-        RenderLine(f"- 状态: {state.status}", cp(2)),
-        RenderLine(f"- 当前会话: {state.current_title or 'main'}", cp(2)),
-        RenderLine(f"- 运行模型: {provider}", cp(2)),
-        RenderLine(f"- 后台会话: {len(state.background_sessions)}", cp(2)),
-        RenderLine(f"- 待审批: {len(approvals)}", cp(2)),
-        RenderLine(f"- 活跃任务: {len(open_tasks)}", cp(2)),
-        RenderLine(f"- 定时任务: {schedule_registry.get('active_job_count', 0)} active / {schedule_registry.get('job_count', 0)} total", cp(2)),
-        RenderLine(f"- Artifact: {len(artifacts)}", cp(2)),
     ]
+    main_summary = dashboard_status_for_main(
+        state,
+        open_tasks=open_tasks,
+        approvals=approvals,
+        schedule_registry=schedule_registry,
+    )
+    append_status_card(
+        lines,
+        title="主控运行概览",
+        summary=main_summary,
+        metrics=[
+            ("状态", state.status),
+            ("活跃任务", str(len(open_tasks))),
+            ("待审批", str(len(approvals))),
+            ("定时任务", f"{schedule_registry.get('active_job_count', 0)}/{schedule_registry.get('job_count', 0)}"),
+            ("Artifact", str(len(artifacts))),
+            ("后台会话", str(len(state.background_sessions))),
+        ],
+        details=[
+            ("当前会话", state.current_title or "main"),
+            ("运行模型", provider),
+            ("调度来源", "shared registry"),
+            ("主页模式", "main orchestrator"),
+        ],
+        width=width,
+    )
     for section in dashboard_sections_for_main(state):
         title = str(section.get("title") or section.get("type") or "section")
         body = main_home_section_body(
@@ -15609,7 +15717,8 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
     section_type = str(section.get("type") or "")
     if section_type == "function":
         profile = profile_summary_for_subagent(sub)
-        return profile.splitlines()[:20] if profile else [f"- 角色: {sub.role}", f"- 写策略: {role_template(sub.role).get('write_policy', 'none')}"]
+        role = normalized_subagent_role(sub.role)
+        return profile.splitlines()[:20] if profile else [f"- 角色: {role}", f"- 写策略: {role_template(role).get('write_policy', 'none')}"]
     if section_type == "status_narrative":
         return [dashboard_status_for_subagent(sub)]
     if section_type == "todos":
@@ -15655,19 +15764,35 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
 
 
 def subagent_home_lines(state: State, sub: SubAgentRuntime, width: int) -> list[RenderLine]:
+    role = normalized_subagent_role(sub.role)
+    active_tasks = agent_task_rows(sub.agent_id, include_terminal=False, limit=20)
+    schedule_rows = agent_schedule_rows(sub.agent_id)
+    approval_rows = agent_approval_rows(state, sub.agent_id)
     lines = [
         RenderLine(f"{sub.name} 主页", cp(7) | curses.A_BOLD),
-        RenderLine("固定状态卡", cp(1) | curses.A_BOLD),
-        RenderLine(f"- ID: {sub.agent_id}", cp(2)),
-        RenderLine(f"- 角色: {sub.role}", cp(2)),
-        RenderLine(f"- 生命周期: {'persistent' if sub.persistent else 'temporary'}", cp(2)),
-        RenderLine(f"- 状态: {sub.status}", cp(2)),
-        RenderLine(f"- 安全上下文: {sub.security_context}", cp(2)),
-        RenderLine(f"- 默认模型: {sub.default_model or '-'}", cp(2)),
-        RenderLine(f"- 队列: task={len(sub.task_queue)} chat={len(sub.chat_queue)}", cp(2)),
-        RenderLine(f"- 活跃任务: {sub.active_bus_task_id or '-'}", cp(2)),
-        RenderLine(f"- 最近更新: {rel_age(sub.updated_at)}", cp(2)),
     ]
+    append_status_card(
+        lines,
+        title=f"{sub.name} / {role}",
+        summary=dashboard_status_for_subagent(sub),
+        metrics=[
+            ("状态", sub.status),
+            ("生命周期", "persistent" if sub.persistent else "temporary"),
+            ("任务队列", str(len(sub.task_queue))),
+            ("聊天队列", str(len(sub.chat_queue))),
+            ("未终态任务", str(len(active_tasks))),
+            ("待审批", str(len(approval_rows))),
+        ],
+        details=[
+            ("ID", sub.agent_id),
+            ("安全上下文", sub.security_context),
+            ("默认模型", sub.default_model or "-"),
+            ("活跃任务", sub.active_bus_task_id or "-"),
+            ("定时任务", str(len(schedule_rows))),
+            ("最近更新", rel_age(sub.updated_at)),
+        ],
+        width=width,
+    )
     if not sub.persistent:
         append_home_section(lines, "临时代理", ["- 临时会话代理不持久化主页；使用 /chat 继续聊天。"], width)
         return lines
@@ -21819,7 +21944,7 @@ def subagent_settings_target_from_command(text: str) -> str:
     return match.group(1) if match else ""
 
 
-def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool]:
+def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool, str]:
     body = (body or "").strip()
     persistent = False
     for flag in ("--persistent", "--persist", "--long-term", "--long_term", "--permanent", "--durable"):
@@ -21855,13 +21980,16 @@ def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool]:
             continue
         break
     role = "specialist"
+    role_note = ""
     for sep in (":", "："):
         if sep in name:
             maybe_role, maybe_name = [part.strip() for part in name.split(sep, 1)]
-            if normalized_role(maybe_role) == maybe_role.replace("-", "_"):
-                role, name = maybe_role, maybe_name
+            role_key = clean_subagent_id(maybe_role).replace("-", "_")
+            if role_key in ROLE_TEMPLATES:
+                role, role_note = subagent_role_request(maybe_role)
+                name = maybe_name
                 break
-    return name.strip(), profile.strip(), role, persistent
+    return name.strip(), profile.strip(), role, persistent, role_note
 
 
 def handle_subagent_command(state: State, text: str) -> bool:
@@ -21880,17 +22008,19 @@ def handle_subagent_command(state: State, text: str) -> bool:
 
     m_new = re.match(r"/agent\s+new\s+(.+?)\s*$", raw, re.I | re.S)
     if m_new:
-        name, profile, role, persistent = parse_subagent_new_body(m_new.group(1))
+        name, profile, role, persistent, role_note = parse_subagent_new_body(m_new.group(1))
         if not name:
             add_system(state, "Usage: /agent new [persistent:] [role:]<name> [| profile]")
             return True
         sub = find_reusable_subagent(state, name, profile, role, require_persistent=persistent, require_temporary=not persistent)
         if sub is not None:
-            add_system(state, f"已复用已有子 agent：{sub.name} ({sub.agent_id})\n角色：{sub.role}\n目录：{sub.home}")
+            note = f"\n{role_note}" if role_note else ""
+            add_system(state, f"已复用已有子 agent：{sub.name} ({sub.agent_id})\n角色：{sub.role}\n目录：{sub.home}{note}")
             return True
         sub = create_subagent(state, name, profile, role=role, persistent=persistent)
         scope = "持久" if sub.persistent else "临时"
-        add_system(state, f"已创建{scope}子 agent：{sub.name} ({sub.agent_id})\n角色：{sub.role}\n目录：{sub.home}")
+        note = f"\n{role_note}" if role_note else ""
+        add_system(state, f"已创建{scope}子 agent：{sub.name} ({sub.agent_id})\n角色：{sub.role}\n目录：{sub.home}{note}")
         return True
 
     m_role = re.match(r"/agent\s+role\s+(\S+)\s+(\S+)\s*$", raw, re.I)
@@ -21899,14 +22029,15 @@ def handle_subagent_command(state: State, text: str) -> bool:
         if sub is None:
             add_system(state, f"找不到子 agent: {m_role.group(1)}")
             return True
-        role = normalized_role(m_role.group(2))
+        role, role_note = subagent_role_request(m_role.group(2))
         if sub.security_context == "secret":
             sub.role = role
             sub.updated_at = time.time()
             save_subagent_meta(sub, state)
             if sub.agent is not None:
                 install_subagent_prompt(sub.agent, sub)
-            add_system(state, f"已设置 Secret 子 agent 角色：{sub.name} -> {sub.role}")
+            note = f"\n{role_note}" if role_note else ""
+            add_system(state, f"已设置 Secret 子 agent 角色：{sub.name} -> {sub.role}{note}")
             return True
         decision = evaluate_policy_action(
             "modify_permission_policy",
@@ -21939,7 +22070,8 @@ def handle_subagent_command(state: State, text: str) -> bool:
         save_subagent_meta(sub, state)
         if sub.agent is not None:
             install_subagent_prompt(sub.agent, sub)
-        add_system(state, f"已设置子 agent 角色：{sub.name} -> {sub.role}")
+        note = f"\n{role_note}" if role_note else ""
+        add_system(state, f"已设置子 agent 角色：{sub.name} -> {sub.role}{note}")
         return True
 
     m_settings = re.match(r"/agent\s+(?:settings|setting|config|detail|details|prefs)\s+(\S+)\s*$", raw, re.I)
@@ -22050,9 +22182,9 @@ def handle_subagent_command(state: State, text: str) -> bool:
         lines = [
             f"id: {sub.agent_id}",
             f"name: {sub.name}",
-            f"role: {sub.role}",
+            f"role: {normalized_subagent_role(sub.role)}",
             f"default_model: {sub.default_model or '(global default)'}",
-            f"write_policy: {role_write_policy(sub.role)}",
+            f"write_policy: {role_write_policy(normalized_subagent_role(sub.role))}",
             f"status: {sub.status}",
             f"persistent: {sub.persistent}",
             f"queued: {len(sub.task_queue)}",
@@ -22297,7 +22429,7 @@ def decide_approval(state: State, approval_id: str, approved: bool) -> str:
             if sub is None:
                 clear_pending_approval_interaction(state, match_id)
                 return f"已批准但找不到目标子 agent：{match_id}"
-            role = normalized_role(str(payload.get("role") or "specialist"))
+            role = normalized_subagent_role(str(payload.get("role") or "specialist"))
             sub.role = role
             sub.updated_at = time.time()
             save_subagent_meta(sub, state)
@@ -22421,7 +22553,7 @@ def apply_subagent_control(
         if not name and target not in {"", "current", "now", "selected"}:
             name = target
         profile = str(control.get("profile") or control.get("description") or control.get("system") or "").strip()
-        role = normalized_role(str(control.get("role") or "specialist"))
+        role, role_note = subagent_role_request(str(control.get("role") or "specialist"))
         persistent, temporary = subagent_control_persistence_intent(control, target, value, name, profile)
         if not name:
             return "缺少子 agent 名称。"
@@ -22442,7 +22574,8 @@ def apply_subagent_control(
                 append_task_update(step_id, status="completed", summary=f"已复用子 agent：{reused.name}")
                 maybe_complete_plan_after_step(step_id)
             scope = "持久" if reused.persistent else "临时"
-            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role})"
+            suffix = f" {role_note}" if role_note else ""
+            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role}){suffix}"
         sub = create_subagent(state, name, profile, role=role, persistent=persistent)
         register_subagent_control_aliases(
             control_aliases,
@@ -22458,7 +22591,8 @@ def apply_subagent_control(
             append_task_update(step_id, status="completed", summary=f"已创建子 agent：{sub.name}")
             maybe_complete_plan_after_step(step_id)
         scope = "持久" if sub.persistent else "临时"
-        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role})"
+        suffix = f" {role_note}" if role_note else ""
+        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role}){suffix}"
 
     sub = resolve_subagent(state, target)
     if sub is None:
@@ -22497,14 +22631,15 @@ def apply_subagent_control(
         return f"已更新子 agent profile：{sub.name}"
 
     if action in {"subagent_role", "agent_role"}:
-        role = normalized_role(str(control.get("role") or value or "specialist"))
+        role, role_note = subagent_role_request(str(control.get("role") or value or "specialist"))
         if sub.security_context == "secret":
             sub.role = role
             sub.updated_at = time.time()
             save_subagent_meta(sub, state)
             if sub.agent is not None:
                 install_subagent_prompt(sub.agent, sub)
-            return f"已设置 Secret 子 agent 角色：{sub.name} -> {sub.role}"
+            suffix = f" {role_note}" if role_note else ""
+            return f"已设置 Secret 子 agent 角色：{sub.name} -> {sub.role}{suffix}"
         decision = evaluate_policy_action(
             "modify_permission_policy",
             subject="orchestrator.main",
@@ -22535,7 +22670,8 @@ def apply_subagent_control(
         save_subagent_meta(sub, state)
         if sub.agent is not None:
             install_subagent_prompt(sub.agent, sub)
-        return f"已设置子 agent 角色：{sub.name} -> {sub.role}"
+        suffix = f" {role_note}" if role_note else ""
+        return f"已设置子 agent 角色：{sub.name} -> {sub.role}{suffix}"
 
     if action in {"subagent_model", "agent_model"}:
         model_name = str(control.get("model") or control.get("default_model") or value or "").strip()
@@ -23097,6 +23233,7 @@ def secret_subagent_task_record(
     parent_task_id: str = "",
     task_title: str = "",
 ) -> dict[str, Any]:
+    role = normalized_subagent_role(sub.role)
     return {
         "schema_version": "secret.subagent_task.v1",
         "task_id": bus_task_id,
@@ -23104,7 +23241,7 @@ def secret_subagent_task_record(
         "status": status,
         "assigned_agent": sub.agent_id,
         "agent_name": sub.name,
-        "role": sub.role,
+        "role": role,
         "title": task_title or f"Secret 子 agent 执行: {sub.name}",
         "kind": "subagent_task",
         "security_context": "secret",
@@ -23114,9 +23251,9 @@ def secret_subagent_task_record(
         "parent_task_id": parent_task_id,
         "session_key": sub.owner_session,
         "artifact_refs": list(artifact_refs or []),
-        "permissions": permissions_for_role(sub.role, security_context="secret"),
+        "permissions": permissions_for_role(role, security_context="secret"),
         "context_policy": context_policy_for_task(prompt, security_context="secret"),
-        "task": task_contract_for_role(sub.role, prompt),
+        "task": task_contract_for_role(role, prompt),
     }
 
 
@@ -23127,6 +23264,7 @@ def write_secret_subagent_task_record(state: State, sub: SubAgentRuntime, bus_ta
 
 
 def write_secret_subagent_mail(state: State, sub: SubAgentRuntime, bus_task_id: str, *, intent: str, status: str, payload: dict[str, Any], artifact_refs: Optional[list[str]] = None) -> str:
+    role = normalized_subagent_role(sub.role)
     row = {
         "schema_version": "secret.agentmail.v1",
         "message_id": short_uid("msg"),
@@ -23140,7 +23278,7 @@ def write_secret_subagent_mail(state: State, sub: SubAgentRuntime, bus_task_id: 
         "status": status,
         "payload": payload,
         "artifact_refs": list(artifact_refs or []),
-        "permissions": permissions_for_role(sub.role, security_context="secret"),
+        "permissions": permissions_for_role(role, security_context="secret"),
         "context_policy": context_policy_for_task(str(payload.get("objective") or payload.get("summary") or ""), security_context="secret"),
     }
     ok, ref = secret_write_subagent_json(state, "subagent-mail", row["message_id"], row)
@@ -23169,7 +23307,7 @@ def write_secret_subagent_artifact(state: State, sub: SubAgentRuntime, bus_task_
         "type": "subagent-results",
         "task_id": bus_task_id,
         "agent_id": sub.agent_id,
-        "role": sub.role,
+        "role": normalized_subagent_role(sub.role),
         "created_at": now_iso(),
         "content_type": "text/markdown",
         "content": f"# {sub.name} result\n\nTask: {bus_task_id}\n\n{text.strip()}\n",
@@ -23189,6 +23327,7 @@ def start_secret_subagent_task(
 ) -> str:
     if not state.secret_vault.unlocked or not state.secret_vault.key:
         return "Secret Vault 已锁定，不能启动 Secret 子 agent。"
+    role = normalized_subagent_role(sub.role)
     task_objective = policy_relevant_subagent_prompt_text(prompt)
     network_decision = secret_network_gate(state, operation="secret_subagent_task")
     if not network_decision.allowed:
@@ -23242,7 +23381,7 @@ def start_secret_subagent_task(
         payload={
             "objective": task_objective,
             "context_pack_ref": context_ref,
-            "role": sub.role,
+            "role": role,
             "runtime_provider_id": agent_runtime_provider_id(agent),
         },
         artifact_refs=[context_ref],
@@ -23265,12 +23404,12 @@ def start_secret_subagent_task(
             prompt=agent_prompt,
             source=runtime_source,
             agent_id=sub.agent_id,
-            role=sub.role,
+            role=role,
             objective=task_objective,
             context_pack_ref=context_ref,
-            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            permissions=permissions_for_role(role, security_context=sub.security_context),
             approval_policy=approval_metadata(),
-            output_contract=task_contract_for_role(sub.role, task_objective).get("output_contract") or {},
+            output_contract=task_contract_for_role(role, task_objective).get("output_contract") or {},
             artifact_refs=[context_ref],
             metadata={"runtime_lane": "secret_subagent", "source": source, "security_context": sub.security_context},
         )
@@ -23295,6 +23434,7 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     prompt = (prompt or "").strip()
     if not prompt:
         return "子 agent 聊天输入为空。"
+    role = normalized_subagent_role(sub.role)
     if sub.security_context == "secret" and (not state.secret_vault.unlocked or not state.secret_vault.key):
         return "Secret Vault 已锁定，不能与 Secret 子 agent 聊天。"
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
@@ -23322,12 +23462,12 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
             prompt=agent_prompt,
             source=runtime_source,
             agent_id=sub.agent_id,
-            role=sub.role,
+            role=role,
             objective=prompt,
             context_pack_ref=context_ref,
-            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            permissions=permissions_for_role(role, security_context=sub.security_context),
             approval_policy=approval_metadata(),
-            output_contract=task_contract_for_role(sub.role, prompt).get("output_contract") or {},
+            output_contract=task_contract_for_role(role, prompt).get("output_contract") or {},
             artifact_refs=[context_ref] if context_ref else [],
             metadata={
                 "runtime_lane": "subagent_chat",
@@ -23368,6 +23508,7 @@ def start_subagent_task(
     prompt = (prompt or "").strip()
     if not prompt:
         return "子 agent 输入为空。"
+    role = normalized_subagent_role(sub.role)
     task_objective = policy_relevant_subagent_prompt_text(prompt)
     if sub.security_context == "secret":
         return start_secret_subagent_task(
@@ -23552,19 +23693,19 @@ def start_subagent_task(
         payload={
             "objective": task_objective,
             "context_pack_ref": context_ref,
-            "role": sub.role,
+            "role": role,
             "runtime_provider_id": runtime_provider_id,
-            "output_contract": {"required_sections": role_output_contract(sub.role)},
-            "permissions": permissions_for_role(sub.role, security_context=sub.security_context),
+            "output_contract": {"required_sections": role_output_contract(role)},
+            "permissions": permissions_for_role(role, security_context=sub.security_context),
         },
         artifact_refs=[context_ref],
-        budget=default_task_budget(sub.role),
-        permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+        budget=default_task_budget(role),
+        permissions=permissions_for_role(role, security_context=sub.security_context),
         context_policy=context_policy_for_task(task_objective, security_context=sub.security_context),
-        task=task_contract_for_role(sub.role, task_objective),
+        task=task_contract_for_role(role, task_objective),
         risks=risks_for_action(
             decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, prompt),
-            sub.role,
+            role,
             task_objective,
         ),
         approval=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
@@ -23585,7 +23726,7 @@ def start_subagent_task(
         status="working",
         payload={
             "context_pack": context_ref,
-            "role": sub.role,
+            "role": role,
             "checkpoint_id": checkpoint.get("checkpoint_id", ""),
             "runtime_provider_id": runtime_provider_id,
         },
@@ -23600,12 +23741,12 @@ def start_subagent_task(
             prompt=agent_prompt,
             source=runtime_source,
             agent_id=sub.agent_id,
-            role=sub.role,
+            role=role,
             objective=task_objective,
             context_pack_ref=context_ref,
-            permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+            permissions=permissions_for_role(role, security_context=sub.security_context),
             approval_policy=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
-            output_contract=task_contract_for_role(sub.role, task_objective).get("output_contract") or {},
+            output_contract=task_contract_for_role(role, task_objective).get("output_contract") or {},
             artifact_refs=[context_ref],
             metadata={"runtime_lane": "subagent", "source": source, "security_context": sub.security_context},
         )
@@ -23892,7 +24033,7 @@ def process_ui_queue(state: State) -> bool:
                         f"{sub.agent_id}-{bus_task_id}",
                         f"# {sub.name} result\n\nTask: {bus_task_id}\n\n{text.strip()}\n",
                         source_task_id=bus_task_id,
-                        provenance={"generated_by": sub.agent_id, "role": sub.role, "source": "subagent_result"},
+                        provenance={"generated_by": sub.agent_id, "role": normalized_subagent_role(sub.role), "source": "subagent_result"},
                     )
                 updates = extract_subagent_memory_updates(text)
                 for update in updates:
@@ -23919,6 +24060,7 @@ def process_ui_queue(state: State) -> bool:
                 parent_task_id = str(task_prev.get("parent_task_id") or "")
                 task_title = str(task_prev.get("title") or f"子 agent 执行: {sub.name}")
                 task_session = str(task_prev.get("session_key") or active_ui_session_key(state))
+                role = normalized_subagent_role(sub.role)
                 if sub.security_context == "secret":
                     write_secret_subagent_task_record(
                         state,
@@ -23937,7 +24079,7 @@ def process_ui_queue(state: State) -> bool:
                         bus_task_id,
                         intent="result",
                         status="completed",
-                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": sub.role},
+                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": role},
                         artifact_refs=[artifact_ref],
                     )
                     write_secret_subagent_trace(state, sub, bus_task_id, "completed", "completed", {"artifact_ref": artifact_ref})
@@ -23963,13 +24105,13 @@ def process_ui_queue(state: State) -> bool:
                         intent="result",
                         task_id=bus_task_id,
                         status="completed",
-                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": sub.role},
+                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": role},
                         artifact_refs=[artifact_ref],
-                        budget=default_task_budget(sub.role),
-                        permissions=permissions_for_role(sub.role, security_context=sub.security_context),
+                        budget=default_task_budget(role),
+                        permissions=permissions_for_role(role, security_context=sub.security_context),
                         context_policy=context_policy_for_task(objective, security_context=sub.security_context),
-                        task=task_contract_for_role(sub.role, objective),
-                        risks=risks_for_action("read_only", sub.role, objective),
+                        task=task_contract_for_role(role, objective),
+                        risks=risks_for_action("read_only", role, objective),
                         approval=approval_metadata(),
                     )
                 add_system(
@@ -24004,7 +24146,7 @@ def process_ui_queue(state: State) -> bool:
                             session_key_value=task_session or active_ui_session_key(state),
                             parent_task_id=parent_task_id,
                             plan_id=plan_id,
-                            role=sub.role,
+                            role=normalized_subagent_role(sub.role),
                         ),
                     )
                 state.last_error = f"子 agent 完成：{sub.name}；结果已加密存储" if sub.security_context == "secret" else f"子 agent 完成：{sub.name}；结果已进 bus"
