@@ -876,6 +876,7 @@ temp_root = os.path.join(TEMP_SUBAGENTS_DIR, owner)
 - The unified manager must keep current-session switching, default selection, recent-model jumping, add/edit/delete, model extraction, single-model test, batch health check, and reload actions.
 - The unified manager must also let the user set per-subagent default models from the same `/model` panel: `g` assigns the selected model to the current subagent target, `c` clears that target back to global inheritance, and `o` cycles the target across available subagents.
 - The subagent target row must initialize to the active subagent chat/home when present, otherwise to the first available subagent, and must show readable name/scope/default-model state without dumping opaque internal ids into the normal panel.
+- When `/model` is opened from an active subagent chat/home, `Enter` / `s` applies the selected model to that subagent target's default model. From the main page, `Enter` / `s` continues to switch the main current dialogue model.
 - Adding a provider must not require `/models` endpoint compatibility when the user has supplied a concrete manual `Model`. If `/models` probing fails but the new entry has a complete Base URL and Model, save the single manual entry, show the probe failure as a warning, and direct the user to `t` test or Enter switch.
 - Manual fallback saving is only for the add-provider path. Existing-row model extraction with `p` must keep the stricter behavior: a failed `/models` probe does not mutate the configured model list.
 - Model rows are grouped by concrete provider tabs, not broad protocol categories.
@@ -1271,6 +1272,7 @@ configure_genericagent_provider_runtime(
 - Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
 - Existing OMP wrapper + `set_model` confirmation after a current-session switch -> the status card keeps the configured provider label/base URL while accepting matching context-window metadata.
 - Existing OMP wrapper with an already selected model -> refresh keeps the matching selected model when it still exists and sends the refreshed provider/model id before the next prompt.
+- Configured OMP model switches must wait for `set_model` confirmation when the RPC process is already running or immediately before prompt submission. A rejected, timed-out, unknown, or wrong-model confirmation is a switch failure and must block the prompt instead of silently running on the previous model.
 - New Shuheng main or temporary session -> active OMP RPC session receives a `new_session` reset when the process is running, and a later first runtime task may inject one fresh full context pack.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
 - OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
@@ -1358,7 +1360,9 @@ configure_genericagent_provider_runtime(
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
 - Tests must assert embedded OMP `config.yml` writes `todo.eager:"default"` so thinking-mode providers are not sent forced `tool_choice:"todo"` by default.
 - Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, `OhMyPiRpcAgent` initializes to the projected default model selector, stale `get_state` model payloads and normal `set_model` confirmations cannot corrupt the current configured model display, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
+- Tests must assert a wrong-model OMP `set_model` confirmation fails the switch and keeps the previous local selection.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
+- Tests must assert `/model` `Enter` from an active subagent view sets that subagent's default model instead of switching the main agent.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
 - Tests must assert OMP terminal errors on subagent task/chat streams fail and release the subagent without generating eval/memory/orchestrator-continuation side effects, and that subagent default-model application failure blocks startup before sending a prompt.
 - Tests must assert system `~/.omp/agent/config.yml` hash remains unchanged when present.

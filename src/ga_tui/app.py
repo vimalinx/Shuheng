@@ -13044,7 +13044,14 @@ def set_agent_llm_index(agent: Any, index: int) -> tuple[bool, str]:
     if index < 0 or index >= len(clients):
         return False, f"找不到模型索引：{index}"
     try:
-        if hasattr(agent, "next_llm"):
+        switcher = getattr(agent, "set_llm_index", None)
+        if callable(switcher):
+            result = switcher(index, wait=True)
+            if isinstance(result, tuple):
+                ok, switch_msg = result
+                if not ok:
+                    return False, f"切换模型失败: {switch_msg}"
+        elif hasattr(agent, "next_llm"):
             agent.next_llm(index)
         else:
             agent.llm_no = index
@@ -13117,6 +13124,12 @@ def reset_agent_instance_to_default_llm(agent: Any) -> tuple[bool, str]:
 def apply_subagent_default_model(state: State, sub: SubAgentRuntime) -> tuple[bool, str]:
     if sub.agent is None or not sub.default_model:
         return True, ""
+    try:
+        refresh_agent_runtime_model_config(sub.agent)
+    except Exception as exc:
+        msg = f"运行时模型配置刷新失败：{type(exc).__name__}: {exc}"
+        state.last_error = f"{sub.name} 默认模型应用失败：{msg}"
+        return False, msg
     ok, msg = set_agent_to_model_name(sub.agent, sub.default_model)
     if not ok:
         state.last_error = f"{sub.name} 默认模型应用失败：{msg}"
@@ -21034,29 +21047,40 @@ def draw_model_manager(
     y0, x0, h, w = popup_geometry(height, width, min_w=82)
     draw_popup(stdscr, y0, x0, h, w, title)
     inner_w = w - 4
+    active_sub = active_subagent_view(state)
     current = ""
     try:
-        current = state.agent.get_llm_name(model=True)
+        if active_sub is not None and subagent_target is not None:
+            if subagent_target.agent is not None:
+                current = subagent_target.agent.get_llm_name(model=True)
+            else:
+                current = subagent_target.default_model or "继承全局（未启动）"
+        else:
+            current = state.agent.get_llm_name(model=True)
     except Exception:
         current = "unknown"
     primary = (mixin.get("llm_nos") or [""])[0]
     recent_names = recent_names or []
     recent_text = " / ".join(recent_names[:3]) if recent_names else "(无)"
-    safe_add(stdscr, y0 + 2, x0 + 2, f"当前对话: {current}    默认新对话: {primary or '(未设置)'}    最近: {recent_text}", inner_w, cp(2))
+    current_label = "当前子代理" if active_sub is not None else "当前对话"
+    safe_add(stdscr, y0 + 2, x0 + 2, f"{current_label}: {current}    默认新对话: {primary or '(未设置)'}    最近: {recent_text}", inner_w, cp(2))
     if subagent_target is not None:
         sub_scope = "持久" if subagent_target.persistent else "临时"
         sub_default = subagent_target.default_model or "继承全局"
         sub_count = f"{subagent_target_index + 1}/{subagent_target_count}" if subagent_target_count > 1 else "1/1"
-        sub_line = f"子代理默认: {subagent_target.name} · {sub_scope} · {sub_default}    目标 {sub_count}    o 切目标  g 设选中模型  c 继承"
+        sub_apply_key = "Enter/g" if active_sub is not None else "g"
+        sub_line = f"子代理默认: {subagent_target.name} · {sub_scope} · {sub_default}    目标 {sub_count}    o 切目标  {sub_apply_key} 设选中模型  c 继承"
         sub_attr = cp(2)
     else:
         sub_line = "子代理默认: 当前没有可设置目标    g/c 需要先创建子 agent"
         sub_attr = cp(1)
     safe_add(stdscr, y0 + 3, x0 + 2, sub_line, inner_w, sub_attr)
     if manage_configs:
-        help_text = "Tab供应商 Enter对话 d全局默认 g子代理默认 c继承 o目标 u最近 a新增 e编辑 p提取 t测试 v验活 x删 r重载"
+        enter_label = "Enter子代理" if active_sub is not None else "Enter对话"
+        help_text = f"Tab供应商 {enter_label} d全局默认 g子代理默认 c继承 o目标 u最近 a新增 e编辑 p提取 t测试 v验活 x删 r重载"
     else:
-        help_text = "Tab供应商 Enter对话 d全局默认 g子代理默认 c继承 o目标 u最近 t测试 v验活 r重载 Esc返回"
+        enter_label = "Enter子代理" if active_sub is not None else "Enter对话"
+        help_text = f"Tab供应商 {enter_label} d全局默认 g子代理默认 c继承 o目标 u最近 t测试 v验活 r重载 Esc返回"
     safe_add(stdscr, y0 + 4, x0 + 2, help_text, inner_w, cp(1))
     category_index = category_index or model_manager_category_index(entries, recent_names, health)
     categories = category_index.categories
@@ -22541,6 +22565,19 @@ def manual_entry_after_probe_failure(
     )
 
 
+def apply_model_manager_selected_model(
+    state: State,
+    entry: LLMConfigEntry,
+    *,
+    subagent_target: Optional[SubAgentRuntime] = None,
+) -> tuple[bool, str, str]:
+    if active_subagent_view(state) is not None and subagent_target is not None:
+        ok, message = set_subagent_default_model(state, subagent_target, config_display_name(entry))
+        return ok, message, "subagent_default"
+    ok, message = switch_agent_to_entry(state, entry)
+    return ok, message, "current_session"
+
+
 def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> None:
     clear_selection(state)
     old_timeout = TUI_POLL_TIMEOUT_MS
@@ -22884,7 +22921,7 @@ def open_model_manager(stdscr, state: State, *, manage_configs: bool = True) -> 
                     final_message = message
                 continue
             if key in ("\n", "\r", curses.KEY_ENTER, "s", "S"):
-                ok, message = switch_agent_to_entry(state, entries[selected])
+                ok, message, _mode = apply_model_manager_selected_model(state, entries[selected], subagent_target=subagent_target)
                 if ok:
                     _recent_ok, recent_msg = remember_recent_model_entry(entries[selected], entries)
                     recent_names = load_recent_model_names(entries)

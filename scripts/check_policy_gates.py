@@ -312,6 +312,9 @@ class FakeRpcStdin:
         self.message_count = 4
         self.context_tokens = 123456
         self.context_window = 1000000
+        self.set_model_success = True
+        self.set_model_error = "set_model failed"
+        self.set_model_model_override: dict | None = None
 
     def write(self, payload: str) -> int:
         for line in payload.splitlines():
@@ -390,6 +393,28 @@ class FakeRpcStdin:
                     "success": True,
                     "data": {"summary": "compacted"},
                 })
+            elif frame.get("type") == "set_model":
+                if not self.set_model_success:
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "set_model",
+                        "success": False,
+                        "error": self.set_model_error,
+                    })
+                else:
+                    model = self.set_model_model_override or {
+                        "provider": str(frame.get("provider") or ""),
+                        "id": str(frame.get("modelId") or ""),
+                        "contextWindow": self.context_window,
+                    }
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "set_model",
+                        "success": True,
+                        "data": {"model": model},
+                    })
             elif frame.get("type") == "set_host_tools":
                 tools = frame.get("tools") if isinstance(frame.get("tools"), list) else []
                 self.stdout.push({
@@ -2433,6 +2458,30 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert agent.is_running is False
     assert agent.task_queue.unfinished_tasks == 0
     agent.close()
+
+    mismatch_processes: list[FakeRpcProcess] = []
+
+    def mismatch_process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=True)
+        mismatch_processes.append(process)
+        return process
+
+    mismatch_agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=mismatch_process_factory,
+        configured_models=models,
+        startup_timeout=1,
+    )
+    warmup_q = mismatch_agent.put_task("warmup", source="test")
+    wait_for_queue_done(warmup_q)
+    mismatch_process = wait_for_process(mismatch_processes)
+    mismatch_process.stdin.set_model_model_override = {"provider": "ga-tui-alpha", "id": "model-alpha"}
+    ok_mismatch, mismatch_msg = mismatch_agent.set_llm_index(1, wait=True, timeout=1)
+    assert not ok_mismatch, mismatch_msg
+    assert "expected" in mismatch_msg, mismatch_msg
+    assert mismatch_agent.llm_no == 0, mismatch_agent.llm_no
+    mismatch_agent.close()
 
 
 def assert_ohmypi_host_tool_bridge() -> None:
@@ -6411,6 +6460,11 @@ def run_checks() -> None:
         panel_state.selected_session = panel_first.agent_id
         panel_targets = a.model_manager_subagent_targets(panel_state)
         assert [sub.agent_id for sub in panel_targets[:2]] == [panel_first.agent_id, panel_second.agent_id], panel_targets
+        ok_enter_sub, enter_sub_msg, enter_mode = a.apply_model_manager_selected_model(panel_state, llm_entries[1], subagent_target=panel_first)
+        assert ok_enter_sub, enter_sub_msg
+        assert enter_mode == "subagent_default", enter_mode
+        assert panel_first.default_model == "beta"
+        assert panel_state.agent.llm_no == 0
 
         old_redraw = a.redraw
         old_modal_read_key = a.modal_read_key

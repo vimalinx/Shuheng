@@ -895,20 +895,43 @@ class OhMyPiRpcAgent:
             return False
         return self.request_runtime_state(wait=True, timeout=timeout)
 
-    def next_llm(self, index: int = -1) -> None:
+    def set_llm_index(self, index: int = -1, *, wait: bool = True, timeout: float | None = None) -> tuple[bool, str]:
         if self.configured_models:
             if index < 0:
                 index = (self.llm_no + 1) % len(self.configured_models)
             if index < 0 or index >= len(self.configured_models):
-                return
+                return False, f"model index out of range: {index}"
+            previous_no = self.llm_no
+            previous_client = self.llmclient
             self.llm_no = index
             self.llmclient = self.llmclients[index]
             self._pending_model = self.configured_models[index]
             if self._process is not None and self._process.poll() is None and self._ready.is_set():
-                self._apply_pending_model()
-            return
+                ok, message = self._apply_pending_model(wait=wait, timeout=timeout or self.startup_timeout)
+                if not ok:
+                    self.llm_no = previous_no
+                    self.llmclient = previous_client
+                    return False, message
+            return True, f"model switched to {self.get_llm_name(model=True)}"
+        if index not in (-1, 0):
+            return False, f"model index out of range: {index}"
         if self._process is not None and self._process.poll() is None:
-            self._send({"id": self._next_request_id("cycle"), "type": "cycle_model"})
+            request = {"id": self._next_request_id("cycle"), "type": "cycle_model"}
+            if wait:
+                try:
+                    frame = self._send_and_wait(request, timeout=timeout or self.startup_timeout)
+                    if frame.get("success") is False:
+                        return False, str(frame.get("error") or "cycle_model failed")
+                except Exception as exc:
+                    return False, f"cycle_model failed: {type(exc).__name__}: {exc}"
+            else:
+                self._send(request)
+        return True, f"model switched to {self.get_llm_name(model=True)}"
+
+    def next_llm(self, index: int = -1) -> None:
+        ok, message = self.set_llm_index(index, wait=False)
+        if not ok:
+            self._remember_stderr(message)
 
     def list_llms(self) -> list[tuple[int, str, bool]]:
         return [
@@ -1021,7 +1044,9 @@ class OhMyPiRpcAgent:
     def _ensure_process(self) -> None:
         if self._process is not None and self._process.poll() is None:
             if self._ready.wait(self.startup_timeout):
-                self._apply_pending_model()
+                ok, message = self._apply_pending_model(wait=True, timeout=self.startup_timeout)
+                if not ok:
+                    raise RuntimeError(f"model switch failed: {message}")
                 return
             raise RuntimeError("RPC ready timeout")
         binary = self.command[0] if self.command else "omp"
@@ -1046,7 +1071,9 @@ class OhMyPiRpcAgent:
         if not self._ready.wait(self.startup_timeout):
             self._terminate_process(self._process)
             raise RuntimeError("RPC ready timeout")
-        self._apply_pending_model()
+        ok, message = self._apply_pending_model(wait=True, timeout=self.startup_timeout)
+        if not ok:
+            raise RuntimeError(f"model switch failed: {message}")
 
     def _read_stdout(self) -> None:
         process = self._process
@@ -1307,17 +1334,41 @@ class OhMyPiRpcAgent:
                 break
         self.llmclient = self.llmclients[self.llm_no]
 
-    def _apply_pending_model(self) -> None:
+    def _apply_pending_model(self, *, wait: bool = False, timeout: float | None = None) -> tuple[bool, str]:
         model = self._pending_model
         if model is None or not model.provider or not model.model_id:
-            return
-        self._pending_model = None
-        self._send({
+            return True, ""
+        request = {
             "id": self._next_request_id("set-model"),
             "type": "set_model",
             "provider": model.provider,
             "modelId": model.model_id,
-        })
+        }
+        if not wait:
+            try:
+                self._send(request)
+            except Exception as exc:
+                return False, f"set_model failed: {type(exc).__name__}: {exc}"
+            self._pending_model = None
+            return True, f"set_model queued: {model.selector}"
+        try:
+            frame = self._send_and_wait(request, timeout=timeout or self.startup_timeout)
+        except Exception as exc:
+            return False, f"set_model confirmation failed: {type(exc).__name__}: {exc}"
+        if frame.get("success") is False:
+            return False, str(frame.get("error") or f"set_model rejected: {model.selector}")
+        data = frame.get("data")
+        if isinstance(data, dict):
+            runtime_model = data.get("model")
+            if isinstance(runtime_model, dict):
+                idx = self._model_index_for_runtime_model(runtime_model)
+                if idx < 0:
+                    return False, f"set_model confirmed an unknown runtime model instead of {model.selector}"
+                actual = self.configured_models[idx]
+                if actual.selector != model.selector:
+                    return False, f"set_model confirmed {actual.selector}, expected {model.selector}"
+        self._pending_model = None
+        return True, f"set_model confirmed: {model.selector}"
 
     def _frame_error_text(self, frame: dict[str, Any]) -> str | None:
         objects: list[dict[str, Any]] = [frame]
