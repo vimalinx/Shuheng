@@ -4587,6 +4587,11 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     retarget_harness(root)
     state = a.State(agent=FakeAgent())
     state.running = True
+    main_session_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_dashboard_home.txt")
+    assert a.append_model_response_transcript_turn(main_session_path, "主控最近对话", "主控最近回复")
+    state.agent.log_path = main_session_path
+    if a.session_names is not None:
+        a.session_names.set_name(main_session_path, "主控最近对话")
 
     assert state.selected_session == a.MAIN_HOME_SESSION_KEY, state.selected_session
     main_render_lines = a.home_lines(state, 100)
@@ -4614,10 +4619,24 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "## 功能描述" in main_home_text, main_home_text
     assert "## 当前状态" in main_home_text, main_home_text
     assert "## 待办事项" in main_home_text, main_home_text
+    assert "## 最近会话" in main_home_text and "主控最近对话" in main_home_text, main_home_text
+    main_session_line = next(line for line in main_render_lines if "主控最近对话" in line.text)
+    assert main_session_line.payload["action"] == "open_session", main_session_line
+    assert main_session_line.payload["session_type"] == "history", main_session_line
+    assert main_session_line.payload["path"] == main_session_path, main_session_line
     assert "## 最近定时任务" in main_home_text, main_home_text
     assert "## 最近任务" in main_home_text, main_home_text
     assert "## 待审批" not in main_home_text, main_home_text
     assert a.display_scope_key(state) == "home:main"
+    main_screen = FakeDrawScreen()
+    click_width = 90
+    click_sidebar_w = a.left_sidebar_width(click_width)
+    a.draw_main(main_screen, state, height=50, width=click_width, sidebar_w=click_sidebar_w, rightbar_w=0)
+    main_line_idx = next(idx for idx, line in enumerate(state.line_cache) if "主控最近对话" in line.text)
+    a.handle_mouse(state, state.main_x0 + 2, state.body_top + main_line_idx - state.scroll, getattr(curses, "BUTTON1_CLICKED", 0), click_width)
+    assert state.selected_session == "main", state.selected_session
+    assert "已打开当前会话" in state.last_error, state.last_error
+    a.show_main_home(state)
     assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
     assert state.selected_session == "main", state.selected_session
     assert a.show_home_for_current_scope(state) == "已打开主 agent 主页。"
@@ -4698,6 +4717,19 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     drain_ui(state)
     assert state.status == "idle", state.status
     assert a.show_home_for_current_scope(state) == f"已打开代理主页：{sub.name}"
+    sub_home_lines = a.home_lines(state, 100)
+    sub_home_text = "\n".join(line.text for line in sub_home_lines)
+    assert "## 最近会话" in sub_home_text and "hello from home" in sub_home_text, sub_home_text
+    sub_session_line = next(line for line in sub_home_lines if "hello from home" in line.text)
+    assert sub_session_line.payload["action"] == "open_session", sub_session_line
+    assert sub_session_line.payload["session_type"] == "subagent", sub_session_line
+    assert sub_session_line.payload["agent_id"] == sub.agent_id, sub_session_line
+    sub_screen = FakeDrawScreen()
+    a.draw_main(sub_screen, state, height=50, width=click_width, sidebar_w=click_sidebar_w, rightbar_w=0)
+    sub_line_idx = next(idx for idx, line in enumerate(state.line_cache) if "hello from home" in line.text)
+    a.handle_mouse(state, state.main_x0 + 2, state.body_top + sub_line_idx - state.scroll, getattr(curses, "BUTTON1_CLICKED", 0), click_width)
+    assert state.selected_session == sub.agent_id, state.selected_session
+    assert a.selected_subagent(state) is sub, state.selected_session
 
     dashboard_control = ga_control({
         "action": "dashboard.update",

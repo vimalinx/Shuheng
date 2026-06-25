@@ -613,6 +613,7 @@ class RenderLine:
     attr: int = 0
     kind: str = ""
     prefix_cells: int = 0
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -15376,6 +15377,7 @@ SUPPORTED_DASHBOARD_SECTIONS = {
     "function",
     "status_narrative",
     "todos",
+    "sessions",
     "schedules",
     "tasks",
     "artifacts",
@@ -15389,6 +15391,7 @@ DEFAULT_DASHBOARD_SECTIONS: list[dict[str, str]] = [
     {"type": "function", "title": "功能描述"},
     {"type": "status_narrative", "title": "当前状态"},
     {"type": "todos", "title": "待办事项"},
+    {"type": "sessions", "title": "最近会话"},
     {"type": "schedules", "title": "最近定时任务"},
     {"type": "tasks", "title": "最近任务"},
 ]
@@ -15603,19 +15606,96 @@ def agent_approval_rows(state: Optional[State], agent_id: str, limit: int = 8) -
     return rows[:limit]
 
 
-def append_home_line(lines: list[RenderLine], text: str = "", attr: int = 0, *, width: int = 80) -> None:
+def main_recent_session_rows(state: State, limit: int = 8) -> list[RenderLine]:
+    load_history(state, force=True)
+    entries = list(enumerate(state.history, 1))
+    recent = recent_history_items(entries, set(), limit=limit)
+    rows: list[RenderLine] = []
+    for _idx, (path, mtime, preview, rounds) in recent:
+        title = compact_title(history_name(state, path) or preview or os.path.basename(path), 80)
+        meta = session_meta_for(state, path)
+        category = session_category_label(meta)
+        parts = [f"{int(rounds or 0)} 轮", rel_age(float(mtime or 0.0))]
+        if category and category != "未分类":
+            parts.insert(0, category)
+        if is_current_session_path(state, path):
+            parts.append("当前会话")
+        parts.append("点击打开")
+        rows.append(RenderLine(
+            f"- {title or '历史会话'} · {' · '.join(parts)}",
+            cp(2),
+            kind="home_session_link",
+            payload={"action": "open_session", "session_type": "history", "path": path},
+        ))
+    return rows
+
+
+def subagent_recent_session_rows(state: State, sub: SubAgentRuntime, limit: int = 8) -> list[RenderLine]:
+    entries = subagent_chat_session_entries(state, sub)
+    current_known = {str(entry.get("session_id") or "") for entry in entries}
+    if sub.chat_session_id and sub.chat_session_id not in current_known and sub.messages:
+        entries.insert(0, {
+            "agent_id": sub.agent_id,
+            "session_id": sub.chat_session_id,
+            "title": subagent_chat_title_for_messages(sub),
+            "updated_at": now_iso(),
+            "message_count": len(sub.messages),
+            "current": True,
+        })
+    rows: list[RenderLine] = []
+    for entry in entries[:limit]:
+        session_id = str(entry.get("session_id") or "")
+        if not session_id:
+            continue
+        title = compact_title(str(entry.get("title") or session_id or "子 agent 会话"), 80)
+        updated = parse_iso_timestamp(str(entry.get("updated_at") or ""))
+        parts = [f"{int(entry.get('message_count') or 0)} 条消息"]
+        if updated:
+            parts.append(rel_age(updated))
+        if session_id == sub.chat_session_id or entry.get("current"):
+            parts.append("当前会话")
+        if entry.get("error"):
+            parts.append("读取异常")
+        else:
+            parts.append("点击打开")
+        rows.append(RenderLine(
+            f"- {title or '子 agent 会话'} · {' · '.join(parts)}",
+            cp(2),
+            kind="home_session_link",
+            payload={
+                "action": "open_session",
+                "session_type": "subagent",
+                "agent_id": sub.agent_id,
+                "session_id": session_id,
+            },
+        ))
+    return rows
+
+
+def append_home_line(
+    lines: list[RenderLine],
+    text: str = "",
+    attr: int = 0,
+    *,
+    width: int = 80,
+    kind: str = "",
+    payload: Optional[dict[str, Any]] = None,
+) -> None:
     for part in wrap_cells(text, width):
-        lines.append(RenderLine(part, attr))
+        lines.append(RenderLine(part, attr, kind=kind, payload=dict(payload or {})))
 
 
-def append_home_section(lines: list[RenderLine], title: str, body: list[str], width: int) -> None:
+def append_home_section(lines: list[RenderLine], title: str, body: list[str | RenderLine], width: int) -> None:
     lines.append(RenderLine(""))
     lines.append(RenderLine(f"## {title}", cp(7) | curses.A_BOLD))
     if not body:
         lines.append(RenderLine("  - 暂无", cp(9)))
         return
     for raw in body:
-        append_home_line(lines, raw, cp(2), width=width)
+        if isinstance(raw, RenderLine):
+            append_home_line(lines, raw.text, raw.attr, width=width, kind=raw.kind, payload=raw.payload)
+        else:
+            append_home_line(lines, raw, cp(2), width=width)
 
 
 def status_card_header_line(title: str, card_width: int) -> str:
@@ -15759,7 +15839,7 @@ def main_home_section_body(
     approvals: list[dict[str, Any]],
     schedule_registry: dict[str, Any],
     artifacts: list[dict[str, Any]],
-) -> list[str]:
+) -> list[str | RenderLine]:
     section_type = str(section.get("type") or "")
     if section_type == "function":
         markdown = bounded_dashboard_text(section.get("markdown"), 1200)
@@ -15779,6 +15859,8 @@ def main_home_section_body(
                 for row in open_tasks[:8]
             ]
         return [f"- {item}" for item in todos]
+    if section_type == "sessions":
+        return main_recent_session_rows(state)
     if section_type == "schedules":
         jobs = list(schedule_registry.get("jobs") or [])
         jobs.sort(key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""), reverse=True)
@@ -15876,7 +15958,7 @@ def main_home_lines_uncached(state: State, width: int) -> list[RenderLine]:
     return lines
 
 
-def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict[str, Any]) -> list[str]:
+def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict[str, Any]) -> list[str | RenderLine]:
     section_type = str(section.get("type") or "")
     if section_type == "function":
         profile = profile_summary_for_subagent(sub)
@@ -15892,6 +15974,8 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
                 for row in agent_task_rows(sub.agent_id, include_terminal=False, limit=8)
             ]
         return [f"- {item}" for item in todos]
+    if section_type == "sessions":
+        return subagent_recent_session_rows(state, sub)
     if section_type == "schedules":
         rows = []
         for row in agent_schedule_rows(sub.agent_id):
@@ -15996,6 +16080,49 @@ def home_registry_signature() -> tuple[tuple[int, int], ...]:
     )
 
 
+def main_history_home_signature(limit: int = 12) -> tuple[Any, ...]:
+    rows: list[tuple[str, int, int]] = []
+    try:
+        paths = glob.glob(os.path.join(MODEL_RESPONSES_DIR, "model_responses*.txt"))
+    except OSError:
+        paths = []
+    for path in paths:
+        if not is_normal_session_log_path(path):
+            continue
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        rows.append((os.path.basename(path), int(stat.st_mtime_ns), int(stat.st_size)))
+    rows.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    names_path = str(getattr(session_names, "_REG_PATH", "") or "") if session_names is not None else ""
+    return (
+        jsonl_file_signature(SESSION_META_PATH),
+        jsonl_file_signature(names_path) if names_path else (0, 0),
+        tuple(rows[:limit]),
+    )
+
+
+def subagent_chat_history_home_signature(state: State, sub: SubAgentRuntime, limit: int = 12) -> tuple[Any, ...]:
+    if sub.security_context == "secret":
+        if state is None or not state.secret_vault.unlocked:
+            return ("secret-locked",)
+        return ("secret", secret_file_signature(SECRET_SUBAGENT_CHAT_KIND, "*.secret")[:limit])
+    rows: list[tuple[str, int, int]] = []
+    try:
+        paths = glob.glob(os.path.join(subagent_sessions_dir(sub), "*.json"))
+    except OSError:
+        paths = []
+    for path in paths:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        rows.append((os.path.basename(path), int(stat.st_mtime_ns), int(stat.st_size)))
+    rows.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    return tuple(rows[:limit])
+
+
 def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
     selected = str(state.selected_session or "")
     registry_signature = home_registry_signature()
@@ -16013,8 +16140,12 @@ def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
             len(sub.task_queue),
             len(sub.chat_queue),
             sub.active_bus_task_id,
+            sub.chat_session_id,
+            sub.chat_title,
+            len(sub.messages),
             round(float(sub.updated_at or 0.0), 3),
             dashboard_cache_signature(sub.dashboard),
+            subagent_chat_history_home_signature(state, sub),
         )
     else:
         try:
@@ -16028,6 +16159,7 @@ def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
             len(state.background_sessions),
             model_name,
             dashboard_cache_signature(state.main_dashboard),
+            main_history_home_signature(),
         )
     return (
         selected,
@@ -16048,7 +16180,7 @@ def home_lines(state: State, width: int) -> list[RenderLine]:
     ):
         return list(state.home_line_cache)
     lines = home_lines_uncached(state, width)
-    state.home_line_cache_key = cache_key
+    state.home_line_cache_key = home_line_cache_key(state, width)
     state.home_line_cache = list(lines)
     state.home_line_cache_loaded_at = now
     return lines
@@ -16985,6 +17117,74 @@ def path_is_active_history_view(state: State, path: str) -> bool:
 
 def switch_to_background_session(state: State, key: str) -> None:
     switch_to_background_session_with_mode(state, key, stash_current=True)
+
+
+def switch_to_subagent_chat_session(state: State, agent_id: str, session_id: str) -> bool:
+    sub = state.subagents.get(str(agent_id or ""))
+    if sub is None:
+        state.last_error = "子 agent 会话不存在。"
+        mark_dirty(state)
+        return True
+    if session_id and sub.chat_session_id != session_id:
+        block_reason = subagent_chat_session_switch_block_reason(sub)
+        if block_reason:
+            state.last_error = block_reason
+            mark_dirty(state)
+            return True
+        if sub.messages:
+            save_subagent_chat_session(state, sub, source="switch-subagent-session")
+        if not load_subagent_chat_session(state, sub, session_id):
+            state.last_error = f"没有找到子 agent 会话：{session_id}"
+            mark_dirty(state)
+            return True
+    state.selected_session = sub.agent_id
+    state.follow_bottom = True
+    mark_subagent_messages_changed(state, sub)
+    state.last_error = f"已切换到子 agent 会话：{sub.name}"
+    return True
+
+
+def open_normal_home_session(state: State, path: str) -> bool:
+    if not isinstance(path, str) or not path:
+        state.last_error = "主页会话缺少可打开路径。"
+        mark_dirty(state)
+        return True
+    hide_session_info_popup(state)
+    if is_current_session_path(state, path):
+        state.selected_session = "main"
+        state.current_title = session_title_for_path(state, path)
+        state.follow_bottom = True
+        clear_history_ui_state(state)
+        state.last_error = f"已打开当前会话：{state.current_title}"
+        mark_dirty(state)
+        return True
+    if bg_key := background_session_key_for_path(state, path):
+        switch_to_background_session(state, bg_key)
+        return True
+    restore_history(state, path)
+    return True
+
+
+def open_home_session_payload(state: State, payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict) or str(payload.get("action") or "") != "open_session":
+        return False
+    session_type = str(payload.get("session_type") or "")
+    if session_type == "history":
+        return open_normal_home_session(state, str(payload.get("path") or ""))
+    if session_type == "subagent":
+        hide_session_info_popup(state)
+        return switch_to_subagent_chat_session(
+            state,
+            str(payload.get("agent_id") or ""),
+            str(payload.get("session_id") or ""),
+        )
+    return False
+
+
+def activate_home_line(state: State, line_idx: int) -> bool:
+    if line_idx < 0 or line_idx >= len(state.line_cache):
+        return False
+    return open_home_session_payload(state, state.line_cache[line_idx].payload)
 
 
 def switch_to_background_session_with_mode(state: State, key: str, stash_current: bool = True) -> None:
@@ -25062,6 +25262,8 @@ def finish_selection_copy(state: State) -> None:
     if not state.selection_dragged:
         line_idx = state.selection_start[0] if state.selection_start is not None else -1
         clear_selection(state)
+        if activate_home_line(state, line_idx):
+            return
         if toggle_process_at_line(state, line_idx):
             return
         state.last_error = ""
@@ -25248,6 +25450,8 @@ def handle_mouse(state: State, mx: int, my: int, bstate: int, width: int) -> Non
     if sidebar_w <= mx < rightbar_x0:
         pos = main_pos_at_mouse(state, mx, my)
         if clean_button1_action(bstate, button1_clicked):
+            if pos is not None and activate_home_line(state, pos[0]):
+                return
             if pos is not None and toggle_process_at_line(state, pos[0]):
                 return
         if clean_button1_action(bstate, button1_pressed):
@@ -25321,23 +25525,7 @@ def handle_mouse(state: State, mx: int, my: int, bstate: int, width: int) -> Non
             elif kind == "subagent_session":
                 hide_session_info_popup(state)
                 agent_id, session_id = subagent_session_from_sidebar_key(key)
-                sub = state.subagents.get(agent_id)
-                if sub is None:
-                    state.last_error = "子 agent 会话不存在。"
-                else:
-                    if sub.chat_session_id != session_id:
-                        block_reason = subagent_chat_session_switch_block_reason(sub)
-                        if block_reason:
-                            state.last_error = block_reason
-                            mark_dirty(state)
-                            return
-                        if sub.messages:
-                            save_subagent_chat_session(state, sub, source="switch-subagent-session")
-                        load_subagent_chat_session(state, sub, session_id)
-                    state.selected_session = sub.agent_id
-                    state.follow_bottom = True
-                    mark_subagent_messages_changed(state, sub)
-                    state.last_error = f"已切换到子 agent 会话：{sub.name}"
+                switch_to_subagent_chat_session(state, agent_id, session_id)
             elif kind == "subagent_home":
                 hide_session_info_popup(state)
                 agent_id = home_subagent_id_from_key(key)
