@@ -81,6 +81,23 @@ _FULL_APPROVAL_TOOL_MAP = {
 }
 _OHMYPI_APPROVAL_MODES = {"always-ask", "write", "yolo"}
 TOKEN_USAGE_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
+MAX_INCOMPLETE_FINAL_CONTINUATIONS = 2
+INCOMPLETE_FINAL_NOTICE = (
+    "\n\n[Oh My Pi] 输出疑似在半句处中断；已达到自动续写上限。"
+    "当前回复保留为 incomplete，请继续追问“继续”或切换模型重试。"
+)
+INCOMPLETE_FINAL_CONTINUATION_PROMPT = (
+    "Your previous visible assistant reply appears to have stopped in the middle of a sentence. "
+    "Continue exactly from the last visible words. Do not restart the answer, do not summarize, "
+    "do not apologize, and do not mention this instruction. Finish the user-facing reply naturally "
+    "in the same language."
+)
+_FINAL_TERMINAL_CHARS = set("。.!！?？…)]}）】』」”'\"`")
+_FINAL_SOFT_BREAK_CHARS = set(",，、:：;；-—")
+_INCOMPLETE_FINAL_SUFFIX_RE = re.compile(
+    r"(用于|作为|因为|所以|但是|不过|如果|虽然|以及|或者|包括|通过|对于|关于|相比|"
+    r"需要|应该|可以|不能|没有|不是|属于|适合|依赖|意味着|核心是|关键是|实际|真实|具体|最终)$"
+)
 
 
 def _empty_token_usage() -> dict[str, int]:
@@ -188,6 +205,7 @@ class _ActivePrompt:
     token_usage: dict[str, int] = field(default_factory=_empty_token_usage)
     token_usage_signatures: set[str] = field(default_factory=set)
     session_usage_baseline_signatures: set[str] = field(default_factory=set)
+    incomplete_final_continuations: int = 0
 
 
 @dataclass(frozen=True)
@@ -459,6 +477,47 @@ def _should_append_terminal_final_tail(buffer: str, final_tail: str) -> bool:
     if not normalized_tail:
         return False
     return normalized_tail not in _terminal_dedupe_text(buffer)
+
+
+def _has_unclosed_markdown_tail(text: str) -> bool:
+    if len(re.findall(r"```+", text)) % 2 == 1:
+        return True
+    if text.count("**") % 2 == 1:
+        return True
+    if text.count("`") % 2 == 1 and "```" not in text:
+        return True
+    return False
+
+
+def _looks_like_incomplete_final_reply(text: str) -> bool:
+    visible = _visible_non_process_text(text)
+    visible = re.sub(r"\s+", " ", visible).strip()
+    if len(visible) < 18:
+        return False
+    if visible.startswith("[Oh My Pi]"):
+        return False
+    if INCOMPLETE_FINAL_NOTICE.strip() in visible:
+        return False
+    if _has_unclosed_markdown_tail(visible):
+        return True
+    tail = visible.rstrip()
+    if not tail:
+        return False
+    last_char = tail[-1]
+    if last_char in _FINAL_TERMINAL_CHARS:
+        return False
+    if last_char in _FINAL_SOFT_BREAK_CHARS:
+        return True
+    compact_tail = re.sub(r"[\s`*_~）】)}]+$", "", tail)
+    compact_tail = re.sub(r"\s+", "", compact_tail)
+    if _INCOMPLETE_FINAL_SUFFIX_RE.search(compact_tail[-32:]):
+        return True
+    return bool(re.search(
+        r"\b(to|for|from|because|although|while|but|and|or|with|without|into|onto|as|is|are|was|were|"
+        r"be|being|been|can|could|should|would|will|must|the|a|an|of|in|on|at|by)$",
+        tail,
+        re.IGNORECASE,
+    ))
 
 
 def _token_usage_int(value: Any) -> int:
@@ -1520,6 +1579,81 @@ class OhMyPiRpcAgent:
                 return None, ""
             return active.pending_terminal_text, active.pending_terminal_fallback_text
 
+    def _active_done_text_candidate(self, text: str | None, fallback_text: str = "") -> str:
+        with self._active_lock:
+            active = self._active
+            if active is None or active.finished:
+                return text or fallback_text or ""
+            if text is not None:
+                return text
+            if active.buffer:
+                done_text = active.buffer
+                final_tail = fallback_text or active.final_text
+                if _should_append_terminal_final_tail(done_text, final_tail):
+                    done_text = done_text.rstrip() + "\n\n" + final_tail
+                return done_text
+            return fallback_text or active.final_text
+
+    def _materialize_active_done_text_candidate(self, done_text: str) -> None:
+        if not done_text:
+            return
+        with self._active_lock:
+            active = self._active
+            if active is None or active.finished:
+                return
+            delta = ""
+            if not active.buffer:
+                delta = done_text
+                active.buffer = done_text
+            elif done_text.startswith(active.buffer):
+                delta = done_text[len(active.buffer) :]
+                active.buffer = done_text
+            elif done_text not in active.buffer:
+                delta = "\n\n" + done_text
+                active.buffer = active.buffer.rstrip() + delta
+            active.final_text = ""
+            active.pending_terminal_text = None
+            active.pending_terminal_fallback_text = ""
+            active.terminal_grace_started = False
+            active.pending_standalone_dot_delta = ""
+            if delta:
+                active.display_queue.put({"next": delta, "source": "ohmypi"})
+
+    def _continue_incomplete_final_reply(self, done_text: str) -> bool:
+        with self._active_lock:
+            active = self._active
+            if active is None or active.finished:
+                return False
+            if active.incomplete_final_continuations >= MAX_INCOMPLETE_FINAL_CONTINUATIONS:
+                return False
+            active.incomplete_final_continuations += 1
+            continuation_no = active.incomplete_final_continuations
+        self._materialize_active_done_text_candidate(done_text)
+        request_id = self._next_request_id("continue-final")
+        try:
+            self._send({
+                "id": request_id,
+                "type": "prompt",
+                "message": INCOMPLETE_FINAL_CONTINUATION_PROMPT,
+            })
+        except Exception as exc:
+            self._finish_active(
+                done_text
+                + "\n\n"
+                + f"[Oh My Pi] 输出疑似中断，自动续写请求发送失败：{type(exc).__name__}: {exc}",
+                wait_for_session_usage=False,
+                allow_incomplete_final_check=False,
+            )
+            return True
+        self._emit_runtime_event(
+            "runtime_incomplete_final_continuation",
+            status="continuing",
+            source="ohmypi",
+            message=done_text[-1200:],
+            payload={"request_id": request_id, "continuation_no": continuation_no},
+        )
+        return True
+
     def _cancel_active_terminal_grace(self) -> None:
         with self._active_lock:
             active = self._active
@@ -1633,10 +1767,28 @@ class OhMyPiRpcAgent:
         source: str = "ohmypi",
         fallback_text: str = "",
         wait_for_session_usage: bool = True,
+        allow_incomplete_final_check: bool = True,
     ) -> None:
         if text is None:
             self._flush_active_thinking()
             self._flush_active_pending_standalone_dot_delta()
+        done_text_candidate = self._active_done_text_candidate(text, fallback_text)
+        if (
+            allow_incomplete_final_check
+            and done_text_candidate
+            and not done_text_candidate.startswith("[Oh My Pi]")
+            and _looks_like_incomplete_final_reply(done_text_candidate)
+        ):
+            with self._active_lock:
+                active = self._active
+                continuation_count = active.incomplete_final_continuations if active is not None else 0
+            if continuation_count < MAX_INCOMPLETE_FINAL_CONTINUATIONS:
+                if self._continue_incomplete_final_reply(done_text_candidate):
+                    return
+            else:
+                text = done_text_candidate.rstrip() + INCOMPLETE_FINAL_NOTICE
+                fallback_text = ""
+                wait_for_session_usage = False
         self._merge_active_session_file_token_usage(wait=wait_for_session_usage)
         done_text = ""
         signal_source = source
@@ -1679,6 +1831,10 @@ class OhMyPiRpcAgent:
             event_type = "runtime_task_failed"
             status = "failed"
             error = done_text
+        elif INCOMPLETE_FINAL_NOTICE.strip() in done_text:
+            event_type = "runtime_task_failed"
+            status = "incomplete"
+            error = "OMP final reply remained structurally incomplete after bounded continuation."
         event_payload: dict[str, Any] = {"request_id": request_id}
         if _has_token_usage(token_usage):
             event_payload["token_usage"] = token_usage

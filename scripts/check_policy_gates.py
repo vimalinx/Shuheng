@@ -1811,6 +1811,131 @@ def assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt() -> None:
     agent.close()
 
 
+def assert_ohmypi_rpc_continues_incomplete_final_reply() -> None:
+    processes: list[FakeRpcProcess] = []
+    runtime_events: list[dict[str, object]] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        runtime_event_sink=lambda event: runtime_events.append(event.to_record()),
+        startup_timeout=1,
+    )
+    dq = agent.put_task("商业分析", source="test")
+    process = wait_for_process(processes)
+    wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt" and frame.get("message") == "商业分析")
+
+    half = "手机内置马达的振动强度**根本不够**用于实际"
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": half},
+    })
+    process.stdout.push({
+        "type": "agent_end",
+        "messages": [{"role": "assistant", "content": [{"type": "text", "text": half}], "stopReason": "stop"}],
+    })
+
+    continuation_prompt = wait_for_rpc_write(
+        process,
+        lambda frame: frame.get("type") == "prompt" and frame.get("message") == omp.INCOMPLETE_FINAL_CONTINUATION_PROMPT,
+    )
+    assert str(continuation_prompt.get("id") or "").startswith("ga-tui-continue-final-"), continuation_prompt
+    assert agent.is_running is True
+    assert agent.task_queue.unfinished_tasks == 1
+    assert_queue_has_no_done(dq, timeout=0.1)
+
+    continuation = "使用，只适合当作趣味试玩。"
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": continuation},
+    })
+    process.stdout.push({
+        "type": "agent_end",
+        "messages": [{"role": "assistant", "content": [{"type": "text", "text": continuation}], "stopReason": "stop"}],
+    })
+    done, _streamed = wait_for_queue_done(dq)
+    assert done["done"] == half + continuation, done
+    assert omp.INCOMPLETE_FINAL_NOTICE.strip() not in done["done"], done
+    assert agent.is_running is False
+    assert agent.task_queue.unfinished_tasks == 0
+    assert any(event.get("event_type") == "runtime_incomplete_final_continuation" for event in runtime_events), runtime_events
+    assert runtime_events[-1]["event_type"] == "runtime_task_completed", runtime_events
+    agent.close()
+
+
+def assert_ohmypi_rpc_incomplete_final_reply_hits_bounded_limit() -> None:
+    processes: list[FakeRpcProcess] = []
+    runtime_events: list[dict[str, object]] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        runtime_event_sink=lambda event: runtime_events.append(event.to_record()),
+        startup_timeout=1,
+    )
+    dq = agent.put_task("bounded incomplete", source="test")
+    process = wait_for_process(processes)
+    wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt" and frame.get("message") == "bounded incomplete")
+
+    chunks = [
+        "手机内置马达的振动强度**根本不够**用于实际",
+        "使用场景，因为",
+        "它仍然不能",
+    ]
+
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": chunks[0]},
+    })
+    process.stdout.push({"type": "agent_end", "messages": [{"role": "assistant", "content": [{"type": "text", "text": chunks[0]}]}]})
+    wait_for_rpc_write(
+        process,
+        lambda frame: frame.get("type") == "prompt"
+        and len([item for item in process.stdin.writes if item.get("type") == "prompt"]) >= 2,
+    )
+    assert_queue_has_no_done(dq, timeout=0.05)
+
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": chunks[1]},
+    })
+    process.stdout.push({"type": "agent_end", "messages": [{"role": "assistant", "content": [{"type": "text", "text": chunks[1]}]}]})
+    wait_for_rpc_write(
+        process,
+        lambda frame: frame.get("type") == "prompt"
+        and len([item for item in process.stdin.writes if item.get("type") == "prompt"]) >= 3,
+    )
+    assert_queue_has_no_done(dq, timeout=0.05)
+
+    process.stdout.push({
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_delta", "delta": chunks[2]},
+    })
+    process.stdout.push({"type": "agent_end", "messages": [{"role": "assistant", "content": [{"type": "text", "text": chunks[2]}]}]})
+    done, _streamed = wait_for_queue_done(dq)
+    assert done["done"].startswith("".join(chunks)), done
+    assert omp.INCOMPLETE_FINAL_NOTICE.strip() in done["done"], done
+    prompt_messages = [item.get("message") for item in process.stdin.writes if item.get("type") == "prompt"]
+    assert prompt_messages.count(omp.INCOMPLETE_FINAL_CONTINUATION_PROMPT) == omp.MAX_INCOMPLETE_FINAL_CONTINUATIONS, prompt_messages
+    assert runtime_events[-1]["event_type"] == "runtime_task_failed", runtime_events
+    assert runtime_events[-1]["status"] == "incomplete", runtime_events
+    assert agent.is_running is False
+    assert agent.task_queue.unfinished_tasks == 0
+    agent.close()
+
+
 def assert_ohmypi_rpc_tool_use_turn_end_waits_for_final_answer() -> None:
     processes: list[FakeRpcProcess] = []
 
@@ -4094,6 +4219,25 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     assert any(row.get("type") == "subagent-results" for row in artifacts), artifacts
     assert any(msg.role == "system" and "子 agent 失败" in msg.content and "429" in msg.content for msg in state.messages), state.messages
 
+    incomplete_root = tempfile.mkdtemp(prefix="ga_tui_subagent_incomplete_runtime_")
+    retarget_harness(incomplete_root)
+    incomplete_state = a.State(agent=ContextFakeAgent())
+    incomplete_state.running = True
+    incomplete_text = "手机内置马达的振动强度**根本不够**用于实际" + omp.INCOMPLETE_FINAL_NOTICE
+    incomplete_sub = a.create_subagent(incomplete_state, "Incomplete Runtime Agent", role="researcher")
+    incomplete_sub.agent = SequencedFakeAgent([incomplete_text])
+    incomplete_started = a.start_subagent_task(incomplete_state, incomplete_sub, "商业分析", source="user")
+    assert incomplete_started.startswith("已启动子 agent"), incomplete_started
+    drain_ui(incomplete_state)
+    incomplete_rows = [
+        row for row in a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
+        if row.get("assigned_agent") == incomplete_sub.agent_id
+    ]
+    assert [row.get("status") for row in incomplete_rows] == ["working", "failed"], incomplete_rows
+    assert "incomplete" in incomplete_rows[-1].get("error", ""), incomplete_rows[-1]
+    assert not any(row.get("status") == "completed" for row in incomplete_rows), incomplete_rows
+    assert "子 agent 失败" in incomplete_state.last_error and "incomplete" in incomplete_state.last_error, incomplete_state.last_error
+
     chat_sub = a.create_subagent(state, "Runtime Error Chat Agent", role="researcher")
     chat_agent = BlockingAbortFakeAgent()
     chat_sub.agent = chat_agent
@@ -6115,6 +6259,8 @@ def run_checks() -> None:
     assert_ohmypi_rpc_final_text_fallback()
     assert_ohmypi_rpc_streamed_final_text_dedupes_terminal_message()
     assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt()
+    assert_ohmypi_rpc_continues_incomplete_final_reply()
+    assert_ohmypi_rpc_incomplete_final_reply_hits_bounded_limit()
     assert_ohmypi_rpc_tool_use_turn_end_waits_for_final_answer()
     assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn()
     assert_ohmypi_rpc_host_tool_followup_activity_waits_for_final_answer()

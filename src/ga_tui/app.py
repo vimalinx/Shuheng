@@ -13132,6 +13132,11 @@ def subagent_runtime_error_text(text: str) -> str:
         return clean
     if re.match(r"^\[Oh My Pi\]\s*[45]\d\d\b", clean):
         return clean
+    if "[Oh My Pi]" in clean and (
+        "输出疑似在半句处中断" in clean
+        or "当前回复保留为 incomplete" in clean
+    ):
+        return clean
     if clean.startswith("[Oh My Pi]") and any(
         marker in lower
         for marker in (
