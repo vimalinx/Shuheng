@@ -1273,7 +1273,11 @@ configure_genericagent_provider_runtime(
 - Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
 - Existing OMP wrapper + `set_model` confirmation after a current-session switch -> the status card keeps the configured provider label/base URL while accepting matching context-window metadata.
 - Existing OMP wrapper with an already selected model -> refresh keeps the matching selected model when it still exists and sends the refreshed provider/model id before the next prompt.
+- OMP configured-model synchronization has one explicit state record with `desired_selector`, `pending_selector`, `confirmed_selector`, `status`, and `error`. UI selection, `/model`, subagent defaults, refreshes, and prompt submission must update this state instead of maintaining separate ad hoc pending/confirmed flags.
 - Configured OMP model switches must wait for `set_model` confirmation when the RPC process is already running or immediately before prompt submission. A rejected, timed-out, unknown, or wrong-model confirmation is a switch failure and must block the prompt instead of silently running on the previous model.
+- OMP process restart or replacement invalidates process-local model confidence: the wrapper must force a fresh `set_model` before the first prompt on the new process, even if `confirmed_selector` matched the desired selector in the previous process.
+- Legacy `next_llm()` calls on configured OMP models must use the same confirmed switch path as `/model`; they must not fire-and-forget a `set_model` request and then clear pending state before confirmation.
+- Current-model UI lines and model orchestration registry must read the active effective model owner: active subagent runtime first, otherwise the main agent. They must not display the main agent model as the current model while the visible interaction target is a subagent.
 - New Shuheng main or temporary session -> active OMP RPC session receives a `new_session` reset when the process is running, and a later first runtime task may inject one fresh full context pack.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
 - OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
@@ -1365,6 +1369,9 @@ configure_genericagent_provider_runtime(
 - Tests must assert a wrong-model OMP `set_model` confirmation fails the switch and keeps the previous local selection.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
 - Tests must assert a new OMP wrapper sends the selected default model through `set_model` before its first prompt, even if the UI already points at that model locally.
+- Tests must assert an OMP process restart sends the desired configured model through `set_model` again before the first prompt on the replacement process.
+- Tests must assert legacy `next_llm()` does not falsely mark configured OMP model switches complete after a wrong-model `set_model` confirmation.
+- Tests must assert current-model UI lines prefer the active subagent runtime model over the main agent model while the selected view is a subagent.
 - Tests must assert OMP error `message_end` frames keep the active prompt busy until a terminal frame or grace timeout, and that a second prompt during that window is blocked locally rather than sent to OMP.
 - Tests must assert `/model` `Enter` from an active subagent view sets that subagent's default model instead of switching the main agent.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
@@ -1374,6 +1381,25 @@ configure_genericagent_provider_runtime(
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# ohmypi_provider.py
+self.llm_no = index
+self.llmclient = self.llmclients[index]
+self._pending_model = None  # UI looks switched, but OMP never confirmed it.
+```
+
+#### Correct
+
+```python
+# ohmypi_provider.py
+self._set_desired_model(self.configured_models[index], force=True)
+ok, message = self._apply_pending_model(wait=True)
+if not ok:
+    restore_previous_selection()
+```
 
 #### Wrong
 

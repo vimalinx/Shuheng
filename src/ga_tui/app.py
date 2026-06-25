@@ -7323,6 +7323,16 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
     }
 
 
+def effective_model_display_agent(state: State) -> Any:
+    try:
+        sub = active_subagent_view(state)
+    except Exception:
+        sub = None
+    if sub is not None and sub.agent is not None:
+        return sub.agent
+    return state.agent
+
+
 def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any]:
     entries: list[LLMConfigEntry] = []
     try:
@@ -7331,10 +7341,13 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
         entries = []
     current_model = ""
     current_provider = ""
+    current_scope = "main"
     if state is not None:
+        agent = effective_model_display_agent(state)
+        current_scope = "subagent" if agent is not state.agent else "main"
         try:
-            current_model = str(state.agent.get_llm_name(model=True))
-            current_provider = str(state.agent.get_llm_name(model=False))
+            current_model = str(agent.get_llm_name(model=True))
+            current_provider = str(agent.get_llm_name(model=False))
         except Exception:
             current_model = ""
             current_provider = ""
@@ -7355,6 +7368,7 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
         "current": {
             "provider": current_provider,
             "model": current_model,
+            "scope": current_scope,
         },
         "model_count": len(models),
         "models": models,
@@ -14375,10 +14389,13 @@ def host_from_url(url: str) -> str:
 
 
 def current_model_lines(state: State, width: int) -> list[tuple[str, int]]:
+    display_agent = effective_model_display_agent(state)
     lines: list[tuple[str, int]] = [("CURRENT MODEL", cp(7) | curses.A_BOLD)]
+    if display_agent is not state.agent:
+        lines = [("SUBAGENT MODEL", cp(7) | curses.A_BOLD)]
     backend = None
     try:
-        backend = state.agent.llmclient.backend
+        backend = display_agent.llmclient.backend
     except Exception:
         backend = None
     provider = model = base = ""
@@ -14388,18 +14405,34 @@ def current_model_lines(state: State, width: int) -> list[tuple[str, int]]:
         base = host_from_url(str(getattr(backend, "api_base", "") or getattr(backend, "apibase", "") or ""))
     if not provider:
         try:
-            provider = str(state.agent.get_llm_name(model=False))
+            provider = str(display_agent.get_llm_name(model=False))
         except Exception:
             provider = "unknown"
     if not model:
         try:
-            model = str(state.agent.get_llm_name(model=True))
+            model = str(display_agent.get_llm_name(model=True))
         except Exception:
             model = "unknown"
     lines.append((f"provider {provider}", cp(2)))
     lines.append((f"model {model}", cp(1)))
     if base:
         lines.append((f"base {base}", cp(1)))
+    snapshotter = getattr(display_agent, "model_sync_snapshot", None)
+    if callable(snapshotter):
+        try:
+            sync = snapshotter()
+        except Exception:
+            sync = {}
+        status = str((sync or {}).get("status") or "")
+        pending = str((sync or {}).get("pending_selector") or "")
+        error = str((sync or {}).get("error") or "")
+        if status in {"pending", "failed"}:
+            sync_text = f"sync {status}"
+            if pending:
+                sync_text += f" {pending}"
+            if error:
+                sync_text += f" {error}"
+            lines.append((sync_text, cp(3 if status == "pending" else 4)))
     return [(truncate_cells(text, width - 2), attr) for text, attr in lines]
 
 

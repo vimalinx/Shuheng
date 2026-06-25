@@ -247,6 +247,33 @@ class OhMyPiRuntimeModel:
         return self.model_id or self.provider
 
 
+@dataclass
+class _ModelSyncState:
+    desired_selector: str = ""
+    pending_selector: str = ""
+    confirmed_selector: str = ""
+    status: str = "clean"
+    error: str = ""
+
+    def copy(self) -> "_ModelSyncState":
+        return _ModelSyncState(
+            desired_selector=self.desired_selector,
+            pending_selector=self.pending_selector,
+            confirmed_selector=self.confirmed_selector,
+            status=self.status,
+            error=self.error,
+        )
+
+    def to_record(self) -> dict[str, str]:
+        return {
+            "desired_selector": self.desired_selector,
+            "pending_selector": self.pending_selector,
+            "confirmed_selector": self.confirmed_selector,
+            "status": self.status,
+            "error": self.error,
+        }
+
+
 @dataclass(frozen=True)
 class OhMyPiRuntimeConfig:
     agent_dir: str
@@ -717,12 +744,8 @@ class OhMyPiRpcAgent:
         self._stderr_tail: list[str] = []
         self._closed = False
         self._host_tools_registered = False
-        self._pending_model: OhMyPiRuntimeModel | None = (
-            self.configured_models[self.llm_no]
-            if self.configured_models and 0 <= self.llm_no < len(self.configured_models)
-            else None
-        )
-        self._last_confirmed_model_selector = ""
+        self._model_sync = _ModelSyncState()
+        self._set_desired_model_from_selection(force=bool(self.configured_models))
         self.native_session_file = ""
         self.native_session_id = ""
         self.native_session_name = ""
@@ -786,12 +809,72 @@ class OhMyPiRpcAgent:
             return None
         return self.configured_models[self.llm_no]
 
+    def _configured_model_for_selector(self, selector: str) -> OhMyPiRuntimeModel | None:
+        selector = str(selector or "").strip()
+        if not selector:
+            return None
+        for model in self.configured_models:
+            if model.selector == selector:
+                return model
+        return None
+
+    @property
+    def _pending_model(self) -> OhMyPiRuntimeModel | None:
+        return self._configured_model_for_selector(self._model_sync.pending_selector)
+
+    @property
+    def _last_confirmed_model_selector(self) -> str:
+        return self._model_sync.confirmed_selector
+
+    def model_sync_snapshot(self) -> dict[str, str]:
+        return self._model_sync.to_record()
+
+    def _set_desired_model(self, model: OhMyPiRuntimeModel | None, *, force: bool = False) -> None:
+        if model is None:
+            self._model_sync = _ModelSyncState()
+            return
+        selector = model.selector
+        self._model_sync.desired_selector = selector
+        if force or selector != self._model_sync.confirmed_selector:
+            self._model_sync.pending_selector = selector
+            self._model_sync.status = "pending"
+            self._model_sync.error = ""
+            return
+        self._model_sync.pending_selector = ""
+        self._model_sync.status = "clean"
+        self._model_sync.error = ""
+
+    def _set_desired_model_from_selection(self, *, force: bool = False) -> None:
+        self._set_desired_model(self._selected_configured_model(), force=force)
+
+    def _mark_model_sync_confirmed(self, selector: str) -> None:
+        selector = str(selector or "").strip()
+        if not selector:
+            return
+        self._model_sync.desired_selector = selector
+        self._model_sync.pending_selector = ""
+        self._model_sync.confirmed_selector = selector
+        self._model_sync.status = "clean"
+        self._model_sync.error = ""
+
+    def _mark_model_sync_failed(self, selector: str, message: str) -> None:
+        selector = str(selector or "").strip()
+        if not selector:
+            return
+        self._model_sync.desired_selector = selector
+        self._model_sync.pending_selector = selector
+        self._model_sync.status = "failed"
+        self._model_sync.error = str(message or "model sync failed")
+
     def _queue_selected_model_if_unconfirmed(self) -> None:
         model = self._selected_configured_model()
-        if model is None or self._pending_model is not None:
+        if model is None:
+            self._set_desired_model(None)
             return
-        if model.selector != self._last_confirmed_model_selector:
-            self._pending_model = model
+        force_retry = self._model_sync.status == "failed" and model.selector != self._model_sync.confirmed_selector
+        if self._model_sync.pending_selector:
+            return
+        self._set_desired_model(model, force=force_retry)
 
     def refresh_configured_models(
         self,
@@ -834,9 +917,7 @@ class OhMyPiRpcAgent:
                 self.llm_no = idx
                 break
         self.llmclient = self.llmclients[self.llm_no]
-        self._pending_model = self.configured_models[self.llm_no] if self.configured_models else None
-        if self._pending_model is not None:
-            self._last_confirmed_model_selector = ""
+        self._set_desired_model_from_selection(force=bool(self.configured_models))
 
     def configure_host_tools(
         self,
@@ -923,14 +1004,16 @@ class OhMyPiRpcAgent:
                 return False, f"model index out of range: {index}"
             previous_no = self.llm_no
             previous_client = self.llmclient
+            previous_sync = self._model_sync.copy()
             self.llm_no = index
             self.llmclient = self.llmclients[index]
-            self._pending_model = self.configured_models[index]
+            self._set_desired_model(self.configured_models[index], force=True)
             if self._process is not None and self._process.poll() is None and self._ready.is_set():
                 ok, message = self._apply_pending_model(wait=wait, timeout=timeout or self.startup_timeout)
                 if not ok:
                     self.llm_no = previous_no
                     self.llmclient = previous_client
+                    self._model_sync = previous_sync
                     return False, message
             return True, f"model switched to {self.get_llm_name(model=True)}"
         if index not in (-1, 0):
@@ -949,7 +1032,7 @@ class OhMyPiRpcAgent:
         return True, f"model switched to {self.get_llm_name(model=True)}"
 
     def next_llm(self, index: int = -1) -> None:
-        ok, message = self.set_llm_index(index, wait=False)
+        ok, message = self.set_llm_index(index, wait=True)
         if not ok:
             self._remember_stderr(message)
 
@@ -1075,6 +1158,7 @@ class OhMyPiRpcAgent:
             raise FileNotFoundError(f"`{binary}` executable not found")
         self._ready.clear()
         self._host_tools_registered = False
+        self._set_desired_model_from_selection(force=bool(self.configured_models))
         self._process = self.process_factory(
             self.command,
             cwd=self.cwd,
@@ -1320,6 +1404,8 @@ class OhMyPiRpcAgent:
             if context_window > 0:
                 setattr(self.llmclient.backend, "context_win", context_window)
                 setattr(self.llmclient.backend, "contextWindow", context_window)
+            if self._model_sync.pending_selector == self.configured_models[idx].selector:
+                self._mark_model_sync_confirmed(self.configured_models[idx].selector)
             return
         provider = str(model.get("provider") or self.llmclient.backend.name or "Oh My Pi")
         model_id = str(model.get("id") or model.get("modelId") or self.llmclient.backend.model or "unknown")
@@ -1362,11 +1448,18 @@ class OhMyPiRpcAgent:
                 self.llm_no = idx
                 break
         self.llmclient = self.llmclients[self.llm_no]
+        self._mark_model_sync_confirmed(self.configured_models[self.llm_no].selector)
 
     def _apply_pending_model(self, *, wait: bool = False, timeout: float | None = None) -> tuple[bool, str]:
-        model = self._pending_model
+        selector = self._model_sync.pending_selector or (
+            self._model_sync.desired_selector
+            if self._model_sync.desired_selector != self._model_sync.confirmed_selector
+            else ""
+        )
+        model = self._configured_model_for_selector(selector)
         if model is None or not model.provider or not model.model_id:
             return True, ""
+        selector = model.selector
         request = {
             "id": self._next_request_id("set-model"),
             "type": "set_model",
@@ -1377,27 +1470,38 @@ class OhMyPiRpcAgent:
             try:
                 self._send(request)
             except Exception as exc:
-                return False, f"set_model failed: {type(exc).__name__}: {exc}"
-            self._pending_model = None
+                message = f"set_model failed: {type(exc).__name__}: {exc}"
+                self._mark_model_sync_failed(selector, message)
+                return False, message
+            self._model_sync.pending_selector = selector
+            self._model_sync.status = "pending"
+            self._model_sync.error = ""
             return True, f"set_model queued: {model.selector}"
         try:
             frame = self._send_and_wait(request, timeout=timeout or self.startup_timeout)
         except Exception as exc:
-            return False, f"set_model confirmation failed: {type(exc).__name__}: {exc}"
+            message = f"set_model confirmation failed: {type(exc).__name__}: {exc}"
+            self._mark_model_sync_failed(selector, message)
+            return False, message
         if frame.get("success") is False:
-            return False, str(frame.get("error") or f"set_model rejected: {model.selector}")
+            message = str(frame.get("error") or f"set_model rejected: {model.selector}")
+            self._mark_model_sync_failed(selector, message)
+            return False, message
         data = frame.get("data")
         if isinstance(data, dict):
             runtime_model = data.get("model")
             if isinstance(runtime_model, dict):
                 idx = self._model_index_for_runtime_model(runtime_model)
                 if idx < 0:
-                    return False, f"set_model confirmed an unknown runtime model instead of {model.selector}"
+                    message = f"set_model confirmed an unknown runtime model instead of {model.selector}"
+                    self._mark_model_sync_failed(selector, message)
+                    return False, message
                 actual = self.configured_models[idx]
                 if actual.selector != model.selector:
-                    return False, f"set_model confirmed {actual.selector}, expected {model.selector}"
-        self._pending_model = None
-        self._last_confirmed_model_selector = model.selector
+                    message = f"set_model confirmed {actual.selector}, expected {model.selector}"
+                    self._mark_model_sync_failed(selector, message)
+                    return False, message
+        self._mark_model_sync_confirmed(model.selector)
         return True, f"set_model confirmed: {model.selector}"
 
     def _frame_error_text(self, frame: dict[str, Any]) -> str | None:

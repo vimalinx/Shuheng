@@ -2398,6 +2398,21 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert startup_set_model["modelId"] == "model-beta", startup_set_model
     assert startup_process.stdin.writes.index(startup_set_model) < startup_process.stdin.writes.index(startup_prompt), startup_process.stdin.writes
     wait_for_queue_done(startup_q)
+    assert startup_agent.model_sync_snapshot()["status"] == "clean", startup_agent.model_sync_snapshot()
+    assert startup_agent.model_sync_snapshot()["confirmed_selector"] == models[1].selector, startup_agent.model_sync_snapshot()
+    startup_process.returncode = 1
+    restart_q = startup_agent.put_task("restart prompt", source="test")
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(startup_processes) < 2:
+        time.sleep(0.01)
+    assert len(startup_processes) == 2, startup_processes
+    restart_process = startup_processes[1]
+    restart_set_model = wait_for_rpc_write(restart_process, lambda frame: frame.get("type") == "set_model")
+    restart_prompt = wait_for_rpc_write(restart_process, lambda frame: frame.get("type") == "prompt")
+    assert restart_set_model["provider"] == "ga-tui-beta", restart_set_model
+    assert restart_set_model["modelId"] == "model-beta", restart_set_model
+    assert restart_process.stdin.writes.index(restart_set_model) < restart_process.stdin.writes.index(restart_prompt), restart_process.stdin.writes
+    wait_for_queue_done(restart_q)
     startup_agent.close()
 
     env = {"PI_CODING_AGENT_DIR": "/tmp/ga-tui-omp-agent", "GA_TUI_OMP_API_KEY_TEST": "key"}
@@ -2515,6 +2530,30 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert "expected" in mismatch_msg, mismatch_msg
     assert mismatch_agent.llm_no == 0, mismatch_agent.llm_no
     mismatch_agent.close()
+
+    legacy_processes: list[FakeRpcProcess] = []
+
+    def legacy_process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=True)
+        legacy_processes.append(process)
+        return process
+
+    legacy_agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=legacy_process_factory,
+        configured_models=models,
+        startup_timeout=1,
+    )
+    legacy_warmup = legacy_agent.put_task("legacy warmup", source="test")
+    wait_for_queue_done(legacy_warmup)
+    legacy_process = wait_for_process(legacy_processes)
+    legacy_process.stdin.set_model_model_override = {"provider": "ga-tui-alpha", "id": "model-alpha"}
+    legacy_agent.next_llm(1)
+    assert legacy_agent.llm_no == 0, legacy_agent.llm_no
+    assert legacy_agent.model_sync_snapshot()["status"] == "clean", legacy_agent.model_sync_snapshot()
+    assert any("expected" in line for line in getattr(legacy_agent, "_stderr_tail", [])), getattr(legacy_agent, "_stderr_tail", [])
+    legacy_agent.close()
 
 
 def assert_ohmypi_host_tool_bridge() -> None:
@@ -6491,6 +6530,12 @@ def run_checks() -> None:
         panel_first = a.create_subagent(panel_state, "Panel First", role="researcher", persistent=True)
         panel_second = a.create_subagent(panel_state, "Panel Second", role="researcher", persistent=True)
         panel_state.selected_session = panel_first.agent_id
+        panel_first.agent = FakeLLMAgent()
+        panel_first.agent.next_llm(2)
+        model_lines = [text for text, _attr in a.current_model_lines(panel_state, 80)]
+        assert model_lines[0] == "SUBAGENT MODEL", model_lines
+        assert "model model-beta" in model_lines, model_lines
+        assert "model model-default" not in model_lines, model_lines
         panel_targets = a.model_manager_subagent_targets(panel_state)
         assert [sub.agent_id for sub in panel_targets[:2]] == [panel_first.agent_id, panel_second.agent_id], panel_targets
         ok_enter_sub, enter_sub_msg, enter_mode = a.apply_model_manager_selected_model(panel_state, llm_entries[1], subagent_target=panel_first)
