@@ -268,6 +268,28 @@ SHUHENG_L1_FILENAME = "global_mem_insight.txt"
 SHUHENG_L2_FILENAME = "global_mem.txt"
 SHUHENG_L0_FILENAME = "memory_management_sop.md"
 SHUHENG_L4_INDEX_FILENAME = "index.json"
+SHUHENG_USER_PROFILE_FILENAME = "user_profile.md"
+SHUHENG_USER_PROFILE_STATE_FILENAME = "user_profile_state.json"
+SHARED_USER_PROFILE_CHINESE_FOCUS_KEYWORDS = [
+    "用户画像",
+    "交互次数",
+    "工作时间",
+    "工作重心",
+    "个人状态",
+    "工作项目",
+    "项目方向",
+    "共享记忆",
+    "记忆系统",
+    "主代理",
+    "子代理",
+    "持久代理",
+    "定时任务",
+    "模型切换",
+    "供应商",
+    "看板",
+    "主页",
+    "枢衡",
+]
 UI_DURABLE_SYSTEM_MESSAGES_KEY = "ui_durable_system_messages"
 UI_DURABLE_SYSTEM_MESSAGE_LIMIT = 200
 SUBAGENT_CONTEXT_REPLY_LIMIT = 2200
@@ -2535,6 +2557,278 @@ def shuheng_memory_file_path(filename: str) -> str:
     return os.path.join(SHUHENG_MEMORY_DIR, filename)
 
 
+def shared_user_profile_path() -> str:
+    return shuheng_memory_file_path(SHUHENG_USER_PROFILE_FILENAME)
+
+
+def shared_user_profile_state_path() -> str:
+    return shuheng_memory_file_path(SHUHENG_USER_PROFILE_STATE_FILENAME)
+
+
+def shared_user_profile_default_description() -> str:
+    return (
+        "The user operates Shuheng as a governed multi-agent workbench and expects "
+        "main and persistent agents to share one current understanding of the user's "
+        "working state, active projects, and interaction preferences."
+    )
+
+
+def shared_user_profile_empty_state() -> dict[str, Any]:
+    now = now_iso()
+    return {
+        "schema_version": "shuheng.shared_user_profile.v1",
+        "created_at": now,
+        "updated_at": now,
+        "first_interaction_at": "",
+        "last_interaction_at": "",
+        "last_interaction_ts": 0.0,
+        "interaction_count": 0,
+        "estimated_work_seconds": 0,
+        "profile_description": shared_user_profile_default_description(),
+        "focus_counts": {},
+        "project_counts": {},
+        "recent_intents": [],
+        "source_counts": {},
+    }
+
+
+def shared_profile_sanitized_text(text: str, *, limit: int = 240) -> str:
+    cleaned = strip_tui_controls(strip_subagent_memory_controls(clean_text(text or "")))
+    cleaned = redact_memory_text(cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return truncate_cells(cleaned, limit)
+
+
+def shared_profile_top_items(raw: Any, *, limit: int = 8) -> list[tuple[str, int]]:
+    if not isinstance(raw, dict):
+        return []
+    items: list[tuple[str, int]] = []
+    for key, value in raw.items():
+        label = shared_profile_sanitized_text(str(key or ""), limit=80)
+        if not label:
+            continue
+        try:
+            count = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            count = 0
+        if count:
+            items.append((label, count))
+    items.sort(key=lambda item: (-item[1], item[0].lower()))
+    return items[:limit]
+
+
+def read_shared_user_profile_state() -> dict[str, Any]:
+    raw = read_json_dict_file(shared_user_profile_state_path())
+    state = shared_user_profile_empty_state()
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if key in {"focus_counts", "project_counts", "source_counts"} and not isinstance(value, dict):
+                continue
+            if key == "recent_intents" and not isinstance(value, list):
+                continue
+            state[key] = value
+    state["schema_version"] = "shuheng.shared_user_profile.v1"
+    if not str(state.get("profile_description") or "").strip():
+        state["profile_description"] = shared_user_profile_default_description()
+    focus_counts = {}
+    for label, count in (state.get("focus_counts") or {}).items():
+        text = str(label or "").strip()
+        if re.fullmatch(r"[\u4e00-\u9fff]+", text) and text not in SHARED_USER_PROFILE_CHINESE_FOCUS_KEYWORDS:
+            continue
+        focus_counts[text] = count
+    state["focus_counts"] = focus_counts
+    return state
+
+
+def shared_user_profile_focus_terms(text: str) -> list[str]:
+    sanitized = shared_profile_sanitized_text(text, limit=1200)
+    stopwords = {
+        "the", "and", "for", "with", "this", "that", "from", "into", "about", "what",
+        "怎么", "这个", "那个", "一下", "看看", "现在", "还是", "就是", "里面", "然后", "所有",
+        "agent", "代理",
+    }
+    terms: list[str] = []
+    for keyword in SHARED_USER_PROFILE_CHINESE_FOCUS_KEYWORDS:
+        if keyword in sanitized:
+            terms.append(keyword)
+    for match in re.finditer(r"[A-Za-z][A-Za-z0-9_-]{2,}", sanitized):
+        term = match.group(0).strip()
+        key = term.lower()
+        if key in stopwords or term in stopwords:
+            continue
+        if len(term) > 32:
+            term = truncate_cells(term, 32)
+        terms.append(term)
+    return list(dict.fromkeys(terms))[:16]
+
+
+def shared_user_profile_project_hints(text: str) -> list[str]:
+    sanitized = shared_profile_sanitized_text(text, limit=1200)
+    hints: list[str] = []
+    if re.search(r"Shuheng|枢衡|agent|代理|OMP|Oh My Pi", sanitized, re.IGNORECASE):
+        hints.append("Shuheng multi-agent harness")
+    for match in re.finditer(r"(?:~|/home/vimalinx|\.{1,2})/[^\s，。；,;:：]+", sanitized):
+        path = match.group(0).strip()
+        if path:
+            hints.append(truncate_cells(path, 120))
+    try:
+        manifest = ensure_auto_workspace()
+        name = str(manifest.get("name") or manifest.get("workspace_id") or "").strip()
+        if name:
+            hints.append(name)
+    except Exception:
+        pass
+    return list(dict.fromkeys(hints))[:8]
+
+
+def render_shared_user_profile_markdown(profile_state: dict[str, Any]) -> str:
+    focus = shared_profile_top_items(profile_state.get("focus_counts"), limit=10)
+    projects = shared_profile_top_items(profile_state.get("project_counts"), limit=8)
+    sources = shared_profile_top_items(profile_state.get("source_counts"), limit=6)
+    recent = profile_state.get("recent_intents") if isinstance(profile_state.get("recent_intents"), list) else []
+    work_seconds = int(profile_state.get("estimated_work_seconds") or 0)
+    work_hours = work_seconds / 3600.0
+    lines = [
+        "# Shared User Profile",
+        "",
+        "This Shuheng-owned operational profile is shared by the main Orchestrator and persistent subagents.",
+        "It is a dynamic interaction-state summary, not an approved L2 fact store. Do not store secrets here.",
+        "",
+        "## Profile Description",
+        "",
+        str(profile_state.get("profile_description") or shared_user_profile_default_description()).strip(),
+        "",
+        "## Current Interaction State",
+        "",
+        f"- interactions: {int(profile_state.get('interaction_count') or 0)}",
+        f"- estimated_work_time_hours: {work_hours:.2f}",
+        f"- first_interaction_at: {profile_state.get('first_interaction_at') or '-'}",
+        f"- last_interaction_at: {profile_state.get('last_interaction_at') or '-'}",
+        f"- updated_at: {profile_state.get('updated_at') or '-'}",
+        "",
+        "## Current Focus",
+        "",
+    ]
+    lines.extend([f"- {label} ({count})" for label, count in focus] or ["- (not enough interaction evidence yet)"])
+    lines.extend(["", "## Active Projects / Directions", ""])
+    lines.extend([f"- {label} ({count})" for label, count in projects] or ["- (not enough interaction evidence yet)"])
+    lines.extend(["", "## Recent User Intents", ""])
+    for item in recent[-8:]:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('at', '-')} · {item.get('source', '-')} · {item.get('summary', '')}")
+    if not recent:
+        lines.append("- (none yet)")
+    lines.extend(["", "## Interaction Sources", ""])
+    lines.extend([f"- {label}: {count}" for label, count in sources] or ["- (none yet)"])
+    lines.extend([
+        "",
+        "## Agent Usage Rule",
+        "",
+        "- All agents should use this profile as shared user-state context.",
+        "- If this profile conflicts with the user's current explicit instruction, obey the current instruction and treat this file as stale evidence.",
+        "- Durable long-term facts and preferences still require Shuheng memory-candidate governance unless the user explicitly asks this profile state to be updated.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def write_shared_user_profile_state(profile_state: dict[str, Any]) -> None:
+    os.makedirs(SHUHENG_MEMORY_DIR, exist_ok=True)
+    write_text_atomic(
+        shared_user_profile_state_path(),
+        json.dumps(profile_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    write_text_atomic(shared_user_profile_path(), render_shared_user_profile_markdown(profile_state))
+
+
+def ensure_shared_user_profile_files() -> dict[str, Any]:
+    profile_state = read_shared_user_profile_state()
+    if not os.path.exists(shared_user_profile_path()) or not os.path.exists(shared_user_profile_state_path()):
+        write_shared_user_profile_state(profile_state)
+    return profile_state
+
+
+def shared_user_profile_payload(*, max_chars: int = 2600) -> dict[str, Any]:
+    profile_state = ensure_shared_user_profile_files()
+    text = redact_memory_text(read_text_file(shared_user_profile_path(), "")).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "\n...[truncated]"
+    return {
+        "schema_version": "shuheng.shared_user_profile.v1",
+        "included": True,
+        "reason": "Shared operational user profile and current work-state context for all Shuheng agents.",
+        "path": shared_user_profile_path(),
+        "state_path": shared_user_profile_state_path(),
+        "profile_description": str(profile_state.get("profile_description") or ""),
+        "interaction_count": int(profile_state.get("interaction_count") or 0),
+        "estimated_work_seconds": int(profile_state.get("estimated_work_seconds") or 0),
+        "last_interaction_at": str(profile_state.get("last_interaction_at") or ""),
+        "focus": [label for label, _count in shared_profile_top_items(profile_state.get("focus_counts"), limit=8)],
+        "projects": [label for label, _count in shared_profile_top_items(profile_state.get("project_counts"), limit=6)],
+        "recent_intents": list(profile_state.get("recent_intents") or [])[-6:],
+        "text": text or "(empty shared user profile)",
+        "refs": [shared_user_profile_path(), shared_user_profile_state_path()],
+    }
+
+
+def record_shared_user_profile_interaction(
+    text: str,
+    *,
+    source: str,
+    state: Optional[State] = None,
+) -> dict[str, Any]:
+    if state is not None and (state.temporary_session or state.secret_vault.unlocked):
+        return read_shared_user_profile_state()
+    source = str(source or "user").strip() or "user"
+    if not (source.startswith("user") or source in {"subagent_chat", "agent_home_input", "main_home_input"}):
+        return read_shared_user_profile_state()
+    summary = shared_profile_sanitized_text(text, limit=180)
+    if not summary:
+        return read_shared_user_profile_state()
+    profile_state = read_shared_user_profile_state()
+    now_ts = time.time()
+    now = now_iso()
+    last_ts = 0.0
+    try:
+        last_ts = float(profile_state.get("last_interaction_ts") or 0.0)
+    except (TypeError, ValueError):
+        last_ts = 0.0
+    if not profile_state.get("first_interaction_at"):
+        profile_state["first_interaction_at"] = now
+    if last_ts > 0:
+        delta = max(0.0, now_ts - last_ts)
+        if 30 <= delta <= 6 * 3600:
+            profile_state["estimated_work_seconds"] = int(profile_state.get("estimated_work_seconds") or 0) + int(min(delta, 2 * 3600))
+    profile_state["last_interaction_at"] = now
+    profile_state["last_interaction_ts"] = now_ts
+    profile_state["updated_at"] = now
+    profile_state["interaction_count"] = int(profile_state.get("interaction_count") or 0) + 1
+
+    focus_counts = dict(profile_state.get("focus_counts") or {})
+    for term in shared_user_profile_focus_terms(summary):
+        focus_counts[term] = int(focus_counts.get(term) or 0) + 1
+    profile_state["focus_counts"] = dict(shared_profile_top_items(focus_counts, limit=40))
+
+    project_counts = dict(profile_state.get("project_counts") or {})
+    for project in shared_user_profile_project_hints(summary):
+        project_counts[project] = int(project_counts.get(project) or 0) + 1
+    profile_state["project_counts"] = dict(shared_profile_top_items(project_counts, limit=24))
+
+    source_counts = dict(profile_state.get("source_counts") or {})
+    source_counts[source] = int(source_counts.get(source) or 0) + 1
+    profile_state["source_counts"] = dict(shared_profile_top_items(source_counts, limit=16))
+
+    recent = [item for item in (profile_state.get("recent_intents") or []) if isinstance(item, dict)]
+    recent.append({"at": now, "source": source, "summary": summary})
+    profile_state["recent_intents"] = recent[-12:]
+    write_shared_user_profile_state(profile_state)
+    try:
+        write_ohmypi_memory_prompt(root_dir=SHUHENG_HOME, harness_dir=AGENT_HARNESS_DIR)
+    except Exception:
+        pass
+    return profile_state
+
+
 def shuheng_l4_index_path() -> str:
     return os.path.join(L4_RAW_SESSIONS_DIR, SHUHENG_L4_INDEX_FILENAME)
 
@@ -2595,6 +2889,8 @@ def ensure_shuheng_layered_memory_files() -> dict[str, str]:
         "l3_dir": SHUHENG_MEMORY_DIR,
         "l4_dir": L4_RAW_SESSIONS_DIR,
         "l4_index": shuheng_l4_index_path(),
+        "user_profile": shared_user_profile_path(),
+        "user_profile_state": shared_user_profile_state_path(),
     }
     if not os.path.exists(paths["l2"]):
         write_text_atomic(paths["l2"], "# [Global Memory - L2]\n")
@@ -2602,6 +2898,7 @@ def ensure_shuheng_layered_memory_files() -> dict[str, str]:
         write_text_atomic(paths["l1"], default_shuheng_l1_text())
     if not os.path.exists(paths["l0"]):
         write_text_atomic(paths["l0"], default_shuheng_l0_text())
+    ensure_shared_user_profile_files()
     refresh_shuheng_l4_index()
     return paths
 
@@ -2623,11 +2920,16 @@ def shuheng_layered_memory_prompt(*, max_l1_chars: int = 3500) -> str:
     paths = ensure_shuheng_layered_memory_files()
     insight_raw = read_text_file(paths["l1"], "")[:max_l1_chars]
     insight = redact_memory_text(insight_raw).strip() or "(empty L1 index)"
+    shared_profile = shared_user_profile_payload(max_chars=2200)
     return "\n".join([
         f"cwd = {os.path.join(AGENT_HARNESS_DIR, 'runtime')} (./)",
         "",
         f"[Memory] ({paths['memory_dir']})",
         shuheng_memory_structure_text(),
+        "",
+        f"[Shared User Profile] ({shared_profile.get('path', '')})",
+        str(shared_profile.get("text") or "(empty shared user profile)"),
+        "",
         f"{paths['l1']}:",
         insight,
     ])
@@ -2636,8 +2938,10 @@ def shuheng_layered_memory_prompt(*, max_l1_chars: int = 3500) -> str:
 def shuheng_layered_memory_payload() -> dict[str, Any]:
     paths = ensure_shuheng_layered_memory_files()
     l4_index = read_json_dict_file(paths["l4_index"])
+    shared_profile = shared_user_profile_payload()
     l1_items = compact_nonempty_lines(read_text_file(paths["l1"], ""), limit=6, width=220)
     items = [
+        f"Shared user profile: {paths['user_profile']}",
         f"L0 META-SOP: {paths['l0']}",
         f"L1 index: {paths['l1']}",
         f"L2 facts: {paths['l2']}",
@@ -2646,14 +2950,17 @@ def shuheng_layered_memory_payload() -> dict[str, Any]:
     ]
     if l1_items:
         items.append("L1 preview: " + " | ".join(l1_items[:3]))
+    if shared_profile.get("focus"):
+        items.append("User focus: " + ", ".join(str(item) for item in (shared_profile.get("focus") or [])[:4]))
     return {
         "schema_version": "shuheng.layered_memory.v1",
         "included": True,
         "mode": "genericagent_l0_l4",
         "reason": "GenericAgent-style Shuheng layered memory is the primary runtime memory context.",
         "items": items,
-        "refs": [paths["l0"], paths["l1"], paths["l2"], paths["l3_dir"], paths["l4_dir"], paths["l4_index"]],
+        "refs": [paths["user_profile"], paths["user_profile_state"], paths["l0"], paths["l1"], paths["l2"], paths["l3_dir"], paths["l4_dir"], paths["l4_index"]],
         "paths": paths,
+        "shared_user_profile": shared_profile,
         "prompt": shuheng_layered_memory_prompt(),
         "l4": {
             "refs_count": int(l4_index.get("refs_count") or 0),
@@ -6165,8 +6472,20 @@ def memory_hydration_pack(
     profile_items = compact_nonempty_lines(profile, limit=8)
     memory_items = compact_nonempty_lines(memory, limit=12)
     layered_memory = layered_memory or shuheng_layered_memory_payload()
+    shared_profile = shared_user_profile_payload()
     workspace_context = workspace_context or {}
     included: list[dict[str, Any]] = [
+        {
+            "scope": "user.shared-profile",
+            "reason": "Shared user profile/current state that every Shuheng agent should know.",
+            "items": [
+                str(shared_profile.get("profile_description") or ""),
+                f"interactions={shared_profile.get('interaction_count', 0)}",
+                "focus=" + ", ".join(str(item) for item in (shared_profile.get("focus") or [])[:6]),
+                "projects=" + ", ".join(str(item) for item in (shared_profile.get("projects") or [])[:4]),
+            ],
+            "refs": [str(ref) for ref in (shared_profile.get("refs") or []) if ref],
+        },
         {
             "scope": "shuheng.layered-memory",
             "reason": "Primary GenericAgent-style L0-L4 memory context owned by Shuheng.",
@@ -6254,6 +6573,7 @@ def context_layers_for_task(
 ) -> dict[str, Any]:
     role = normalized_role(role) if role else normalized_subagent_role(sub.role)
     layered_memory = layered_memory or shuheng_layered_memory_payload()
+    shared_profile = shared_user_profile_payload()
     workspace_context = workspace_context or {}
     if sub.security_context == "secret":
         recent_tasks: list[dict[str, Any]] = []
@@ -6293,9 +6613,16 @@ def context_layers_for_task(
             ],
         },
         "L1_user_profile": {
-            "included": False,
-            "items": [],
-            "reason": "No broad user profile is hydrated into worker context by default.",
+            "included": True,
+            "reason": "Shared user profile/current work-state context for all Shuheng agents.",
+            "profile": shared_profile,
+            "items": [
+                str(shared_profile.get("profile_description") or ""),
+                f"interactions={shared_profile.get('interaction_count', 0)}",
+                "focus=" + ", ".join(str(item) for item in (shared_profile.get("focus") or [])[:8]),
+                "projects=" + ", ".join(str(item) for item in (shared_profile.get("projects") or [])[:6]),
+            ],
+            "refs": list(shared_profile.get("refs") or []),
         },
         "L2_project_memory": {
             "included": True,
@@ -6373,6 +6700,7 @@ def build_context_pack(
     context_policy = context_policy_for_task(objective, security_context=sub.security_context)
     permissions = permissions_for_role(role, security_context=sub.security_context, permission_profile=permission_profile)
     layered_memory = shuheng_layered_memory_payload()
+    shared_profile = shared_user_profile_payload()
     workspace_context = workspace_context_payload(security_context=sub.security_context)
     skill_refs = normalize_subagent_skill_refs(sub.skill_refs)
     skill_pack = subagent_skill_pack_for_refs(skill_refs)
@@ -6432,6 +6760,7 @@ def build_context_pack(
         },
         "source_policy": source_policy_for_role(role, security_context=sub.security_context),
         "layered_memory": layered_memory,
+        "shared_user_profile": shared_profile,
         "memory_pack": memory_pack,
         "workspace_context": workspace_context,
         "layers": layers,
@@ -6607,6 +6936,7 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     source_policy = pack.get("source_policy") or {}
     memory_pack = pack.get("memory_pack") or {}
     layered_memory = pack.get("layered_memory") or {}
+    shared_profile = pack.get("shared_user_profile") or ((pack.get("layers") or {}).get("L1_user_profile") or {}).get("profile") or {}
     skill_pack = pack.get("skill_pack") or {}
     layers = pack.get("layers") or {}
     boundaries = "\n".join(f"- {item}" for item in (task.get("boundaries") or []))
@@ -6628,6 +6958,7 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     else:
         workspace_line = f"none - {workspace_context.get('reason') or 'No Shuheng workspace is selected.'}"
     layered_memory_prompt = str(layered_memory.get("prompt") or "").strip()
+    shared_profile_text = str(shared_profile.get("text") or "").strip()
     artifact_items = []
     for item in ((layers.get("L7_artifacts") or {}).get("items") or [])[-5:]:
         artifact_items.append(f"- {item.get('uri', '')} {item.get('hash', '')} task={item.get('source_task_id', '')}")
@@ -6680,6 +7011,9 @@ Source policy:
 
 Layered Shuheng memory:
 {layered_memory_prompt or "- (empty)"}
+
+Shared user profile:
+{shared_profile_text or "- (empty)"}
 
 Memory hydration pack:
 {chr(10).join(memory_items) or "- (empty)"}
@@ -8863,6 +9197,12 @@ def start_main_agent_task(
         clear_history_ui_state(state)
     if remember_user and visible_user_text is not None and not secret_task:
         remember_input(state, visible_user_text)
+    if not secret_task:
+        record_shared_user_profile_interaction(
+            visible_user_text if visible_user_text is not None else text,
+            source=source,
+            state=state,
+        )
     agent_text = agent_text_with_pending_bus(state.agent, text)
     state.task_id += 1
     task_id = state.task_id
@@ -10423,7 +10763,6 @@ def ensure_subagent_agent(state: State, sub: SubAgentRuntime) -> Any:
         bind_agent_token_session(state, sub.agent)
     elif sub.security_context == "secret":
         set_agent_log_path(sub.agent, os.devnull)
-    apply_subagent_default_model(state, sub)
     install_subagent_prompt(sub.agent, sub)
     return sub.agent
 
@@ -12784,6 +13123,33 @@ def apply_subagent_default_model(state: State, sub: SubAgentRuntime) -> tuple[bo
     return ok, msg
 
 
+def subagent_runtime_error_text(text: str) -> str:
+    clean = clean_text(text or "").strip()
+    if not clean:
+        return ""
+    lower = clean.lower()
+    if clean.startswith("[ERROR] put_task"):
+        return clean
+    if re.match(r"^\[Oh My Pi\]\s*[45]\d\d\b", clean):
+        return clean
+    if clean.startswith("[Oh My Pi]") and any(
+        marker in lower
+        for marker in (
+            "429",
+            "rpc prompt failed",
+            "already processing",
+            "error",
+            "failed",
+            "失败",
+            "访问量过大",
+            "进程已退出",
+            "启动失败",
+        )
+    ):
+        return clean
+    return ""
+
+
 def reset_agent_to_default_llm(state: State) -> tuple[bool, str]:
     return reset_agent_instance_to_default_llm(state.agent)
 
@@ -13446,7 +13812,7 @@ def ohmypi_runtime_settings_payload(default_model: str, *, approval_mode: str = 
         "providers": {"webSearch": "tavily"},
         "symbolPreset": "unicode",
         "task": {"maxRuntimeMs": 0},
-        "todo": {"eager": True},
+        "todo": {"eager": "default"},
         "tools": {"approvalMode": approval_mode},
         "vault": {"enabled": False},
     }
@@ -20831,6 +21197,7 @@ def memory_inventory() -> list[MemoryEntry]:
     memory_root = SHUHENG_MEMORY_DIR
     entries: list[MemoryEntry] = []
     for layer, filename, note in [
+        ("L1", "user_profile.md", "所有 agent 共享的用户画像/当前状态"),
         ("L1", "global_mem_insight.txt", "启动自动注入的极简索引"),
         ("L2", "global_mem.txt", "全局事实库"),
         ("L0", "memory_management_sop.md", "记忆写入规则"),
@@ -20850,7 +21217,7 @@ def memory_inventory() -> list[MemoryEntry]:
                 continue
             path = os.path.join(root, filename)
             rel = os.path.relpath(path, memory_root)
-            if rel in {"global_mem_insight.txt", "global_mem.txt", "memory_management_sop.md"}:
+            if rel in {"user_profile.md", "global_mem_insight.txt", "global_mem.txt", "memory_management_sop.md"}:
                 continue
             if rel.startswith("L4_raw_sessions"):
                 layer = "L4"
@@ -24140,6 +24507,9 @@ def start_secret_subagent_task(
         return f"Secret 子 agent 高风险操作暂未开放自动审批：{action}。"
     bus_task_id = short_uid("task")
     agent = ensure_subagent_agent(state, sub)
+    ok_model, model_msg = apply_subagent_default_model(state, sub)
+    if not ok_model:
+        return f"{sub.name} 默认模型未应用，已阻止启动：{model_msg}"
     sub.task_id += 1
     task_id = sub.task_id
     context_pack, context_ref = build_context_pack(state, sub, task_objective, bus_task_id, parent_task_id=parent_task_id)
@@ -24230,9 +24600,13 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     role = normalized_subagent_role(sub.role)
     if sub.security_context == "secret" and (not state.secret_vault.unlocked or not state.secret_vault.key):
         return "Secret Vault 已锁定，不能与 Secret 子 agent 聊天。"
+    record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
         return queue_subagent_chat_input(state, sub, prompt, interrupt_requested=sub.status == "aborting")
     agent = ensure_subagent_agent(state, sub)
+    ok_model, model_msg = apply_subagent_default_model(state, sub)
+    if not ok_model:
+        return f"{sub.name} 默认模型未应用，已阻止发送：{model_msg}"
     sub.task_id += 1
     task_id = sub.task_id
     sub.active_task_id = task_id
@@ -24313,6 +24687,7 @@ def start_subagent_task(
             parent_task_id=parent_task_id,
             task_title=task_title,
         )
+    record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
         return queue_subagent_task(
             state,
@@ -24404,6 +24779,9 @@ def start_subagent_task(
             append_trace(bus_task_id, "policy_gate_denied", agent_id=sub.agent_id, status="rejected", payload=payload)
             return policy_gate_text(decision)
     agent = ensure_subagent_agent(state, sub)
+    ok_model, model_msg = apply_subagent_default_model(state, sub)
+    if not ok_model:
+        return f"{sub.name} 默认模型未应用，已阻止启动：{model_msg}"
     sub.task_id += 1
     task_id = sub.task_id
     locked, lock_error = acquire_single_writer_lock(sub, bus_task_id, task_objective)
@@ -24768,35 +25146,44 @@ def process_ui_queue(state: State) -> bool:
                 sub.pending_interaction = normalize_interaction_payload(payload)
                 mark_subagent_messages_changed(state, sub)
             if done:
+                runtime_error = subagent_runtime_error_text(display_text)
+                if runtime_error:
+                    sub.pending_interaction = None
                 sub.status = "waiting-input" if sub.pending_interaction else "idle"
                 sub.active_task_id = None
                 sub.active_bus_task_id = ""
                 sub.updated_at = time.time()
                 save_subagent_meta(sub, state)
                 chat_saved, chat_ref = save_subagent_chat_session(state, sub, source="subagent_chat_done")
-                updates = extract_subagent_memory_updates(text)
-                memory_notices: list[str] = []
-                for update in updates:
-                    memory_notices.append(queue_curated_memory_candidate(
-                        state,
-                        sub,
-                        update,
-                        source=f"subagent-chat:{sub.agent_id}",
-                        evidence_ref=chat_ref if chat_saved else subagent_chat_session_ref(sub),
-                        task_id=f"chat:{sub.chat_session_id}",
-                    ))
-                if memory_notices:
-                    append_subagent_visible_system_notice(
-                        state,
-                        sub,
-                        format_memory_candidate_notice(updates, memory_notices),
-                        source="subagent_chat_memory_candidate",
-                    )
+                if not runtime_error:
+                    updates = extract_subagent_memory_updates(text)
+                    memory_notices: list[str] = []
+                    for update in updates:
+                        memory_notices.append(queue_curated_memory_candidate(
+                            state,
+                            sub,
+                            update,
+                            source=f"subagent-chat:{sub.agent_id}",
+                            evidence_ref=chat_ref if chat_saved else subagent_chat_session_ref(sub),
+                            task_id=f"chat:{sub.chat_session_id}",
+                        ))
+                    if memory_notices:
+                        append_subagent_visible_system_notice(
+                            state,
+                            sub,
+                            format_memory_candidate_notice(updates, memory_notices),
+                            source="subagent_chat_memory_candidate",
+                        )
                 append_subagent_event(sub, "assistant", display_text, state=state)
                 if sub.agent is not None:
                     persist_agent_token_usage(state, sub.agent)
                 queued_result = maybe_start_next_subagent_chat(state, sub)
-                state.last_error = queued_result or f"子 agent 聊天完成：{sub.name}"
+                if queued_result:
+                    state.last_error = queued_result
+                elif runtime_error:
+                    state.last_error = f"子 agent 聊天失败：{sub.name}；{runtime_error}"
+                else:
+                    state.last_error = f"子 agent 聊天完成：{sub.name}"
                 mark_subagent_messages_changed(state, sub)
             changed = True
             continue
@@ -24828,16 +25215,19 @@ def process_ui_queue(state: State) -> bool:
                         source_task_id=bus_task_id,
                         provenance={"generated_by": sub.agent_id, "role": normalized_subagent_role(sub.role), "source": "subagent_result"},
                     )
-                updates = extract_subagent_memory_updates(text)
-                for update in updates:
-                    queue_curated_memory_candidate(
-                        state,
-                        sub,
-                        update,
-                        source=f"subagent:{sub.agent_id}",
-                        evidence_ref=artifact_ref,
-                        task_id=bus_task_id,
-                    )
+                runtime_error = subagent_runtime_error_text(display_text)
+                final_status = "failed" if runtime_error else "completed"
+                if not runtime_error:
+                    updates = extract_subagent_memory_updates(text)
+                    for update in updates:
+                        queue_curated_memory_candidate(
+                            state,
+                            sub,
+                            update,
+                            source=f"subagent:{sub.agent_id}",
+                            evidence_ref=artifact_ref,
+                            task_id=bus_task_id,
+                        )
                 sub.status = "idle"
                 sub.active_task_id = None
                 sub.active_bus_task_id = ""
@@ -24859,9 +25249,10 @@ def process_ui_queue(state: State) -> bool:
                         state,
                         sub,
                         bus_task_id,
-                        status="completed",
+                        status=final_status,
                         prompt=objective,
                         summary=truncate_cells(clean_text(display_text), 240),
+                        error=runtime_error,
                         artifact_refs=[artifact_ref],
                         parent_task_id=parent_task_id,
                         task_title=task_title,
@@ -24871,15 +25262,37 @@ def process_ui_queue(state: State) -> bool:
                         sub,
                         bus_task_id,
                         intent="result",
-                        status="completed",
-                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": role},
+                        status=final_status,
+                        payload={
+                            "summary": truncate_cells(clean_text(display_text), 600),
+                            "role": role,
+                            "error": runtime_error,
+                        },
                         artifact_refs=[artifact_ref],
                     )
-                    write_secret_subagent_trace(state, sub, bus_task_id, "completed", "completed", {"artifact_ref": artifact_ref})
+                    secret_event = "runtime_failed" if runtime_error else "completed"
+                    write_secret_subagent_trace(
+                        state,
+                        sub,
+                        bus_task_id,
+                        secret_event,
+                        final_status,
+                        {"artifact_ref": artifact_ref, "error": runtime_error} if runtime_error else {"artifact_ref": artifact_ref},
+                    )
                 else:
+                    if runtime_error:
+                        append_orchestrator_plan(
+                            sub,
+                            objective,
+                            bus_task_id,
+                            parent_task_id=parent_task_id,
+                            status="failed",
+                            source="subagent_runtime",
+                            error=runtime_error,
+                        )
                     append_task_ledger(
                         bus_task_id,
-                        status="completed",
+                        status=final_status,
                         assigned_agent=sub.agent_id,
                         title=task_title,
                         kind="subagent_task",
@@ -24888,6 +25301,7 @@ def process_ui_queue(state: State) -> bool:
                         session_key=task_session,
                         artifact_refs=[artifact_ref],
                         summary=truncate_cells(clean_text(display_text), 240),
+                        error=runtime_error,
                         **subagent_task_schema_kwargs(sub, objective),
                     )
                     update_plan_step_from_child(parent_task_id)
@@ -24897,8 +25311,12 @@ def process_ui_queue(state: State) -> bool:
                         target="orchestrator.main",
                         intent="result",
                         task_id=bus_task_id,
-                        status="completed",
-                        payload={"summary": truncate_cells(clean_text(display_text), 600), "role": role},
+                        status=final_status,
+                        payload={
+                            "summary": truncate_cells(clean_text(display_text), 600),
+                            "role": role,
+                            "error": runtime_error,
+                        },
                         artifact_refs=[artifact_ref],
                         budget=default_task_budget(role),
                         permissions=permissions_for_role(role, security_context=sub.security_context),
@@ -24907,47 +25325,71 @@ def process_ui_queue(state: State) -> bool:
                         risks=risks_for_action("read_only", role, objective),
                         approval=approval_metadata(),
                     )
+                if runtime_error:
+                    notice = (
+                        f"子 agent 失败 · {sub.name or sub.agent_id} ({sub.agent_id or '-'})\n"
+                        f"Task: {bus_task_id}\n"
+                        f"Artifact: {artifact_ref}\n\n"
+                        f"{runtime_error}"
+                    )
+                    notice_kind = "subagent_failure"
+                else:
+                    notice = format_subagent_result_notice(sub, bus_task_id, artifact_ref, display_text)
+                    notice_kind = "subagent_result"
                 add_system(
                     state,
-                    format_subagent_result_notice(sub, bus_task_id, artifact_ref, display_text),
+                    notice,
                     persist=sub.security_context != "secret",
-                    kind="subagent_result",
+                    kind=notice_kind,
                 )
                 if sub.security_context == "secret" and state.secret_vault.unlocked and state.secret_vault.session_id:
                     secret_save_current_session_state(state, source="secret_subagent_result")
                 if sub.security_context != "secret":
                     checkpoint = append_task_checkpoint(
                         bus_task_id,
-                        status="completed",
-                        reason="subagent_completed",
+                        status=final_status,
+                        reason="subagent_runtime_failed" if runtime_error else "subagent_completed",
                         state=state,
                         agent_id=sub.agent_id,
                         summary=truncate_cells(clean_text(display_text), 240),
-                        extra={"result_artifact_ref": artifact_ref},
+                        extra={"result_artifact_ref": artifact_ref, "error": runtime_error} if runtime_error else {"result_artifact_ref": artifact_ref},
                     )
-                    append_trace(bus_task_id, "completed", agent_id=sub.agent_id, status="completed", payload={"artifact_ref": artifact_ref, "checkpoint_id": checkpoint.get("checkpoint_id", "")})
-                    append_task_eval(bus_task_id, sub, display_text, artifact_ref)
-                    plan_id = str(latest_task_records().get(parent_task_id, {}).get("parent_task_id") or state.active_plan_task_id or "")
-                    inject_orchestrator_notice(
-                        state.agent,
-                        format_subagent_result_context_update(
-                            sub.name,
-                            sub.agent_id,
-                            bus_task_id,
-                            artifact_ref,
-                            display_text,
-                            session_key_value=task_session or active_ui_session_key(state),
-                            parent_task_id=parent_task_id,
-                            plan_id=plan_id,
-                            role=normalized_subagent_role(sub.role),
-                        ),
+                    trace_payload = {"artifact_ref": artifact_ref, "checkpoint_id": checkpoint.get("checkpoint_id", "")}
+                    if runtime_error:
+                        trace_payload["error"] = runtime_error
+                    append_trace(
+                        bus_task_id,
+                        "runtime_failed" if runtime_error else "completed",
+                        agent_id=sub.agent_id,
+                        status=final_status,
+                        payload=trace_payload,
                     )
-                state.last_error = f"子 agent 完成：{sub.name}；结果已加密存储" if sub.security_context == "secret" else f"子 agent 完成：{sub.name}；结果已进 bus"
+                    if not runtime_error:
+                        append_task_eval(bus_task_id, sub, display_text, artifact_ref)
+                        plan_id = str(latest_task_records().get(parent_task_id, {}).get("parent_task_id") or state.active_plan_task_id or "")
+                        inject_orchestrator_notice(
+                            state.agent,
+                            format_subagent_result_context_update(
+                                sub.name,
+                                sub.agent_id,
+                                bus_task_id,
+                                artifact_ref,
+                                display_text,
+                                session_key_value=task_session or active_ui_session_key(state),
+                                parent_task_id=parent_task_id,
+                                plan_id=plan_id,
+                                role=normalized_subagent_role(sub.role),
+                            ),
+                        )
+                if runtime_error:
+                    state.last_error = f"子 agent 失败：{sub.name}；{runtime_error}"
+                else:
+                    state.last_error = f"子 agent 完成：{sub.name}；结果已加密存储" if sub.security_context == "secret" else f"子 agent 完成：{sub.name}；结果已进 bus"
                 queued_result = maybe_start_next_subagent_task(state, sub)
                 if queued_result:
                     state.last_error = queued_result
                 else:
-                    if sub.security_context != "secret":
+                    if sub.security_context != "secret" and not runtime_error:
                         maybe_queue_orchestrator_plan_continuation(state, f"subagent_completed:{sub.name}")
                 mark_subagent_messages_changed(state, sub)
             changed = True

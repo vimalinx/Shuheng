@@ -1200,6 +1200,7 @@ configure_genericagent_provider_runtime(
 - Refreshing `OhMyPiRpcAgent.configured_models` must preserve the current model by selector, display name, provider/model id, or model/base URL where possible, and update any pending model switch so the next lazy RPC startup sends the refreshed provider/model pair.
 - OMP binary discovery order is explicit `binary` argument, `GA_TUI_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
 - Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
+- Generated OMP `config.yml` must set `todo.eager:"default"` and must not write boolean `true` or `"always"` by default. Eager todo forces first-turn `tool_choice:"todo"`, which thinking-mode OpenAI-compatible providers such as DeepSeek can reject before the model answers.
 - Generated OMP `models.yml` must represent complete GA-TUI OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
 - Generated OMP API protocol must be inferred from explicit `api_mode` and known endpoint shape, not only from the historical config variable prefix. In particular, `https://open.bigmodel.cn/api/coding/paas/v4` and `https://api.z.ai/api/paas/v4` are OpenAI-compatible PAAS v4 bases and must generate `api:"openai-completions"` unless `api_mode:"responses"` explicitly requests Responses; `https://open.bigmodel.cn/api/anthropic` remains Anthropic Messages.
 - Generated OMP `models.yml` must project `/model` `context_win` to OMP `models[].contextWindow`; if `max_tokens` is configured, it must project to `models[].maxTokens`.
@@ -1259,6 +1260,7 @@ configure_genericagent_provider_runtime(
 - Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
 - Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
+- DeepSeek or another thinking-mode OpenAI-compatible model -> isolated OMP `config.yml` carries `todo.eager:"default"` so OMP does not send a forced `tool_choice:"todo"` before the first model answer.
 - Existing OMP wrapper + changed `mykey.py` -> `refresh_agent_runtime_model_config(agent)` updates wrapper `configured_models`, regenerated env, command `--model`, and isolated files before the next switch/prompt.
 - Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
 - Existing OMP wrapper + `set_model` confirmation after a current-session switch -> the status card keeps the configured provider label/base URL while accepting matching context-window metadata.
@@ -1267,6 +1269,8 @@ configure_genericagent_provider_runtime(
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
 - OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
 - OMP error frame with `stopReason:"error"` and `errorMessage` -> active TUI queue receives a visible `[Oh My Pi] ...` done item.
+- OMP terminal runtime errors delivered through subagent task/chat streams, including `429`, `RPC prompt failed`, and `Agent is already processing`, must release the subagent active task state; subagent tasks record `failed` in task ledgers/mail/checkpoints/traces, keep an audit artifact, and must not create eval rows, memory candidates, orchestrator result injections, or plan continuations.
+- Subagent default models must be applied immediately before every subagent task or direct-chat prompt. If the configured model cannot be applied to the live runtime, startup is blocked before the prompt is sent so the subagent never silently runs on the previous model.
 - OMP `turn_end` followed by an immediate next `put_task()` before `agent_end` -> wrapper rejects the next prompt as concurrent instead of sending it to OMP and surfacing `Agent is already processing`.
 - OMP `turn_end` followed by `agent_end` -> active queue receives the done item and the next prompt can then be sent normally.
 - OMP text deltas split punctuation as `"1"`, `"."`, `" item"` or `"0"`, `"."`, `"6"` -> the final queue text preserves `1.` and `0.6`; if `agent_end.messages` also carries the complete final assistant message, the answer appears once.
@@ -1340,9 +1344,11 @@ configure_genericagent_provider_runtime(
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert PAAS v4 OpenAI-compatible bases such as `https://open.bigmodel.cn/api/coding/paas/v4` do not inherit Anthropic `/v1/messages` routing from a historical `native_claude_config_*` variable name.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
+- Tests must assert embedded OMP `config.yml` writes `todo.eager:"default"` so thinking-mode providers are not sent forced `tool_choice:"todo"` by default.
 - Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, `OhMyPiRpcAgent` initializes to the projected default model selector, stale `get_state` model payloads and normal `set_model` confirmations cannot corrupt the current configured model display, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
+- Tests must assert OMP terminal errors on subagent task/chat streams fail and release the subagent without generating eval/memory/orchestrator-continuation side effects, and that subagent default-model application failure blocks startup before sending a prompt.
 - Tests must assert system `~/.omp/agent/config.yml` hash remains unchanged when present.
 - Tests must assert missing binary failure and `abort()` cleanup decrement unfinished task state.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
@@ -1814,6 +1820,69 @@ if not workspace_id:
 manifest = ensure_auto_workspace(current_workspace_root())
 workspace_context = workspace_context_payload(security_context=sub.security_context)
 pack["workspace_context"] = workspace_context
+```
+
+## Scenario: Shared User Profile And Work-State Memory
+
+### 1. Scope / Trigger
+
+- Trigger: The user wants every Shuheng agent to share one description of the user's profile, current state, active projects, and work direction, and to keep that state updated from normal interactions.
+- Applies to: Shuheng memory files, main-runtime context packs, subagent context packs, OMP append-system-prompt generation, memory inventory, and normal user/subagent-chat input paths.
+- Non-goal: This does not let runtime providers or subagents directly write approved L2 facts, does not store secrets, and does not hydrate Secret Vault or temporary-session content into the normal shared profile.
+
+### 2. Signatures
+
+- Shared Markdown profile: `~/.shuheng/memory/user_profile.md`.
+- Shared machine state: `~/.shuheng/memory/user_profile_state.json`.
+- Context-pack fields:
+  - top-level `shared_user_profile`.
+  - `layers.L1_user_profile.included == true`.
+  - `memory_pack.included[].scope == "user.shared-profile"`.
+- OMP memory prompt section: `Shared User Profile`.
+
+### 3. Contracts
+
+- All main and persistent-subagent context packs must include the same shared user profile refs and a bounded redacted summary.
+- The shared profile is an operational interaction-state summary, not an approved L2 long-term fact store.
+- Normal user-originated main prompts, direct subagent chats, and user-originated subagent tasks update interaction count, last interaction time, bounded recent intents, focus terms, project hints, source counts, and estimated work time.
+- Secret Vault sessions and temporary sessions must not write into the normal shared profile.
+- OMP append-system-prompt generation must read the same `user_profile.md` path without importing `app.py` or mutating TUI state.
+- If the shared profile conflicts with an explicit current user instruction, agents must treat the profile as stale context and obey the current instruction.
+
+### 4. Validation & Error Matrix
+
+- Missing `user_profile.md` or `user_profile_state.json` -> layered memory initialization creates bounded default files.
+- Main context pack -> includes `shared_user_profile.path == ~/.shuheng/memory/user_profile.md` and `L1_user_profile.included:true`.
+- Persistent subagent context pack -> includes the same shared profile path and `user.shared-profile` memory hydration scope.
+- OMP memory prompt generation -> includes `Shared User Profile` and the same file path.
+- Temporary session input -> does not increase shared profile interaction count.
+- Secret Vault input -> does not write normal shared profile state.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A user asks to update Shuheng agent memory behavior; the next main and subagent context packs both show the same shared profile, interaction count, focus terms, and profile refs.
+- Base: A fresh install has an empty/default shared profile that agents can read without inventing personal facts.
+- Bad: A subagent writes its own divergent user-profile file and other agents do not see it.
+- Bad: Secret Vault task text or temporary scratch prompts appear in `user_profile.md`.
+- Bad: The OMP provider imports `ga_tui.app` just to obtain the profile path.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary sessions do not mutate the profile.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+subagent A writes memory/subagents/A/user_profile.md -> only A sees the user profile.
+```
+
+#### Correct
+
+```text
+normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/memory/user_profile.md -> main and subagent context packs share the same L1_user_profile refs.
 ```
 
 ## Scenario: Temporary Non-Persistent Main Sessions

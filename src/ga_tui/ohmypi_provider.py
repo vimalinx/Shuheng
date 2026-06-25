@@ -2112,10 +2112,12 @@ def _bounded_section(title: str, path: str, text: str, *, max_chars: int = 2200)
 
 
 def _shuheng_memory_structure(*, memory_dir: str, harness_dir: str) -> str:
+    user_profile_path = os.path.join(memory_dir, "user_profile.md")
     global_path = os.path.join(memory_dir, "global_mem.txt")
     sop_path = os.path.join(memory_dir, "memory_management_sop.md")
     l4_path = os.path.join(memory_dir, "L4_raw_sessions")
     return (
+        f"Shared user profile/state: {user_profile_path} | "
         f"Facts(L2): {global_path} | "
         f"SOPs(L3): {memory_dir}/*.md or *.py | "
         f"META-SOP(L0): {sop_path}\n"
@@ -2126,6 +2128,7 @@ def _shuheng_memory_structure(*, memory_dir: str, harness_dir: str) -> str:
 
 def build_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
     memory_dir = os.path.join(root_dir, "memory")
+    user_profile_path = os.path.join(memory_dir, "user_profile.md")
     insight_path = os.path.join(memory_dir, "global_mem_insight.txt")
     global_path = os.path.join(memory_dir, "global_mem.txt")
     sop_path = os.path.join(memory_dir, "memory_management_sop.md")
@@ -2151,9 +2154,11 @@ def build_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
         f"{insight_path}:",
         insight,
         "",
+        _bounded_section("Shared User Profile", user_profile_path, _read_text_if_exists(user_profile_path, max_chars=3200), max_chars=2600),
         _bounded_section("L0 Memory Governance Preview", sop_path, _read_text_if_exists(sop_path, max_chars=2800), max_chars=2200),
         "## Layer References",
         "",
+        f"- Shared user profile/current state: `{user_profile_path}`",
         f"- L1 global memory index: `{insight_path}`",
         f"- L2 global facts: `{global_path}`",
         f"- L3 SOPs/tools: `{memory_dir}`",

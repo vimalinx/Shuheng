@@ -811,6 +811,50 @@ def assert_shuheng_workspace_memory_context() -> None:
         os.chdir(old_cwd)
 
 
+def assert_shared_user_profile_context_is_global() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_shared_profile_")
+    retarget_harness(root)
+    install_fake_agent_runtime()
+    state = a.State(agent=FakeLLMAgent())
+    state.running = True
+
+    a.record_shared_user_profile_interaction(
+        "请把 Shuheng 的所有 agent 都共享同一个用户画像，并持续跟踪工作重心",
+        source="user",
+        state=state,
+    )
+    profile_path = a.shared_user_profile_path()
+    profile_state_path = a.shared_user_profile_state_path()
+    assert os.path.exists(profile_path), profile_path
+    assert os.path.exists(profile_state_path), profile_state_path
+    profile_text = Path(profile_path).read_text(encoding="utf-8")
+    assert "Shared User Profile" in profile_text, profile_text
+    assert "Shuheng" in profile_text, profile_text
+    profile_state = a.read_json_dict_file(profile_state_path)
+    assert profile_state["interaction_count"] == 1, profile_state
+
+    sub = a.create_subagent(state, "Profile Aware Agent", role="researcher", persistent=True)
+    sub_pack, _sub_ref = a.build_context_pack(state, sub, "Use shared user state", "task_shared_profile_sub")
+    assert sub_pack["shared_user_profile"]["path"] == profile_path, sub_pack["shared_user_profile"]
+    assert sub_pack["layers"]["L1_user_profile"]["included"] is True, sub_pack["layers"]["L1_user_profile"]
+    assert any(row.get("scope") == "user.shared-profile" for row in sub_pack["memory_pack"]["included"]), sub_pack["memory_pack"]
+    sub_prompt = a.format_context_pack_for_prompt(sub_pack)
+    assert "Shared user profile:" in sub_prompt and profile_path in sub_prompt, sub_prompt
+
+    main_pack, _main_ref = a.build_main_runtime_context_pack(state, "Main should see shared user state", "task_shared_profile_main")
+    assert main_pack["shared_user_profile"]["path"] == profile_path, main_pack["shared_user_profile"]
+    assert main_pack["layers"]["L1_user_profile"]["refs"] == [profile_path, profile_state_path], main_pack["layers"]["L1_user_profile"]
+
+    omp_prompt = omp.build_ohmypi_memory_prompt(root_dir=root, harness_dir=a.AGENT_HARNESS_DIR)
+    assert "Shared User Profile" in omp_prompt and profile_path in omp_prompt, omp_prompt
+
+    temp_state = a.State(agent=FakeLLMAgent())
+    temp_state.temporary_session = True
+    a.record_shared_user_profile_interaction("临时会话不要写入共享画像", source="user", state=temp_state)
+    profile_state_after_temp = a.read_json_dict_file(profile_state_path)
+    assert profile_state_after_temp["interaction_count"] == 1, profile_state_after_temp
+
+
 def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_legacy_bootstrap_")
     legacy_root = os.path.join(root, "GenericAgent")
@@ -1034,6 +1078,7 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         models_data = json.loads(Path(runtime_config.models_path).read_text(encoding="utf-8"))
         assert config_data["autoResume"] is False, config_data
         assert config_data["modelRoles"]["default"] == runtime_config.default_model, config_data
+        assert config_data["todo"]["eager"] == "default", config_data
         assert config_data["tools"]["approvalMode"] == "yolo", config_data
         assert "providers" in models_data and len(models_data["providers"]) == 2, models_data
         beta_provider = next(
@@ -3630,7 +3675,9 @@ def assert_context_pack_schema(path: str) -> dict:
     assert pack["task_brief"]["non_goals"], pack["task_brief"]
     assert pack["task_brief"]["success_criteria"], pack["task_brief"]
     assert pack["layers"]["L0_system_constitution"]["items"], pack["layers"]["L0_system_constitution"]
-    assert pack["layers"]["L1_user_profile"]["included"] is False, pack["layers"]["L1_user_profile"]
+    assert pack["layers"]["L1_user_profile"]["included"] is True, pack["layers"]["L1_user_profile"]
+    assert pack["shared_user_profile"]["path"] in pack["layers"]["L1_user_profile"]["refs"], pack["layers"]["L1_user_profile"]
+    assert any(row.get("scope") == "user.shared-profile" for row in pack["memory_pack"]["included"]), pack["memory_pack"]
     assert pack["layers"]["L3_task_brief"]["source_policy"]["allowed_sources"], pack["layers"]["L3_task_brief"]
     assert "memory_pack_ref" in pack["layers"]["L6_working_notes"], pack["layers"]["L6_working_notes"]
     assert isinstance(pack["layers"]["L7_artifacts"]["items"], list), pack["layers"]["L7_artifacts"]
@@ -4008,6 +4055,77 @@ def assert_live_subagent_result_reaches_main_context() -> None:
     assert "当前会话子代理已经回复。" in prompt, prompt
     assert "artifact://artifacts/subagent-results/" in prompt, prompt
     assert "do not search historical session logs" in prompt, prompt
+
+
+def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_subagent_runtime_error_")
+    retarget_harness(root)
+    install_fake_agent_runtime()
+    state = a.State(agent=ContextFakeAgent())
+    state.running = True
+
+    omp_error = "[Oh My Pi] 429: 429 该模型当前访问量过大，请您稍后再试"
+    sub = a.create_subagent(state, "Runtime Error Agent", role="researcher")
+    sub.agent = SequencedFakeAgent([omp_error])
+    started = a.start_subagent_task(state, sub, "read local data", source="user")
+    assert started.startswith("已启动子 agent"), started
+    drain_ui(state)
+
+    assert sub.status == "idle", sub.status
+    assert sub.active_task_id is None, sub.active_task_id
+    assert sub.active_bus_task_id == "", sub.active_bus_task_id
+    assert "子 agent 失败" in state.last_error and "429" in state.last_error, state.last_error
+    task_rows = [row for row in a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) if row.get("assigned_agent") == sub.agent_id]
+    assert [row.get("status") for row in task_rows] == ["working", "failed"], task_rows
+    failed_task = task_rows[-1]
+    assert_task_schema(failed_task, status="failed")
+    assert "429" in failed_task.get("error", ""), failed_task
+    assert not any(row.get("status") == "completed" for row in task_rows), task_rows
+    mail_rows = [row for row in a.read_jsonl(a.AGENT_MAIL_PATH) if row.get("task_id") == failed_task["task_id"] and row.get("intent") == "result"]
+    assert mail_rows and mail_rows[-1]["status"] == "failed", mail_rows
+    assert_mail_schema(mail_rows[-1], intent="result")
+    assert "429" in (mail_rows[-1].get("payload") or {}).get("error", ""), mail_rows[-1]
+    checkpoints = [row for row in a.read_jsonl(a.AGENT_CHECKPOINT_INDEX_PATH) if row.get("task_id") == failed_task["task_id"]]
+    assert any(row.get("status") == "failed" and row.get("reason") == "subagent_runtime_failed" for row in checkpoints), checkpoints
+    traces = [row for row in a.read_jsonl(a.AGENT_TRACES_PATH) if row.get("task_id") == failed_task["task_id"]]
+    assert any(row.get("event") == "runtime_failed" and row.get("status") == "failed" for row in traces), traces
+    assert not a.read_jsonl(a.AGENT_EVALS_PATH), a.read_jsonl(a.AGENT_EVALS_PATH)
+    artifacts = [row for row in a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) if row.get("source_task_id") == failed_task["task_id"]]
+    assert any(row.get("type") == "subagent-results" for row in artifacts), artifacts
+    assert any(msg.role == "system" and "子 agent 失败" in msg.content and "429" in msg.content for msg in state.messages), state.messages
+
+    chat_sub = a.create_subagent(state, "Runtime Error Chat Agent", role="researcher")
+    chat_agent = BlockingAbortFakeAgent()
+    chat_sub.agent = chat_agent
+    chat_started = a.start_subagent_chat(state, chat_sub, "first chat", source="subagent_chat")
+    assert chat_started.startswith("已发送给子 agent"), chat_started
+    first_chat_task_id = chat_sub.active_task_id
+    queued = a.start_subagent_chat(state, chat_sub, "queued after rpc failure", source="subagent_chat")
+    assert "已排队" in queued, queued
+    state.ui_queue.put(("sub_chat_stream", chat_sub.agent_id, first_chat_task_id, "[Oh My Pi] RPC prompt failed: Agent is already processing.", True))
+    assert a.process_ui_queue(state) is True
+    assert chat_sub.status == "running", chat_sub.status
+    assert chat_sub.active_task_id is not None and chat_sub.active_task_id != first_chat_task_id, chat_sub.active_task_id
+    assert len(chat_agent.prompts) == 2, chat_agent.prompts
+    assert "queued after rpc failure" in chat_agent.prompts[-1][0], chat_agent.prompts[-1]
+
+    model_root = tempfile.mkdtemp(prefix="ga_tui_subagent_model_block_")
+    retarget_harness(model_root)
+    model_state = a.State(agent=ContextFakeAgent())
+    model_state.running = True
+    model_sub = a.create_subagent(model_state, "Model Block Agent", role="researcher")
+    model_sub.default_model = "beta"
+    old_apply = a.apply_subagent_default_model
+    try:
+        a.apply_subagent_default_model = lambda _state, _sub: (False, "missing runtime model")
+        blocked = a.start_subagent_task(model_state, model_sub, "should not run on old model", source="user")
+        assert "默认模型未应用，已阻止启动" in blocked, blocked
+        assert model_sub.status == "idle", model_sub.status
+        assert model_sub.agent is not None
+        assert getattr(model_sub.agent, "prompts", []) == [], getattr(model_sub.agent, "prompts", [])
+        assert not a.read_jsonl(a.AGENT_TASK_LEDGER_PATH), a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
+    finally:
+        a.apply_subagent_default_model = old_apply
 
 
 def assert_selected_subagent_chat_is_direct_session() -> None:
@@ -5981,6 +6099,7 @@ def run_checks() -> None:
     assert_shuheng_history_storage_owned()
     assert_token_usage_registry_prunes_removed_history()
     assert_shuheng_workspace_memory_context()
+    assert_shared_user_profile_context_is_global()
     assert_shuheng_bootstraps_legacy_state_without_mutating_source()
     assert_ohmypi_runtime_registry()
     assert_ohmypi_memory_prompt_and_command()
@@ -6025,6 +6144,7 @@ def run_checks() -> None:
     assert_aux_mouse_buttons_do_not_start_selection()
     assert_subagent_result_context_update_from_notice()
     assert_live_subagent_result_reaches_main_context()
+    assert_subagent_runtime_errors_fail_and_release_model_switch()
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
