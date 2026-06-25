@@ -273,10 +273,6 @@ UI_DURABLE_SYSTEM_MESSAGE_LIMIT = 200
 SUBAGENT_CONTEXT_REPLY_LIMIT = 2200
 SUBAGENT_CONTEXT_UPDATE_LIMIT = 20
 SUBAGENT_CONTEXT_TOTAL_LIMIT = 12000
-SUBAGENT_SKILL_LIMIT = 16
-SUBAGENT_SKILL_PACK_LIMIT = 8
-SUBAGENT_SKILL_BODY_LIMIT = 3500
-SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT = 10000
 SESSION_TRASH_DIR = os.path.join(MODEL_RESPONSES_DIR, ".trash")
 SUBAGENTS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "subagents")
 TEMP_SUBAGENTS_DIR = os.path.join(SHUHENG_TEMP_DIR, "subagents")
@@ -6636,13 +6632,13 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     for item in ((layers.get("L7_artifacts") or {}).get("items") or [])[-5:]:
         artifact_items.append(f"- {item.get('uri', '')} {item.get('hash', '')} task={item.get('source_task_id', '')}")
     skill_items: list[str] = []
-    for item in (skill_pack.get("included") or [])[:SUBAGENT_SKILL_PACK_LIMIT]:
+    for item in (skill_pack.get("included") or []):
         name = str(item.get("name") or item.get("ref") or "").strip()
         ref = str(item.get("ref") or "").strip()
         path = str(item.get("path") or "").strip()
         status = "resolved" if item.get("resolved") else "unresolved"
         summary = str(item.get("summary") or "").strip()
-        body = str(item.get("body_excerpt") or "").strip()
+        body = str(item.get("body") or item.get("body_excerpt") or "").strip()
         header = f"- {name or ref} ({status})"
         if ref and ref != name:
             header += f" ref={ref}"
@@ -9869,7 +9865,7 @@ def subagent_memory_text(sub: SubAgentRuntime) -> str:
     return read_text_file(subagent_memory_file(sub), "") if sub.persistent else ""
 
 
-def normalize_subagent_skill_refs(value: Any, limit: int = SUBAGENT_SKILL_LIMIT) -> list[str]:
+def normalize_subagent_skill_refs(value: Any, limit: Optional[int] = None) -> list[str]:
     raw_items: list[str] = []
     if isinstance(value, str):
         text = value.strip()
@@ -9898,7 +9894,7 @@ def normalize_subagent_skill_refs(value: Any, limit: int = SUBAGENT_SKILL_LIMIT)
             continue
         seen.add(key)
         refs.append(ref)
-        if len(refs) >= limit:
+        if limit is not None and limit > 0 and len(refs) >= limit:
             break
     return refs
 
@@ -9991,8 +9987,7 @@ def subagent_skill_summary_from_text(text: str, limit: int = 360) -> str:
 
 def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
     included: list[dict[str, Any]] = []
-    total_chars = 0
-    for ref in normalize_subagent_skill_refs(refs)[:SUBAGENT_SKILL_PACK_LIMIT]:
+    for ref in normalize_subagent_skill_refs(refs):
         path = subagent_skill_file_for_ref(ref)
         display = subagent_skill_display_name(ref)
         if not path:
@@ -10006,20 +10001,16 @@ def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
             })
             continue
         body = read_text_file(path, "")
-        remaining = max(0, SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT - total_chars)
-        excerpt_limit = min(SUBAGENT_SKILL_BODY_LIMIT, remaining)
-        excerpt = clean_text(body).strip()[:excerpt_limit]
-        total_chars += len(excerpt)
+        full_body = clean_text(body).strip()
         included.append({
             "ref": ref,
             "name": display or subagent_skill_display_name(path) or ref,
             "resolved": True,
             "path": path,
             "summary": subagent_skill_summary_from_text(body),
-            "body_excerpt": excerpt,
+            "body": full_body,
+            "body_excerpt": full_body,
         })
-        if total_chars >= SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT:
-            break
     return {
         "schema_version": "subagent.skill_pack.v1",
         "skill_refs": normalize_subagent_skill_refs(refs),

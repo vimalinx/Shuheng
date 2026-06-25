@@ -362,8 +362,8 @@ S01 修复左栏历史会话标题
 ### 3. Contracts
 
 - `skill_refs` belongs to exactly one `SubAgentRuntime`; it is persisted with that subagent's metadata and rehydrated on `load_subagents(...)` / `load_secret_subagents(...)`.
-- Skill refs are normalized, deduplicated, and bounded. Resolved refs load local `SKILL.md` or markdown skill files from Shuheng/Codex/OMP/repo skill roots; unresolved refs stay visible as unresolved metadata but do not inject arbitrary content.
-- Only the target subagent's context pack includes its resolved `skill_pack` body excerpts. Other subagents and the main Orchestrator must show no body text from that skill unless they independently own the same ref.
+- Skill refs are normalized and deduplicated without an artificial count cap. Resolved refs load full local `SKILL.md` or markdown skill files from Shuheng/Codex/OMP/repo skill roots; unresolved refs stay visible as unresolved metadata but do not inject arbitrary content.
+- Only the target subagent's context pack includes its resolved `skill_pack` full body text. Other subagents and the main Orchestrator must show no body text from that skill unless they independently own the same ref.
 - `format_context_pack_for_prompt(...)` must label the section as `Dedicated skills for this agent only` so runtime agents know the skill is scoped, not global.
 - `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, gateway records, and `ga_tui_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
 - `agent_match` may score a subagent by role tools plus dedicated skill refs/display names so a task requiring a target-only skill can reuse the correct existing agent.
@@ -379,6 +379,7 @@ S01 修复左栏历史会话标题
 - Target agent has `custom-sop`; another agent has no skill refs -> target context prompt contains the custom SOP marker, other context prompt does not.
 - Reload after save -> target still has `skill_refs`, other agent still does not.
 - Secret Vault subagent metadata -> `skill_refs` is encrypted with the subagent metadata, not written to normal subagent directories.
+- Target agent has more than 16 skill refs and a resolved skill body longer than 3500 characters -> all refs persist and the full body remains in the target context pack.
 
 ### 5. Good/Base/Bad Cases
 
@@ -395,6 +396,7 @@ S01 修复左栏历史会话标题
 - Tests must assert target context packs and direct-chat prompts include a unique skill marker while another subagent's context packs and direct-chat prompts do not.
 - Tests must assert home pages, `/agent info`/agent records, A2A cards, gateway capability registry, and `agent_match` expose/use the target skill refs without leaking skill body text to other agents.
 - Tests must assert `agent.create` accepts `skills`/`skill_refs`, and `agent.skill.update` removes or updates the target agent's skills.
+- Tests must assert dedicated skill registration is not capped at 16, all resolved skill pack entries are included, and skill body text is not truncated at 3500 characters.
 - Tests must keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
 ### 7. Wrong vs Correct

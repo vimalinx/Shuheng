@@ -4665,6 +4665,26 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert outside_marker not in outside_prompt, outside_prompt
     a.set_subagent_skill_refs(reloaded, loaded_plain, [], mode="clear")
 
+    bulk_refs: list[str] = []
+    long_tail_marker = "LONG_SKILL_BODY_AFTER_3500_CHARS_MUST_SURVIVE"
+    for index in range(21):
+        ref = f"bulk-skill-{index:02d}"
+        bulk_refs.append(ref)
+        bulk_skill_dir = Path(a.SHUHENG_SKILLS_DIR, ref)
+        bulk_skill_dir.mkdir(parents=True, exist_ok=True)
+        body = f"# {ref}\n\nSkill body marker {ref}.\n"
+        if index == 20:
+            body += ("x" * 3800) + long_tail_marker + "\n"
+        bulk_skill_dir.joinpath("SKILL.md").write_text(body, encoding="utf-8")
+    a.set_subagent_skill_refs(reloaded, loaded_plain, bulk_refs, mode="replace")
+    bulk_pack, _bulk_ref = a.build_context_pack(reloaded, loaded_plain, "Use every dedicated skill", "task_skill_bulk")
+    bulk_prompt = a.format_context_pack_for_prompt(bulk_pack)
+    assert bulk_pack["skill_refs"] == bulk_refs, bulk_pack
+    assert len(bulk_pack["skill_pack"]["included"]) == len(bulk_refs), bulk_pack
+    assert "bulk-skill-20" in bulk_prompt, bulk_prompt
+    assert long_tail_marker in bulk_prompt, bulk_prompt
+    a.set_subagent_skill_refs(reloaded, loaded_plain, [], mode="clear")
+
     prompt_block = a.subagent_prompt_block(loaded_skilled)
     assert "Dedicated skills: custom-sop" in prompt_block, prompt_block
     home_text = "\n".join(line.text for line in a.subagent_home_lines(reloaded, loaded_skilled, 100))
