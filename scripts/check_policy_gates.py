@@ -4388,13 +4388,20 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert any(row[0] == "subagent_session" and "hello direct" in row[2] for row in rows), rows
     session_entries = a.subagent_chat_session_entries(reloaded, reloaded_sub)
     assert any(entry["session_id"] == new_chat_session_id and entry["message_count"] == 0 for entry in session_entries), session_entries
+    assert a.switch_to_subagent_chat_session(reloaded, reloaded_sub.agent_id, previous_chat_session_id) is True
+    assert reloaded_sub.chat_session_id == previous_chat_session_id, reloaded_sub.chat_session_id
+    assert [msg.content for msg in reloaded_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_sub.messages
     reloaded_empty = a.State(agent=ContextFakeAgent())
     reloaded_empty.running = True
     assert a.load_subagents(reloaded_empty) is True
     reloaded_empty_sub = reloaded_empty.subagents.get(sub.agent_id)
     assert reloaded_empty_sub is not None
-    assert reloaded_empty_sub.chat_session_id == new_chat_session_id, reloaded_empty_sub.chat_session_id
-    assert reloaded_empty_sub.messages == [], reloaded_empty_sub.messages
+    assert reloaded_empty_sub.chat_session_id == previous_chat_session_id, reloaded_empty_sub.chat_session_id
+    assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
+    a.show_subagent_home(reloaded_empty, reloaded_empty_sub)
+    a.submit(reloaded_empty, "/chat")
+    assert reloaded_empty.selected_session == reloaded_empty_sub.agent_id, reloaded_empty.selected_session
+    assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
     reloaded.selected_session = reloaded_sub.agent_id
     screen = FakeDrawScreen()
     a.draw_rightbar(screen, reloaded, 18, 140)
@@ -5044,23 +5051,11 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "## 功能描述" in main_home_text, main_home_text
     assert "## 当前状态" in main_home_text, main_home_text
     assert "## 待办事项" in main_home_text, main_home_text
-    assert "## 最近会话" in main_home_text and "主控最近对话" in main_home_text, main_home_text
-    main_session_line = next(line for line in main_render_lines if "主控最近对话" in line.text)
-    assert main_session_line.payload["action"] == "open_session", main_session_line
-    assert main_session_line.payload["session_type"] == "history", main_session_line
-    assert main_session_line.payload["path"] == main_session_path, main_session_line
+    assert "## 最近会话" not in main_home_text and "主控最近对话" not in main_home_text, main_home_text
     assert "## 最近定时任务" in main_home_text, main_home_text
     assert "## 最近任务" in main_home_text, main_home_text
     assert "## 待审批" not in main_home_text, main_home_text
     assert a.display_scope_key(state) == "home:main"
-    main_screen = FakeDrawScreen()
-    click_width = 90
-    click_sidebar_w = a.left_sidebar_width(click_width)
-    a.draw_main(main_screen, state, height=50, width=click_width, sidebar_w=click_sidebar_w, rightbar_w=0)
-    main_line_idx = next(idx for idx, line in enumerate(state.line_cache) if "主控最近对话" in line.text)
-    a.handle_mouse(state, state.main_x0 + 2, state.body_top + main_line_idx - state.scroll, getattr(curses, "BUTTON1_CLICKED", 0), click_width)
-    assert state.selected_session == "main", state.selected_session
-    assert "已打开当前会话" in state.last_error, state.last_error
     a.show_main_home(state)
     assert a.switch_home_to_chat(state) == "已切到主 agent 聊天。"
     assert state.selected_session == "main", state.selected_session
@@ -5144,15 +5139,10 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert a.show_home_for_current_scope(state) == f"已打开代理主页：{sub.name}"
     sub_home_lines = a.home_lines(state, 100)
     sub_home_text = "\n".join(line.text for line in sub_home_lines)
-    assert "## 最近会话" in sub_home_text and "hello from home" in sub_home_text, sub_home_text
-    sub_session_line = next(line for line in sub_home_lines if "hello from home" in line.text)
-    assert sub_session_line.payload["action"] == "open_session", sub_session_line
-    assert sub_session_line.payload["session_type"] == "subagent", sub_session_line
-    assert sub_session_line.payload["agent_id"] == sub.agent_id, sub_session_line
-    sub_screen = FakeDrawScreen()
-    a.draw_main(sub_screen, state, height=50, width=click_width, sidebar_w=click_sidebar_w, rightbar_w=0)
-    sub_line_idx = next(idx for idx, line in enumerate(state.line_cache) if "hello from home" in line.text)
-    a.handle_mouse(state, state.main_x0 + 2, state.body_top + sub_line_idx - state.scroll, getattr(curses, "BUTTON1_CLICKED", 0), click_width)
+    assert "## 最近会话" not in sub_home_text and "hello from home" not in sub_home_text, sub_home_text
+    session_entries = a.subagent_chat_session_entries(state, sub)
+    assert session_entries and session_entries[0]["session_id"] == sub.chat_session_id, session_entries
+    assert a.switch_to_subagent_chat_session(state, sub.agent_id, session_entries[0]["session_id"]) is True
     assert state.selected_session == sub.agent_id, state.selected_session
     assert a.selected_subagent(state) is sub, state.selected_session
 

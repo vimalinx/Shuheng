@@ -15811,7 +15811,7 @@ def show_home_for_current_scope(state: State, target: str = "") -> str:
 def switch_home_to_chat(state: State) -> str:
     home_sub = selected_home_subagent(state)
     if home_sub is not None:
-        set_selected_interface(state, home_sub.agent_id)
+        switch_to_subagent_chat_session(state, home_sub.agent_id, "")
         return f"已切到代理聊天：{home_sub.name}"
     if is_main_home_session_key(state.selected_session):
         set_selected_interface(state, "main")
@@ -16020,7 +16020,6 @@ DEFAULT_DASHBOARD_SECTIONS: list[dict[str, str]] = [
     {"type": "function", "title": "功能描述"},
     {"type": "status_narrative", "title": "当前状态"},
     {"type": "todos", "title": "待办事项"},
-    {"type": "sessions", "title": "最近会话"},
     {"type": "schedules", "title": "最近定时任务"},
     {"type": "tasks", "title": "最近任务"},
 ]
@@ -16076,6 +16075,10 @@ def dashboard_sections_for_main(state: State) -> list[dict[str, Any]]:
     spec = dashboard_spec_for_main(state)
     sections = normalize_dashboard_sections(spec.get("sections")) if spec else []
     return sections or list(DEFAULT_DASHBOARD_SECTIONS)
+
+
+def dashboard_sections_include_sessions(sections: list[dict[str, Any]]) -> bool:
+    return any(str(section.get("type") or "") == "sessions" for section in sections)
 
 
 def normalize_dashboard_spec_payload(control: dict[str, Any], *, source: str, target: str) -> dict[str, Any]:
@@ -16775,7 +16778,7 @@ def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
             len(sub.messages),
             round(float(sub.updated_at or 0.0), 3),
             dashboard_cache_signature(sub.dashboard),
-            subagent_chat_history_home_signature(state, sub),
+            subagent_chat_history_home_signature(state, sub) if dashboard_sections_include_sessions(dashboard_sections_for_subagent(sub)) else (),
         )
     else:
         try:
@@ -16789,7 +16792,7 @@ def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:
             len(state.background_sessions),
             model_name,
             dashboard_cache_signature(state.main_dashboard),
-            main_history_home_signature(),
+            main_history_home_signature() if dashboard_sections_include_sessions(dashboard_sections_for_main(state)) else (),
         )
     return (
         selected,
@@ -17755,20 +17758,29 @@ def switch_to_subagent_chat_session(state: State, agent_id: str, session_id: str
         state.last_error = "子 agent 会话不存在。"
         mark_dirty(state)
         return True
-    if session_id and sub.chat_session_id != session_id:
+    target_session_id = str(session_id or sub.chat_session_id or "")
+    should_restore = bool(
+        sub.persistent
+        and target_session_id
+        and (sub.chat_session_id != target_session_id or not sub.messages)
+    )
+    if should_restore:
         block_reason = subagent_chat_session_switch_block_reason(sub)
         if block_reason:
             state.last_error = block_reason
             mark_dirty(state)
             return True
-        if sub.messages:
+        if sub.messages and sub.chat_session_id != target_session_id:
             save_subagent_chat_session(state, sub, source="switch-subagent-session")
-        if not load_subagent_chat_session(state, sub, session_id):
-            state.last_error = f"没有找到子 agent 会话：{session_id}"
+        if not load_subagent_chat_session(state, sub, target_session_id) and session_id:
+            state.last_error = f"没有找到子 agent 会话：{target_session_id}"
             mark_dirty(state)
             return True
-    state.selected_session = sub.agent_id
-    state.follow_bottom = True
+    elif sub.persistent and not sub.chat_session_id:
+        load_subagent_chat_session(state, sub, "")
+    set_selected_interface(state, sub.agent_id)
+    sub.updated_at = time.time()
+    save_subagent_meta(sub, state)
     mark_subagent_messages_changed(state, sub)
     state.last_error = f"已切换到子 agent 会话：{sub.name}"
     return True
@@ -23964,7 +23976,9 @@ def submit(state: State, text: str) -> None:
     active_sub = selected_subagent(state)
     home_sub = selected_home_subagent(state)
     if home_sub is not None and not text.startswith("/"):
-        set_selected_interface(state, home_sub.agent_id)
+        switch_to_subagent_chat_session(state, home_sub.agent_id, "")
+        if selected_subagent(state) is not home_sub:
+            return
         state.last_error = start_subagent_chat(state, home_sub, text, source="subagent_chat")
         mark_dirty(state)
         return
