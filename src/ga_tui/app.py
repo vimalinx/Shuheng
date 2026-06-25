@@ -15580,13 +15580,6 @@ def agent_schedule_rows(agent_id: str, limit: int = 8) -> list[dict[str, Any]]:
     return rows[:limit]
 
 
-def latest_run_for_schedule(schedule_id: str) -> dict[str, Any]:
-    for row in reversed(latest_schedule_run_records(limit=1000)):
-        if str(row.get("schedule_id") or "") == schedule_id:
-            return row
-    return {}
-
-
 def agent_artifact_rows(agent_id: str, limit: int = 8) -> list[dict[str, Any]]:
     task_ids = {str(row.get("task_id") or "") for row in agent_task_rows(agent_id, limit=40)}
     rows = [
@@ -15902,11 +15895,9 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
     if section_type == "schedules":
         rows = []
         for row in agent_schedule_rows(sub.agent_id):
-            run = latest_run_for_schedule(str(row.get("schedule_id") or ""))
             rows.append(
                 f"- {row.get('name') or row.get('schedule_id')} · {row.get('status') or 'enabled'} · "
-                f"{row.get('trigger') or row.get('cron') or row.get('interval') or row.get('at') or '-'} · "
-                f"last:{run.get('status') or '-'}"
+                f"{row.get('trigger') or row.get('cron') or row.get('interval') or row.get('at') or '-'}"
             )
         return rows
     if section_type == "tasks":

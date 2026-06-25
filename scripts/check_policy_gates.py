@@ -4650,6 +4650,12 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
         "target": sub.agent_id,
         "trigger": "daily",
     })
+    a.append_schedule_run({
+        "schedule_id": "sched_dashboard_agent",
+        "status": "failed",
+        "timestamp": "2026-06-25T09:00:00+08:00",
+        "task_id": "task_dashboard_agent_run_record",
+    })
     artifact_path = Path(a.AGENT_ARTIFACTS_DIR, "dashboard-agent.md")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text("dashboard artifact", encoding="utf-8")
@@ -4679,6 +4685,7 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "- ID:" not in top_card, home_text
     assert "╭─ 详情入口" in home_text, home_text
     assert "## 最近定时任务" in home_text and "主页巡检" in home_text, home_text
+    assert "last:" not in home_text and "task_dashboard_agent_run_record" not in home_text, home_text
     assert "## 最近任务" in home_text and "主页任务" in home_text, home_text
     assert "artifact://" not in home_text, home_text
     assert approval_id not in home_text, home_text

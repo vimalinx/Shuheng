@@ -255,7 +255,7 @@ S01 修复左栏历史会话标题
 - The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, a visible compact short-metric grid, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
 - The status-card metric grid must default to visible content under a plain `核心指标` divider. The current default should not show `▸/▾` collapsed-state chrome for the whole metric grid.
 - Default home pages should show readable function, status, todo, schedule, and recent-task sections below the fixed card. Approval ids, artifact URIs, and internal owner ids stay behind deliberate `/approvals`, `/artifacts`, and drill-down panels unless an agent explicitly declares a readable dashboard section.
-- Dashboard schedule data must be read from `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
+- Dashboard schedule sections must render schedule definitions from `scheduled_task_registry(...)` / `latest_schedule_records(...)` only. Schedule run audit records stay in drill-down schedule panels and must not appear as `last:<status>` or task-run ids in the default home-page schedule section.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home auto-switches to that agent's chat interface and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
@@ -287,7 +287,7 @@ S01 修复左栏历史会话标题
 
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
 - Tests must assert the main and persistent-agent fixed status cards keep native TUI metric-grid rows visible by default, plus lower detail rows instead of flat label/value rows or raw Markdown table text.
-- Tests must assert default home pages show readable function/status/todo/schedule/recent-task sections while keeping artifact URIs and approval ids out of the default view.
+- Tests must assert default home pages show readable function/status/todo/schedule/recent-task sections while keeping schedule run records, artifact URIs, and approval ids out of the default view.
 - Tests must assert repeated `home_lines(...)` calls for an unchanged home page reuse the cached render instead of rereading the task ledger.
 - Tests must assert default main and persistent-agent home rendering shows readable task and schedule rows while keeping raw artifact and approval rows behind detail-entry actions.
 - Tests must assert explicitly declared readable dashboard sections still render from persisted dashboard declarations.
