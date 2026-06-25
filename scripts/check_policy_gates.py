@@ -2375,6 +2375,31 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
         omp.OhMyPiRuntimeModel(provider="ga-tui-alpha", model_id="model-alpha", display_name="alpha", base_url="https://alpha.example.invalid/v1"),
         omp.OhMyPiRuntimeModel(provider="ga-tui-beta", model_id="model-beta", display_name="beta", base_url="https://beta.example.invalid/v1"),
     ]
+    startup_processes: list[FakeRpcProcess] = []
+
+    def startup_process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=True)
+        startup_processes.append(process)
+        return process
+
+    startup_agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=startup_process_factory,
+        configured_models=models,
+        default_model=models[1].selector,
+        startup_timeout=1,
+    )
+    startup_q = startup_agent.put_task("startup prompt", source="test")
+    startup_process = wait_for_process(startup_processes)
+    startup_set_model = wait_for_rpc_write(startup_process, lambda frame: frame.get("type") == "set_model")
+    startup_prompt = wait_for_rpc_write(startup_process, lambda frame: frame.get("type") == "prompt")
+    assert startup_set_model["provider"] == "ga-tui-beta", startup_set_model
+    assert startup_set_model["modelId"] == "model-beta", startup_set_model
+    assert startup_process.stdin.writes.index(startup_set_model) < startup_process.stdin.writes.index(startup_prompt), startup_process.stdin.writes
+    wait_for_queue_done(startup_q)
+    startup_agent.close()
+
     env = {"PI_CODING_AGENT_DIR": "/tmp/ga-tui-omp-agent", "GA_TUI_OMP_API_KEY_TEST": "key"}
     agent = omp.OhMyPiRpcAgent(
         command=["/fake/omp", "--mode", "rpc"],
@@ -2453,6 +2478,14 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
             "errorStatus": "401",
         },
     })
+    concurrent_q = agent.put_task("must not enter OMP before terminal frame", source="test")
+    concurrent_done = concurrent_q.get(timeout=2)
+    assert "不能并发启动新任务" in concurrent_done["done"], concurrent_done
+    assert not any(
+        frame.get("type") == "prompt" and frame.get("message") == "must not enter OMP before terminal frame"
+        for frame in process.stdin.writes
+    ), process.stdin.writes
+    process.stdout.push({"type": "agent_end"})
     done = dq.get(timeout=2)
     assert "[Oh My Pi] 401: Incorrect API key provided" == done["done"], done
     assert agent.is_running is False

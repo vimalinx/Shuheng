@@ -1267,6 +1267,7 @@ configure_genericagent_provider_runtime(
 - Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
 - Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
 - Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
+- Selected GA-TUI default model -> a new OMP wrapper must queue that selected model for confirmed `set_model` synchronization before the first prompt, because OMP native sessions can otherwise retain a previous workspace model even when the Shuheng UI displays the projected default.
 - DeepSeek or another thinking-mode OpenAI-compatible model -> isolated OMP `config.yml` carries `todo.eager:"default"` so OMP does not send a forced `tool_choice:"todo"` before the first model answer.
 - Existing OMP wrapper + changed `mykey.py` -> `refresh_agent_runtime_model_config(agent)` updates wrapper `configured_models`, regenerated env, command `--model`, and isolated files before the next switch/prompt.
 - Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
@@ -1278,6 +1279,7 @@ configure_genericagent_provider_runtime(
 - OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
 - OMP error frame with `stopReason:"error"` and `errorMessage` -> active TUI queue receives a visible `[Oh My Pi] ...` done item.
 - OMP terminal runtime errors delivered through subagent task/chat streams, including `429`, `RPC prompt failed`, and `Agent is already processing`, must release the subagent active task state; subagent tasks record `failed` in task ledgers/mail/checkpoints/traces, keep an audit artifact, and must not create eval rows, memory candidates, orchestrator result injections, or plan continuations.
+- OMP `message_end` / assistant-message error frames are not final turn ownership by themselves. The wrapper must keep the active prompt busy until `agent_end` / `turn_end` or a bounded terminal grace expires, so OMP internal retries after a 429 cannot receive the next prompt and produce `Agent is already processing`.
 - Subagent default models must be applied immediately before every subagent task or direct-chat prompt. If the configured model cannot be applied to the live runtime, startup is blocked before the prompt is sent so the subagent never silently runs on the previous model.
 - OMP `turn_end` followed by an immediate next `put_task()` before `agent_end` -> wrapper rejects the next prompt as concurrent instead of sending it to OMP and surfacing `Agent is already processing`.
 - OMP `turn_end` followed by `agent_end` -> active queue receives the done item and the next prompt can then be sent normally.
@@ -1362,6 +1364,8 @@ configure_genericagent_provider_runtime(
 - Tests must assert `refresh_agent_runtime_model_config()` updates an existing OMP wrapper after `mykey.py` changes, `OhMyPiRpcAgent` initializes to the projected default model selector, stale `get_state` model payloads and normal `set_model` confirmations cannot corrupt the current configured model display, and `OhMyPiRpcAgent.refresh_configured_models()` preserves a selected model while updating env, command, and pending `set_model` provider id.
 - Tests must assert a wrong-model OMP `set_model` confirmation fails the switch and keeps the previous local selection.
 - Tests must assert `/model` default selection maps to isolated OMP `modelRoles.default` and RPC `set_model` can be sent before the first prompt when a TUI model is selected.
+- Tests must assert a new OMP wrapper sends the selected default model through `set_model` before its first prompt, even if the UI already points at that model locally.
+- Tests must assert OMP error `message_end` frames keep the active prompt busy until a terminal frame or grace timeout, and that a second prompt during that window is blocked locally rather than sent to OMP.
 - Tests must assert `/model` `Enter` from an active subagent view sets that subagent's default model instead of switching the main agent.
 - Tests must assert OMP terminal error frames surface `errorMessage` / `errorStatus` visibly instead of an empty done item.
 - Tests must assert OMP terminal errors on subagent task/chat streams fail and release the subagent without generating eval/memory/orchestrator-continuation side effects, and that subagent default-model application failure blocks startup before sending a prompt.

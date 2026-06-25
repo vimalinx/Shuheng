@@ -197,6 +197,7 @@ class _ActivePrompt:
     pending_terminal_text: str | None = None
     pending_terminal_fallback_text: str = ""
     terminal_grace_started: bool = False
+    terminal_grace_generation: int = 0
     host_tool_followup_generation: int = 0
     host_tool_followup_started_generation: int = 0
     host_tool_result_fallback_text: str = ""
@@ -716,7 +717,12 @@ class OhMyPiRpcAgent:
         self._stderr_tail: list[str] = []
         self._closed = False
         self._host_tools_registered = False
-        self._pending_model: OhMyPiRuntimeModel | None = None
+        self._pending_model: OhMyPiRuntimeModel | None = (
+            self.configured_models[self.llm_no]
+            if self.configured_models and 0 <= self.llm_no < len(self.configured_models)
+            else None
+        )
+        self._last_confirmed_model_selector = ""
         self.native_session_file = ""
         self.native_session_id = ""
         self.native_session_name = ""
@@ -775,6 +781,18 @@ class OhMyPiRpcAgent:
                 fallback = idx
         return fallback
 
+    def _selected_configured_model(self) -> OhMyPiRuntimeModel | None:
+        if not self.configured_models or self.llm_no < 0 or self.llm_no >= len(self.configured_models):
+            return None
+        return self.configured_models[self.llm_no]
+
+    def _queue_selected_model_if_unconfirmed(self) -> None:
+        model = self._selected_configured_model()
+        if model is None or self._pending_model is not None:
+            return
+        if model.selector != self._last_confirmed_model_selector:
+            self._pending_model = model
+
     def refresh_configured_models(
         self,
         models: list[OhMyPiRuntimeModel],
@@ -817,6 +835,8 @@ class OhMyPiRpcAgent:
                 break
         self.llmclient = self.llmclients[self.llm_no]
         self._pending_model = self.configured_models[self.llm_no] if self.configured_models else None
+        if self._pending_model is not None:
+            self._last_confirmed_model_selector = ""
 
     def configure_host_tools(
         self,
@@ -1042,6 +1062,7 @@ class OhMyPiRpcAgent:
         return f"ga-tui-{prefix}-{self._request_no}"
 
     def _ensure_process(self) -> None:
+        self._queue_selected_model_if_unconfirmed()
         if self._process is not None and self._process.poll() is None:
             if self._ready.wait(self.startup_timeout):
                 ok, message = self._apply_pending_model(wait=True, timeout=self.startup_timeout)
@@ -1148,7 +1169,11 @@ class OhMyPiRpcAgent:
             self._note_active_host_tool_followup_activity()
             error_text = self._frame_error_text(frame)
             if error_text:
-                self._finish_active(error_text, wait_for_session_usage=False)
+                self._defer_active_terminal(
+                    error_text,
+                    start_grace=True,
+                    delay=max(self.terminal_grace_timeout, 10.0),
+                )
             else:
                 self._remember_active_final_text(self._frame_visible_text(frame))
             return
@@ -1198,7 +1223,11 @@ class OhMyPiRpcAgent:
             else:
                 error_text = str(error_payload or event.get("errorMessage") or event.get("message") or "")
             if error_text:
-                self._finish_active(f"[Oh My Pi] {error_text}", wait_for_session_usage=False)
+                self._defer_active_terminal(
+                    f"[Oh My Pi] {error_text}",
+                    start_grace=True,
+                    delay=max(self.terminal_grace_timeout, 10.0),
+                )
             return
         text = _visible_text_from_payload(event)
         if text:
@@ -1368,6 +1397,7 @@ class OhMyPiRpcAgent:
                 if actual.selector != model.selector:
                     return False, f"set_model confirmed {actual.selector}, expected {model.selector}"
         self._pending_model = None
+        self._last_confirmed_model_selector = model.selector
         return True, f"set_model confirmed: {model.selector}"
 
     def _frame_error_text(self, frame: dict[str, Any]) -> str | None:
@@ -1713,6 +1743,7 @@ class OhMyPiRpcAgent:
             active.pending_terminal_text = None
             active.pending_terminal_fallback_text = ""
             active.terminal_grace_started = False
+            active.terminal_grace_generation += 1
 
     def _mark_active_host_tool_result(self, tool_name: str, result: Any, *, is_error: bool = False) -> None:
         generation = 0
@@ -1783,8 +1814,16 @@ class OhMyPiRpcAgent:
             self._finish_active(None, fallback_text="" if visible_text_after_host_tool else fallback_text)
             return
 
-    def _defer_active_terminal(self, text: str | None = None, *, fallback_text: str = "", start_grace: bool = True) -> None:
-        should_start_grace = False
+    def _defer_active_terminal(
+        self,
+        text: str | None = None,
+        *,
+        fallback_text: str = "",
+        start_grace: bool = True,
+        delay: float | None = None,
+    ) -> None:
+        generation = 0
+        grace_delay = max(0.05, float(delay if delay is not None else self.terminal_grace_timeout))
         with self._active_lock:
             active = self._active
             if active is None or active.finished:
@@ -1796,18 +1835,27 @@ class OhMyPiRpcAgent:
             if not start_grace:
                 active.terminal_grace_started = False
                 return
-            if not active.terminal_grace_started:
-                active.terminal_grace_started = True
-                should_start_grace = True
-        if should_start_grace:
-            self.thread_factory(target=self._finish_active_after_terminal_grace, daemon=True, name="ohmypi-rpc-terminal-grace").start()
+            active.terminal_grace_started = True
+            active.terminal_grace_generation += 1
+            generation = active.terminal_grace_generation
+        self.thread_factory(
+            target=self._finish_active_after_terminal_grace,
+            args=(generation, grace_delay),
+            daemon=True,
+            name="ohmypi-rpc-terminal-grace",
+        ).start()
 
-    def _finish_active_after_terminal_grace(self) -> None:
-        time.sleep(max(0.05, self.terminal_grace_timeout))
+    def _finish_active_after_terminal_grace(self, generation: int, delay: float) -> None:
+        time.sleep(max(0.05, delay))
         text, fallback_text = self._active_pending_terminal()
         with self._active_lock:
             active = self._active
-            if active is None or active.finished or not active.terminal_grace_started:
+            if (
+                active is None
+                or active.finished
+                or not active.terminal_grace_started
+                or active.terminal_grace_generation != generation
+            ):
                 return
         self._finish_active(text, fallback_text=fallback_text)
 
