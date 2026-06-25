@@ -258,6 +258,7 @@ TOKEN_USAGE_PATH = os.path.join(MODEL_RESPONSES_DIR, "session_token_usage.json")
 SESSION_META_PATH = os.path.join(MODEL_RESPONSES_DIR, "session_meta.json")
 SHUHENG_WORKSPACES_DIR = os.path.join(SHUHENG_HOME, "workspaces")
 SHUHENG_WORKSPACE_STATE_PATH = os.path.join(SHUHENG_WORKSPACES_DIR, "active.json")
+SHUHENG_SKILLS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "skills")
 WORKSPACE_MANIFEST_FILENAME = "manifest.json"
 WORKSPACE_MEMORY_FILENAME = "memory.md"
 WORKSPACE_INDEX_FILENAME = "index.json"
@@ -272,6 +273,10 @@ UI_DURABLE_SYSTEM_MESSAGE_LIMIT = 200
 SUBAGENT_CONTEXT_REPLY_LIMIT = 2200
 SUBAGENT_CONTEXT_UPDATE_LIMIT = 20
 SUBAGENT_CONTEXT_TOTAL_LIMIT = 12000
+SUBAGENT_SKILL_LIMIT = 16
+SUBAGENT_SKILL_PACK_LIMIT = 8
+SUBAGENT_SKILL_BODY_LIMIT = 3500
+SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT = 10000
 SESSION_TRASH_DIR = os.path.join(MODEL_RESPONSES_DIR, ".trash")
 SUBAGENTS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "subagents")
 TEMP_SUBAGENTS_DIR = os.path.join(SHUHENG_TEMP_DIR, "subagents")
@@ -504,6 +509,7 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/model", "", "管理模型配置/切换/提取/验活/子代理默认", True),
     ("/agents", "", "列出持久子 agent", True),
     ("/agent", "<cmd>", "管理/运行持久子 agent", False),
+    ("/agent skill", "<cmd>", "给指定子 agent 配置专属 skill", False),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
@@ -701,6 +707,7 @@ class SubAgentRuntime:
     profile_text: str = field(default="", repr=False)
     memory_text: str = field(default="", repr=False)
     dashboard: dict[str, Any] = field(default_factory=dict)
+    skill_refs: list[str] = field(default_factory=list)
     encrypted_ref: str = ""
 
 
@@ -6026,6 +6033,7 @@ def source_policy_for_role(role: str, security_context: str = "standard") -> dic
             "task_brief",
             "subagent.profile",
             "subagent.memory",
+            "subagent.skills",
             "project.agent-harness",
             "agent_mail.refs",
             "task_ledger.refs",
@@ -6370,6 +6378,8 @@ def build_context_pack(
     permissions = permissions_for_role(role, security_context=sub.security_context, permission_profile=permission_profile)
     layered_memory = shuheng_layered_memory_payload()
     workspace_context = workspace_context_payload(security_context=sub.security_context)
+    skill_refs = normalize_subagent_skill_refs(sub.skill_refs)
+    skill_pack = subagent_skill_pack_for_refs(skill_refs)
     memory_pack = memory_hydration_pack(
         task_id=task_id,
         sub=sub,
@@ -6411,6 +6421,8 @@ def build_context_pack(
         "budget": default_task_budget(role),
         "permission_profile": permissions.get("permission_profile", PERMISSION_PROFILE_STANDARD),
         "permissions": permissions,
+        "skill_refs": skill_refs,
+        "skill_pack": skill_pack,
         "context_policy": context_policy,
         "task": task_contract,
         "task_brief": {
@@ -6588,6 +6600,10 @@ def put_agent_runtime_task(agent: Any, request: RuntimeTaskRequest) -> Any:
     return agent.put_task(request.prompt, source=request.source)
 
 
+def indent_text(text: str, prefix: str) -> str:
+    return "\n".join(prefix + line if line else prefix.rstrip() for line in str(text or "").splitlines())
+
+
 def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     budget = pack.get("budget") or {}
     task = pack.get("task") or {}
@@ -6595,6 +6611,7 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     source_policy = pack.get("source_policy") or {}
     memory_pack = pack.get("memory_pack") or {}
     layered_memory = pack.get("layered_memory") or {}
+    skill_pack = pack.get("skill_pack") or {}
     layers = pack.get("layers") or {}
     boundaries = "\n".join(f"- {item}" for item in (task.get("boundaries") or []))
     success = "\n".join(f"- {item}" for item in (task.get("success_criteria") or []))
@@ -6618,6 +6635,24 @@ def format_context_pack_for_prompt(pack: dict[str, Any]) -> str:
     artifact_items = []
     for item in ((layers.get("L7_artifacts") or {}).get("items") or [])[-5:]:
         artifact_items.append(f"- {item.get('uri', '')} {item.get('hash', '')} task={item.get('source_task_id', '')}")
+    skill_items: list[str] = []
+    for item in (skill_pack.get("included") or [])[:SUBAGENT_SKILL_PACK_LIMIT]:
+        name = str(item.get("name") or item.get("ref") or "").strip()
+        ref = str(item.get("ref") or "").strip()
+        path = str(item.get("path") or "").strip()
+        status = "resolved" if item.get("resolved") else "unresolved"
+        summary = str(item.get("summary") or "").strip()
+        body = str(item.get("body_excerpt") or "").strip()
+        header = f"- {name or ref} ({status})"
+        if ref and ref != name:
+            header += f" ref={ref}"
+        if path:
+            header += f" path={path}"
+        if summary:
+            header += f"\n  summary: {summary}"
+        if body:
+            header += f"\n  instructions:\n{indent_text(body, '    ')}"
+        skill_items.append(header)
     return f"""
 [GA TUI Context Pack]
 task_id: {pack.get("task_id", "")}
@@ -6661,6 +6696,9 @@ Workspace context:
 
 Recent artifact refs:
 {chr(10).join(artifact_items) or "- (empty)"}
+
+Dedicated skills for this agent only:
+{chr(10).join(skill_items) or "- (none)"}
 
 Profile excerpt:
 {pack.get("profile_excerpt") or "(empty)"}
@@ -6761,6 +6799,17 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
         "security_context": sub.security_context,
         "status": sub.status,
         "skills": role_tools_allowed(role),
+        "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
+        "dedicated_skills": [
+            {
+                "ref": item.get("ref", ""),
+                "name": item.get("name", ""),
+                "resolved": bool(item.get("resolved")),
+                "path": item.get("path", ""),
+                "summary": item.get("summary", ""),
+            }
+            for item in (subagent_skill_pack_for_refs(sub.skill_refs).get("included") or [])
+        ],
         "write_policy": role_write_policy(role),
         "permissions": permissions,
         "input_modes": ["text/plain"],
@@ -6923,6 +6972,7 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
                 "role": normalized_subagent_role(sub.role),
                 "security_context": sub.security_context,
                 "capabilities_ref": f"capability://role/{normalized_subagent_role(sub.role)}",
+                "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
                 "status": sub.status,
                 "active_task_id": sub.active_bus_task_id,
             }
@@ -9738,6 +9788,7 @@ def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) ->
         "chat_session_id": sub.chat_session_id,
         "chat_title": sub.chat_title,
         "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
+        "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
         "memory_ref": secret_virtual_ref(SECRET_SUBAGENT_MEMORY_KIND, sub.agent_id) if sub.persistent else "",
     }
     meta.update(fields)
@@ -9784,6 +9835,7 @@ def save_subagent_meta(sub: SubAgentRuntime, state: Optional[State] = None, **fi
         "chat_session_id": sub.chat_session_id,
         "chat_title": sub.chat_title,
         "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
+        "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
     })
     meta.update(fields)
     os.makedirs(sub.home, exist_ok=True)
@@ -9815,6 +9867,196 @@ def subagent_memory_text(sub: SubAgentRuntime) -> str:
     if sub.security_context == "secret":
         return sub.memory_text if sub.persistent else ""
     return read_text_file(subagent_memory_file(sub), "") if sub.persistent else ""
+
+
+def normalize_subagent_skill_refs(value: Any, limit: int = SUBAGENT_SKILL_LIMIT) -> list[str]:
+    raw_items: list[str] = []
+    if isinstance(value, str):
+        text = value.strip()
+        if "," in text or "\n" in text:
+            raw_items.extend(part.strip() for part in re.split(r"[,\n]+", text))
+        else:
+            raw_items.extend(part.strip() for part in text.split())
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            if isinstance(item, dict):
+                raw_items.append(str(item.get("ref") or item.get("name") or item.get("skill") or item.get("path") or ""))
+            else:
+                raw_items.append(str(item or ""))
+    elif isinstance(value, dict):
+        raw_items.extend(str(key) for key, enabled in value.items() if enabled)
+    seen: set[str] = set()
+    refs: list[str] = []
+    for item in raw_items:
+        ref = clean_text(str(item or "")).strip()
+        ref = ref.removeprefix("skill://").strip()
+        ref = re.sub(r"\s+", " ", ref)
+        if not ref or len(ref) > 220:
+            continue
+        key = ref.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(ref)
+        if len(refs) >= limit:
+            break
+    return refs
+
+
+def subagent_skill_roots() -> list[str]:
+    raw_roots = [
+        SHUHENG_SKILLS_DIR,
+        os.path.join(SHUHENG_HOME, "skills"),
+        os.path.expanduser("~/.codex/skills"),
+        os.path.expanduser("~/.agents/skills"),
+        os.path.expanduser("~/.omp/agent/skills"),
+        os.path.join(APP_ROOT_DIR, ".agents", "skills"),
+        os.path.expanduser("~/.codex/skills/.system"),
+    ]
+    roots: list[str] = []
+    seen: set[str] = set()
+    for root in raw_roots:
+        path = normalized_path(root)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        roots.append(path)
+    return roots
+
+
+def subagent_skill_display_name(ref: str) -> str:
+    text = str(ref or "").strip().removeprefix("skill://").strip()
+    if not text:
+        return ""
+    expanded = normalized_path(os.path.expanduser(text))
+    if os.path.basename(expanded) == "SKILL.md":
+        return os.path.basename(os.path.dirname(expanded)) or "SKILL.md"
+    if os.path.isdir(expanded):
+        return os.path.basename(expanded)
+    return os.path.basename(text.rstrip("/")) if ("/" in text or "\\" in text) else text
+
+
+def subagent_skill_file_for_ref(ref: str) -> str:
+    text = str(ref or "").strip().removeprefix("skill://").strip()
+    if not text:
+        return ""
+    roots = subagent_skill_roots()
+    expanded = normalized_path(os.path.expanduser(text))
+    candidates: list[str] = []
+    if os.path.isabs(expanded) or text.startswith((".", "~")) or "/" in text:
+        if os.path.isdir(expanded):
+            candidates.append(os.path.join(expanded, "SKILL.md"))
+        else:
+            candidates.append(expanded)
+    for root in roots:
+        candidates.append(os.path.join(root, text, "SKILL.md"))
+        candidates.append(os.path.join(root, text + ".md"))
+    for candidate in candidates:
+        path = normalized_path(candidate)
+        if not path or not os.path.isfile(path):
+            continue
+        if not any(path_is_within(path, root) for root in roots):
+            continue
+        return path
+    return ""
+
+
+def subagent_skill_summary_from_text(text: str, limit: int = 360) -> str:
+    lines: list[str] = []
+    in_frontmatter = False
+    frontmatter_description = ""
+    saw_frontmatter = False
+    for raw in (text or "").splitlines():
+        line = clean_text(raw).strip()
+        if in_frontmatter:
+            if line == "---":
+                in_frontmatter = False
+                if frontmatter_description:
+                    return truncate_cells(frontmatter_description, limit)
+                continue
+            if line.lower().startswith("description:"):
+                frontmatter_description = line.split(":", 1)[1].strip().strip("\"'")
+            continue
+        if line == "---" and not lines and not saw_frontmatter:
+            saw_frontmatter = True
+            in_frontmatter = True
+            continue
+        if not line or line.startswith("#"):
+            continue
+        lines.append(line)
+        if len(" ".join(lines)) >= limit:
+            break
+    return truncate_cells(" ".join(lines), limit)
+
+
+def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
+    included: list[dict[str, Any]] = []
+    total_chars = 0
+    for ref in normalize_subagent_skill_refs(refs)[:SUBAGENT_SKILL_PACK_LIMIT]:
+        path = subagent_skill_file_for_ref(ref)
+        display = subagent_skill_display_name(ref)
+        if not path:
+            included.append({
+                "ref": ref,
+                "name": display or ref,
+                "resolved": False,
+                "path": "",
+                "summary": "Skill ref is registered for this agent but was not resolved to a local SKILL.md.",
+                "body_excerpt": "",
+            })
+            continue
+        body = read_text_file(path, "")
+        remaining = max(0, SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT - total_chars)
+        excerpt_limit = min(SUBAGENT_SKILL_BODY_LIMIT, remaining)
+        excerpt = clean_text(body).strip()[:excerpt_limit]
+        total_chars += len(excerpt)
+        included.append({
+            "ref": ref,
+            "name": display or subagent_skill_display_name(path) or ref,
+            "resolved": True,
+            "path": path,
+            "summary": subagent_skill_summary_from_text(body),
+            "body_excerpt": excerpt,
+        })
+        if total_chars >= SUBAGENT_SKILL_PROMPT_TOTAL_LIMIT:
+            break
+    return {
+        "schema_version": "subagent.skill_pack.v1",
+        "skill_refs": normalize_subagent_skill_refs(refs),
+        "included": included,
+        "roots": subagent_skill_roots(),
+    }
+
+
+def format_subagent_skill_refs(refs: list[str], *, empty: str = "无") -> str:
+    names = [subagent_skill_display_name(ref) or ref for ref in normalize_subagent_skill_refs(refs)]
+    return ", ".join(names) if names else empty
+
+
+def set_subagent_skill_refs(state: Optional[State], sub: SubAgentRuntime, refs: Any, *, mode: str = "replace") -> tuple[bool, str]:
+    incoming = normalize_subagent_skill_refs(refs)
+    current = normalize_subagent_skill_refs(sub.skill_refs)
+    if mode == "add":
+        merged = normalize_subagent_skill_refs([*current, *incoming])
+    elif mode == "remove":
+        remove_keys = {ref.casefold() for ref in incoming}
+        merged = [ref for ref in current if ref.casefold() not in remove_keys and subagent_skill_display_name(ref).casefold() not in remove_keys]
+    elif mode == "clear":
+        merged = []
+    else:
+        merged = incoming
+    sub.skill_refs = merged
+    sub.updated_at = time.time()
+    save_subagent_meta(sub, state)
+    if sub.agent is not None:
+        install_subagent_prompt(sub.agent, sub)
+    if mode == "add":
+        return True, f"已给 {sub.name} 添加专属 skill：{format_subagent_skill_refs(incoming)}"
+    if mode == "remove":
+        return True, f"已从 {sub.name} 移除专属 skill：{format_subagent_skill_refs(incoming)}"
+    if mode == "clear":
+        return True, f"已清空 {sub.name} 的专属 skill。"
+    return True, f"已设置 {sub.name} 专属 skill：{format_subagent_skill_refs(merged)}"
 
 
 def subagent_home_dirs_for_session(state: State) -> list[str]:
@@ -9863,6 +10105,7 @@ def load_secret_subagents(state: State) -> bool:
         chat_session_id = str(meta.get("chat_session_id") or "")
         chat_title = str(meta.get("chat_title") or "")
         dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
+        skill_refs = normalize_subagent_skill_refs(meta.get("skill_refs") or meta.get("skills") or [])
         memory_text = load_secret_subagent_memory(state, agent_id) if persistent else ""
         if not memory_text and persistent:
             memory_text = str(payload.get("memory") or "")
@@ -9882,6 +10125,7 @@ def load_secret_subagents(state: State) -> bool:
             existing.profile_text = str(payload.get("profile") or "")
             existing.memory_text = memory_text if persistent else ""
             existing.dashboard = dict(dashboard)
+            existing.skill_refs = list(skill_refs)
             existing.encrypted_ref = secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id)
             if not existing.chat_session_id:
                 existing.chat_session_id = chat_session_id
@@ -9905,6 +10149,7 @@ def load_secret_subagents(state: State) -> bool:
                 profile_text=str(payload.get("profile") or ""),
                 memory_text=memory_text if persistent else "",
                 dashboard=dict(dashboard),
+                skill_refs=list(skill_refs),
                 encrypted_ref=secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id),
                 chat_session_id=chat_session_id,
                 chat_title=chat_title,
@@ -9937,6 +10182,7 @@ def load_subagents(state: State) -> bool:
         chat_session_id = str(meta.get("chat_session_id") or "")
         chat_title = str(meta.get("chat_title") or "")
         dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
+        skill_refs = normalize_subagent_skill_refs(meta.get("skill_refs") or meta.get("skills") or [])
         existing = state.subagents.get(agent_id)
         if existing:
             existing.name = display_name
@@ -9953,6 +10199,7 @@ def load_subagents(state: State) -> bool:
             if not existing.chat_title:
                 existing.chat_title = chat_title
             existing.dashboard = dict(dashboard)
+            existing.skill_refs = list(skill_refs)
             if not existing.messages and existing.status not in {"running", "aborting"}:
                 load_subagent_chat_session(state, existing, existing.chat_session_id)
             loaded[agent_id] = existing
@@ -9971,6 +10218,7 @@ def load_subagents(state: State) -> bool:
                 chat_session_id=chat_session_id,
                 chat_title=chat_title,
                 dashboard=dict(dashboard),
+                skill_refs=list(skill_refs),
             )
             load_subagent_chat_session(state, sub, sub.chat_session_id)
             loaded[agent_id] = sub
@@ -10054,6 +10302,7 @@ Name: {sub.name}
 ID: {sub.agent_id}
 Role: {role}
 Default model: {sub.default_model or "(global default)"}
+Dedicated skills: {format_subagent_skill_refs(sub.skill_refs, empty="(none)")}
 Security context: {sub.security_context}
 Home: {sub.home}
 Persistence: {'persistent' if sub.persistent else 'ephemeral-session'}
@@ -11076,6 +11325,16 @@ def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dic
         "busy_reason": tui_query_agent_busy_reason(sub),
         "security_context": sub.security_context,
         "capabilities": role_tools_allowed(role),
+        "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
+        "dedicated_skills": [
+            {
+                "ref": item.get("ref", ""),
+                "name": item.get("name", ""),
+                "resolved": bool(item.get("resolved")),
+                "summary": item.get("summary", ""),
+            }
+            for item in (subagent_skill_pack_for_refs(sub.skill_refs).get("included") or [])
+        ],
         "write_policy": role_write_policy(role),
         "permissions": permissions,
         "default_model": sub.default_model,
@@ -11220,7 +11479,11 @@ def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[s
                 reasons.append(f"role_mismatch:{sub.role}")
         elif explicit_target:
             reasons.append("role_not_requested")
-        available_caps = role_tools_allowed(normalized_subagent_role(sub.role))
+        available_caps = [
+            *role_tools_allowed(normalized_subagent_role(sub.role)),
+            *normalize_subagent_skill_refs(sub.skill_refs),
+            *(subagent_skill_display_name(ref) for ref in normalize_subagent_skill_refs(sub.skill_refs)),
+        ]
         for cap in required_caps:
             if tui_query_capability_matches(cap, available_caps):
                 score += 20
@@ -11500,7 +11763,8 @@ def subagent_brief(sub: SubAgentRuntime) -> str:
     scope = "persist" if sub.persistent else "temp"
     queued = f" q:{len(sub.task_queue)}" if sub.task_queue else ""
     model = f" model:{sub.default_model}" if sub.default_model else ""
-    return f"{sub.agent_id:<16} {sub.name:<18} {sub.role:<14} {scope:<7} {sub.status}{pending}{queued}{model} · {rel_age(sub.updated_at)}"
+    skills = f" skills:{len(normalize_subagent_skill_refs(sub.skill_refs))}" if sub.skill_refs else ""
+    return f"{sub.agent_id:<16} {sub.name:<18} {sub.role:<14} {scope:<7} {sub.status}{pending}{queued}{model}{skills} · {rel_age(sub.updated_at)}"
 
 
 def format_subagent_list(state: State) -> str:
@@ -11516,6 +11780,8 @@ def format_subagent_list(state: State) -> str:
         "  /agent role <id|name> <role>",
         "  /agent settings <id|name>",
         "  /agent model <id|name> [model|inherit]",
+        "  /agent skill <id|name>",
+        "  /agent skill add|remove|set|clear <id|name> [skill-ref ...]",
         "  /agent templates",
         "  /agent ask <id|name> <prompt>",
         "  /agent memory <id|name>",
@@ -14900,6 +15166,7 @@ AGENT_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
     ("role", "<agent> <role>", "设置子 agent 角色", False),
     ("settings", "<agent>", "打开 agent 详细设置", False),
     ("model", "<agent> [model|inherit]", "设置 agent 默认模型", False),
+    ("skill", "<agent> [add|remove|set|clear|list] [skill-ref ...]", "配置 agent 专属 skill", False),
     ("templates", "", "列出角色模板", True),
     ("ask", "<agent> <prompt>", "让子 agent 执行任务", False),
     ("run", "<agent> <prompt>", "ask 的别名", False),
@@ -14915,9 +15182,9 @@ AGENT_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
     ("delete", "<agent>", "移除子 agent", False),
 ]
 AGENT_SUBCOMMANDS_REQUIRING_AGENT = {
-    "ask", "run", "input", "answer", "reply", "memory", "remember", "profile", "rename", "role", "settings", "model", "info", "stop", "delete"
+    "ask", "run", "input", "answer", "reply", "memory", "remember", "profile", "rename", "role", "settings", "model", "skill", "info", "stop", "delete"
 }
-AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "stop", "delete"}
+AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "skill", "stop", "delete"}
 WORKSPACE_SUBCOMMANDS: list[tuple[str, str, str, bool]] = [
     ("list", "", "列出工作区", True),
     ("current", "", "显示自动推断的当前工作区", True),
@@ -16032,6 +16299,7 @@ def subagent_home_lines_uncached(state: State, sub: SubAgentRuntime, width: int)
             ("ID", sub.agent_id),
             ("安全上下文", sub.security_context),
             ("默认模型", sub.default_model or "-"),
+            ("专属技能", format_subagent_skill_refs(sub.skill_refs, empty="-")),
             ("活跃任务", sub.active_bus_task_id or "-"),
             ("定时任务", str(len(schedule_rows))),
             ("最近更新", rel_age(sub.updated_at)),
@@ -22419,6 +22687,45 @@ def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool, str]:
     return name.strip(), profile.strip(), role, persistent, role_note
 
 
+def format_subagent_skill_detail(sub: SubAgentRuntime) -> str:
+    refs = normalize_subagent_skill_refs(sub.skill_refs)
+    if not refs:
+        return f"{sub.name} 还没有专属 skill。\n用法：/agent skill add {sub.agent_id} <skill-ref>"
+    pack = subagent_skill_pack_for_refs(refs)
+    lines = [f"{sub.name} 专属 skill："]
+    for idx, item in enumerate(pack.get("included") or [], 1):
+        status = "ok" if item.get("resolved") else "missing"
+        path = str(item.get("path") or "")
+        summary = str(item.get("summary") or "")
+        lines.append(f"- {idx}. {item.get('name') or item.get('ref')} · {status}")
+        lines.append(f"  ref: {item.get('ref')}")
+        if path:
+            lines.append(f"  path: {path}")
+        if summary:
+            lines.append(f"  summary: {summary}")
+    return "\n".join(lines)
+
+
+def subagent_skill_command_message(state: State, sub: SubAgentRuntime, action_name: str, raw_refs: str = "") -> str:
+    action_name = (action_name or "list").strip().lower()
+    raw_refs = (raw_refs or "").strip()
+    if action_name in {"list", "show", "info"}:
+        return format_subagent_skill_detail(sub)
+    if action_name == "clear":
+        _ok, msg = set_subagent_skill_refs(state, sub, [], mode="clear")
+        return msg
+    if not raw_refs:
+        return f"Usage: /agent skill {action_name} {sub.agent_id} <skill-ref ...>"
+    if action_name in {"remove", "rm", "delete", "del"}:
+        _ok, msg = set_subagent_skill_refs(state, sub, raw_refs, mode="remove")
+        return msg
+    if action_name == "add":
+        _ok, msg = set_subagent_skill_refs(state, sub, raw_refs, mode="add")
+        return msg
+    _ok, msg = set_subagent_skill_refs(state, sub, raw_refs, mode="replace")
+    return msg
+
+
 def handle_subagent_command(state: State, text: str) -> bool:
     raw = (text or "").strip()
     load_subagents(state)
@@ -22524,6 +22831,34 @@ def handle_subagent_command(state: State, text: str) -> bool:
         add_system(state, msg)
         return True
 
+    m_skill_action = re.match(r"/agent\s+skills?\s+(add|remove|rm|delete|del|set|clear|list)\s+(\S+)(?:\s+([\s\S]+))?$", raw, re.I)
+    if m_skill_action:
+        action_name = m_skill_action.group(1).lower()
+        sub = resolve_subagent(state, m_skill_action.group(2))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_skill_action.group(2)}")
+            return True
+        add_system(state, subagent_skill_command_message(state, sub, action_name, m_skill_action.group(3) or ""))
+        return True
+
+    m_skill_target_action = re.match(r"/agent\s+skills?\s+(\S+)\s+(add|remove|rm|delete|del|set|clear|list|show|info)(?:\s+([\s\S]+))?$", raw, re.I)
+    if m_skill_target_action:
+        sub = resolve_subagent(state, m_skill_target_action.group(1))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_skill_target_action.group(1)}")
+            return True
+        add_system(state, subagent_skill_command_message(state, sub, m_skill_target_action.group(2), m_skill_target_action.group(3) or ""))
+        return True
+
+    m_skill_show = re.match(r"/agent\s+skills?\s+(\S+)\s*$", raw, re.I)
+    if m_skill_show:
+        sub = resolve_subagent(state, m_skill_show.group(1))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_skill_show.group(1)}")
+            return True
+        add_system(state, format_subagent_skill_detail(sub))
+        return True
+
     m_ask = re.match(r"/agent\s+(?:ask|input|run)\s+(\S+)\s+([\s\S]+)$", raw, re.I)
     if m_ask:
         sub = resolve_subagent(state, m_ask.group(1))
@@ -22611,6 +22946,7 @@ def handle_subagent_command(state: State, text: str) -> bool:
             f"name: {sub.name}",
             f"role: {normalized_subagent_role(sub.role)}",
             f"default_model: {sub.default_model or '(global default)'}",
+            f"skill_refs: {format_subagent_skill_refs(sub.skill_refs, empty='(none)')}",
             f"write_policy: {role_write_policy(normalized_subagent_role(sub.role))}",
             f"status: {sub.status}",
             f"persistent: {sub.persistent}",
@@ -22982,6 +23318,7 @@ def apply_subagent_control(
         profile = str(control.get("profile") or control.get("description") or control.get("system") or "").strip()
         role, role_note = subagent_role_request(str(control.get("role") or "specialist"))
         requested_model = str(control.get("model") or control.get("default_model") or control.get("model_name") or "").strip()
+        requested_skills = normalize_subagent_skill_refs(control.get("skill_refs") or control.get("skills") or control.get("skill") or [])
         persistent, temporary = subagent_control_persistence_intent(control, target, value, name, profile)
         if not name:
             return "缺少子 agent 名称。"
@@ -23007,7 +23344,11 @@ def apply_subagent_control(
             if requested_model:
                 ok_model, model_msg = set_subagent_default_model(state, reused, requested_model)
                 model_suffix = f"；{model_msg}" if ok_model else f"；默认模型设置失败：{model_msg}"
-            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role}){suffix}{model_suffix}"
+            skill_suffix = ""
+            if requested_skills:
+                _ok_skill, skill_msg = set_subagent_skill_refs(state, reused, requested_skills, mode="add")
+                skill_suffix = f"；{skill_msg}"
+            return f"已复用已有{scope}子 agent：{reused.name} ({reused.agent_id}, role={reused.role}){suffix}{model_suffix}{skill_suffix}"
         sub = create_subagent(state, name, profile, role=role, persistent=persistent)
         register_subagent_control_aliases(
             control_aliases,
@@ -23028,7 +23369,11 @@ def apply_subagent_control(
         if requested_model:
             ok_model, model_msg = set_subagent_default_model(state, sub, requested_model)
             model_suffix = f"；{model_msg}" if ok_model else f"；默认模型设置失败：{model_msg}"
-        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role}){suffix}{model_suffix}"
+        skill_suffix = ""
+        if requested_skills:
+            _ok_skill, skill_msg = set_subagent_skill_refs(state, sub, requested_skills, mode="replace")
+            skill_suffix = f"；{skill_msg}"
+        return f"已创建{scope}子 agent：{sub.name} ({sub.agent_id}, role={sub.role}){suffix}{model_suffix}{skill_suffix}"
 
     sub = resolve_subagent(state, target)
     if sub is None:
@@ -23114,6 +23459,23 @@ def apply_subagent_control(
         if not model_name:
             return "缺少子 agent 默认模型名称。"
         _ok, msg = set_subagent_default_model(state, sub, model_name)
+        return msg
+
+    if action in {"subagent_skill", "subagent_skills", "agent_skill", "agent_skills"}:
+        op = str(control.get("op") or control.get("mode") or control.get("operation") or "add").strip().lower()
+        refs = control.get("skill_refs") or control.get("skills") or control.get("skill") or value or []
+        if op in {"clear", "reset"}:
+            _ok, msg = set_subagent_skill_refs(state, sub, [], mode="clear")
+            return msg
+        if not normalize_subagent_skill_refs(refs):
+            return "缺少子 agent skill ref。"
+        if op in {"remove", "rm", "delete", "del"}:
+            _ok, msg = set_subagent_skill_refs(state, sub, refs, mode="remove")
+            return msg
+        if op in {"set", "replace"}:
+            _ok, msg = set_subagent_skill_refs(state, sub, refs, mode="replace")
+            return msg
+        _ok, msg = set_subagent_skill_refs(state, sub, refs, mode="add")
         return msg
 
     if action in {"subagent_stop", "agent_stop"}:

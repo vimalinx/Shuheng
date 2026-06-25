@@ -43,6 +43,7 @@ def retarget_harness(root: str) -> None:
     a.SESSION_META_PATH = os.path.join(a.MODEL_RESPONSES_DIR, "session_meta.json")
     a.SHUHENG_WORKSPACES_DIR = os.path.join(root, "workspaces")
     a.SHUHENG_WORKSPACE_STATE_PATH = os.path.join(a.SHUHENG_WORKSPACES_DIR, "active.json")
+    a.SHUHENG_SKILLS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "skills")
     a.L4_RAW_SESSIONS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "L4_raw_sessions")
     a.SESSION_TRASH_DIR = os.path.join(a.MODEL_RESPONSES_DIR, ".trash")
     a.configure_frontend_history_storage()
@@ -87,6 +88,7 @@ def retarget_harness(root: str) -> None:
     os.makedirs(a.SUBAGENTS_DIR, exist_ok=True)
     os.makedirs(a.TEMP_SUBAGENTS_DIR, exist_ok=True)
     os.makedirs(a.SHUHENG_WORKSPACES_DIR, exist_ok=True)
+    os.makedirs(a.SHUHENG_SKILLS_DIR, exist_ok=True)
     a.configure_scheduler_runtime(
         schedules_path=a.AGENT_SCHEDULES_PATH,
         runs_path=a.AGENT_SCHEDULE_RUNS_PATH,
@@ -4582,6 +4584,147 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "parse_error" not in state.messages[-1].content, state.messages[-1].content
 
 
+def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_subagent_skills_")
+    retarget_harness(root)
+    state = a.State(agent=ContextFakeAgent())
+    state.running = True
+    skill_dir = Path(a.SHUHENG_SKILLS_DIR, "custom-sop")
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    unique_marker = "UNIQUE_CUSTOM_SOP_MARKER_FOR_TARGET_AGENT_ONLY"
+    skill_dir.joinpath("SKILL.md").write_text(
+        "\n".join([
+            "---",
+            "name: custom-sop",
+            "description: Target-only SOP for the policy gate.",
+            "---",
+            "# Custom SOP",
+            "",
+            f"Always preserve {unique_marker} when this dedicated skill is loaded.",
+            "Use this only for the one subagent that explicitly owns the skill ref.",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    skilled = a.create_subagent(
+        state,
+        "Skill Scoped Agent",
+        "Owns the custom SOP and should be the only agent hydrated with it.",
+        role="researcher",
+        persistent=True,
+    )
+    plain = a.create_subagent(
+        state,
+        "Plain Agent",
+        "Has no dedicated skill and must not receive custom SOP instructions.",
+        role="researcher",
+        persistent=True,
+    )
+
+    assert a.handle_subagent_command(state, f"/agent skill {skilled.agent_id} add custom-sop") is True
+    assert a.normalize_subagent_skill_refs(skilled.skill_refs) == ["custom-sop"], skilled.skill_refs
+    assert a.normalize_subagent_skill_refs(plain.skill_refs) == [], plain.skill_refs
+    assert "专属 skill" in state.messages[-1].content, state.messages[-1].content
+    assert "skill" in {cmd for cmd, _args, _desc, _sendable in a.AGENT_SUBCOMMANDS}
+    assert "agent.skill.update" in a.TUI_AGENT_CONTROL_HINT, a.TUI_AGENT_CONTROL_HINT
+
+    a.handle_subagent_command(state, f"/agent skill list {skilled.agent_id}")
+    assert "custom-sop" in state.messages[-1].content and "Target-only SOP" in state.messages[-1].content, state.messages[-1].content
+
+    reloaded = a.State(agent=ContextFakeAgent())
+    reloaded.running = True
+    assert a.load_subagents(reloaded) is True
+    loaded_skilled = a.resolve_subagent(reloaded, skilled.agent_id)
+    loaded_plain = a.resolve_subagent(reloaded, plain.agent_id)
+    assert loaded_skilled is not None and loaded_plain is not None, reloaded.subagents
+    assert a.normalize_subagent_skill_refs(loaded_skilled.skill_refs) == ["custom-sop"], loaded_skilled.skill_refs
+    assert a.normalize_subagent_skill_refs(loaded_plain.skill_refs) == [], loaded_plain.skill_refs
+
+    target_pack, _target_ref = a.build_context_pack(reloaded, loaded_skilled, "Use custom SOP", "task_skill_target")
+    plain_pack, _plain_ref = a.build_context_pack(reloaded, loaded_plain, "Do not use custom SOP", "task_skill_plain")
+    target_prompt = a.format_context_pack_for_prompt(target_pack)
+    plain_prompt = a.format_context_pack_for_prompt(plain_pack)
+    assert target_pack["skill_refs"] == ["custom-sop"], target_pack
+    assert target_pack["skill_pack"]["included"][0]["resolved"] is True, target_pack
+    assert "Dedicated skills for this agent only" in target_prompt, target_prompt
+    assert unique_marker in target_prompt, target_prompt
+    assert plain_pack["skill_refs"] == [], plain_pack
+    assert unique_marker not in plain_prompt, plain_prompt
+    assert "Dedicated skills for this agent only:\n- (none)" in plain_prompt, plain_prompt
+    assert unique_marker in a.build_subagent_direct_chat_prompt(reloaded, loaded_skilled, "hello")[0]
+    assert unique_marker not in a.build_subagent_direct_chat_prompt(reloaded, loaded_plain, "hello")[0]
+
+    outside_marker = "OUTSIDE_SKILL_FILE_MUST_NOT_BE_INJECTED"
+    outside_file = Path(root, "outside-skill.md")
+    outside_file.write_text(outside_marker, encoding="utf-8")
+    assert a.subagent_skill_file_for_ref(str(outside_file)) == ""
+    a.set_subagent_skill_refs(reloaded, loaded_plain, [str(outside_file)], mode="replace")
+    outside_pack, _outside_ref = a.build_context_pack(reloaded, loaded_plain, "Reject outside skill path", "task_skill_outside")
+    outside_prompt = a.format_context_pack_for_prompt(outside_pack)
+    assert outside_pack["skill_pack"]["included"][0]["resolved"] is False, outside_pack
+    assert outside_marker not in outside_prompt, outside_prompt
+    a.set_subagent_skill_refs(reloaded, loaded_plain, [], mode="clear")
+
+    prompt_block = a.subagent_prompt_block(loaded_skilled)
+    assert "Dedicated skills: custom-sop" in prompt_block, prompt_block
+    home_text = "\n".join(line.text for line in a.subagent_home_lines(reloaded, loaded_skilled, 100))
+    assert "专属技能" in home_text and "custom-sop" in home_text, home_text
+    plain_home_text = "\n".join(line.text for line in a.subagent_home_lines(reloaded, loaded_plain, 100))
+    assert "专属技能" in plain_home_text and unique_marker not in plain_home_text, plain_home_text
+
+    agent_record = a.tui_query_agent_record(loaded_skilled, detail=True)
+    assert agent_record["skill_refs"] == ["custom-sop"], agent_record
+    assert agent_record["dedicated_skills"][0]["resolved"] is True, agent_record
+    plain_record = a.tui_query_agent_record(loaded_plain, detail=True)
+    assert plain_record["skill_refs"] == [], plain_record
+    card = a.a2a_agent_card_for_subagent(loaded_skilled)
+    assert card["skill_refs"] == ["custom-sop"], card
+    assert card["dedicated_skills"][0]["summary"], card
+    registry = a.gateway_capability_registry(reloaded)
+    registry_agent = next(row for row in registry["agents"] if row["agent_id"] == loaded_skilled.agent_id)
+    assert registry_agent["skill_refs"] == ["custom-sop"], registry_agent
+
+    match = a.tui_tool_agent_match(
+        reloaded,
+        {
+            "objective": "Run a target-only custom SOP",
+            "role": "researcher",
+            "capabilities_required": ["custom-sop"],
+            "reuse_policy": "reuse_only",
+        },
+    )
+    assert match["recommended_action"] == "reuse_existing", match
+    assert match["recommended_agent"]["agent_id"] == loaded_skilled.agent_id, match
+
+    create_text = ga_control({
+        "action": "agent.create",
+        "name": "Skill Control Agent",
+        "role": "researcher",
+        "lifecycle": "persistent",
+        "skills": ["custom-sop"],
+        "profile": "Created through ga-control with a dedicated skill.",
+    })
+    create_controls = a.extract_tui_controls(create_text)
+    assert len(create_controls) == 1 and create_controls[0]["skill_refs"] == ["custom-sop"], create_controls
+    a.apply_tui_controls_from_text(reloaded, create_text, source="agent")
+    control_agent = a.resolve_subagent(reloaded, "Skill Control Agent")
+    assert control_agent is not None, reloaded.subagents
+    assert a.normalize_subagent_skill_refs(control_agent.skill_refs) == ["custom-sop"], control_agent.skill_refs
+
+    remove_text = ga_control({
+        "action": "agent.skill.update",
+        "target": control_agent.agent_id,
+        "op": "remove",
+        "skills": ["custom-sop"],
+    })
+    remove_controls = a.extract_tui_controls(remove_text)
+    assert len(remove_controls) == 1 and remove_controls[0]["action"] == "agent_skill", remove_controls
+    a.apply_tui_controls_from_text(reloaded, remove_text, source="agent")
+    assert a.normalize_subagent_skill_refs(control_agent.skill_refs) == [], control_agent.skill_refs
+    persisted = a.load_subagent_meta(control_agent.agent_id)
+    assert persisted.get("skill_refs") == [], persisted
+
+
 def assert_persistent_agent_dashboard_home_pages() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
     retarget_harness(root)
@@ -5865,6 +6008,7 @@ def run_checks() -> None:
     assert_selected_subagent_chat_is_direct_session()
     assert_running_main_input_is_queued_and_interruptible()
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
+    assert_subagent_dedicated_skills_are_agent_scoped()
     assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()
     assert_tui_query_tools_expose_dashboard_state()

@@ -333,6 +333,84 @@ S01 修复左栏历史会话标题
 }
 ```
 
+## Scenario: Per-Agent Dedicated Skills
+
+### 1. Scope / Trigger
+
+- Trigger: The user wants one persistent subagent to have a dedicated skill without giving that skill to other subagents or the main Orchestrator.
+- Applies to: `/agent skill ...`, `agent.create`, `agent.skill.update`, persistent and Secret subagent metadata, context pack construction, subagent prompt installation, home-page status cards, A2A agent cards, gateway capability registry, and read-only host tool records.
+- Non-goal: This does not create a global skill registry UI, does not auto-install third-party skills, and does not let one subagent read another subagent's skill pack.
+
+### 2. Signatures
+
+- Persistent metadata field: `skill_refs: list[str]`.
+- Commands:
+  - `/agent skill <agent>`
+  - `/agent skill list <agent>`
+  - `/agent skill add <agent> <skill-ref ...>`
+  - `/agent skill remove <agent> <skill-ref ...>`
+  - `/agent skill set <agent> <skill-ref ...>`
+  - `/agent skill clear <agent>`
+  - `/agent skill <agent> add|remove|set|clear|list <skill-ref ...>`
+- Control actions:
+  - `agent.create` may include `skills`, `skill`, or `skill_refs`.
+  - `agent.skill.update` / `agent.skills.update` map to internal `agent_skill` and must include `target` plus `op` and skill refs unless `op:"clear"`.
+- Context-pack fields:
+  - `skill_refs`
+  - `skill_pack.schema_version == "subagent.skill_pack.v1"`
+
+### 3. Contracts
+
+- `skill_refs` belongs to exactly one `SubAgentRuntime`; it is persisted with that subagent's metadata and rehydrated on `load_subagents(...)` / `load_secret_subagents(...)`.
+- Skill refs are normalized, deduplicated, and bounded. Resolved refs load local `SKILL.md` or markdown skill files from Shuheng/Codex/OMP/repo skill roots; unresolved refs stay visible as unresolved metadata but do not inject arbitrary content.
+- Only the target subagent's context pack includes its resolved `skill_pack` body excerpts. Other subagents and the main Orchestrator must show no body text from that skill unless they independently own the same ref.
+- `format_context_pack_for_prompt(...)` must label the section as `Dedicated skills for this agent only` so runtime agents know the skill is scoped, not global.
+- `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, gateway records, and `ga_tui_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
+- `agent_match` may score a subagent by role tools plus dedicated skill refs/display names so a task requiring a target-only skill can reuse the correct existing agent.
+- Updating dedicated skills should reinstall the subagent system prompt when the subagent runtime is already loaded.
+- Skill support must not weaken existing role write policy, approval gates, Secret Vault isolation, or single-writer enforcement.
+
+### 4. Validation & Error Matrix
+
+- `/agent skill <missing>` -> user-visible `找不到子 agent`.
+- `/agent skill add <agent>` without refs -> usage message, no metadata change.
+- `agent.skill.update` without refs and without `op:"clear"` -> user-visible missing skill-ref result.
+- Unresolved skill ref -> kept in `skill_refs`, displayed as missing/unresolved, and omitted from injected body text.
+- Target agent has `custom-sop`; another agent has no skill refs -> target context prompt contains the custom SOP marker, other context prompt does not.
+- Reload after save -> target still has `skill_refs`, other agent still does not.
+- Secret Vault subagent metadata -> `skill_refs` is encrypted with the subagent metadata, not written to normal subagent directories.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/agent skill add agent-research custom-sop` persists `["custom-sop"]`; the target agent home shows `专属技能 custom-sop`, and only that target's context pack contains the `custom-sop` instructions.
+- Good: `agent.create` with `lifecycle:"persistent"` and `skills:["custom-sop"]` creates a persistent subagent with that dedicated skill from the first turn.
+- Good: `agent.skill.update` with `op:"remove"` removes the skill from only the target agent.
+- Base: An unresolved ref remains visible for operator diagnosis but injects no body text into prompts.
+- Bad: Putting the skill body in the main Orchestrator context pack or every subagent prompt.
+- Bad: Treating dedicated skill refs as permission grants that bypass role tools, policy approvals, or single-writer locks.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `/agent skill` command paths update only the selected subagent and persist through reload.
+- Tests must assert target context packs and direct-chat prompts include a unique skill marker while another subagent's context packs and direct-chat prompts do not.
+- Tests must assert home pages, `/agent info`/agent records, A2A cards, gateway capability registry, and `agent_match` expose/use the target skill refs without leaking skill body text to other agents.
+- Tests must assert `agent.create` accepts `skills`/`skill_refs`, and `agent.skill.update` removes or updates the target agent's skills.
+- Tests must keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+custom-sop installed globally -> every subagent sees custom SOP body text
+```
+
+#### Correct
+
+```text
+/agent skill add agent-research custom-sop -> only agent-research context_pack.skill_pack includes custom-sop
+```
+
 ## Scenario: Running Indicator Rendering
 
 ### 1. Scope / Trigger

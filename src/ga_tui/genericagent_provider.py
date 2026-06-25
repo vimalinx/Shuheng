@@ -53,7 +53,7 @@ TUI_AGENT_CONTROL_HINT = """
 - `task.plan.create`, `task.update`, `task.done`, `task.start`, `task.fail`, `task.cancel`
 - `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, `schedule.delete`
 - `dashboard.update`
-- `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`, `agent.delete`
+- `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.skill.update`, `agent.stop`, `agent.delete`
 - `delegate.create`
 - `memory.candidate`
 
@@ -62,6 +62,7 @@ TUI_AGENT_CONTROL_HINT = """
 - `delegate.create` 必须带 `routing`、`work_order`、`capability_contract`、`context_contract`、`output_contract`，让能力匹配、工作安排和输出契约完整可审计。
 - 默认创建临时会话 agent；如果用户意图是长期、持久、周期性或专职职责，主控必须在 `agent.create` 中显式写 `lifecycle:"persistent"` 或 `persistent:true`。TUI 不会从 name/profile 自然语言里猜生命周期。
 - `main_orchestrator` 是当前主控 runtime 专属 role，不能用于 `agent.create` 或 `agent.role.update` 的子 agent；创建/更新子 agent 时请选择 `researcher`、`specialist`、`coder`、`reviewer` 等受限角色。
+- 给单个子 agent 配置专属 skill 时，使用 `agent.skill.update`，带 `target` 和 `skills`/`skill_refs`，`op` 可为 `add`、`remove`、`set`、`clear`；这些 skill 只注入目标 agent 的上下文，不属于全局 skill。
 - 用户明确要求删除/移除子 agent 时使用 `agent.delete`，不要只使用 `agent.stop`；删除会从 TUI agent 列表移除并保留原目录作为可审计文件。
 - 用户明确要求全新/不要复用时，使用 `reuse_policy:"force_new"` 或 `force_new:true`；TUI 不会从可见正文里猜复用策略。
 - 如果当前控制块只是一个中间步骤，且需要主控继续生成后续控制，在本次 `ga-control.v2` 批量 envelope 或最后一个 action 上显式写 `continue_after:true` 或 `workflow_state:"in_progress"`。

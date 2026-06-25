@@ -49,6 +49,8 @@ CURRENT_TUI_CONTROL_ACTIONS = {
     "agent.profile.update",
     "agent.role.update",
     "agent.model.update",
+    "agent.skill.update",
+    "agent.skills.update",
     "agent.stop",
     "agent.delete",
     "delegate.create",
@@ -243,6 +245,13 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
         mapped["action"] = "dashboard_update"
         mapped["target"] = control.get("target") or control.get("agent_id") or control.get("agent") or ""
         return mapped
+    if action in {"agent_skill_update", "agent_skills_update"}:
+        mapped = dict(control)
+        mapped.update(common)
+        mapped["action"] = "agent_skill"
+        mapped["target"] = control.get("target") or control.get("agent_id") or control.get("agent") or ""
+        mapped["skill_refs"] = control.get("skill_refs") or control.get("skills") or control.get("skill") or []
+        return mapped
     if action == "agent_create":
         selector = agenttask_target_selector(control)
         persistent = lifecycle_is_persistent(control)
@@ -255,6 +264,7 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
             "profile": control.get("profile") or control.get("description") or selector.get("profile") or selector.get("description") or "",
             "role": control.get("role") or selector.get("role") or "specialist",
             "model": control.get("model") or control.get("default_model") or control.get("model_name") or selector.get("model") or selector.get("default_model") or "",
+            "skill_refs": control.get("skill_refs") or control.get("skills") or control.get("skill") or selector.get("skill_refs") or selector.get("skills") or selector.get("skill") or [],
             "plan_step_id": control.get("plan_step_id") or control.get("parent_task_id") or control.get("step") or "",
             "force_new": force_new_from_v2(control),
         })
