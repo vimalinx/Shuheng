@@ -563,6 +563,61 @@ state.run_frame += 1
 draw_running_indicator_frame(stdscr, state)
 ```
 
+## Scenario: Stream Queue First-Chunk Coalescing
+
+### 1. Scope / Trigger
+
+- Trigger: Runtime provider queues emit a burst of `{"next": ...}` chunks followed by `{"done": ...}`.
+- Applies to: `consume_stream_queue_to_ui(...)`, main stream queues, subagent task streams, subagent chat streams, and token-usage queue emission.
+- Non-goal: This does not change provider protocol parsing, final transcript rendering, or token accounting semantics.
+
+### 2. Signatures
+
+- Function: `consume_stream_queue_to_ui(state, kind, target_ref, task_id, dq)`.
+- Timing constant: `STREAM_UI_FLUSH_INTERVAL`.
+- UI queue items:
+  - `(kind, target_ref, task_id, text, False)` for partial stream flushes.
+  - `(kind, target_ref, task_id, text, True)` for terminal completion.
+  - `("token_usage", kind, target_ref, task_id, usage)` for usage payloads.
+
+### 3. Contracts
+
+- The first visible `next` chunk must flush immediately, independent of `time.monotonic()` uptime and independent of `STREAM_UI_FLUSH_INTERVAL` size.
+- Later burst chunks may be coalesced until the interval elapses or the terminal `done` item arrives.
+- A terminal `done` item must still emit token usage before the final stream item when usage is present.
+- The first-chunk behavior must be shared by main, subagent task, and subagent chat stream consumers because they all call the same helper.
+
+### 4. Validation & Error Matrix
+
+- System uptime is less than `STREAM_UI_FLUSH_INTERVAL` -> first chunk still emits as a partial stream item.
+- Multiple chunks arrive immediately -> first chunk emits, intermediate chunks are coalesced, final `done` emits complete text.
+- Usage is attached to `done` -> `token_usage` item is queued before the final stream item.
+
+### 5. Good/Base/Bad Cases
+
+- Good: With interval `3600.0`, chunks `a b c d e` plus `done:abcde` produce partial `a`, usage, and final `abcde`.
+- Base: With normal interval, long streams still coalesce intermediate chunks to avoid repaint storms.
+- Bad: Initializing `last_emit_at` to `0.0`, making first-chunk behavior depend on host uptime.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert burst updates emit the first partial chunk and final completion even when `STREAM_UI_FLUSH_INTERVAL` is much larger than the current process runtime.
+- Tests must assert usage payloads still reach the UI queue.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+last_emit_at = 0.0
+```
+
+#### Correct
+
+```python
+last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
+```
+
 ## Scenario: OMP Runtime Permission Profiles
 
 ### 1. Scope / Trigger
