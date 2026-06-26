@@ -223,9 +223,11 @@ S01 修复左栏历史会话标题
 
 - UI-only home keys:
   - Main home: `MAIN_HOME_SESSION_KEY == "__home__:main"`.
+  - Scheduled-report home: `SCHEDULED_REPORTS_SESSION_KEY == "__home__:scheduled_reports"`.
   - Persistent subagent home: `subagent_home_session_key(agent_id) == "__home__:sub:<safe-agent-id>"`.
 - Commands:
   - `/home [agent]` opens the main home, current persistent-agent home, or named persistent-agent home.
+  - `/reports` or `/home reports` opens the scheduled-report home page next to the main home entry.
   - `/chat` switches from the current home page back to the corresponding chat view.
   - `/agent-dashboard <agent>` opens a named persistent-agent home.
 - Control action:
@@ -250,13 +252,14 @@ S01 修复左栏历史会话标题
   - optional `status_narrative`
   - optional `todos`
   - optional `markdown`
-- Supported section types are `function`, `status_narrative`, `todos`, `sessions`, `schedules`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
+- Supported section types are `function`, `status_narrative`, `todos`, `sessions`, `schedules`, `scheduled_reports`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - Shuheng owns the fixed top status card. Agent declarations may control lower-page section order, labels, bounded Markdown, status narrative, and todo text.
 - The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, a visible compact short-metric grid, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
 - The status-card metric grid must default to visible content under a plain `核心指标` divider. The current default should not show `▸/▾` collapsed-state chrome for the whole metric grid.
 - Default home pages should show readable function, status, todo, schedule, and recent-task sections below the fixed card. They should not show recent-session sections by default. Approval ids, artifact URIs, and internal owner ids stay behind deliberate `/approvals`, `/artifacts`, and drill-down panels unless an agent explicitly declares a readable dashboard section.
 - Explicit `sessions` dashboard sections, when declared, must show readable titles and compact activity metadata only. Main home session rows open normal Shuheng history/current sessions; persistent-subagent session rows open that subagent's own chat sessions. Home row payloads may carry paths or subagent session ids, but the visible text must not dump raw filesystem paths.
 - Dashboard schedule sections must render schedule definitions from `scheduled_task_registry(...)` / `latest_schedule_records(...)` only. Schedule run audit records stay in drill-down schedule panels and must not appear as `last:<status>` or task-run ids in the default home-page schedule section.
+- Scheduled-report sections render child subagent replies for scheduled agent-task runs by joining `scheduledtask.run.v1.task_id` to the task ledger and subagent result artifact rows. They are display-only derived views: no extra scheduler, result store, approval action, or memory write is created for the page itself. Default persistent-subagent home pages include a pinned `scheduled_reports` section even when the agent did not declare it, and the main sidebar exposes a global scheduled-report home page.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home restores that agent's last entered chat session, auto-switches to that agent's chat interface, and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
@@ -275,6 +278,7 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: Clicking a persistent agent opens `__home__:sub:<agent_id>` and shows the fixed status card, readable default schedule/task sections, and concise detail-entry actions without dumping artifact URIs or approval ids by default.
+- Good: A scheduled subagent task completes, writes a subagent-result artifact, and then appears as a readable excerpt in both that subagent's home `定时汇报` section and the global `__home__:scheduled_reports` page without exposing raw artifact URIs in the default text.
 - Good: Repainting the same home page during typing, mouse movement, or scroll reuses the cached rendered home lines until a relevant ledger file signature, dashboard declaration, selected home, width, or expanded-state key changes.
 - Good: The fixed status card uses native TUI panel separators such as `├─ 核心指标`; aligned metric tiles are visible by default, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
 - Good: A persistent agent may explicitly declare readable lower sections such as `markdown` or `todos`; those sections render below the card while unsupported fields are dropped.
@@ -293,6 +297,7 @@ S01 修复左栏历史会话标题
 - `scripts/check_policy_gates.py` must assert fresh `State` opens `MAIN_HOME_SESSION_KEY` and main home lines render.
 - Tests must assert the main and persistent-agent fixed status cards keep native TUI metric-grid rows visible by default, plus lower detail rows instead of flat label/value rows or raw Markdown table text.
 - Tests must assert default home pages show readable function/status/todo/schedule/recent-task sections while keeping recent-session sections, schedule run records, artifact URIs, and approval ids out of the default view.
+- Tests must assert scheduled subagent result rows are visible in the subagent `scheduled_reports` home section and in the global scheduled-report page, while the normal schedule section still shows schedule definitions only.
 - Tests must assert entering a persistent subagent chat through `/chat` or a subagent-session switch persists the selected chat session id and a later restart restores that session.
 - Tests must assert repeated `home_lines(...)` calls for an unchanged home page reuse the cached render instead of rereading the task ledger.
 - Tests must assert default main and persistent-agent home rendering shows readable task and schedule rows while keeping raw artifact and approval rows behind detail-entry actions.
@@ -1598,6 +1603,7 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Due jobs reserve an `idempotency_key` by appending a `starting` run row before dispatching.
 - Final run rows reuse the same `run_id` and append status such as `dispatched`, `queued`, `approval_required`, `failed`, `rejected`, `duplicate`, `skipped`, or `invalid`.
 - Agent-task final run status must come from a structured dispatch result (`status`, `message`, `task_id`, `approval_id`, `error`, `provider_id`) rather than parsing localized UI text returned to ordinary callers.
+- The scheduler does not write report pages directly. Scheduled-report UI derives subagent replies from the final run row `task_id`, the latest task ledger row, and subagent-result artifact refs.
 - Schedule run rows must record `provider_id`. If a schedule does not explicitly carry a provider id, scheduler dispatch resolves it through the injected runtime default, which is `ohmypi` on this branch.
 - Agent-task final run rows should also record `runtime_provider_id` from the structured dispatch result or the resolved schedule provider.
 - After each run row, the latest schedule record is updated append-only with `last_run_id`, `last_run_status`, `last_run_at`, and `last_idempotency_key`.

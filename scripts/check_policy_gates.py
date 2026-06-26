@@ -5216,6 +5216,37 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
         "timestamp": "2026-06-25T09:00:00+08:00",
         "task_id": "task_dashboard_agent_run_record",
     })
+    scheduled_report_task_id = "task_dashboard_agent_scheduled_report"
+    scheduled_report_ref = a.write_harness_artifact(
+        "subagent-results",
+        f"{sub.agent_id}-{scheduled_report_task_id}",
+        "# Dashboard Agent result\n\n"
+        f"Task: {scheduled_report_task_id}\n\n"
+        "定时巡检完成：主页健康，待办事项已同步。",
+        source_task_id=scheduled_report_task_id,
+        provenance={"generated_by": sub.agent_id, "source": "test_scheduled_report"},
+    )
+    a.append_task_ledger(
+        scheduled_report_task_id,
+        status="completed",
+        assigned_agent=sub.agent_id,
+        title="主页巡检",
+        kind="subagent_task",
+        objective="Produce scheduled dashboard report",
+        session_key="main",
+        artifact_refs=[scheduled_report_ref],
+        summary="定时巡检完成：主页健康，待办事项已同步。",
+    )
+    a.append_schedule_run({
+        "schedule_id": "sched_dashboard_agent",
+        "schedule_name": "主页巡检",
+        "status": "dispatched",
+        "timestamp": "2026-06-25T09:10:00+08:00",
+        "finished_at": "2026-06-25T09:10:01+08:00",
+        "target": sub.agent_id,
+        "target_name": sub.name,
+        "task_id": scheduled_report_task_id,
+    })
     artifact_path = Path(a.AGENT_ARTIFACTS_DIR, "dashboard-agent.md")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text("dashboard artifact", encoding="utf-8")
@@ -5246,9 +5277,22 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "╭─ 详情入口" in home_text, home_text
     assert "## 最近定时任务" in home_text and "主页巡检" in home_text, home_text
     assert "last:" not in home_text and "task_dashboard_agent_run_record" not in home_text, home_text
+    assert "## 定时汇报" in home_text and "定时巡检完成：主页健康" in home_text, home_text
     assert "## 最近任务" in home_text and "主页任务" in home_text, home_text
     assert "artifact://" not in home_text, home_text
     assert approval_id not in home_text, home_text
+
+    assert a.show_home_for_current_scope(state, "reports") == "已打开定时汇报。"
+    assert state.selected_session == a.SCHEDULED_REPORTS_SESSION_KEY, state.selected_session
+    assert a.display_scope_key(state) == "home:scheduled_reports"
+    assert a.top_bar_session_id(state) == "home:scheduled_reports"
+    report_home_text = "\n".join(line.text for line in a.home_lines(state, 100))
+    assert "定时汇报" in report_home_text and "Dashboard Agent" in report_home_text, report_home_text
+    assert "主页巡检" in report_home_text and "定时巡检完成：主页健康" in report_home_text, report_home_text
+    assert "artifact://" not in report_home_text, report_home_text
+    assert "task_dashboard_agent_run_record" not in report_home_text, report_home_text
+    assert "只读治理页面" in a.switch_home_to_chat(state)
+    a.show_subagent_home(state, sub)
 
     a.submit(state, "hello from home")
     assert state.selected_session == sub.agent_id, state.selected_session
