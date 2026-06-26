@@ -5222,6 +5222,9 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
         f"{sub.agent_id}-{scheduled_report_task_id}",
         "# Dashboard Agent result\n\n"
         f"Task: {scheduled_report_task_id}\n\n"
+        "**LLM Running (Turn 1) ...**\n"
+        "<summary>Reading files and deciding how to produce the report.</summary>\n"
+        "<thinking>internal chain should not be visible in scheduled reports</thinking>\n\n"
         "定时巡检完成：主页健康，待办事项已同步。",
         source_task_id=scheduled_report_task_id,
         provenance={"generated_by": sub.agent_id, "source": "test_scheduled_report"},
@@ -5246,6 +5249,46 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
         "target": sub.agent_id,
         "target_name": sub.name,
         "task_id": scheduled_report_task_id,
+    })
+    approval_report_task_id = "task_dashboard_agent_approval_report"
+    a.append_task_ledger(
+        approval_report_task_id,
+        status="approval_required",
+        assigned_agent=sub.agent_id,
+        title="主页巡检待审批",
+        kind="subagent_task",
+        objective="Approval should not be treated as scheduled reply",
+        session_key="main",
+        summary="APPROVAL_REQUIRED access_secret: approval=appr_hidden",
+    )
+    a.append_schedule_run({
+        "schedule_id": "sched_dashboard_agent",
+        "schedule_name": "主页巡检",
+        "status": "approval_required",
+        "timestamp": "2026-06-25T09:11:00+08:00",
+        "target": sub.agent_id,
+        "target_name": sub.name,
+        "task_id": approval_report_task_id,
+    })
+    cancelled_report_task_id = "task_dashboard_agent_cancelled_report"
+    a.append_task_ledger(
+        cancelled_report_task_id,
+        status="cancelled",
+        assigned_agent=sub.agent_id,
+        title="主页巡检取消记录",
+        kind="subagent_task",
+        objective="Cancelled audit record should not be treated as scheduled reply",
+        session_key="main",
+        summary="APPROVAL_REQUIRED long_running_privilege_escalation: approval=appr_old",
+    )
+    a.append_schedule_run({
+        "schedule_id": "sched_dashboard_agent",
+        "schedule_name": "主页巡检",
+        "status": "cancelled",
+        "timestamp": "2026-06-25T09:12:00+08:00",
+        "target": sub.agent_id,
+        "target_name": sub.name,
+        "task_id": cancelled_report_task_id,
     })
     artifact_path = Path(a.AGENT_ARTIFACTS_DIR, "dashboard-agent.md")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
@@ -5278,6 +5321,8 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "## 最近定时任务" in home_text and "主页巡检" in home_text, home_text
     assert "last:" not in home_text and "task_dashboard_agent_run_record" not in home_text, home_text
     assert "## 定时汇报" in home_text and "定时巡检完成：主页健康" in home_text, home_text
+    assert "LLM Running" not in home_text and "<thinking>" not in home_text and "APPROVAL_REQUIRED" not in home_text, home_text
+    assert approval_report_task_id not in home_text and cancelled_report_task_id not in home_text, home_text
     assert "## 最近任务" in home_text and "主页任务" in home_text, home_text
     assert "artifact://" not in home_text, home_text
     assert approval_id not in home_text, home_text
@@ -5291,6 +5336,8 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "主页巡检" in report_home_text and "定时巡检完成：主页健康" in report_home_text, report_home_text
     assert "artifact://" not in report_home_text, report_home_text
     assert "task_dashboard_agent_run_record" not in report_home_text, report_home_text
+    assert "LLM Running" not in report_home_text and "<summary>" not in report_home_text and "<thinking>" not in report_home_text, report_home_text
+    assert "APPROVAL_REQUIRED" not in report_home_text and approval_report_task_id not in report_home_text and cancelled_report_task_id not in report_home_text, report_home_text
     assert "只读治理页面" in a.switch_home_to_chat(state)
     a.show_subagent_home(state, sub)
 

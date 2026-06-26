@@ -16315,11 +16315,39 @@ def artifact_rows_by_source_task() -> dict[str, dict[str, Any]]:
     return by_task
 
 
-def scheduled_report_excerpt(text: str, limit: int = 260) -> str:
+def scheduled_report_visible_text(text: str) -> str:
     cleaned = clean_text(strip_subagent_memory_controls(strip_tui_controls(text or ""))).strip()
     if not cleaned:
         return ""
-    lines = [line.strip(" -\t") for line in cleaned.splitlines() if line.strip()]
+    parts = split_top_level_turn_markers(cleaned)
+    if len(parts) >= 3:
+        turns: list[tuple[str, str]] = []
+        for idx in range(1, len(parts), 2):
+            marker = parts[idx]
+            body = parts[idx + 1] if idx + 1 < len(parts) else ""
+            turns.append((marker, body))
+        visible = preferred_group_visible_reply(turns).strip()
+    else:
+        visible = visible_reply_text(cleaned, hide_detail_fences=process_has_tool_noise(cleaned)).strip()
+    visible = clean_text(strip_inline_markdown(visible)).strip()
+    noise_markers = ("LLM Running", "<summary>", "<thinking>", "<think>", "过程组", "过程 Turn")
+    if not visible or any(marker in visible for marker in noise_markers):
+        return ""
+    return visible
+
+
+def scheduled_report_excerpt(text: str, limit: int = 260) -> str:
+    cleaned = scheduled_report_visible_text(text)
+    if not cleaned:
+        return ""
+    lines = []
+    for raw_line in cleaned.splitlines():
+        line = re.sub(r"^\s*#{1,6}\s+", "", raw_line).strip(" -\t")
+        line = re.sub(r"(?i)^(summary|摘要|总结)\s*[:：]\s*", "", line).strip()
+        if re.fullmatch(r"(?i)(summary|摘要|总结|运行结果|report|报告)", line):
+            continue
+        if line:
+            lines.append(line)
     excerpt = " / ".join(lines[:3]).strip()
     return truncate_cells(excerpt or cleaned.replace("\n", " "), limit)
 
@@ -16365,17 +16393,20 @@ def scheduled_report_rows(state: Optional[State] = None, *, agent_id: str = "", 
         kind = str(task.get("kind") or "").strip()
         if kind not in {"subagent_task", "subagent"} and not assigned_agent.startswith(("agent-", "tmp-agent-", "tmp-")):
             continue
+        status = str(task.get("status") or run.get("status") or "-").strip()
+        if status.lower() != "completed":
+            continue
         schedule_id = str(run.get("schedule_id") or "").strip()
         schedule = schedules.get(schedule_id, {})
         schedule_name = str(run.get("schedule_name") or schedule.get("name") or schedule_id or "定时任务")
         artifact_ref = task_artifact_ref_for_scheduled_report(task, artifacts_by_task)
-        body = str(task.get("summary") or task.get("error") or "").strip()
-        if not body and artifact_ref:
-            body = subagent_result_body_from_artifact(artifact_ref)
-        summary = scheduled_report_excerpt(body)
-        status = str(task.get("status") or run.get("status") or "-").strip()
+        artifact_body = subagent_result_body_from_artifact(artifact_ref) if artifact_ref else ""
+        summary = (
+            scheduled_report_excerpt(artifact_body)
+            or scheduled_report_excerpt(str(task.get("summary") or ""))
+        )
         if not summary:
-            summary = "尚未生成回复。" if not terminal_task_status(status) else "没有可读摘要；详情见任务账本。"
+            continue
         timestamp = str(task.get("timestamp") or run.get("finished_at") or run.get("timestamp") or "").strip()
         row = {
             "schedule_id": schedule_id,
