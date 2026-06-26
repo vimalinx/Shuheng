@@ -390,6 +390,7 @@ S01 修复左栏历史会话标题
 
 - `/gui` serves a self-contained local page with no new frontend build dependency and no external asset requirement.
 - `/gui` default chrome uses a restrained workspace layout: persistent left channel/session/model navigation, a central channel header plus action composer plus open message/list rows, and a right context rail for agents/tasks. It must not default to a card grid, dramatic command-center shell, or raw admin dashboard visual model.
+- `/gui` Slack-like navigation is functional, not decorative. Channel entries switch the central view, history/session rows open a sanitized session preview through `session.open`, and agent rows in the left direct-agent list, central agent list, and right context rail select that agent and prefill agent-scoped composer actions.
 - `/gui` must collect mutable user input through native in-page controls and forms, not browser prompt/alert dialogs. Row buttons may prefill the governed action composer, while one-click actions still post directly to `/gui/action`.
 - `/gui/snapshot` builds a read-only `State` with a non-runtime placeholder agent, loads persisted subagent metadata, and derives display data from the existing shared task ledger, schedule registry, schedule-run records, approval registry, artifact index, and model config.
 - `/gui` and `/gui/snapshot` must not call `ensure_gateway_registry(...)`, write `gateway.json`, append JSONL rows, queue approvals, dispatch tasks, mutate schedules, switch models, or write memory.
@@ -398,6 +399,7 @@ S01 修复左栏历史会话标题
 - Schedule create/update actions from the browser may submit a sanitized `target_agent_ref`; `/gui/action` resolves it server-side into the existing `agent_task.execution.routing.selected_agent` field before calling the shared scheduler registry.
 - Browser-triggered runtime work must still drain the normal runtime queues so task completion, artifacts, token usage, memory candidates, TUI controls, traces, and ledger updates are persisted through the same paths used by the TUI.
 - The Web console translates raw governance records into user-readable names, summaries, counts, and report bodies. Default visible HTML/JS-rendered content must not dump raw artifact URIs, approval ids, task ids, or internal agent ids as primary text.
+- `session.open` resolves only a sanitized session `ui_ref` against current server-side history rows under `MODEL_RESPONSES_DIR`, marks the session opened when present, and returns a bounded preview payload with title, category, description, rounds, age, and cleaned recent messages. The response must not expose filesystem paths, `model_responses_*.txt` basenames, raw task ids, approval ids, artifact URIs, or internal agent ids.
 - Scheduled-report rows must use the same cleaned scheduled-report body path as TUI home pages: completed child subagent replies from subagent result artifacts first, then task summary fallback, with OMP/LLM process markers and approval-only audit rows excluded.
 - Artifact rows in the default Web console show type, source title, and size-style metadata only. Raw artifact refs remain available through existing gateway/MCP/resource drill-down routes, not the default GUI.
 - Approval rows in the default Web console show approval type, target name, and human-readable summary only. Actual approval decisions must go through `/gui/action` and reuse `decide_approval(...)`.
@@ -408,6 +410,7 @@ S01 修复左栏历史会话标题
 - `GET /gui` -> HTML with console shell and client fetch for `/gui/snapshot`.
 - `POST /gui/action` with a missing or wrong schema -> rejected without mutating ledgers.
 - `POST /gui/action` with an unknown `ui_ref` -> rejected without mutating ledgers.
+- `POST /gui/action` with `action:"session.open"` and a valid session `ui_ref` -> returns a sanitized preview payload and a refreshed snapshot; unknown or non-session refs are rejected without mutating ledgers.
 - `POST /gui/action` approval approve/reject -> appends through the existing approval decision path and returns a sanitized message plus a fresh snapshot.
 - `POST /gui/action` schedule enable/disable/delete/run -> uses the existing schedule registry or scheduler tick path and returns a sanitized message plus a fresh snapshot.
 - `POST /gui/action` agent task/chat -> starts real governed runtime work or queues/blocks through existing policy gates, then a Web-console runtime pump drains the same UI queue path used by the TUI.
@@ -423,6 +426,7 @@ S01 修复左栏历史会话标题
 
 - Good: `GET /gui/snapshot` shows `overview.metrics`, subagent rows, schedule definitions, full cleaned report bodies, and compact governance queues without writing any files.
 - Good: `GET /gui` renders a Slack-like shell with channel navigation, a central channel header, open message rows, and a right context rail instead of `hero-card`, `agent-card`, or card-grid defaults.
+- Good: Clicking a session row posts `session.open` with `session:<digest>` and opens a center-channel preview; clicking a persistent agent row selects that agent and sets the composer target without exposing its raw `agent-...` id.
 - Good: The default GUI says `待审批 3` and shows readable summaries, while approval ids stay out of the visible page.
 - Good: The default GUI says an artifact came from `主页巡检` with type `subagent-results`, while the raw `artifact://...` ref stays behind MCP/resource drill-down.
 - Good: Clicking approve sends `POST /gui/action` with an approval `ui_ref`; the server resolves it, calls `decide_approval(...)`, and the browser receives only a sanitized result message.
@@ -437,10 +441,12 @@ S01 修复左栏历史会话标题
 - `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
 - Tests must assert `/gui` contains real in-page action controls, does not use browser prompt dialogs for core actions, and advertises the supported governed action modes.
 - Tests must assert `/gui` keeps the restrained collaboration shell structure and does not reintroduce card-grid classes such as `hero-card`, `agent-card`, or `agent-matrix`.
+- Tests must assert `/gui` includes the Slack-like global rail, direct-agent section, session preview view, and client handlers for selecting agents and opening session refs.
 - Tests must assert `/gui/snapshot` returns `shuheng.web_console.snapshot.v1`, `mode:"read_only"`, expected top-level sections, and populated overview metrics.
 - Tests must assert `/gui/snapshot.sidebar` has the expected read-only shell sections and still excludes raw session paths or internal ids.
 - Tests must assert `/gui` and `/gui/snapshot` do not change signatures for `gateway.json`, task ledger, approval registry, or artifact index.
 - Tests must assert `/gui/action` rejects invalid schemas and unknown `ui_ref` values without mutating ledgers.
+- Tests must assert `/gui/action` `session.open` accepts a valid sanitized session ref, returns cleaned title/messages, and rejects unknown session refs without mutating ledgers or exposing `model_responses_*.txt`.
 - Tests must assert `/gui/action` schedule and approval actions mutate only through the governed registry/approval paths and return sanitized messages/snapshots.
 - Tests must assert `/gui/action` schedule create/update can resolve a browser `target_agent_ref` into the server-side subagent routing field without exposing or accepting raw agent ids in the browser contract.
 - Tests must assert `/gui/action` and `/gui/snapshot` do not expose raw task ids, approval ids, artifact URIs, filesystem session paths, or internal agent ids in default browser payloads.

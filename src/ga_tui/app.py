@@ -7822,7 +7822,7 @@ class WebConsoleReadOnlyAgent:
 
 WEB_CONSOLE_ACTION_REQUEST_SCHEMA = "shuheng.web_console.action_request.v1"
 WEB_CONSOLE_ACTION_RESPONSE_SCHEMA = "shuheng.web_console.action_response.v1"
-WEB_CONSOLE_REF_KINDS = {"agent", "approval", "artifact", "model", "schedule", "task"}
+WEB_CONSOLE_REF_KINDS = {"agent", "approval", "artifact", "model", "schedule", "session", "task"}
 WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS = 60 * 60 * 6
 
 
@@ -7887,6 +7887,11 @@ def web_console_ref_map(state: Optional[State] = None) -> dict[str, tuple[str, s
         add("artifact", row.get("uri") or artifact_id)
     for sub in state.subagents.values():
         add("agent", sub.agent_id)
+    state.session_meta = load_session_meta_registry()
+    session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
+    for path, _last_user_at, _preview, _rounds, _desc in session_rows:
+        if path_is_within(path, MODEL_RESPONSES_DIR):
+            add("session", normalized_path(path))
     try:
         entries, _mixin, _preserved, _error = load_llm_config_entries()
     except Exception:
@@ -8137,6 +8142,59 @@ def web_console_report_rows(state: State, limit: int = 12) -> list[dict[str, str
     return rows
 
 
+def web_console_session_payload(state: State, path: str) -> dict[str, Any]:
+    normalized = normalized_path(path)
+    key = session_key(normalized)
+    meta = dict(load_session_meta_registry().get(key, {}))
+    title_seed = history_name(state, normalized)
+    row_description = ""
+    row_rounds = 0
+    if not title_seed or is_process_only_session_title(title_seed):
+        state.session_meta = load_session_meta_registry()
+        session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
+        for row_path, _last_user_at, preview, rounds, desc in session_rows:
+            if normalized_path(row_path) != normalized:
+                continue
+            title_seed = preview or title_seed
+            row_description = desc
+            row_rounds = int(rounds or 0)
+            break
+    title = web_console_clean_visible(title_seed or session_title_for_path(state, normalized), 120) or "历史会话"
+    description = web_console_clean_visible(meta.get("description") or row_description or meta.get("preview") or "", 220)
+    raw_messages = meta.get("ui_preview_messages")
+    preview_messages = raw_messages if isinstance(raw_messages, list) else []
+    if not preview_messages and os.path.exists(normalized):
+        try:
+            with open(normalized, encoding="utf-8", errors="replace") as fh:
+                pairs = _pairs(fh.read())
+        except Exception:
+            pairs = []
+        preview_messages, _loaded, _total, _count = compact_ui_preview_messages_from_pairs(pairs)
+        if not description and pairs:
+            description = web_console_clean_visible(session_description_from_pairs(pairs), 220)
+    messages: list[dict[str, str]] = []
+    for item in preview_messages[-10:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = web_console_clean_visible(item.get("content") or "", 700)
+        if content:
+            messages.append({"role": role, "content": content})
+    if not messages and description:
+        messages.append({"role": "assistant", "content": description})
+    return {
+        "ui_ref": web_console_ref("session", normalized),
+        "title": title,
+        "category": web_console_clean_visible(session_category_label(meta), 40) or "未分类",
+        "description": description,
+        "rounds": int(meta.get("ui_preview_total_rounds") or meta.get("rounds") or row_rounds or len(messages) or 0),
+        "age": rel_age(float(meta.get("last_user_at") or meta.get("last_opened_at") or 0.0)) if (meta.get("last_user_at") or meta.get("last_opened_at")) else "",
+        "messages": messages,
+    }
+
+
 def web_console_agent_rows(state: State) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     reports_by_agent: dict[str, dict[str, str]] = {}
@@ -8197,6 +8255,7 @@ def web_console_history_rows(state: State, limit: int = 36) -> list[dict[str, An
         title = web_console_clean_visible(name or preview or os.path.basename(path) or "历史会话", 80)
         category = session_category_label(meta)
         result.append({
+            "ui_ref": web_console_ref("session", normalized_path(path)),
             "title": title or "历史会话",
             "category": web_console_clean_visible(category or "未分类", 24),
             "age": rel_age(float(last_user_at or 0.0)) if last_user_at else "",
@@ -8368,6 +8427,7 @@ def web_console_snapshot() -> dict[str, Any]:
                 "schedule.disable",
                 "schedule.delete",
                 "schedule.run",
+                "session.open",
                 "scheduler.tick",
                 "task.cancel",
                 "task.fail",
@@ -8488,6 +8548,24 @@ def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], i
         action = "refresh_snapshot"
     if action == "refresh_snapshot":
         return web_console_action_response(action=action, ok=True, message="已刷新快照。", state=state)
+
+    if action == "session.open":
+        ok_ref, session_path, error = web_console_resolve_ref(refs, ui_ref, "session")
+        if not ok_ref:
+            return web_console_action_error(action, error)
+        session_path = normalized_path(session_path)
+        if not path_is_within(session_path, MODEL_RESPONSES_DIR):
+            return web_console_action_error(action, "会话引用不在 Shuheng 历史目录。")
+        if os.path.exists(session_path):
+            mark_session_opened(state, session_path)
+        response, status = web_console_action_response(
+            action=action,
+            ok=True,
+            message="已打开会话预览。",
+            state=state,
+        )
+        response["session"] = web_console_session_payload(state, session_path)
+        return response, status
 
     if action == "main.prompt":
         prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
@@ -8633,8 +8711,9 @@ def web_console_html() -> str:
       color-scheme: light;
       --bg: #f7f5ef;
       --canvas: #fffefa;
-      --sidebar: #27332f;
-      --sidebar-soft: #33423d;
+      --rail: #3f0e40;
+      --sidebar: #4b2450;
+      --sidebar-soft: #613266;
       --sidebar-line: rgba(255, 255, 255, 0.13);
       --line: #ddd7ca;
       --line-soft: #e8e2d6;
@@ -8666,11 +8745,12 @@ def web_console_html() -> str:
 
     .workbench {
       display: grid;
-      grid-template-columns: minmax(16rem, 18vw) minmax(0, 1fr) minmax(18rem, 20vw);
+      grid-template-columns: 4.4rem minmax(19rem, 23rem) minmax(0, 1fr) minmax(18rem, 20vw);
       min-height: 100vh;
       gap: 0;
     }
 
+    .global-rail,
     .leftbar,
     .rightbar {
       position: sticky;
@@ -8678,6 +8758,56 @@ def web_console_html() -> str:
       height: 100vh;
       overflow: auto;
     }
+
+    .global-rail {
+      background: var(--rail);
+      color: rgba(255, 255, 255, 0.72);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.7rem 0.45rem;
+    }
+
+    .workspace-mark {
+      width: 2.25rem;
+      height: 2.25rem;
+      border: 0;
+      border-radius: 0.55rem;
+      background: rgba(255, 255, 255, 0.18);
+      color: #fffefa;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .rail-btn {
+      width: 3rem;
+      min-height: 3rem;
+      border: 0;
+      border-radius: 0.65rem;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.74);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      gap: 0.12rem;
+      font-size: 1.05rem;
+    }
+
+    .rail-btn span {
+      display: block;
+      font-size: 0.64rem;
+      line-height: 1;
+    }
+
+    .rail-btn:hover,
+    .rail-btn.active,
+    .workspace-mark:hover {
+      background: rgba(255, 255, 255, 0.16);
+      color: #fffefa;
+    }
+
+    .rail-spacer { flex: 1; }
 
     .leftbar {
       background: var(--sidebar);
@@ -8740,6 +8870,12 @@ def web_console_html() -> str:
       color: var(--muted);
     }
 
+    .rightbar .history-row:hover,
+    .rightbar .history-row.is-selected {
+      background: var(--selected);
+      color: var(--strong);
+    }
+
     .block {
       margin-top: 0.9rem;
     }
@@ -8752,6 +8888,16 @@ def web_console_html() -> str:
       text-transform: uppercase;
       padding: 0 0.45rem 0.28rem;
       font-size: 0.74rem;
+    }
+
+    .sidebar-search {
+      margin: 0.72rem 0.35rem 0;
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.58);
+      border-radius: 0.45rem;
+      padding: 0.42rem 0.55rem;
+      font-size: 0.86rem;
     }
 
     .session-button,
@@ -8823,8 +8969,22 @@ def web_console_html() -> str:
       border-radius: 0.25rem;
     }
 
+    button.history-row {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+
     .history-row.is-current {
       background: var(--sidebar-soft);
+      color: #fffefa;
+    }
+
+    .history-row:hover,
+    .history-row.is-selected {
+      background: rgba(255, 255, 255, 0.1);
       color: #fffefa;
     }
 
@@ -9258,6 +9418,12 @@ def web_console_html() -> str:
       min-width: 0;
       padding: 0.72rem 0;
       border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+
+    .agent-row:hover,
+    .agent-row.is-selected {
+      background: linear-gradient(90deg, var(--selected), transparent 96%);
     }
 
     .agent-row h3 {
@@ -9352,12 +9518,19 @@ def web_console_html() -> str:
         grid-template-columns: 1fr;
         padding: 0;
       }
+      .global-rail,
       .leftbar,
       .rightbar,
       .center {
         position: relative;
         height: auto;
       }
+      .global-rail {
+        flex-direction: row;
+        justify-content: flex-start;
+        overflow-x: auto;
+      }
+      .rail-spacer { display: none; }
       .leftbar { border-right: 0; border-bottom: 1px solid #1f2926; }
       .rightbar { border-left: 0; border-top: 1px solid var(--line); }
     }
@@ -9378,9 +9551,20 @@ def web_console_html() -> str:
 </head>
 <body>
   <div class="workbench">
+    <aside class="global-rail" aria-label="全局导航">
+      <button class="workspace-mark" type="button" data-view="overview">枢</button>
+      <button class="rail-btn active" type="button" data-view="overview">⌂<span>Home</span></button>
+      <button class="rail-btn" type="button" data-view="agents">◎<span>Agents</span></button>
+      <button class="rail-btn" type="button" data-view="reports">◷<span>Reports</span></button>
+      <button class="rail-btn" type="button" data-view="governance">⚙<span>Gov</span></button>
+      <div class="rail-spacer"></div>
+      <button class="rail-btn" type="button" data-view="overview">＋<span>New</span></button>
+    </aside>
     <aside class="leftbar">
       <div class="brand"><strong>枢衡工作区</strong><span>governed</span></div>
+      <div class="sidebar-search">搜索会话、agent、任务...</div>
       <section class="block" id="left-current"></section>
+      <section class="block" id="left-agents"></section>
       <section class="block" id="left-history"></section>
       <section class="status-panel" id="left-model"></section>
       <section class="block" id="left-token"></section>
@@ -9395,6 +9579,7 @@ def web_console_html() -> str:
       <section class="view" id="view-agents"></section>
       <section class="view" id="view-reports"></section>
       <section class="view" id="view-governance"></section>
+      <section class="view" id="view-session"></section>
     </main>
     <aside class="rightbar">
       <div class="brand"><strong>上下文</strong><span id="agent-count">0</span></div>
@@ -9407,6 +9592,8 @@ def web_console_html() -> str:
       data: null,
       view: "overview",
       notice: "",
+      activeAgentRef: "",
+      activeSession: null,
       composer: {
         mode: "main.prompt",
         agent_ref: "",
@@ -9501,6 +9688,34 @@ def web_console_html() -> str:
     function firstAgentRef(data) {
       const agents = agentEntries(data);
       return agents.length ? (agents[0].ui_ref || "") : "";
+    }
+
+    function selectedAgent(data) {
+      const agents = agentEntries(data);
+      return agents.find(agent => agent.ui_ref && agent.ui_ref === app.activeAgentRef) || null;
+    }
+
+    function setActiveAgent(agentRef, preferredMode) {
+      app.activeAgentRef = agentRef || "";
+      app.activeSession = null;
+      if (agentRef) {
+        app.composer.agent_ref = agentRef;
+        if (preferredMode) app.composer.mode = preferredMode;
+        app.view = "agents";
+      } else {
+        app.view = "overview";
+      }
+      renderAll();
+    }
+
+    function openChannel(view) {
+      app.activeSession = null;
+      setView(view || "overview");
+    }
+
+    function openSession(uiRef) {
+      if (!uiRef) return;
+      sendAction("session.open", uiRef, {});
     }
 
     function setComposer(mode, options) {
@@ -9606,6 +9821,10 @@ def web_console_html() -> str:
       grid.append(composerField("", "动作", modeSelect));
 
       const agentSelect = selectControl("composer-agent", agentOptions.length ? agentOptions : [["", "暂无子代理"]], composer.agent_ref || "");
+      agentSelect.addEventListener("change", event => {
+        app.composer.agent_ref = event.target.value || "";
+        if (app.composer.agent_ref) app.activeAgentRef = app.composer.agent_ref;
+      });
       grid.append(composerField("composer-agent-field", "目标子代理", agentSelect));
 
       const modelSelect = selectControl("composer-model", modelOptions, composer.model_ref || "");
@@ -9840,6 +10059,10 @@ def web_console_html() -> str:
         const result = await response.json();
         app.notice = (result.ok ? "完成: " : "失败: ") + (result.message || action);
         if (result.snapshot) app.data = result.snapshot;
+        if (result.session) {
+          app.activeSession = result.session;
+          app.view = "session";
+        }
         renderAll();
       } catch (error) {
         app.notice = "动作请求失败: " + error.message;
@@ -9854,7 +10077,16 @@ def web_console_html() -> str:
 
     function setView(view) {
       app.view = view || "overview";
+      if (app.view !== "session") app.activeSession = null;
       renderAll();
+    }
+
+    function renderRail() {
+      document.querySelectorAll("[data-view]").forEach(button => {
+        const view = button.getAttribute("data-view") || "overview";
+        button.classList.toggle("active", app.view === view || (app.view === "session" && view === "overview"));
+        button.onclick = () => openChannel(view);
+      });
     }
 
     function renderNav() {
@@ -9882,12 +10114,29 @@ def web_console_html() -> str:
       current.forEach(item => {
         const button = node("button", "session-button" + (app.view === item.target ? " active" : ""));
         button.type = "button";
-        button.addEventListener("click", () => setView(item.target || "overview"));
+        button.addEventListener("click", () => openChannel(item.target || "overview"));
         button.append(node("b", "", "# " + (item.title || "会话")));
         button.append(node("span", "", item.status || ""));
         currentWrap.append(button);
       });
       replace("left-current", [currentWrap]);
+
+      const agentWrap = node("div");
+      const persistentAgents = (data.agents || []).filter(agent => agent.lifecycle !== "temporary");
+      agentWrap.append(blockTitle("DIRECT AGENTS", persistentAgents.length));
+      if (!persistentAgents.length) {
+        agentWrap.append(empty("暂无 agent"));
+      } else {
+        persistentAgents.slice(0, 14).forEach(agent => {
+          const button = node("button", "history-row" + (agent.ui_ref === app.activeAgentRef ? " is-current" : ""));
+          button.type = "button";
+          button.addEventListener("click", () => setActiveAgent(agent.ui_ref, "agent.chat"));
+          button.append(node("strong", "", `○ ${agent.name || "子代理"}`));
+          button.append(node("small", "", agent.status || "idle"));
+          agentWrap.append(button);
+        });
+      }
+      replace("left-agents", [agentWrap]);
 
       const history = sidebar.history || {};
       const historyWrap = node("div");
@@ -9901,7 +10150,9 @@ def web_console_html() -> str:
           detail.open = true;
           detail.append(node("summary", "", `▾ ${group.label || "未分类"} (${group.count || 0})`));
           (group.items || []).forEach((item, index) => {
-            const line = node("div", "history-row");
+            const line = node("button", "history-row" + (app.activeSession && app.activeSession.ui_ref === item.ui_ref ? " is-current" : ""));
+            line.type = "button";
+            line.addEventListener("click", () => openSession(item.ui_ref || ""));
             line.append(node("strong", "", `S${String(index + 1).padStart(2, "0")} ${item.title || "历史会话"}`));
             const right = [item.age || "", item.rounds ? `${item.rounds}` : ""].filter(Boolean).join(" ");
             line.append(node("small", "", right));
@@ -9954,13 +10205,17 @@ def web_console_html() -> str:
       document.getElementById("agent-count").textContent = String(agents.length + 1);
       const agentWrap = node("div");
       agentWrap.append(blockTitle("主 agent"));
-      const main = node("div", "history-row");
+      const main = node("button", "history-row" + (!app.activeAgentRef && app.view === "overview" ? " is-selected" : ""));
+      main.type = "button";
+      main.addEventListener("click", () => setActiveAgent("", ""));
       main.append(node("strong", "", "◆ 主 agent"));
       main.append(node("small", "", (data.overview && data.overview.metrics && data.overview.metrics[0] && data.overview.metrics[0].value) || "idle"));
       agentWrap.append(main);
       agentWrap.append(blockTitle("持久", agents.filter(agent => agent.lifecycle !== "temporary").length));
       agents.filter(agent => agent.lifecycle !== "temporary").slice(0, 16).forEach(agent => {
-        const line = node("div", "history-row");
+        const line = node("button", "history-row" + (agent.ui_ref === app.activeAgentRef ? " is-selected" : ""));
+        line.type = "button";
+        line.addEventListener("click", () => setActiveAgent(agent.ui_ref, "agent.chat"));
         line.append(node("strong", "", `○ ${agent.name || "子代理"}`));
         line.append(node("small", "", agent.status || "idle"));
         agentWrap.append(line);
@@ -9994,8 +10249,8 @@ def web_console_html() -> str:
     function renderTopline(data) {
       const now = new Date().toLocaleString("zh-CN", {hour12: false});
       const totals = data.totals || {};
-      const title = app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : "home:main";
-      const channel = app.view === "reports" ? "# 定时汇报" : app.view === "agents" ? "# 子代理" : app.view === "governance" ? "# 治理队列" : "# 主控台";
+      const title = app.view === "session" && app.activeSession ? "session:preview" : app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : "home:main";
+      const channel = app.view === "session" && app.activeSession ? "# " + app.activeSession.title : app.view === "reports" ? "# 定时汇报" : app.view === "agents" ? "# 子代理" : app.view === "governance" ? "# 治理队列" : "# 主控台";
       document.getElementById("topline").textContent = `${channel} · ${now} · ${title} · 汇报 ${totals.reports || 0} / 待办 ${totals.open_tasks || 0}`;
     }
 
@@ -10003,6 +10258,42 @@ def web_console_html() -> str:
       const overview = data.overview || {};
       const header = document.getElementById("channel-header");
       header.replaceChildren();
+      if (app.view === "session" && app.activeSession) {
+        const session = app.activeSession;
+        const title = node("div", "channel-title");
+        title.append(node("h1", "", "# " + (session.title || "历史会话")));
+        title.append(node("span", "", `${session.category || "未分类"} · ${session.rounds || 0} 轮`));
+        header.append(title);
+        header.append(node("p", "summary-line", session.description || "最近会话预览。"));
+        const metrics = node("div", "metric-grid");
+        [
+          {label: "分类", value: session.category || "未分类"},
+          {label: "轮次", value: session.rounds || "0"},
+          {label: "更新时间", value: session.age || "-"}
+        ].forEach(item => metrics.append(metric(item)));
+        header.append(metrics);
+        return;
+      }
+      const agent = app.view === "agents" ? selectedAgent(data) : null;
+      if (agent) {
+        const title = node("div", "channel-title");
+        title.append(node("h1", "", "○ " + (agent.name || "子代理")));
+        title.append(node("span", "", `${agent.role || "specialist"} · ${agent.status || "idle"}`));
+        header.append(title);
+        header.append(node("p", "summary-line", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        const metrics = node("div", "metric-grid");
+        (agent.metrics || []).forEach(item => metrics.append(metric(item)));
+        header.append(metrics);
+        const details = node("div", "detail-grid");
+        [
+          {label: "模型", value: agent.model || "继承主控默认模型"},
+          {label: "生命周期", value: agent.lifecycle || "-"},
+          {label: "Skill", value: (agent.skills || []).join(" · ") || "-"},
+          {label: "最近汇报", value: (agent.latest_report && agent.latest_report.schedule) || "-"}
+        ].forEach(item => details.append(kv(item.label, item.value)));
+        header.append(details);
+        return;
+      }
       const title = node("div", "channel-title");
       title.append(node("h1", "", overview.title || "主控运行概览"));
       title.append(node("span", "", "频道主页 · 受控动作入口"));
@@ -10062,7 +10353,8 @@ def web_console_html() -> str:
       }
       const wrap = node("div", "agent-list");
       agents.forEach(agent => {
-        const item = node("article", "agent-row");
+        const item = node("article", "agent-row" + (agent.ui_ref === app.activeAgentRef ? " is-selected" : ""));
+        item.addEventListener("click", () => setActiveAgent(agent.ui_ref, "agent.chat"));
         const main = node("div");
         main.append(node("h3", "", agent.name || "子代理"));
         const skills = (agent.skills || []).slice(0, 4).join(" · ");
@@ -10135,18 +10427,45 @@ def web_console_html() -> str:
       replace("view-governance", [grid]);
     }
 
+    function renderSession() {
+      const session = app.activeSession;
+      if (!session) {
+        replace("view-session", [empty("从左侧 Sessions 选择一个会话")]);
+        return;
+      }
+      const wrap = node("section", "thread-section");
+      const head = node("div", "thread-head");
+      head.append(node("b", "", "最近消息"));
+      head.append(node("span", "", `${session.category || "未分类"} · ${session.rounds || 0} 轮`));
+      wrap.append(head);
+      const list = node("div", "message-list");
+      const messages = session.messages || [];
+      if (!messages.length) {
+        list.append(empty("这个会话没有可展示预览"));
+      } else {
+        messages.forEach(message => {
+          const title = message.role === "user" ? "你" : message.role === "assistant" ? "AI" : "系统";
+          list.append(row(title, message.content || "", message.role || ""));
+        });
+      }
+      wrap.append(list);
+      replace("view-session", [wrap]);
+    }
+
     function renderViews(data) {
-      ["overview", "agents", "reports", "governance"].forEach(key => {
+      ["overview", "agents", "reports", "governance", "session"].forEach(key => {
         document.getElementById("view-" + key).classList.toggle("active", app.view === key);
       });
       renderOverview(data);
       renderAgents(data);
       renderReports(data);
       renderGovernance(data);
+      renderSession();
     }
 
     function renderAll() {
       if (!app.data) return;
+      renderRail();
       renderTopline(app.data);
       renderNav();
       renderLeft(app.data);

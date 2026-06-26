@@ -3861,6 +3861,16 @@ def post_json_any_status(url: str, payload: dict) -> dict:
 def run_gateway_server_checks() -> None:
     state = a.web_console_state()
     sample_subagent = a.create_subagent(state, "Web Console Worker", role="researcher")
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+    sample_session_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_web_console_click.txt")
+    a.write_text_atomic(
+        sample_session_path,
+        "=== Prompt === 2026-06-27 09:00:00\n"
+        + json.dumps({"role": "user", "content": [{"type": "text", "text": "打开 Slack 式控制台会话"}]}, ensure_ascii=False)
+        + "\n\n=== Response === 2026-06-27 09:00:01\n"
+        + repr([{"type": "text", "text": "会话预览应该在中间频道打开，并且不泄露真实文件路径。"}])
+        + "\n",
+    )
     sample_approval_id = a.queue_approval(
         approval_type="policy_approval_request",
         summary="Web console approval sample",
@@ -3903,7 +3913,9 @@ def run_gateway_server_checks() -> None:
         assert "window.prompt" not in html, html[:2000]
         assert "action-composer" in html and "composer-mode" in html, html[:2000]
         assert "channel-header" in html and "message-row" in html and "thread-section" in html, html[:4000]
+        assert "global-rail" in html and "left-agents" in html and "view-session" in html, html[:4000]
         assert "agent-list" in html and "workspace-split" in html and "rightbar" in html, html[:4000]
+        assert "openSession" in html and "setActiveAgent" in html and "session.open" in html, html[:5000]
         for removed_shell in ("hero-card", "agent-card", "agent-matrix", "term-panel", "two-col"):
             assert removed_shell not in html, removed_shell
         assert "agent.task" in html and "schedule.create" in html and "target_agent_ref" in html, html[:3000]
@@ -3917,6 +3929,7 @@ def run_gateway_server_checks() -> None:
         assert isinstance(sidebar, dict), snapshot
         assert {"current_sessions", "history", "model", "tokens"} <= set(sidebar), sidebar
         assert snapshot["actions"]["endpoint"] == "/gui/action", snapshot["actions"]
+        assert "session.open" in snapshot["actions"]["supported"], snapshot["actions"]
         snapshot_text = json.dumps(snapshot, ensure_ascii=False)
         assert "artifact://" not in snapshot_text and "appr_" not in snapshot_text, snapshot_text
         assert "APPROVAL_REQUIRED" not in snapshot_text and "approval=" not in snapshot_text, snapshot_text
@@ -3945,10 +3958,46 @@ def run_gateway_server_checks() -> None:
         assert unknown_ref["_http_status"] == 400, unknown_ref
         assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
         assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
+        unknown_session = post_json_any_status(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "session.open",
+                "ui_ref": "session:0000000000000000",
+            },
+        )
+        assert unknown_session["ok"] is False, unknown_session
+        assert unknown_session["_http_status"] == 400, unknown_session
+        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
+        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
         approval_ref = next((row.get("ui_ref") for row in snapshot["approvals"] if "Web console approval sample" in row.get("summary", "")), "")
         schedule_ref = next((row.get("ui_ref") for row in snapshot["schedules"] if row.get("name") == "Web Console Toggle"), "")
         agent_ref = next((row.get("ui_ref") for row in snapshot["agents"] if row.get("name") == "Web Console Worker"), "")
         assert approval_ref and schedule_ref and agent_ref, snapshot
+        history_items = [
+            item
+            for group in snapshot["sidebar"]["history"]["groups"]
+            for item in group.get("items", [])
+        ]
+        session_ref = next((row.get("ui_ref") for row in history_items if row.get("title") == "打开 Slack 式控制台会话"), "")
+        assert session_ref and session_ref.startswith("session:"), snapshot["sidebar"]["history"]
+        opened_session = post_json(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "session.open",
+                "ui_ref": session_ref,
+            },
+        )
+        assert opened_session["ok"] is True, opened_session
+        assert opened_session["session"]["ui_ref"] == session_ref, opened_session
+        assert opened_session["session"]["title"] == "打开 Slack 式控制台会话", opened_session
+        opened_messages = opened_session["session"]["messages"]
+        assert any("打开 Slack 式控制台会话" in row.get("content", "") for row in opened_messages), opened_messages
+        assert any("会话预览应该在中间频道打开" in row.get("content", "") for row in opened_messages), opened_messages
+        opened_text = json.dumps(opened_session, ensure_ascii=False)
+        assert "model_responses_" not in opened_text and sample_session_path not in opened_text, opened_text
+        assert "artifact://" not in opened_text and "appr_" not in opened_text and "task_" not in opened_text, opened_text
         schedule_action = post_json(
             f"{base}/gui/action",
             {
