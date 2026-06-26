@@ -3897,11 +3897,15 @@ def run_gateway_server_checks() -> None:
         schedule_sig_before = a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH)
         with urllib.request.urlopen(f"{base}/gui", timeout=5) as response:
             html = response.read().decode("utf-8")
-        assert "Shuheng Console" in html and "枢衡驾驶舱" in html, html[:500]
+        assert "Shuheng Console" in html and "枢衡工作区" in html, html[:500]
         assert "/gui/snapshot" in html, html[:1000]
         assert "/gui/action" in html, html[:1000]
         assert "window.prompt" not in html, html[:2000]
         assert "action-composer" in html and "composer-mode" in html, html[:2000]
+        assert "channel-header" in html and "message-row" in html and "thread-section" in html, html[:4000]
+        assert "agent-list" in html and "workspace-split" in html and "rightbar" in html, html[:4000]
+        for removed_shell in ("hero-card", "agent-card", "agent-matrix", "term-panel", "two-col"):
+            assert removed_shell not in html, removed_shell
         assert "agent.task" in html and "schedule.create" in html and "target_agent_ref" in html, html[:3000]
         assert "artifact://" not in html and "appr_" not in html and "task_" not in html, html[:2000]
         snapshot = get_json(f"{base}/gui/snapshot")

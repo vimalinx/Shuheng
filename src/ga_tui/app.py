@@ -8630,24 +8630,26 @@ def web_console_html() -> str:
   <title>Shuheng Console</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #02060b;
-      --panel: #050b12;
-      --panel-soft: #07131d;
-      --panel-lift: #0a1722;
-      --line: #173444;
-      --line-bright: #7ce9eb;
-      --line-soft: rgba(124, 233, 235, 0.28);
-      --text: #b8c3cb;
-      --strong: #e3ecf1;
-      --muted: #75818c;
-      --dim: #4f5b66;
-      --cyan: #82f3f2;
-      --green: #9ddd38;
-      --amber: #ffb84d;
-      --red: #ff5a43;
-      --select: #5d6467;
-      --shadow: rgba(0, 0, 0, 0.45);
+      color-scheme: light;
+      --bg: #f7f5ef;
+      --canvas: #fffefa;
+      --sidebar: #27332f;
+      --sidebar-soft: #33423d;
+      --sidebar-line: rgba(255, 255, 255, 0.13);
+      --line: #ddd7ca;
+      --line-soft: #e8e2d6;
+      --line-strong: #bcb4a4;
+      --hover: #f0ece3;
+      --selected: #e4efe9;
+      --text: #2a2823;
+      --strong: #171511;
+      --muted: #746f64;
+      --dim: #9b9488;
+      --accent: #0f7665;
+      --accent-ink: #095848;
+      --warn: #986200;
+      --red: #b3261e;
+      --shadow: rgba(48, 42, 31, 0.08);
     }
 
     * { box-sizing: border-box; }
@@ -8655,21 +8657,17 @@ def web_console_html() -> str:
     body {
       margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at 18% -8%, rgba(124, 233, 235, 0.11), transparent 28rem),
-        linear-gradient(180deg, #07101a 0, var(--bg) 14rem);
+      background: var(--bg);
       color: var(--text);
-      font-family: "JetBrains Mono", "Maple Mono", "Noto Sans Mono CJK SC", "Sarasa Mono SC", monospace;
-      letter-spacing: 0.01em;
+      font-family: "IBM Plex Sans", "Noto Sans SC", "Source Han Sans SC", sans-serif;
     }
 
     button, select, input, textarea { font: inherit; }
 
     .workbench {
       display: grid;
-      grid-template-columns: minmax(18rem, 22vw) minmax(0, 1fr) minmax(17rem, 19vw);
+      grid-template-columns: minmax(16rem, 18vw) minmax(0, 1fr) minmax(18rem, 20vw);
       min-height: 100vh;
-      padding: 0.85rem;
       gap: 0;
     }
 
@@ -8677,29 +8675,29 @@ def web_console_html() -> str:
     .rightbar {
       position: sticky;
       top: 0;
-      height: calc(100vh - 1.7rem);
+      height: 100vh;
       overflow: auto;
-      background: rgba(5, 11, 18, 0.96);
-      box-shadow: 0 20px 60px var(--shadow);
     }
 
     .leftbar {
-      border-right: 2px solid var(--line-bright);
-      padding: 0.4rem 0.35rem 0.6rem 0.2rem;
+      background: var(--sidebar);
+      color: rgba(255, 255, 255, 0.78);
+      border-right: 1px solid #1f2926;
+      padding: 0.7rem 0.55rem 1rem;
     }
 
     .rightbar {
-      border-left: 2px solid var(--line-bright);
-      padding: 0.4rem 0.2rem 0.6rem 0.7rem;
+      background: #fbfaf6;
+      border-left: 1px solid var(--line);
+      padding: 0.7rem 0.65rem 1rem;
     }
 
     .center {
       min-width: 0;
-      height: calc(100vh - 1.7rem);
+      height: 100vh;
       overflow: auto;
-      background: rgba(2, 6, 11, 0.94);
-      padding: 0 1rem 1rem;
-      box-shadow: 0 20px 60px var(--shadow);
+      background: var(--canvas);
+      padding: 0 1.25rem 1.35rem;
     }
 
     .brand {
@@ -8707,34 +8705,53 @@ def web_console_html() -> str:
       justify-content: space-between;
       align-items: baseline;
       gap: 0.5rem;
-      padding: 0 0.55rem 0.5rem;
-      border-bottom: 1px solid var(--line-soft);
+      padding: 0.2rem 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--sidebar-line);
     }
 
     .brand strong {
-      color: var(--amber);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-size: 0.92rem;
+      color: #fffefa;
+      font-size: 1rem;
+      letter-spacing: -0.01em;
     }
 
     .brand span {
-      color: var(--dim);
-      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.47);
+      font-size: 0.78rem;
+    }
+
+    .rightbar .brand {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .rightbar .brand strong {
+      color: var(--strong);
+    }
+
+    .rightbar .brand span {
+      color: var(--muted);
+    }
+
+    .rightbar .block-title {
+      color: var(--muted);
+    }
+
+    .rightbar .history-row small {
+      color: var(--muted);
     }
 
     .block {
-      margin-top: 0.85rem;
+      margin-top: 0.9rem;
     }
 
     .block-title {
-      color: var(--amber);
-      font-weight: 800;
+      color: rgba(255, 255, 255, 0.56);
+      font-weight: 700;
       line-height: 1.2;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.02em;
       text-transform: uppercase;
-      padding: 0 0.55rem 0.32rem;
-      font-size: 0.9rem;
+      padding: 0 0.45rem 0.28rem;
+      font-size: 0.74rem;
     }
 
     .session-button,
@@ -8745,27 +8762,28 @@ def web_console_html() -> str:
       gap: 0.45rem;
       align-items: center;
       border: 0;
-      color: var(--text);
+      color: rgba(255, 255, 255, 0.78);
       background: transparent;
       cursor: pointer;
-      padding: 0.12rem 0.55rem;
+      padding: 0.26rem 0.45rem;
       text-align: left;
-      min-height: 1.28rem;
+      min-height: 1.75rem;
       line-height: 1.18;
+      border-radius: 0.25rem;
     }
 
     .session-button:hover,
     .session-button.active,
     .nav button:hover,
     .nav button.active {
-      background: var(--select);
-      color: #f4fafc;
+      background: var(--sidebar-soft);
+      color: #fffefa;
     }
 
     .session-button b,
     .nav button b {
-      color: var(--green);
-      font-weight: 800;
+      color: inherit;
+      font-weight: 650;
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
@@ -8774,9 +8792,9 @@ def web_console_html() -> str:
     .session-button span,
     .nav button span,
     .row-right {
-      color: var(--green);
+      color: rgba(255, 255, 255, 0.52);
       white-space: nowrap;
-      font-size: 0.86rem;
+      font-size: 0.78rem;
     }
 
     .history-group {
@@ -8784,11 +8802,11 @@ def web_console_html() -> str:
     }
 
     .history-group summary {
-      color: var(--cyan);
+      color: rgba(255, 255, 255, 0.7);
       cursor: pointer;
       list-style: none;
-      padding: 0.04rem 0.55rem;
-      font-weight: 800;
+      padding: 0.12rem 0.45rem;
+      font-weight: 650;
     }
 
     .history-group summary::-webkit-details-marker { display: none; }
@@ -8798,15 +8816,16 @@ def web_console_html() -> str:
       align-items: center;
       justify-content: space-between;
       gap: 0.5rem;
-      min-height: 1.28rem;
-      padding: 0.08rem 0.55rem;
-      color: var(--text);
+      min-height: 1.55rem;
+      padding: 0.14rem 0.45rem;
+      color: inherit;
       line-height: 1.15;
+      border-radius: 0.25rem;
     }
 
     .history-row.is-current {
-      background: var(--select);
-      color: #f4fafc;
+      background: var(--sidebar-soft);
+      color: #fffefa;
     }
 
     .history-row strong {
@@ -8818,13 +8837,13 @@ def web_console_html() -> str:
     }
 
     .history-row small {
-      color: var(--muted);
+      color: rgba(255, 255, 255, 0.48);
       white-space: nowrap;
     }
 
     .status-panel {
       margin: 0.85rem 0.25rem 0;
-      border-top: 2px solid var(--line-bright);
+      border-top: 1px solid var(--sidebar-line);
       padding-top: 0.55rem;
     }
 
@@ -8832,13 +8851,13 @@ def web_console_html() -> str:
       display: grid;
       grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr);
       gap: 0.5rem;
-      padding: 0.08rem 0.28rem;
-      color: var(--text);
+      padding: 0.12rem 0.28rem;
+      color: inherit;
       line-height: 1.25;
     }
 
     .kv-line span:first-child {
-      color: var(--cyan);
+      color: var(--muted);
     }
 
     .kv-line span:last-child {
@@ -8848,19 +8867,27 @@ def web_console_html() -> str:
       white-space: nowrap;
     }
 
+    .leftbar .kv-line span:first-child {
+      color: rgba(255, 255, 255, 0.45);
+    }
+
+    .leftbar .kv-line span:last-child {
+      color: rgba(255, 255, 255, 0.82);
+    }
+
     .topline {
       position: sticky;
       top: 0;
       z-index: 5;
-      min-height: 2.1rem;
+      min-height: 3.05rem;
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      border-bottom: 1px solid var(--line-soft);
-      background: rgba(2, 6, 11, 0.96);
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 254, 250, 0.96);
       color: var(--strong);
-      font-weight: 800;
-      letter-spacing: 0.02em;
+      font-weight: 650;
+      backdrop-filter: blur(8px);
     }
 
     .topline span {
@@ -8871,15 +8898,16 @@ def web_console_html() -> str:
 
     .view-switcher {
       position: sticky;
-      top: 2.1rem;
+      top: 3.05rem;
       z-index: 4;
       display: flex;
       flex-wrap: wrap;
-      gap: 1rem;
+      gap: 0.2rem;
       align-items: center;
-      padding: 0.52rem 0;
-      border-bottom: 1px solid var(--line-soft);
-      background: rgba(2, 6, 11, 0.93);
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 254, 250, 0.94);
+      backdrop-filter: blur(8px);
     }
 
     .view-switcher button {
@@ -8887,27 +8915,30 @@ def web_console_html() -> str:
       background: transparent;
       color: var(--muted);
       cursor: pointer;
-      padding: 0;
-      font-weight: 800;
+      padding: 0.34rem 0.55rem;
+      font-weight: 650;
+      border-radius: 0.35rem;
     }
 
     .view-switcher button.active,
     .view-switcher button:hover {
-      color: var(--green);
+      color: var(--accent-ink);
+      background: var(--selected);
     }
 
     .action-status {
-      min-height: 1.5rem;
-      padding: 0.32rem 0;
-      color: var(--cyan);
+      min-height: 1.8rem;
+      padding: 0.38rem 0;
+      color: var(--muted);
       font-size: 0.82rem;
-      border-bottom: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line);
     }
 
     .action-composer {
-      margin: 0.85rem 0 0;
-      border-top: 2px solid var(--line-bright);
-      background: rgba(5, 11, 18, 0.66);
+      margin: 0.75rem 0 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: #fbfaf6;
     }
 
     .composer-head {
@@ -8915,24 +8946,23 @@ def web_console_html() -> str:
       justify-content: space-between;
       gap: 0.75rem;
       align-items: center;
-      min-height: 2rem;
-      padding: 0.45rem 0.6rem;
-      color: var(--amber);
-      border-bottom: 1px solid var(--line-soft);
-      font-weight: 800;
+      min-height: 2.15rem;
+      padding: 0.45rem 0.6rem 0.3rem;
+      color: var(--strong);
+      font-weight: 650;
     }
 
     .composer-head span {
       color: var(--muted);
       font-size: 0.78rem;
-      font-weight: 500;
+      font-weight: 450;
     }
 
     .composer-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.65rem;
-      padding: 0.65rem;
+      gap: 0.55rem;
+      padding: 0.35rem 0.6rem 0.6rem;
     }
 
     .composer-field {
@@ -8950,30 +8980,31 @@ def web_console_html() -> str:
     .composer-field label {
       display: block;
       margin-bottom: 0.22rem;
-      color: var(--cyan);
+      color: var(--muted);
       font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.02em;
     }
 
     .composer-input,
     .composer-textarea {
       width: 100%;
-      border: 1px solid var(--line-soft);
-      background: rgba(7, 19, 29, 0.95);
+      border: 1px solid var(--line);
+      background: var(--canvas);
       color: var(--strong);
-      padding: 0.38rem 0.45rem;
+      padding: 0.42rem 0.5rem;
       outline: none;
+      border-radius: 0.35rem;
     }
 
     .composer-input:focus,
     .composer-textarea:focus {
-      border-color: var(--line-bright);
-      box-shadow: 0 0 0 1px rgba(124, 233, 235, 0.18);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(15, 118, 101, 0.12);
     }
 
     .composer-textarea {
-      min-height: 6.4rem;
+      min-height: 5.8rem;
       resize: vertical;
       line-height: 1.48;
     }
@@ -8983,7 +9014,7 @@ def web_console_html() -> str:
       flex-wrap: wrap;
       gap: 0.45rem;
       align-items: center;
-      padding: 0 0.65rem 0.65rem;
+      padding: 0 0.6rem 0.65rem;
     }
 
     .composer-help {
@@ -8996,39 +9027,54 @@ def web_console_html() -> str:
       display: none !important;
     }
 
-    .hero-card {
-      margin: 0.9rem 0 0;
-      padding: 0.9rem 1.05rem;
-      border-left: 0.22rem solid var(--amber);
-      background: linear-gradient(90deg, rgba(255, 184, 77, 0.07), transparent 36rem);
+    .channel-header {
+      margin: 0.85rem 0 0;
+      padding: 0.2rem 0 0;
     }
 
-    .hero-card h1 {
-      margin: 0 0 0.65rem;
-      color: var(--amber);
-      font-size: 1.1rem;
-      line-height: 1.2;
+    .channel-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-bottom: 0.55rem;
+      border-bottom: 1px solid var(--line);
     }
 
-    .hero-card p {
+    .channel-title h1 {
       margin: 0;
-      max-width: 72rem;
+      color: var(--strong);
+      font-size: 1.15rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+
+    .channel-title span {
+      color: var(--muted);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .summary-line {
+      margin: 0;
+      padding: 0.58rem 0;
       color: var(--text);
-      line-height: 1.55;
+      line-height: 1.48;
+      border-bottom: 1px solid var(--line);
     }
 
     .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      margin-top: 0.85rem;
-      border-top: 2px solid var(--line-bright);
-      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      border-bottom: 1px solid var(--line);
     }
 
     .metric {
-      min-height: 3.1rem;
-      padding: 0.55rem 0.65rem;
-      border-right: 1px solid var(--line-soft);
+      min-height: 2.65rem;
+      padding: 0.45rem 1rem 0.45rem 0;
+      margin-right: 1rem;
+      border-right: 1px solid var(--line);
     }
 
     .metric:last-child { border-right: 0; }
@@ -9043,22 +9089,25 @@ def web_console_html() -> str:
       display: block;
       margin-top: 0.18rem;
       color: var(--strong);
-      font-size: 1.02rem;
+      font-size: 0.96rem;
     }
 
-    .metric.warn strong { color: var(--amber); }
+    .metric.warn strong { color: var(--warn); }
     .metric.hot strong { color: var(--red); }
-    .metric.calm strong { color: var(--green); }
+    .metric.calm strong { color: var(--accent); }
 
     .detail-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
       border-bottom: 1px solid var(--line-soft);
     }
 
     .detail-grid .kv-line {
-      padding: 0.5rem 0.65rem;
-      border-right: 1px solid var(--line-soft);
+      min-width: 13rem;
+      padding: 0.42rem 1rem 0.42rem 0;
+      border-right: 1px solid var(--line);
+      margin-right: 1rem;
     }
 
     .detail-grid .kv-line:last-child { border-right: 0; }
@@ -9073,67 +9122,66 @@ def web_console_html() -> str:
       animation: settle 160ms ease-out;
     }
 
-    .two-col {
+    .workspace-split {
       display: grid;
       grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.75fr);
       gap: 1rem;
       align-items: start;
     }
 
-    .term-panel {
+    .thread-section {
       min-width: 0;
-      margin-bottom: 1rem;
-      border-top: 2px solid var(--line-bright);
-      background: rgba(5, 11, 18, 0.58);
+      margin-bottom: 1.05rem;
+      border-top: 1px solid var(--line-strong);
     }
 
-    .term-head {
+    .thread-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 0.75rem;
-      min-height: 2rem;
-      color: var(--amber);
-      font-weight: 800;
-      padding: 0.42rem 0.55rem;
-      border-bottom: 1px solid var(--line-soft);
+      min-height: 2.1rem;
+      color: var(--strong);
+      font-weight: 650;
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--line);
     }
 
-    .term-head span {
-      color: var(--dim);
+    .thread-head span {
+      color: var(--muted);
       font-weight: 500;
-      font-size: 0.75rem;
+      font-size: 0.78rem;
     }
 
-    .table {
+    .message-list {
       display: grid;
     }
 
-    .row {
+    .message-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 1rem;
-      min-height: 2.05rem;
+      min-height: 2.25rem;
       align-items: start;
-      padding: 0.38rem 0.55rem;
-      border-bottom: 1px solid var(--line-soft);
+      padding: 0.48rem 0;
+      border-bottom: 1px solid var(--line);
     }
 
-    .row:last-child { border-bottom: 0; }
-    .row:hover { background: rgba(124, 233, 235, 0.06); }
+    .message-row:last-child { border-bottom: 0; }
+    .message-row:hover { background: linear-gradient(90deg, var(--hover), transparent 96%); }
 
-    .row strong {
+    .message-row strong {
       display: block;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--strong);
-      font-weight: 600;
+      font-weight: 650;
       font-size: 0.93rem;
     }
 
-    .row em {
+    .message-row em {
       display: block;
       margin-top: 0.16rem;
       color: var(--muted);
@@ -9154,7 +9202,7 @@ def web_console_html() -> str:
     }
 
     .tag {
-      color: var(--cyan);
+      color: var(--accent-ink);
       white-space: nowrap;
       font-size: 0.83rem;
     }
@@ -9172,58 +9220,60 @@ def web_console_html() -> str:
     .row-actions { justify-content: flex-end; }
 
     .action-btn {
-      border: 1px solid var(--line-soft);
-      background: rgba(124, 233, 235, 0.04);
-      color: var(--cyan);
+      border: 1px solid var(--line);
+      background: var(--canvas);
+      color: var(--accent-ink);
       cursor: pointer;
-      min-height: 1.35rem;
-      padding: 0.08rem 0.42rem;
-      font-size: 0.74rem;
+      min-height: 1.55rem;
+      padding: 0.12rem 0.46rem;
+      font-size: 0.75rem;
+      border-radius: 0.35rem;
     }
 
     .action-btn:hover {
-      color: #f4fafc;
-      border-color: var(--line-bright);
-      background: rgba(124, 233, 235, 0.13);
+      color: var(--strong);
+      border-color: var(--accent);
+      background: var(--selected);
     }
 
     .inline-select {
       width: 100%;
       min-height: 1.55rem;
-      border: 1px solid var(--line-soft);
-      background: var(--panel-soft);
-      color: var(--text);
+      border: 1px solid var(--sidebar-line);
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.88);
       padding: 0.1rem 0.28rem;
       margin-top: 0.3rem;
+      border-radius: 0.25rem;
     }
 
-    .agent-matrix {
+    .agent-list {
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .agent-row {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.45fr);
       gap: 1rem;
-    }
-
-    .agent-card {
       min-width: 0;
-      border-top: 2px solid var(--line-bright);
-      background: rgba(5, 11, 18, 0.58);
-      padding: 0.65rem 0.7rem;
+      padding: 0.72rem 0;
+      border-bottom: 1px solid var(--line);
     }
 
-    .agent-card h3 {
+    .agent-row h3 {
       margin: 0;
       color: var(--strong);
       font-size: 0.98rem;
     }
 
     .agent-meta {
-      margin: 0.35rem 0;
-      color: var(--cyan);
+      margin: 0.28rem 0;
+      color: var(--muted);
       font-size: 0.8rem;
       line-height: 1.55;
     }
 
-    .agent-card p {
+    .agent-row p {
       margin: 0.45rem 0 0;
       color: var(--text);
       line-height: 1.48;
@@ -9231,15 +9281,14 @@ def web_console_html() -> str:
     }
 
     .agent-actions {
-      margin-top: 0.55rem;
+      margin-top: 0;
+      justify-content: flex-end;
     }
 
     .mini-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      border-top: 1px solid var(--line-soft);
-      margin-top: 0.55rem;
-      padding-top: 0.38rem;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 0.58rem;
       gap: 0.45rem;
     }
 
@@ -9255,44 +9304,42 @@ def web_console_html() -> str:
       font-size: 0.85rem;
     }
 
-    .report {
-      border-top: 2px solid var(--line-bright);
-      margin-bottom: 0.85rem;
-      background: rgba(5, 11, 18, 0.58);
+    .report-thread {
+      border-top: 1px solid var(--line);
     }
 
-    .report summary {
+    .report-thread summary {
       cursor: pointer;
       list-style: none;
-      padding: 0.58rem 0.7rem;
+      padding: 0.62rem 0;
       color: var(--strong);
+      border-bottom: 1px solid var(--line);
     }
 
-    .report summary::-webkit-details-marker { display: none; }
+    .report-thread summary::-webkit-details-marker { display: none; }
 
-    .report summary b {
-      color: var(--amber);
+    .report-thread summary b {
+      color: var(--strong);
       display: block;
       margin-bottom: 0.25rem;
     }
 
-    .report summary span {
+    .report-thread summary span {
       color: var(--muted);
       font-size: 0.82rem;
     }
 
     .report-body {
-      border-top: 1px solid var(--line-soft);
-      padding: 0.72rem 0.85rem;
+      border-bottom: 1px solid var(--line);
+      padding: 0.72rem 0;
       white-space: pre-wrap;
       color: var(--text);
       line-height: 1.58;
-      background: rgba(124, 233, 235, 0.035);
     }
 
     .empty {
       color: var(--dim);
-      padding: 0.65rem 0.55rem;
+      padding: 0.65rem 0;
     }
 
     @keyframes settle {
@@ -9311,19 +9358,17 @@ def web_console_html() -> str:
         position: relative;
         height: auto;
       }
-      .leftbar { border-right: 0; border-bottom: 2px solid var(--line-bright); }
-      .rightbar { border-left: 0; border-top: 2px solid var(--line-bright); }
+      .leftbar { border-right: 0; border-bottom: 1px solid #1f2926; }
+      .rightbar { border-left: 0; border-top: 1px solid var(--line); }
     }
 
     @media (max-width: 780px) {
-      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .detail-grid,
       .composer-grid,
-      .two-col,
-      .agent-matrix { grid-template-columns: 1fr; }
+      .workspace-split,
+      .agent-row { grid-template-columns: 1fr; }
       .composer-field.wide,
       .composer-field.full { grid-column: auto; }
-      .row { grid-template-columns: 1fr; }
+      .message-row { grid-template-columns: 1fr; }
       .row-side,
       .row-actions { justify-content: flex-start; }
       .row-right,
@@ -9334,7 +9379,7 @@ def web_console_html() -> str:
 <body>
   <div class="workbench">
     <aside class="leftbar">
-      <div class="brand"><strong>枢衡驾驶舱</strong><span>governed</span></div>
+      <div class="brand"><strong>枢衡工作区</strong><span>governed</span></div>
       <section class="block" id="left-current"></section>
       <section class="block" id="left-history"></section>
       <section class="status-panel" id="left-model"></section>
@@ -9343,16 +9388,16 @@ def web_console_html() -> str:
     <main class="center">
       <div class="topline"><span id="topline">当前时间: loading | 会话ID: web:gui | 当前轮次: -</span></div>
       <div class="view-switcher" id="nav"></div>
+      <section class="channel-header" id="channel-header"></section>
       <div class="action-status" id="action-status"></div>
       <section class="action-composer" id="action-composer"></section>
-      <section class="hero-card" id="overview-card"></section>
       <section class="view active" id="view-overview"></section>
       <section class="view" id="view-agents"></section>
       <section class="view" id="view-reports"></section>
       <section class="view" id="view-governance"></section>
     </main>
     <aside class="rightbar">
-      <div class="brand"><strong>AGENTS</strong><span id="agent-count">0</span></div>
+      <div class="brand"><strong>上下文</strong><span id="agent-count">0</span></div>
       <section class="block" id="right-agents"></section>
       <section class="block" id="right-tasks"></section>
     </aside>
@@ -9538,7 +9583,7 @@ def web_console_html() -> str:
       const target = document.getElementById("action-composer");
       if (!target) return;
       const head = node("div", "composer-head");
-      head.append(node("b", "", "操作面板"));
+      head.append(node("b", "", "消息 / 动作"));
       head.append(node("span", "", composerLabels[mode] || mode));
 
       const form = node("form");
@@ -9742,7 +9787,7 @@ def web_console_html() -> str:
     }
 
     function row(title, meta, tag, actions) {
-      const item = node("div", "row");
+      const item = node("div", "message-row");
       const left = node("div");
       left.append(node("strong", "", title || "未命名"));
       if (meta) left.append(node("em", "", meta));
@@ -9759,12 +9804,12 @@ def web_console_html() -> str:
     }
 
     function panel(title, note, rowsData, mapper) {
-      const wrap = node("section", "term-panel");
-      const head = node("div", "term-head");
+      const wrap = node("section", "thread-section");
+      const head = node("div", "thread-head");
       head.append(node("b", "", title));
       if (note) head.append(node("span", "", note));
       wrap.append(head);
-      const table = node("div", "table");
+      const table = node("div", "message-list");
       if (!rowsData || !rowsData.length) {
         table.append(empty("暂无记录"));
       } else {
@@ -9822,7 +9867,7 @@ def web_console_html() -> str:
         {key: "governance", label: "治理队列"}
       ];
       for (const item of items) {
-        const button = node("button", app.view === item.key ? "active" : "", item.label);
+        const button = node("button", app.view === item.key ? "active" : "", "# " + (item.label || item.key));
         button.type = "button";
         button.addEventListener("click", () => setView(item.key));
         nav.append(button);
@@ -9833,12 +9878,12 @@ def web_console_html() -> str:
       const sidebar = data.sidebar || {};
       const current = sidebar.current_sessions || [];
       const currentWrap = node("div");
-      currentWrap.append(blockTitle("CURRENT SESSIONS", current.length));
+      currentWrap.append(blockTitle("CHANNELS", current.length));
       current.forEach(item => {
         const button = node("button", "session-button" + (app.view === item.target ? " active" : ""));
         button.type = "button";
         button.addEventListener("click", () => setView(item.target || "overview"));
-        button.append(node("b", "", (item.target === "reports" ? "◆ " : item.active ? "◆ " : "● ") + (item.title || "会话")));
+        button.append(node("b", "", "# " + (item.title || "会话")));
         button.append(node("span", "", item.status || ""));
         currentWrap.append(button);
       });
@@ -9950,21 +9995,25 @@ def web_console_html() -> str:
       const now = new Date().toLocaleString("zh-CN", {hour12: false});
       const totals = data.totals || {};
       const title = app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : "home:main";
-      document.getElementById("topline").textContent = `当前时间: ${now} | 会话ID: ${title} | 当前轮次: ${totals.reports || 0}/${totals.open_tasks || 0}`;
+      const channel = app.view === "reports" ? "# 定时汇报" : app.view === "agents" ? "# 子代理" : app.view === "governance" ? "# 治理队列" : "# 主控台";
+      document.getElementById("topline").textContent = `${channel} · ${now} · ${title} · 汇报 ${totals.reports || 0} / 待办 ${totals.open_tasks || 0}`;
     }
 
-    function renderOverviewCard(data) {
+    function renderChannelHeader(data) {
       const overview = data.overview || {};
-      const card = document.getElementById("overview-card");
-      card.replaceChildren();
-      card.append(node("h1", "", overview.title || "主控运行概览"));
-      card.append(node("p", "", overview.summary || "等待治理数据。"));
+      const header = document.getElementById("channel-header");
+      header.replaceChildren();
+      const title = node("div", "channel-title");
+      title.append(node("h1", "", overview.title || "主控运行概览"));
+      title.append(node("span", "", "频道主页 · 受控动作入口"));
+      header.append(title);
+      header.append(node("p", "summary-line", overview.summary || "等待治理数据。"));
       const metrics = node("div", "metric-grid");
       (overview.metrics || []).forEach(item => metrics.append(metric(item)));
-      card.append(metrics);
+      header.append(metrics);
       const details = node("div", "detail-grid");
       (overview.details || []).forEach(item => details.append(kv(item.label || "", item.value || "-")));
-      card.append(details);
+      header.append(details);
     }
 
     function renderOverview(data) {
@@ -9972,7 +10021,7 @@ def web_console_html() -> str:
       const recent = (data.tasks && data.tasks.recent) || [];
       const schedules = data.schedules || [];
       const reports = data.scheduled_reports || [];
-      const grid = node("div", "two-col");
+      const grid = node("div", "workspace-split");
       const workPanel = panel("当前待办", "未终态任务", tasks, item =>
         row(item.title, `${item.owner || "主 agent"} · ${item.summary || item.time || ""}`, item.status, [
           actionButton("取消", "task.cancel", item.ui_ref),
@@ -10011,14 +10060,17 @@ def web_console_html() -> str:
         replace("view-agents", [empty("还没有持久子代理")]);
         return;
       }
-      const wrap = node("div", "agent-matrix");
+      const wrap = node("div", "agent-list");
       agents.forEach(agent => {
-        const card = node("article", "agent-card");
-        card.append(node("h3", "", agent.name || "子代理"));
+        const item = node("article", "agent-row");
+        const main = node("div");
+        main.append(node("h3", "", agent.name || "子代理"));
         const skills = (agent.skills || []).slice(0, 4).join(" · ");
-        card.append(node("div", "agent-meta", `${agent.role || "specialist"} · ${agent.status || "idle"} · ${agent.model || "继承主控默认模型"}`));
-        if (skills) card.append(node("div", "agent-meta", skills));
-        card.append(node("p", "", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        main.append(node("div", "agent-meta", `${agent.role || "specialist"} · ${agent.status || "idle"} · ${agent.model || "继承主控默认模型"}`));
+        if (skills) main.append(node("div", "agent-meta", skills));
+        main.append(node("p", "", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        item.append(main);
+        const ops = node("div");
         const actions = node("div", "agent-actions");
         actions.append(prefillButton("发任务", "agent.task", {agent_ref: agent.ui_ref, title: "", text: ""}));
         actions.append(prefillButton("聊天", "agent.chat", {agent_ref: agent.ui_ref, text: ""}));
@@ -10026,7 +10078,7 @@ def web_console_html() -> str:
         actions.append(prefillButton("加Skill", "agent.set_skills", {agent_ref: agent.ui_ref, skill_operation: "add", text: ""}));
         actions.append(actionButton("清Skill", "agent.set_skills", agent.ui_ref, {operation: "clear"}));
         actions.append(actionButton("停止", "agent.stop", agent.ui_ref));
-        card.append(actions);
+        ops.append(actions);
         const minis = node("div", "mini-grid");
         (agent.metrics || []).forEach(item => {
           const mini = node("div");
@@ -10034,8 +10086,9 @@ def web_console_html() -> str:
           mini.append(node("strong", "", item.value || "0"));
           minis.append(mini);
         });
-        card.append(minis);
-        wrap.append(card);
+        ops.append(minis);
+        item.append(ops);
+        wrap.append(item);
       });
       replace("view-agents", [wrap]);
     }
@@ -10048,7 +10101,7 @@ def web_console_html() -> str:
       }
       const list = node("div");
       reports.forEach((report, index) => {
-        const card = node("details", "report");
+        const card = node("details", "report-thread");
         if (index < 2) card.open = true;
         const summary = node("summary");
         summary.append(node("b", "", report.schedule || "定时任务"));
@@ -10061,7 +10114,7 @@ def web_console_html() -> str:
     }
 
     function renderGovernance(data) {
-      const grid = node("div", "two-col");
+      const grid = node("div", "workspace-split");
       grid.append(panel("待审批", "隐藏审批编号，只展示摘要", data.approvals || [], item =>
         row(item.summary, `${item.target || "主 agent"} · ${item.time || ""}`, item.type, [
           actionButton("批准", "approval.approve", item.ui_ref),
@@ -10099,7 +10152,7 @@ def web_console_html() -> str:
       renderLeft(app.data);
       renderRight(app.data);
       renderActionComposer(app.data);
-      renderOverviewCard(app.data);
+      renderChannelHeader(app.data);
       renderViews(app.data);
       renderNotice();
     }
@@ -10111,7 +10164,7 @@ def web_console_html() -> str:
         app.data = await response.json();
         renderAll();
       } catch (error) {
-        replace("overview-card", [empty("无法读取本地 GUI 快照：" + error.message)]);
+        replace("channel-header", [empty("无法读取本地 GUI 快照：" + error.message)]);
       }
     }
 
