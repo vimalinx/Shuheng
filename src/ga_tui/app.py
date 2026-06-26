@@ -8045,6 +8045,132 @@ def web_console_agent_rows(state: State) -> list[dict[str, Any]]:
     return rows
 
 
+def web_console_history_rows(state: State, limit: int = 36) -> list[dict[str, Any]]:
+    state.session_meta = load_session_meta_registry()
+    session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
+    names: dict[str, str] = {}
+    if session_names is not None:
+        try:
+            raw_names = session_names._load()
+        except Exception:
+            raw_names = {}
+        if isinstance(raw_names, dict):
+            names = {str(key): str(value) for key, value in raw_names.items()}
+    result: list[dict[str, Any]] = []
+    for path, last_user_at, preview, rounds, desc in session_rows:
+        key = session_key(path)
+        meta = session_meta_for(state, path)
+        if bool(meta.get("deleted")) or bool(meta.get("archived")):
+            continue
+        name = names.get(key, "")
+        if is_process_only_session_title(name):
+            name = ""
+        title = web_console_clean_visible(name or preview or os.path.basename(path) or "历史会话", 80)
+        category = session_category_label(meta)
+        result.append({
+            "title": title or "历史会话",
+            "category": web_console_clean_visible(category or "未分类", 24),
+            "age": rel_age(float(last_user_at or 0.0)) if last_user_at else "",
+            "rounds": int(rounds or 0),
+            "description": web_console_clean_visible(desc or str(meta.get("description") or ""), 120),
+            "pinned": bool(meta.get("pinned")),
+        })
+        if len(result) >= limit:
+            break
+    return result
+
+
+def web_console_history_groups(rows: list[dict[str, Any]], limit_groups: int = 7, limit_per_group: int = 6) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    used: set[int] = set()
+
+    pinned = [(idx, row) for idx, row in enumerate(rows) if row.get("pinned")]
+    if pinned:
+        groups.append({"label": PINNED_SESSION_LABEL, "count": len(pinned), "items": [row for _idx, row in pinned[:limit_per_group]]})
+        used.update(idx for idx, _row in pinned)
+
+    recent = [(idx, row) for idx, row in enumerate(rows) if idx not in used][:RECENT_SESSION_LIMIT]
+    if recent:
+        groups.append({"label": RECENT_SESSION_LABEL, "count": len(recent), "items": [row for _idx, row in recent[:limit_per_group]]})
+        used.update(idx for idx, _row in recent)
+
+    by_category: dict[str, list[dict[str, Any]]] = {}
+    for idx, row in enumerate(rows):
+        if idx in used:
+            continue
+        label = str(row.get("category") or "未分类")
+        by_category.setdefault(label, []).append(row)
+    for label in sorted(by_category, key=category_sort_key):
+        items = by_category[label]
+        groups.append({"label": label, "count": len(items), "items": items[:limit_per_group]})
+        if len(groups) >= limit_groups:
+            break
+    return groups
+
+
+def web_console_model_sidebar(model_registry: dict[str, Any]) -> dict[str, str]:
+    current = model_registry.get("current") if isinstance(model_registry.get("current"), dict) else {}
+    provider = web_console_clean_visible(current.get("provider") or "", 80)
+    model = web_console_clean_visible(current.get("model") or "", 80)
+    base = ""
+    source = "current session"
+    if not model or model == "-":
+        try:
+            entries, mixin, _preserved, _error = load_llm_config_entries()
+        except Exception:
+            entries, mixin = [], {}
+        default_name = str((mixin.get("llm_nos") or [""])[0] or "").strip() if isinstance(mixin, dict) else ""
+        entry = next((item for item in entries if config_display_name(item) == default_name), None)
+        if entry is None and entries:
+            entry = entries[0]
+        if entry is not None:
+            provider = web_console_clean_visible(str(entry.cfg.get("name") or config_display_name(entry)), 80)
+            model = web_console_clean_visible(str(entry.cfg.get("model") or config_display_name(entry)), 80)
+            base = web_console_clean_visible(provider_host_label(str(entry.cfg.get("apibase") or "")), 80)
+            source = "default config"
+    return {
+        "provider": provider or "-",
+        "model": model or "-",
+        "base": base or "-",
+        "scope": web_console_clean_visible(current.get("scope") or source, 40) or source,
+        "count": str(model_registry.get("model_count") or 0),
+    }
+
+
+def web_console_token_sidebar() -> dict[str, str]:
+    registry = load_token_usage_registry()
+    total = empty_token_stats_dict()
+    for stats in registry.values():
+        total = token_stats_add(total, normalize_runtime_token_usage(stats))
+    total_tokens = total.get("input", 0) + total.get("output", 0) + total.get("cache_create", 0) + total.get("cache_read", 0)
+    cache_tokens = total.get("cache_create", 0) + total.get("cache_read", 0)
+    return {
+        "sessions": str(len(registry)),
+        "requests": str(total.get("requests", 0)),
+        "total": human_tokens(total_tokens),
+        "input": human_tokens(total.get("input", 0) + total.get("cache_create", 0) + total.get("cache_read", 0)),
+        "output": human_tokens(total.get("output", 0)),
+        "cache": human_tokens(cache_tokens),
+    }
+
+
+def web_console_sidebar_snapshot(state: State, model_registry: dict[str, Any]) -> dict[str, Any]:
+    history_rows = web_console_history_rows(state)
+    return {
+        "current_sessions": [
+            {"title": "主 agent 主页", "status": "home", "target": "overview", "active": True},
+            {"title": "定时汇报", "status": "reports", "target": "reports", "active": False},
+            {"title": state.current_title or "main", "status": state.status or "idle", "target": "overview", "active": False},
+        ],
+        "history": {
+            "count": len(history_rows),
+            "groups": web_console_history_groups(history_rows),
+        },
+        "model": web_console_model_sidebar(model_registry),
+        "tokens": web_console_token_sidebar(),
+    }
+
+
 def web_console_snapshot() -> dict[str, Any]:
     state = web_console_state()
     task_map = latest_task_records()
@@ -8056,6 +8182,7 @@ def web_console_snapshot() -> dict[str, Any]:
     artifacts = list(artifact_index_latest().values())
     reports = web_console_report_rows(state, limit=16)
     model_registry = model_orchestration_registry(state)
+    sidebar = web_console_sidebar_snapshot(state, model_registry)
     return {
         "schema_version": "shuheng.web_console.snapshot.v1",
         "updated_at": now_iso(),
@@ -8089,6 +8216,7 @@ def web_console_snapshot() -> dict[str, Any]:
             "model_count": int(model_registry.get("model_count") or 0),
             "capabilities": model_registry.get("capabilities") if isinstance(model_registry.get("capabilities"), dict) else {},
         },
+        "sidebar": sidebar,
         "totals": {
             "open_tasks": len(open_tasks),
             "approvals": len(approvals),
@@ -8116,25 +8244,24 @@ def web_console_html() -> str:
   <title>Shuheng Console</title>
   <style>
     :root {
-      color-scheme: light;
-      --ink: #1d1c1d;
-      --canvas: #f7f5f2;
-      --panel: #ffffff;
-      --panel-soft: #fbfaf8;
-      --line: #dedbd5;
-      --line-soft: #ebe8e2;
-      --text: #1d1c1d;
-      --muted: #5f5b66;
-      --soft: #86808d;
-      --rail: #332538;
-      --rail-ink: #f7eef7;
-      --rail-muted: #c8bdcc;
-      --accent: #1264a3;
-      --accent-soft: #e8f2f9;
-      --green: #2e7d32;
-      --amber: #a56a00;
-      --red: #b3261e;
-      --shadow: rgba(29, 28, 29, 0.08);
+      color-scheme: dark;
+      --bg: #02060b;
+      --panel: #050b12;
+      --panel-soft: #07131d;
+      --panel-lift: #0a1722;
+      --line: #173444;
+      --line-bright: #7ce9eb;
+      --line-soft: rgba(124, 233, 235, 0.28);
+      --text: #b8c3cb;
+      --strong: #e3ecf1;
+      --muted: #75818c;
+      --dim: #4f5b66;
+      --cyan: #82f3f2;
+      --green: #9ddd38;
+      --amber: #ffb84d;
+      --red: #ff5a43;
+      --select: #5d6467;
+      --shadow: rgba(0, 0, 0, 0.45);
     }
 
     * { box-sizing: border-box; }
@@ -8142,195 +8269,295 @@ def web_console_html() -> str:
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--canvas);
+      background:
+        radial-gradient(circle at 18% -8%, rgba(124, 233, 235, 0.11), transparent 28rem),
+        linear-gradient(180deg, #07101a 0, var(--bg) 14rem);
       color: var(--text);
-      font-family: "Aptos", "IBM Plex Sans", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
-      letter-spacing: 0;
+      font-family: "JetBrains Mono", "Maple Mono", "Noto Sans Mono CJK SC", "Sarasa Mono SC", monospace;
+      letter-spacing: 0.01em;
     }
 
-    button, input { font: inherit; }
+    button { font: inherit; }
 
-    .shell {
+    .workbench {
       display: grid;
-      grid-template-columns: 16rem minmax(0, 1fr);
+      grid-template-columns: minmax(18rem, 22vw) minmax(0, 1fr) minmax(17rem, 19vw);
       min-height: 100vh;
+      padding: 0.85rem;
+      gap: 0;
     }
 
-    .rail {
+    .leftbar,
+    .rightbar {
       position: sticky;
       top: 0;
-      height: 100vh;
-      padding: 0.85rem;
-      border-right: 1px solid rgba(29, 28, 29, 0.14);
-      background: var(--rail);
-      color: var(--rail-ink);
+      height: calc(100vh - 1.7rem);
+      overflow: auto;
+      background: rgba(5, 11, 18, 0.96);
+      box-shadow: 0 20px 60px var(--shadow);
+    }
+
+    .leftbar {
+      border-right: 2px solid var(--line-bright);
+      padding: 0.4rem 0.35rem 0.6rem 0.2rem;
+    }
+
+    .rightbar {
+      border-left: 2px solid var(--line-bright);
+      padding: 0.4rem 0.2rem 0.6rem 0.7rem;
+    }
+
+    .center {
+      min-width: 0;
+      height: calc(100vh - 1.7rem);
+      overflow: auto;
+      background: rgba(2, 6, 11, 0.94);
+      padding: 0 1rem 1rem;
+      box-shadow: 0 20px 60px var(--shadow);
     }
 
     .brand {
-      display: grid;
-      gap: 0.15rem;
-      margin: 0.25rem 0 1rem;
-      padding: 0 0.35rem;
-    }
-
-    .brand small {
-      color: var(--rail-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      font-family: "JetBrains Mono", "Iosevka", monospace;
-      font-size: 0.62rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+      padding: 0 0.55rem 0.5rem;
+      border-bottom: 1px solid var(--line-soft);
     }
 
     .brand strong {
-      font-size: 1.05rem;
-      line-height: 1.2;
-      font-weight: 680;
-    }
-
-    .nav {
-      display: grid;
-      gap: 0.18rem;
-      margin: 0.8rem 0;
-    }
-
-    .nav button {
-      border: 1px solid transparent;
-      border-radius: 0.48rem;
-      padding: 0.46rem 0.58rem;
-      text-align: left;
-      color: var(--rail-muted);
-      background: transparent;
-      cursor: pointer;
+      color: var(--amber);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       font-size: 0.92rem;
     }
 
+    .brand span {
+      color: var(--dim);
+      font-size: 0.75rem;
+    }
+
+    .block {
+      margin-top: 0.85rem;
+    }
+
+    .block-title {
+      color: var(--amber);
+      font-weight: 800;
+      line-height: 1.2;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0 0.55rem 0.32rem;
+      font-size: 0.9rem;
+    }
+
+    .session-button,
+    .nav button {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.45rem;
+      align-items: center;
+      border: 0;
+      color: var(--text);
+      background: transparent;
+      cursor: pointer;
+      padding: 0.12rem 0.55rem;
+      text-align: left;
+      min-height: 1.28rem;
+      line-height: 1.18;
+    }
+
+    .session-button:hover,
+    .session-button.active,
     .nav button:hover,
     .nav button.active {
-      color: var(--rail-ink);
-      background: rgba(255, 255, 255, 0.12);
+      background: var(--select);
+      color: #f4fafc;
     }
 
-    .rail-note {
-      margin-top: 1rem;
-      padding: 0.7rem;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 0.55rem;
-      color: var(--rail-muted);
-      background: rgba(255, 255, 255, 0.06);
-      font-size: 0.8rem;
-      line-height: 1.45;
+    .session-button b,
+    .nav button b {
+      color: var(--green);
+      font-weight: 800;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
 
-    main {
-      padding: 0;
-      min-width: 0;
+    .session-button span,
+    .nav button span,
+    .row-right {
+      color: var(--green);
+      white-space: nowrap;
+      font-size: 0.86rem;
     }
 
-    .topbar {
+    .history-group {
+      margin: 0.16rem 0 0.25rem;
+    }
+
+    .history-group summary {
+      color: var(--cyan);
+      cursor: pointer;
+      list-style: none;
+      padding: 0.04rem 0.55rem;
+      font-weight: 800;
+    }
+
+    .history-group summary::-webkit-details-marker { display: none; }
+
+    .history-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1rem;
-      min-height: 4.15rem;
-      padding: 0.7rem 1.25rem;
-      border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.86);
+      gap: 0.5rem;
+      min-height: 1.28rem;
+      padding: 0.08rem 0.55rem;
+      color: var(--text);
+      line-height: 1.15;
+    }
+
+    .history-row.is-current {
+      background: var(--select);
+      color: #f4fafc;
+    }
+
+    .history-row strong {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+
+    .history-row small {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .status-panel {
+      margin: 0.85rem 0.25rem 0;
+      border-top: 2px solid var(--line-bright);
+      padding-top: 0.55rem;
+    }
+
+    .kv-line {
+      display: grid;
+      grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr);
+      gap: 0.5rem;
+      padding: 0.08rem 0.28rem;
+      color: var(--text);
+      line-height: 1.25;
+    }
+
+    .kv-line span:first-child {
+      color: var(--cyan);
+    }
+
+    .kv-line span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .topline {
       position: sticky;
       top: 0;
       z-index: 5;
-      backdrop-filter: blur(12px);
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 1.18rem;
-      line-height: 1.25;
-      letter-spacing: -0.01em;
-      font-weight: 750;
-    }
-
-    .subhead {
-      max-width: 50rem;
-      color: var(--muted);
-      line-height: 1.45;
-      margin-top: 0.18rem;
-      font-size: 0.9rem;
-    }
-
-    .stamp {
-      min-width: 12rem;
-      padding: 0.48rem 0.62rem;
-      border: 1px solid var(--line);
-      border-radius: 0.55rem;
-      background: var(--panel-soft);
-      color: var(--muted);
-      font-family: "JetBrains Mono", "Iosevka", monospace;
-      font-size: 0.72rem;
-      text-align: right;
-    }
-
-    .stage {
-      margin: 1rem 1.25rem 0;
-      border: 1px solid var(--line);
-      border-radius: 0.8rem;
-      padding: 0.95rem;
-      background: var(--panel);
-      box-shadow: 0 1px 2px var(--shadow);
-    }
-
-    .status-line {
+      min-height: 2.1rem;
       display: flex;
-      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(2, 6, 11, 0.96);
+      color: var(--strong);
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .topline span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .view-switcher {
+      position: sticky;
+      top: 2.1rem;
+      z-index: 4;
+      display: flex;
+      flex-wrap: wrap;
       gap: 1rem;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
+      align-items: center;
+      padding: 0.52rem 0;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(2, 6, 11, 0.93);
     }
 
-    .status-line h2,
-    .section-title h2 {
+    .view-switcher button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      font-weight: 800;
+    }
+
+    .view-switcher button.active,
+    .view-switcher button:hover {
+      color: var(--green);
+    }
+
+    .hero-card {
+      margin: 0.9rem 0 0;
+      padding: 0.9rem 1.05rem;
+      border-left: 0.22rem solid var(--amber);
+      background: linear-gradient(90deg, rgba(255, 184, 77, 0.07), transparent 36rem);
+    }
+
+    .hero-card h1 {
+      margin: 0 0 0.65rem;
+      color: var(--amber);
+      font-size: 1.1rem;
+      line-height: 1.2;
+    }
+
+    .hero-card p {
       margin: 0;
-      font-size: 0.9rem;
+      max-width: 72rem;
       color: var(--text);
-      font-weight: 750;
-    }
-
-    .summary {
-      color: var(--text);
-      font-size: 0.95rem;
       line-height: 1.55;
-      margin: 0.32rem 0 0;
-      max-width: 62rem;
     }
 
-    .metrics {
+    .metric-grid {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 0;
-      margin: 0.5rem 0 0.65rem;
-      border: 1px solid var(--line-soft);
-      border-radius: 0.7rem;
-      overflow: hidden;
+      margin-top: 0.85rem;
+      border-top: 2px solid var(--line-bright);
+      border-bottom: 1px solid var(--line-soft);
     }
 
     .metric {
-      min-height: 4.15rem;
-      padding: 0.62rem 0.72rem;
+      min-height: 3.1rem;
+      padding: 0.55rem 0.65rem;
       border-right: 1px solid var(--line-soft);
-      background: var(--panel-soft);
     }
 
     .metric:last-child { border-right: 0; }
 
     .metric span {
-      color: var(--soft);
+      display: block;
+      color: var(--muted);
       font-size: 0.72rem;
     }
 
     .metric strong {
       display: block;
-      margin-top: 0.28rem;
-      font-size: 1.18rem;
-      letter-spacing: -0.02em;
+      margin-top: 0.18rem;
+      color: var(--strong);
+      font-size: 1.02rem;
     }
 
     .metric.warn strong { color: var(--amber); }
@@ -8340,261 +8567,255 @@ def web_console_html() -> str:
     .detail-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.45rem 0.8rem;
-      color: var(--muted);
+      border-bottom: 1px solid var(--line-soft);
     }
 
-    .detail {
-      padding-top: 0.55rem;
-      border-top: 1px solid var(--line-soft);
+    .detail-grid .kv-line {
+      padding: 0.5rem 0.65rem;
+      border-right: 1px solid var(--line-soft);
     }
 
-    .detail span {
-      display: block;
-      color: var(--soft);
-      font-size: 0.72rem;
-    }
-
-    .detail strong {
-      display: block;
-      margin-top: 0.25rem;
-      color: var(--text);
-      font-weight: 600;
-    }
+    .detail-grid .kv-line:last-child { border-right: 0; }
 
     .view {
       display: none;
-      margin: 0;
-      padding: 1rem 1.25rem 1.4rem;
-      animation: rise 220ms ease-out;
+      padding: 0.8rem 0 0;
     }
 
-    .view.active { display: block; }
+    .view.active {
+      display: block;
+      animation: settle 160ms ease-out;
+    }
 
-    .grid {
+    .two-col {
       display: grid;
       grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.75fr);
-      gap: 0.9rem;
-      margin-top: 0;
+      gap: 1rem;
       align-items: start;
     }
 
-    .panel {
-      border: 1px solid var(--line);
-      border-radius: 0.78rem;
-      background: var(--panel);
-      padding: 0.85rem;
+    .term-panel {
       min-width: 0;
-      box-shadow: 0 1px 2px var(--shadow);
+      margin-bottom: 1rem;
+      border-top: 2px solid var(--line-bright);
+      background: rgba(5, 11, 18, 0.58);
     }
 
-    .section-title {
+    .term-head {
       display: flex;
       justify-content: space-between;
-      gap: 1rem;
       align-items: center;
-      margin-bottom: 0.55rem;
+      gap: 0.75rem;
+      min-height: 2rem;
+      color: var(--amber);
+      font-weight: 800;
+      padding: 0.42rem 0.55rem;
+      border-bottom: 1px solid var(--line-soft);
     }
 
-    .section-title p {
-      margin: 0;
-      color: var(--soft);
-      font-size: 0.82rem;
+    .term-head span {
+      color: var(--dim);
+      font-weight: 500;
+      font-size: 0.75rem;
     }
 
-    .rows {
+    .table {
       display: grid;
-      gap: 0;
-      border: 1px solid var(--line-soft);
-      border-radius: 0.7rem;
-      overflow: hidden;
     }
 
     .row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.75rem;
-      align-items: center;
-      padding: 0.62rem 0.72rem;
+      gap: 1rem;
+      min-height: 2.05rem;
+      align-items: start;
+      padding: 0.38rem 0.55rem;
       border-bottom: 1px solid var(--line-soft);
-      background: var(--panel);
     }
 
     .row:last-child { border-bottom: 0; }
-    .row:hover { background: var(--panel-soft); }
+    .row:hover { background: rgba(124, 233, 235, 0.06); }
 
     .row strong {
       display: block;
-      color: var(--text);
-      font-weight: 650;
-      font-size: 0.92rem;
-    }
-
-    .row span,
-    .muted {
-      color: var(--soft);
-      font-size: 0.84rem;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 0.16rem 0.5rem;
-      color: var(--accent);
-      background: var(--accent-soft);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: 0.76rem;
-      font-family: "JetBrains Mono", "Iosevka", monospace;
+      color: var(--strong);
+      font-weight: 600;
+      font-size: 0.93rem;
     }
 
-    .agent-grid {
+    .row em {
+      display: block;
+      margin-top: 0.16rem;
+      color: var(--muted);
+      font-style: normal;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.82rem;
+    }
+
+    .tag {
+      color: var(--cyan);
+      white-space: nowrap;
+      font-size: 0.83rem;
+    }
+
+    .agent-matrix {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.75rem;
+      gap: 1rem;
     }
 
-    .agent-card,
-    .report-card {
-      border: 1px solid var(--line);
-      border-radius: 0.78rem;
-      background: var(--panel);
-      padding: 0.85rem;
+    .agent-card {
       min-width: 0;
-      box-shadow: 0 1px 2px var(--shadow);
+      border-top: 2px solid var(--line-bright);
+      background: rgba(5, 11, 18, 0.58);
+      padding: 0.65rem 0.7rem;
     }
 
-    .agent-card h3,
-    .report-card h3 {
+    .agent-card h3 {
       margin: 0;
+      color: var(--strong);
       font-size: 0.98rem;
     }
 
     .agent-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin: 0.55rem 0;
+      margin: 0.35rem 0;
+      color: var(--cyan);
+      font-size: 0.8rem;
+      line-height: 1.55;
     }
 
-    .mini-metrics {
+    .agent-card p {
+      margin: 0.45rem 0 0;
+      color: var(--text);
+      line-height: 1.48;
+      font-size: 0.86rem;
+    }
+
+    .mini-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.45rem 0.75rem;
-      margin-top: 0.65rem;
-    }
-
-    .mini {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       border-top: 1px solid var(--line-soft);
-      padding-top: 0.42rem;
+      margin-top: 0.55rem;
+      padding-top: 0.38rem;
+      gap: 0.45rem;
     }
 
-    .mini span { color: var(--soft); font-size: 0.75rem; }
-    .mini strong { display: block; margin-top: 0.2rem; }
-
-    .report-list {
-      display: grid;
-      gap: 0.65rem;
+    .mini-grid span {
+      color: var(--muted);
+      font-size: 0.7rem;
     }
 
-    details.report-card {
-      padding: 0;
-      overflow: hidden;
+    .mini-grid strong {
+      display: block;
+      color: var(--strong);
+      margin-top: 0.1rem;
+      font-size: 0.85rem;
     }
 
-    details.report-card summary {
+    .report {
+      border-top: 2px solid var(--line-bright);
+      margin-bottom: 0.85rem;
+      background: rgba(5, 11, 18, 0.58);
+    }
+
+    .report summary {
       cursor: pointer;
       list-style: none;
-      padding: 0.85rem;
+      padding: 0.58rem 0.7rem;
+      color: var(--strong);
     }
 
-    details.report-card summary::-webkit-details-marker { display: none; }
+    .report summary::-webkit-details-marker { display: none; }
+
+    .report summary b {
+      color: var(--amber);
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+
+    .report summary span {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
 
     .report-body {
       border-top: 1px solid var(--line-soft);
-      padding: 0.85rem;
-      color: var(--muted);
+      padding: 0.72rem 0.85rem;
       white-space: pre-wrap;
-      line-height: 1.62;
-      background: var(--panel-soft);
+      color: var(--text);
+      line-height: 1.58;
+      background: rgba(124, 233, 235, 0.035);
     }
 
     .empty {
-      padding: 0.9rem;
-      border: 1px dashed var(--line);
-      border-radius: 0.7rem;
-      color: var(--soft);
-      text-align: center;
-      background: var(--panel-soft);
+      color: var(--dim);
+      padding: 0.65rem 0.55rem;
     }
 
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(0.4rem); }
+    @keyframes settle {
+      from { opacity: 0; transform: translateY(0.18rem); }
       to { opacity: 1; transform: translateY(0); }
     }
 
-    @media (max-width: 1100px) {
-      .shell { grid-template-columns: 1fr; }
-      .rail {
+    @media (max-width: 1180px) {
+      .workbench {
+        grid-template-columns: 1fr;
+        padding: 0;
+      }
+      .leftbar,
+      .rightbar,
+      .center {
         position: relative;
         height: auto;
-        border-right: 0;
-        border-bottom: 1px solid rgba(29, 28, 29, 0.14);
       }
-      .nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .grid { grid-template-columns: 1fr; }
-      .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .leftbar { border-right: 0; border-bottom: 2px solid var(--line-bright); }
+      .rightbar { border-left: 0; border-top: 2px solid var(--line-bright); }
     }
 
-    @media (max-width: 720px) {
-      main { padding: 1rem; }
-      main { padding: 0; }
-      .topbar { display: block; }
-      .stamp { margin-top: 0.8rem; text-align: left; }
-      .nav { grid-template-columns: 1fr 1fr; }
-      .metrics,
+    @media (max-width: 780px) {
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid,
-      .agent-grid,
-      .mini-metrics { grid-template-columns: 1fr; }
+      .two-col,
+      .agent-matrix { grid-template-columns: 1fr; }
       .row { grid-template-columns: 1fr; }
+      .row-right,
+      .tag { white-space: normal; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="rail">
-      <div class="brand">
-        <small>Shuheng local console</small>
-        <strong>枢衡驾驶舱</strong>
-      </div>
-      <nav class="nav" id="nav"></nav>
-      <div class="rail-note">
-        本页面只读取共享治理数据，不执行任务、不审批、不写长期记忆。重操作继续回到 TUI。
-      </div>
+  <div class="workbench">
+    <aside class="leftbar">
+      <div class="brand"><strong>枢衡驾驶舱</strong><span>read-only</span></div>
+      <section class="block" id="left-current"></section>
+      <section class="block" id="left-history"></section>
+      <section class="status-panel" id="left-model"></section>
+      <section class="block" id="left-token"></section>
     </aside>
-    <main>
-      <div class="topbar">
-        <div>
-          <h1>主控台</h1>
-          <div class="subhead">一个强主控 Orchestrator、受限子代理、共享任务账本、定时汇报和审批门的可视化读面。</div>
-        </div>
-        <div class="stamp">
-          <div id="updated">loading</div>
-          <div id="mode">read-only</div>
-        </div>
-      </div>
-      <section class="stage" id="overview-card"></section>
+    <main class="center">
+      <div class="topline"><span id="topline">当前时间: loading | 会话ID: web:gui | 当前轮次: -</span></div>
+      <div class="view-switcher" id="nav"></div>
+      <section class="hero-card" id="overview-card"></section>
       <section class="view active" id="view-overview"></section>
       <section class="view" id="view-agents"></section>
       <section class="view" id="view-reports"></section>
       <section class="view" id="view-governance"></section>
     </main>
+    <aside class="rightbar">
+      <div class="brand"><strong>AGENTS</strong><span id="agent-count">0</span></div>
+      <section class="block" id="right-agents"></section>
+      <section class="block" id="right-tasks"></section>
+    </aside>
   </div>
   <script>
-    const app = { data: null, view: "overview" };
+    const app = {data: null, view: "overview"};
 
     function node(tag, className, text) {
       const item = document.createElement(tag);
@@ -8612,6 +8833,17 @@ def web_console_html() -> str:
       return node("div", "empty", label || "暂无可展示内容");
     }
 
+    function blockTitle(title, count) {
+      return node("div", "block-title", count === undefined ? title : `${title} (${count})`);
+    }
+
+    function kv(label, value) {
+      const line = node("div", "kv-line");
+      line.append(node("span", "", label));
+      line.append(node("span", "", value || "-"));
+      return line;
+    }
+
     function metric(item) {
       const box = node("div", "metric " + (item.tone || ""));
       box.append(node("span", "", item.label || ""));
@@ -8619,34 +8851,35 @@ def web_console_html() -> str:
       return box;
     }
 
-    function miniMetric(item) {
-      const box = node("div", "mini");
-      box.append(node("span", "", item.label || ""));
-      box.append(node("strong", "", item.value || "0"));
-      return box;
-    }
-
-    function titleBlock(title, note) {
-      const wrap = node("div", "section-title");
-      const left = node("div");
-      left.append(node("h2", "", title));
-      if (note) left.append(node("p", "", note));
-      wrap.append(left);
-      return wrap;
-    }
-
-    function pill(text) {
-      return node("span", "pill", text || "-");
-    }
-
     function row(title, meta, tag) {
       const item = node("div", "row");
       const left = node("div");
       left.append(node("strong", "", title || "未命名"));
-      if (meta) left.append(node("span", "", meta));
+      if (meta) left.append(node("em", "", meta));
       item.append(left);
-      item.append(pill(tag || "-"));
+      item.append(node("span", "tag", tag || "-"));
       return item;
+    }
+
+    function panel(title, note, rowsData, mapper) {
+      const wrap = node("section", "term-panel");
+      const head = node("div", "term-head");
+      head.append(node("b", "", title));
+      if (note) head.append(node("span", "", note));
+      wrap.append(head);
+      const table = node("div", "table");
+      if (!rowsData || !rowsData.length) {
+        table.append(empty("暂无记录"));
+      } else {
+        rowsData.forEach(item => table.append(mapper(item)));
+      }
+      wrap.append(table);
+      return wrap;
+    }
+
+    function setView(view) {
+      app.view = view || "overview";
+      renderAll();
     }
 
     function renderNav() {
@@ -8661,114 +8894,194 @@ def web_console_html() -> str:
       for (const item of items) {
         const button = node("button", app.view === item.key ? "active" : "", item.label);
         button.type = "button";
-        button.addEventListener("click", () => {
-          app.view = item.key;
-          renderAll();
-        });
+        button.addEventListener("click", () => setView(item.key));
         nav.append(button);
       }
+    }
+
+    function renderLeft(data) {
+      const sidebar = data.sidebar || {};
+      const current = sidebar.current_sessions || [];
+      const currentWrap = node("div");
+      currentWrap.append(blockTitle("CURRENT SESSIONS", current.length));
+      current.forEach(item => {
+        const button = node("button", "session-button" + (app.view === item.target ? " active" : ""));
+        button.type = "button";
+        button.addEventListener("click", () => setView(item.target || "overview"));
+        button.append(node("b", "", (item.target === "reports" ? "◆ " : item.active ? "◆ " : "● ") + (item.title || "会话")));
+        button.append(node("span", "", item.status || ""));
+        currentWrap.append(button);
+      });
+      replace("left-current", [currentWrap]);
+
+      const history = sidebar.history || {};
+      const historyWrap = node("div");
+      historyWrap.append(blockTitle("SESSIONS", history.count || 0));
+      const groups = history.groups || [];
+      if (!groups.length) {
+        historyWrap.append(empty("没有历史会话"));
+      } else {
+        groups.forEach(group => {
+          const detail = node("details", "history-group");
+          detail.open = true;
+          detail.append(node("summary", "", `▾ ${group.label || "未分类"} (${group.count || 0})`));
+          (group.items || []).forEach((item, index) => {
+            const line = node("div", "history-row");
+            line.append(node("strong", "", `S${String(index + 1).padStart(2, "0")} ${item.title || "历史会话"}`));
+            const right = [item.age || "", item.rounds ? `${item.rounds}` : ""].filter(Boolean).join(" ");
+            line.append(node("small", "", right));
+            detail.append(line);
+          });
+          historyWrap.append(detail);
+        });
+      }
+      replace("left-history", [historyWrap]);
+
+      const model = sidebar.model || {};
+      const modelWrap = node("div");
+      modelWrap.append(blockTitle("CURRENT MODEL"));
+      modelWrap.append(kv("provider", model.provider || "-"));
+      modelWrap.append(kv("model", model.model || "-"));
+      modelWrap.append(kv("base", model.base || "-"));
+      modelWrap.append(kv("scope", model.scope || "-"));
+      replace("left-model", [modelWrap]);
+
+      const tokens = sidebar.tokens || {};
+      const tokenWrap = node("div");
+      tokenWrap.append(blockTitle("TOKEN USAGE"));
+      tokenWrap.append(kv("sessions", tokens.sessions || "0"));
+      tokenWrap.append(kv("total", tokens.total || "0"));
+      tokenWrap.append(kv("in/out", `${tokens.input || "0"} / ${tokens.output || "0"}`));
+      tokenWrap.append(kv("cache", tokens.cache || "0"));
+      replace("left-token", [tokenWrap]);
+    }
+
+    function renderRight(data) {
+      const agents = data.agents || [];
+      document.getElementById("agent-count").textContent = String(agents.length + 1);
+      const agentWrap = node("div");
+      agentWrap.append(blockTitle("主 agent"));
+      const main = node("div", "history-row");
+      main.append(node("strong", "", "◆ 主 agent"));
+      main.append(node("small", "", (data.overview && data.overview.metrics && data.overview.metrics[0] && data.overview.metrics[0].value) || "idle"));
+      agentWrap.append(main);
+      agentWrap.append(blockTitle("持久", agents.filter(agent => agent.lifecycle !== "temporary").length));
+      agents.filter(agent => agent.lifecycle !== "temporary").slice(0, 16).forEach(agent => {
+        const line = node("div", "history-row");
+        line.append(node("strong", "", `○ ${agent.name || "子代理"}`));
+        line.append(node("small", "", agent.status || "idle"));
+        agentWrap.append(line);
+      });
+      const temporary = agents.filter(agent => agent.lifecycle === "temporary");
+      agentWrap.append(blockTitle("临时会话", temporary.length));
+      if (!temporary.length) {
+        const none = node("div", "history-row");
+        none.append(node("strong", "", "○ 暂无"));
+        none.append(node("small", "", ""));
+        agentWrap.append(none);
+      }
+      replace("right-agents", [agentWrap]);
+
+      const open = (data.tasks && data.tasks.open) || [];
+      const taskWrap = node("div");
+      taskWrap.append(blockTitle("TASKS", open.length));
+      if (!open.length) {
+        taskWrap.append(empty("暂无任务"));
+      } else {
+        open.slice(0, 10).forEach(item => {
+          const line = node("div", "history-row");
+          line.append(node("strong", "", `○ ${item.title || "任务"}`));
+          line.append(node("small", "", item.status || ""));
+          taskWrap.append(line);
+        });
+      }
+      replace("right-tasks", [taskWrap]);
+    }
+
+    function renderTopline(data) {
+      const now = new Date().toLocaleString("zh-CN", {hour12: false});
+      const totals = data.totals || {};
+      const title = app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : "home:main";
+      document.getElementById("topline").textContent = `当前时间: ${now} | 会话ID: ${title} | 当前轮次: ${totals.reports || 0}/${totals.open_tasks || 0}`;
     }
 
     function renderOverviewCard(data) {
       const overview = data.overview || {};
       const card = document.getElementById("overview-card");
       card.replaceChildren();
-      const line = node("div", "status-line");
-      const left = node("div");
-      left.append(node("h2", "", overview.title || "主控运行概览"));
-      left.append(node("p", "summary", overview.summary || "等待治理数据。"));
-      line.append(left);
-      line.append(pill(data.mode || "read_only"));
-      card.append(line);
-      const metrics = node("div", "metrics");
-      for (const item of overview.metrics || []) metrics.append(metric(item));
+      card.append(node("h1", "", overview.title || "主控运行概览"));
+      card.append(node("p", "", overview.summary || "等待治理数据。"));
+      const metrics = node("div", "metric-grid");
+      (overview.metrics || []).forEach(item => metrics.append(metric(item)));
       card.append(metrics);
       const details = node("div", "detail-grid");
-      for (const item of overview.details || []) {
-        const detail = node("div", "detail");
-        detail.append(node("span", "", item.label || ""));
-        detail.append(node("strong", "", item.value || "-"));
-        details.append(detail);
-      }
+      (overview.details || []).forEach(item => details.append(kv(item.label || "", item.value || "-")));
       card.append(details);
     }
 
-    function renderRowsPanel(title, note, rowsData, mapper) {
-      const panel = node("section", "panel");
-      panel.append(titleBlock(title, note));
-      const rows = node("div", "rows");
-      if (!rowsData || !rowsData.length) {
-        rows.append(empty("暂无记录"));
-      } else {
-        rowsData.forEach(item => rows.append(mapper(item)));
-      }
-      panel.append(rows);
-      return panel;
-    }
-
-    function renderOverview() {
-      const data = app.data || {};
+    function renderOverview(data) {
       const tasks = (data.tasks && data.tasks.open) || [];
       const recent = (data.tasks && data.tasks.recent) || [];
       const schedules = data.schedules || [];
       const reports = data.scheduled_reports || [];
-      const grid = node("div", "grid");
-      grid.append(renderRowsPanel("当前待办", "只显示未终态任务的可读标题", tasks, item =>
-        row(item.title, (item.owner || "主 agent") + " · " + (item.summary || item.time || ""), item.status)
+      const grid = node("div", "two-col");
+      grid.append(panel("当前待办", "未终态任务", tasks, item =>
+        row(item.title, `${item.owner || "主 agent"} · ${item.summary || item.time || ""}`, item.status)
       ));
-      const side = node("div", "rows");
-      side.append(renderRowsPanel("最近定时任务", "任务定义，不混入历史运行记录", schedules.slice(0, 5), item =>
-        row(item.name, (item.target || "主 agent") + " · " + (item.trigger || "-"), item.status)
+      const side = node("div");
+      side.append(panel("最近定时任务", "任务定义", schedules.slice(0, 8), item =>
+        row(item.name, `${item.target || "主 agent"} · ${item.trigger || "-"}`, item.status)
       ));
-      side.append(renderRowsPanel("最近完成的汇报", "来自子代理最终回复正文", reports.slice(0, 3), item =>
-        row(item.schedule, (item.agent || "子代理") + " · " + (item.summary || ""), item.status)
+      side.append(panel("最近任务", "共享任务账本", recent.slice(0, 6), item =>
+        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status)
+      ));
+      side.append(panel("最近汇报", "子代理最终回复", reports.slice(0, 4), item =>
+        row(item.schedule, `${item.agent || "子代理"} · ${item.summary || ""}`, item.status)
       ));
       grid.append(side);
       replace("view-overview", [grid]);
     }
 
-    function renderAgents() {
-      const wrap = node("div", "agent-grid");
-      const agents = (app.data && app.data.agents) || [];
+    function renderAgents(data) {
+      const agents = data.agents || [];
       if (!agents.length) {
         replace("view-agents", [empty("还没有持久子代理")]);
         return;
       }
-      for (const agent of agents) {
+      const wrap = node("div", "agent-matrix");
+      agents.forEach(agent => {
         const card = node("article", "agent-card");
         card.append(node("h3", "", agent.name || "子代理"));
-        const meta = node("div", "agent-meta");
-        meta.append(pill(agent.role || "specialist"));
-        meta.append(pill(agent.status || "idle"));
-        meta.append(pill(agent.model || "继承主控默认模型"));
-        for (const skill of agent.skills || []) meta.append(pill(skill));
-        card.append(meta);
-        card.append(node("p", "muted", agent.status_narrative || agent.profile || "暂无状态叙述。"));
-        if (agent.latest_report && agent.latest_report.summary) {
-          card.append(node("p", "muted", "最近汇报：" + agent.latest_report.summary));
-        }
-        const minis = node("div", "mini-metrics");
-        for (const item of agent.metrics || []) minis.append(miniMetric(item));
+        const skills = (agent.skills || []).slice(0, 4).join(" · ");
+        card.append(node("div", "agent-meta", `${agent.role || "specialist"} · ${agent.status || "idle"} · ${agent.model || "继承主控默认模型"}`));
+        if (skills) card.append(node("div", "agent-meta", skills));
+        card.append(node("p", "", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        const minis = node("div", "mini-grid");
+        (agent.metrics || []).forEach(item => {
+          const mini = node("div");
+          mini.append(node("span", "", item.label || ""));
+          mini.append(node("strong", "", item.value || "0"));
+          minis.append(mini);
+        });
         card.append(minis);
         wrap.append(card);
-      }
+      });
       replace("view-agents", [wrap]);
     }
 
-    function renderReports() {
-      const list = node("div", "report-list");
-      const reports = (app.data && app.data.scheduled_reports) || [];
+    function renderReports(data) {
+      const reports = data.scheduled_reports || [];
       if (!reports.length) {
         replace("view-reports", [empty("还没有可读的子代理定时汇报")]);
         return;
       }
+      const list = node("div");
       reports.forEach((report, index) => {
-        const card = node("details", "report-card");
+        const card = node("details", "report");
         if (index < 2) card.open = true;
         const summary = node("summary");
-        summary.append(node("h3", "", report.schedule || "定时任务"));
-        summary.append(node("p", "muted", (report.agent || "子代理") + " · " + (report.status || "-") + " · " + (report.time || "")));
-        summary.append(node("p", "muted", report.summary || ""));
+        summary.append(node("b", "", report.schedule || "定时任务"));
+        summary.append(node("span", "", `${report.agent || "子代理"} · ${report.status || "-"} · ${report.time || ""}`));
         card.append(summary);
         card.append(node("div", "report-body", report.body || report.summary || "暂无正文"));
         list.append(card);
@@ -8776,40 +9089,40 @@ def web_console_html() -> str:
       replace("view-reports", [list]);
     }
 
-    function renderGovernance() {
-      const data = app.data || {};
-      const grid = node("div", "grid");
-      grid.append(renderRowsPanel("待审批", "默认隐藏审批编号，只展示人需要判断的摘要", data.approvals || [], item =>
-        row(item.summary, (item.target || "主 agent") + " · " + (item.time || ""), item.type)
+    function renderGovernance(data) {
+      const grid = node("div", "two-col");
+      grid.append(panel("待审批", "隐藏审批编号，只展示摘要", data.approvals || [], item =>
+        row(item.summary, `${item.target || "主 agent"} · ${item.time || ""}`, item.type)
       ));
-      const side = node("div", "rows");
-      side.append(renderRowsPanel("最近任务", "从共享任务账本读取", (data.tasks && data.tasks.recent) || [], item =>
-        row(item.title, (item.owner || "主 agent") + " · " + (item.time || ""), item.status)
+      const side = node("div");
+      side.append(panel("产物架", "类型、来源、大小", data.artifacts || [], item =>
+        row(item.source, `size ${item.size || "-"}`, item.type)
       ));
-      side.append(renderRowsPanel("产物架", "只显示类型和来源，不在默认界面倾倒 URI", data.artifacts || [], item =>
-        row(item.source, "size " + (item.size || "-"), item.type)
+      side.append(panel("最近任务", "状态回看", (data.tasks && data.tasks.recent) || [], item =>
+        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status)
       ));
       grid.append(side);
       replace("view-governance", [grid]);
     }
 
-    function renderViews() {
-      for (const id of ["overview", "agents", "reports", "governance"]) {
-        document.getElementById("view-" + id).classList.toggle("active", app.view === id);
-      }
-      renderOverview();
-      renderAgents();
-      renderReports();
-      renderGovernance();
+    function renderViews(data) {
+      ["overview", "agents", "reports", "governance"].forEach(key => {
+        document.getElementById("view-" + key).classList.toggle("active", app.view === key);
+      });
+      renderOverview(data);
+      renderAgents(data);
+      renderReports(data);
+      renderGovernance(data);
     }
 
     function renderAll() {
       if (!app.data) return;
-      document.getElementById("updated").textContent = "updated " + (app.data.updated_at || "-");
-      document.getElementById("mode").textContent = app.data.mode || "read_only";
+      renderTopline(app.data);
       renderNav();
+      renderLeft(app.data);
+      renderRight(app.data);
       renderOverviewCard(app.data);
-      renderViews();
+      renderViews(app.data);
     }
 
     async function refresh() {

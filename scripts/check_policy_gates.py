@@ -3860,12 +3860,16 @@ def run_gateway_server_checks() -> None:
         snapshot = get_json(f"{base}/gui/snapshot")
         assert snapshot["schema_version"] == "shuheng.web_console.snapshot.v1", snapshot
         assert snapshot["mode"] == "read_only", snapshot
-        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts"} <= set(snapshot), snapshot
+        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts", "sidebar"} <= set(snapshot), snapshot
         assert snapshot["overview"]["metrics"], snapshot
+        sidebar = snapshot["sidebar"]
+        assert isinstance(sidebar, dict), snapshot
+        assert {"current_sessions", "history", "model", "tokens"} <= set(sidebar), sidebar
         snapshot_text = json.dumps(snapshot, ensure_ascii=False)
         assert "artifact://" not in snapshot_text and "appr_" not in snapshot_text, snapshot_text
         assert "APPROVAL_REQUIRED" not in snapshot_text and "approval=" not in snapshot_text, snapshot_text
         assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", snapshot_text) is None, snapshot_text
+        assert re.search(r"model_responses_[^\"\\s]+\\.txt", snapshot_text) is None, snapshot_text
         assert "task_dashboard_agent_run_record" not in snapshot_text, snapshot_text
         assert a.jsonl_file_signature(a.AGENT_GATEWAY_PATH) == gateway_sig_before
         assert a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH) == task_sig_before

@@ -369,6 +369,7 @@ S01 修复左栏历史会话标题
   - `approvals`
   - `artifacts`
   - `model`
+  - `sidebar`
   - `totals`
   - `navigation`
 
@@ -381,12 +382,14 @@ S01 修复左栏历史会话标题
 - Scheduled-report cards must use the same cleaned scheduled-report body path as TUI home pages: completed child subagent replies from subagent result artifacts first, then task summary fallback, with OMP/LLM process markers and approval-only audit rows excluded.
 - Artifact rows in the default Web console show type, source title, and size-style metadata only. Raw artifact refs remain available through existing gateway/MCP/resource drill-down routes, not the default GUI.
 - Approval rows in the default Web console show approval type, target name, and human-readable summary only. Actual approval decisions remain in the TUI approval flow and existing approval APIs.
+- `sidebar` is display-only shell data for the Web console's TUI-like layout. It may include current-page entries, sanitized history titles/groups, current/default model summary, and aggregated token usage, but it must not expose normal-session paths, raw task ids, approval ids, or artifact URIs.
 
 ### 4. Validation & Error Matrix
 
 - `GET /gui` -> HTML with console shell and client fetch for `/gui/snapshot`.
 - `GET /dashboard` or `GET /console` -> same HTML alias as `/gui`.
 - `GET /gui/snapshot` with empty ledgers -> valid snapshot with empty arrays and zero counts.
+- `GET /gui/snapshot` -> `sidebar` contains `current_sessions`, `history`, `model`, and `tokens` objects derived from read-only state.
 - Persistent subagents exist -> snapshot `agents` contains readable name, role, status, default model or inherited-model text, scoped skill refs, status narrative, and compact metrics.
 - Scheduled report exists with process/thinking text in the artifact -> snapshot report body excludes process/thinking text and includes final reply text.
 - Approval-required or cancelled schedule audit rows exist -> they do not appear in `scheduled_reports`; they may appear only as normal task or approval summaries when applicable.
@@ -406,6 +409,7 @@ S01 修复左栏历史会话标题
 
 - `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
 - Tests must assert `/gui/snapshot` returns `shuheng.web_console.snapshot.v1`, `mode:"read_only"`, expected top-level sections, and populated overview metrics.
+- Tests must assert `/gui/snapshot.sidebar` has the expected read-only shell sections and still excludes raw session paths or internal ids.
 - Tests must assert `/gui` and `/gui/snapshot` do not change signatures for `gateway.json`, task ledger, approval registry, or artifact index.
 - Tests must assert snapshot/default text does not leak raw artifact URIs or approval ids and does not include known schedule-run audit task ids.
 - `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
