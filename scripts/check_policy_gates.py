@@ -3841,7 +3841,48 @@ def post_json(url: str, payload: dict) -> dict:
     return data
 
 
+def post_json_any_status(url: str, payload: dict) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        data = json.loads(exc.read().decode("utf-8"))
+        data["_http_status"] = exc.code
+    assert isinstance(data, dict), data
+    return data
+
+
 def run_gateway_server_checks() -> None:
+    state = a.web_console_state()
+    sample_approval_id = a.queue_approval(
+        approval_type="policy_approval_request",
+        summary="Web console approval sample",
+        payload={},
+        source="test:web_console",
+        target="orchestrator.main",
+        approval_required_for="web_console_sample",
+    )
+    sample_schedule_id = "sched_web_console_toggle"
+    schedule_create = a.apply_schedule_control(
+        state,
+        "schedule_create",
+        "",
+        "",
+        {
+            "schedule_id": sample_schedule_id,
+            "name": "Web Console Toggle",
+            "interval": "1h",
+            "execution": {"mode": "tui_action", "action": "beep"},
+        },
+        source="test:web_console",
+    )
+    assert "已登记定时任务" in str(schedule_create), schedule_create
     server = a.make_gateway_http_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -3852,19 +3893,22 @@ def run_gateway_server_checks() -> None:
         task_sig_before = a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH)
         approval_sig_before = a.jsonl_file_signature(a.AGENT_APPROVALS_PATH)
         artifact_sig_before = a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH)
+        schedule_sig_before = a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH)
         with urllib.request.urlopen(f"{base}/gui", timeout=5) as response:
             html = response.read().decode("utf-8")
         assert "Shuheng Console" in html and "枢衡驾驶舱" in html, html[:500]
         assert "/gui/snapshot" in html, html[:1000]
+        assert "/gui/action" in html, html[:1000]
         assert "artifact://" not in html and "appr_" not in html and "task_" not in html, html[:2000]
         snapshot = get_json(f"{base}/gui/snapshot")
         assert snapshot["schema_version"] == "shuheng.web_console.snapshot.v1", snapshot
         assert snapshot["mode"] == "read_only", snapshot
-        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts", "sidebar"} <= set(snapshot), snapshot
+        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts", "model", "actions", "sidebar"} <= set(snapshot), snapshot
         assert snapshot["overview"]["metrics"], snapshot
         sidebar = snapshot["sidebar"]
         assert isinstance(sidebar, dict), snapshot
         assert {"current_sessions", "history", "model", "tokens"} <= set(sidebar), sidebar
+        assert snapshot["actions"]["endpoint"] == "/gui/action", snapshot["actions"]
         snapshot_text = json.dumps(snapshot, ensure_ascii=False)
         assert "artifact://" not in snapshot_text and "appr_" not in snapshot_text, snapshot_text
         assert "APPROVAL_REQUIRED" not in snapshot_text and "approval=" not in snapshot_text, snapshot_text
@@ -3875,6 +3919,50 @@ def run_gateway_server_checks() -> None:
         assert a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH) == task_sig_before
         assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
         assert a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH) == artifact_sig_before
+        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
+        invalid_action = post_json_any_status(f"{base}/gui/action", {"action": "approval.approve"})
+        assert invalid_action["ok"] is False, invalid_action
+        assert invalid_action["_http_status"] == 400, invalid_action
+        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
+        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
+        unknown_ref = post_json_any_status(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "approval.approve",
+                "ui_ref": "approval:0000000000000000",
+            },
+        )
+        assert unknown_ref["ok"] is False, unknown_ref
+        assert unknown_ref["_http_status"] == 400, unknown_ref
+        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
+        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
+        approval_ref = next((row.get("ui_ref") for row in snapshot["approvals"] if "Web console approval sample" in row.get("summary", "")), "")
+        schedule_ref = next((row.get("ui_ref") for row in snapshot["schedules"] if row.get("name") == "Web Console Toggle"), "")
+        assert approval_ref and schedule_ref, snapshot
+        schedule_action = post_json(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "schedule.disable",
+                "ui_ref": schedule_ref,
+            },
+        )
+        assert schedule_action["ok"] is True, schedule_action
+        assert a.latest_schedule_records()[sample_schedule_id]["status"] == "disabled", a.latest_schedule_records()[sample_schedule_id]
+        approval_action = post_json(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "approval.reject",
+                "ui_ref": approval_ref,
+            },
+        )
+        assert approval_action["ok"] is True, approval_action
+        assert a.approval_latest_records()[sample_approval_id]["status"] == "rejected", a.approval_latest_records()[sample_approval_id]
+        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action}, ensure_ascii=False)
+        assert "artifact://" not in action_text and "appr_" not in action_text and "task_" not in action_text, action_text
+        assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", action_text) is None, action_text
         health = get_json(f"{base}/health")
         assert health["ok"] is True, health
         assert health["service"]["schema_version"] == "agentgateway.service.v1", health

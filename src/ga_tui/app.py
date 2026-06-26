@@ -7820,12 +7820,134 @@ class WebConsoleReadOnlyAgent:
         return "-"
 
 
-def web_console_state() -> State:
-    state = State(agent=WebConsoleReadOnlyAgent())
+WEB_CONSOLE_ACTION_REQUEST_SCHEMA = "shuheng.web_console.action_request.v1"
+WEB_CONSOLE_ACTION_RESPONSE_SCHEMA = "shuheng.web_console.action_response.v1"
+WEB_CONSOLE_REF_KINDS = {"agent", "approval", "artifact", "model", "schedule", "task"}
+WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS = 60 * 60 * 6
+
+
+def web_console_state(*, runtime_agent: bool = False) -> State:
+    agent = new_agent() if runtime_agent else WebConsoleReadOnlyAgent()
+    state = State(agent=agent)
+    if runtime_agent:
+        install_interaction_hook(state, state.agent)
+        bind_agent_token_session(state, state.agent)
     state.status = "idle"
     state.current_title = "main"
     load_subagents(state)
     return state
+
+
+def web_console_ref(kind: str, raw_id: Any) -> str:
+    kind = str(kind or "").strip().lower()
+    raw = str(raw_id or "").strip()
+    if kind not in WEB_CONSOLE_REF_KINDS or not raw:
+        return ""
+    digest = hashlib.sha256(f"shuheng.web_console.v1\0{kind}\0{raw}".encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"{kind}:{digest}"
+
+
+def web_console_model_rows() -> list[dict[str, str]]:
+    try:
+        entries, mixin, _preserved, _error = load_llm_config_entries()
+    except Exception:
+        return []
+    default_idx = default_entry_index(entries, mixin) if entries else -1
+    rows: list[dict[str, str]] = []
+    for idx, entry in enumerate(entries):
+        name = config_display_name(entry)
+        rows.append({
+            "ui_ref": web_console_ref("model", name),
+            "name": web_console_clean_visible(name, 100),
+            "provider": web_console_clean_visible(entry.cfg.get("name") or entry.cfg_type, 80),
+            "model": web_console_clean_visible(entry.cfg.get("model") or name, 100),
+            "base": web_console_clean_visible(provider_host_label(str(entry.cfg.get("apibase") or "")), 80),
+            "default": "true" if idx == default_idx else "false",
+        })
+    return rows
+
+
+def web_console_ref_map(state: Optional[State] = None) -> dict[str, tuple[str, str]]:
+    state = state or web_console_state()
+    refs: dict[str, tuple[str, str]] = {}
+
+    def add(kind: str, raw_id: Any) -> None:
+        raw = str(raw_id or "").strip()
+        ref = web_console_ref(kind, raw)
+        if ref:
+            refs[ref] = (kind, raw)
+
+    for task_id in latest_task_records():
+        add("task", task_id)
+    for approval_id in approval_latest_records():
+        add("approval", approval_id)
+    for schedule_id in latest_schedule_records():
+        add("schedule", schedule_id)
+    for artifact_id, row in artifact_index_latest().items():
+        add("artifact", row.get("uri") or artifact_id)
+    for sub in state.subagents.values():
+        add("agent", sub.agent_id)
+    try:
+        entries, _mixin, _preserved, _error = load_llm_config_entries()
+    except Exception:
+        entries = []
+    for entry in entries:
+        add("model", config_display_name(entry))
+    return refs
+
+
+def web_console_resolve_ref(refs: dict[str, tuple[str, str]], ui_ref: Any, expected_kind: str) -> tuple[bool, str, str]:
+    ref = str(ui_ref or "").strip()
+    if not ref:
+        return False, "", "缺少 ui_ref。"
+    resolved = refs.get(ref)
+    if resolved is None:
+        return False, "", "找不到这个界面引用，请刷新后重试。"
+    kind, raw = resolved
+    if expected_kind and kind != expected_kind:
+        return False, "", f"界面引用类型不匹配：需要 {expected_kind}。"
+    return True, raw, ""
+
+
+def web_console_background_work_exists(state: State) -> bool:
+    if state.status in {"running", "aborting", "restoring"} or state.active_task_id is not None:
+        return True
+    for sub in state.subagents.values():
+        if sub.status in {"running", "aborting"} or sub.active_task_id is not None:
+            return True
+        if sub.task_queue or sub.chat_queue:
+            return True
+    return False
+
+
+def web_console_pump_runtime_state(state: State) -> None:
+    deadline = time.monotonic() + WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS
+    idle_since = 0.0
+    try:
+        while time.monotonic() < deadline:
+            process_ui_queue(state)
+            active = web_console_background_work_exists(state)
+            if not active and state.ui_queue.empty():
+                if not idle_since:
+                    idle_since = time.monotonic()
+                if time.monotonic() - idle_since >= 0.5:
+                    return
+            else:
+                idle_since = 0.0
+            time.sleep(0.08)
+    finally:
+        state.running = False
+
+
+def web_console_start_runtime_pump_if_needed(state: State) -> None:
+    if not web_console_background_work_exists(state) and state.ui_queue.empty():
+        return
+    threading.Thread(
+        target=web_console_pump_runtime_state,
+        args=(state,),
+        daemon=True,
+        name="shuheng-web-console-runtime-pump",
+    ).start()
 
 
 def web_console_timestamp(row: dict[str, Any]) -> float:
@@ -7850,6 +7972,8 @@ def web_console_clean_visible(value: Any, limit: int = 320) -> str:
     text = re.sub(r"\bappr[_0-9][A-Za-z0-9_:-]+\b", "[approval]", text)
     text = re.sub(r"\bapproval=[^\s,;，；]+", "approval=[hidden]", text)
     text = re.sub(r"\btask_[A-Za-z0-9_:-]+\b", "[task]", text)
+    text = re.sub(r"\bschedrun_[A-Za-z0-9_:-]+\b", "[schedule-run]", text)
+    text = re.sub(r"\bsched_[A-Za-z0-9_:-]+\b", "[schedule]", text)
     text = re.sub(r"\bagent-\d+\b", "子代理", text)
     text = re.sub(r"\btmp-agent-[A-Za-z0-9_.:-]+\b", "临时代理", text)
     return truncate_cells(text, limit).strip()
@@ -7921,7 +8045,7 @@ def web_console_main_summary(
             {"label": "当前会话", "value": state.current_title or "main"},
             {"label": "运行模型", "value": model_name or "-"},
             {"label": "调度来源", "value": "shared governance ledgers"},
-            {"label": "页面模式", "value": "local read-only web console"},
+            {"label": "页面模式", "value": "local console + governed actions"},
         ],
         "recent_workload": len(tasks),
     }
@@ -7938,6 +8062,7 @@ def web_console_task_rows(state: State, rows: list[dict[str, Any]], limit: int =
             raw_summary = row.get("objective") or "等待人工审批"
         summary = web_console_clean_visible(raw_summary, 180) or ("等待人工审批" if raw_status.lower() == "approval_required" else "")
         result.append({
+            "ui_ref": web_console_ref("task", row.get("task_id")),
             "title": web_console_clean_visible(task_display_title(row, state), 120) or "未命名任务",
             "status": web_console_status_label(raw_status),
             "owner": web_console_agent_name(state, owner_id, "主 agent"),
@@ -7957,6 +8082,7 @@ def web_console_schedule_rows(state: State, schedule_registry: dict[str, Any], l
         if not target:
             target = schedule_execution_target(execution)
         rows.append({
+            "ui_ref": web_console_ref("schedule", row.get("schedule_id") or row.get("id")),
             "name": web_console_clean_visible(row.get("name") or row.get("schedule_id") or "定时任务", 100),
             "status": web_console_status_label(row.get("status") or "enabled"),
             "trigger": web_console_clean_visible(row.get("trigger") or row.get("cron") or row.get("interval") or row.get("at") or "-", 100),
@@ -7972,6 +8098,7 @@ def web_console_approval_rows(state: State, approvals: list[dict[str, Any]], lim
         target = str(row.get("target") or payload.get("subagent_id") or payload.get("target_subagent") or "")
         summary = web_console_clean_visible(row.get("summary") or row.get("approval_required_for") or "待审批", 180)
         rows.append({
+            "ui_ref": web_console_ref("approval", row.get("approval_id")),
             "type": web_console_clean_visible(row.get("type") or "approval", 80),
             "summary": summary or "等待人工审批",
             "target": web_console_agent_name(state, target, "主 agent"),
@@ -7987,6 +8114,7 @@ def web_console_artifact_rows(state: State, artifacts: list[dict[str, Any]], tas
         source_task_id = str(row.get("source_task_id") or "")
         source_task = tasks.get(source_task_id, {})
         rows.append({
+            "ui_ref": web_console_ref("artifact", row.get("uri") or row.get("artifact_id")),
             "type": web_console_clean_visible(row.get("type") or "artifact", 80),
             "source": web_console_clean_visible(task_display_title(source_task, None) if source_task else "治理产物", 120),
             "size": str(row.get("size_bytes") or row.get("size") or "-"),
@@ -8025,6 +8153,7 @@ def web_console_agent_rows(state: State) -> list[dict[str, Any]]:
         schedule_rows = agent_schedule_rows(sub.agent_id, limit=20)
         approval_rows = agent_approval_rows(state, sub.agent_id, limit=20)
         rows.append({
+            "ui_ref": web_console_ref("agent", sub.agent_id),
             "name": sub.name,
             "role": normalized_subagent_role(sub.role),
             "status": web_console_status_label(sub.status),
@@ -8193,6 +8322,7 @@ def web_console_snapshot() -> dict[str, Any]:
             "reports": "schedule runs + task ledger + subagent result artifacts",
             "approvals": "approval registry",
             "artifacts": "artifact index",
+            "actions": "POST /gui/action governed dispatcher",
         },
         "overview": web_console_main_summary(
             state,
@@ -8215,6 +8345,36 @@ def web_console_snapshot() -> dict[str, Any]:
             "current": model_registry.get("current") if isinstance(model_registry.get("current"), dict) else {},
             "model_count": int(model_registry.get("model_count") or 0),
             "capabilities": model_registry.get("capabilities") if isinstance(model_registry.get("capabilities"), dict) else {},
+            "entries": web_console_model_rows(),
+        },
+        "actions": {
+            "schema_version": WEB_CONSOLE_ACTION_REQUEST_SCHEMA,
+            "endpoint": "/gui/action",
+            "supported": [
+                "refresh_snapshot",
+                "main.prompt",
+                "agent.create",
+                "agent.task",
+                "agent.chat",
+                "agent.set_model",
+                "agent.set_skills",
+                "agent.stop",
+                "agent.delete",
+                "approval.approve",
+                "approval.reject",
+                "schedule.create",
+                "schedule.update",
+                "schedule.enable",
+                "schedule.disable",
+                "schedule.delete",
+                "schedule.run",
+                "scheduler.tick",
+                "task.cancel",
+                "task.fail",
+                "task.retry",
+                "task.release_lock",
+                "model.set_default",
+            ],
         },
         "sidebar": sidebar,
         "totals": {
@@ -8233,6 +8393,193 @@ def web_console_snapshot() -> dict[str, Any]:
             {"key": "governance", "label": "治理队列"},
         ],
     }
+
+
+def web_console_action_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("payload")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def web_console_action_message(text: Any) -> str:
+    return web_console_clean_visible(text, 900) or "动作已执行。"
+
+
+def web_console_action_response(
+    *,
+    action: str,
+    ok: bool,
+    message: str,
+    status: int = 200,
+    state: Optional[State] = None,
+    include_snapshot: bool = True,
+) -> tuple[dict[str, Any], int]:
+    if state is not None:
+        web_console_start_runtime_pump_if_needed(state)
+    response: dict[str, Any] = {
+        "schema_version": WEB_CONSOLE_ACTION_RESPONSE_SCHEMA,
+        "ok": bool(ok),
+        "action": str(action or ""),
+        "message": web_console_action_message(message),
+    }
+    if include_snapshot:
+        response["snapshot"] = web_console_snapshot()
+    return response, status
+
+
+def web_console_action_error(action: str, message: str, status: int = 400) -> tuple[dict[str, Any], int]:
+    return web_console_action_response(action=action, ok=False, message=message, status=status, include_snapshot=False)
+
+
+def web_console_model_name_from_payload(action_data: dict[str, Any], refs: dict[str, tuple[str, str]]) -> tuple[bool, str, str]:
+    model_name = str(action_data.get("model_name") or action_data.get("model") or "").strip()
+    if model_name:
+        return True, model_name, ""
+    model_ref = str(action_data.get("model_ref") or action_data.get("model_ui_ref") or "").strip()
+    if model_ref:
+        return web_console_resolve_ref(refs, model_ref, "model")
+    return True, "", ""
+
+
+def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    action = str(payload.get("action") or "").strip().lower().replace("_", ".")
+    if payload.get("schema_version") != WEB_CONSOLE_ACTION_REQUEST_SCHEMA:
+        return web_console_action_error(action, "无效的 Web Console action schema。")
+    if not action:
+        return web_console_action_error(action, "缺少 action。")
+
+    action_data = web_console_action_payload(payload)
+    state = web_console_state()
+    refs = web_console_ref_map(state)
+    ui_ref = str(payload.get("ui_ref") or payload.get("target") or action_data.get("ui_ref") or action_data.get("target") or "").strip()
+
+    if action == "refresh.snapshot":
+        action = "refresh_snapshot"
+    if action == "refresh_snapshot":
+        return web_console_action_response(action=action, ok=True, message="已刷新快照。", state=state)
+
+    if action == "main.prompt":
+        prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
+        if not prompt:
+            return web_console_action_error(action, "缺少主 agent 任务内容。")
+        state = web_console_state(runtime_agent=True)
+        ok = start_main_agent_task(
+            state,
+            prompt,
+            source="web_console",
+            visible_user_text=prompt,
+            remember_user=True,
+            clear_history=False,
+        )
+        return web_console_action_response(
+            action=action,
+            ok=ok,
+            message="已启动主 agent 任务。" if ok else (state.last_error or "主 agent 任务启动失败。"),
+            state=state,
+        )
+
+    if action == "agent.create":
+        control = dict(action_data)
+        result = apply_subagent_control(state, "agent_create", "", "", control, source="web_console")
+        return web_console_action_response(action=action, ok=bool(result and "缺少" not in result), message=result or "agent.create 未执行。", state=state)
+
+    if action in {"agent.task", "agent.chat", "agent.set.model", "agent.set.skills", "agent.stop", "agent.delete"}:
+        ok_ref, agent_id, error = web_console_resolve_ref(refs, ui_ref, "agent")
+        if not ok_ref:
+            return web_console_action_error(action, error)
+        sub = resolve_subagent(state, agent_id)
+        if sub is None:
+            return web_console_action_error(action, "找不到子 agent。", status=404)
+        if action == "agent.task":
+            prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
+            if not prompt:
+                return web_console_action_error(action, "缺少子 agent 任务内容。")
+            result = start_subagent_task(state, sub, prompt, source="web_console", task_title=str(action_data.get("title") or ""))
+            return web_console_action_response(action=action, ok=not result.startswith("子 agent 输入为空"), message=result, state=state)
+        if action == "agent.chat":
+            prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
+            if not prompt:
+                return web_console_action_error(action, "缺少子 agent 聊天内容。")
+            result = start_subagent_chat(state, sub, prompt, source="web_console")
+            return web_console_action_response(action=action, ok=not result.endswith("输入为空。"), message=result, state=state)
+        if action == "agent.set.model":
+            ok_model, model_name, model_error = web_console_model_name_from_payload(action_data, refs)
+            if not ok_model:
+                return web_console_action_error(action, model_error)
+            ok, result = set_subagent_default_model(state, sub, model_name or "inherit")
+            return web_console_action_response(action=action, ok=ok, message=result, state=state)
+        if action == "agent.set.skills":
+            op = str(action_data.get("operation") or action_data.get("mode") or "add").strip().lower().replace("-", "_")
+            refs_value = action_data.get("skill_refs", action_data.get("skills", action_data.get("skill", "")))
+            if op in {"clear", "reset"}:
+                ok, result = set_subagent_skill_refs(state, sub, [], mode="clear")
+                return web_console_action_response(action=action, ok=ok, message=result, state=state)
+            if not normalize_subagent_skill_refs(refs_value):
+                return web_console_action_error(action, "缺少 skill ref。")
+            mode = "remove" if op in {"remove", "rm", "delete", "del"} else ("replace" if op in {"set", "replace"} else "add")
+            ok, result = set_subagent_skill_refs(state, sub, refs_value, mode=mode)
+            return web_console_action_response(action=action, ok=ok, message=result, state=state)
+        control_action = "subagent_stop" if action == "agent.stop" else "subagent_delete"
+        result = apply_subagent_control(state, control_action, agent_id, "", {}, source="web_console")
+        return web_console_action_response(action=action, ok=bool(result and not result.startswith("找不到")), message=result or "agent action 未执行。", state=state)
+
+    if action in {"approval.approve", "approval.reject"}:
+        ok_ref, approval_id, error = web_console_resolve_ref(refs, ui_ref, "approval")
+        if not ok_ref:
+            return web_console_action_error(action, error)
+        result = decide_approval(state, approval_id, action == "approval.approve")
+        return web_console_action_response(action=action, ok=not result.startswith("找不到"), message=result, state=state)
+
+    if action in {"schedule.create", "schedule.update", "schedule.enable", "schedule.disable", "schedule.delete", "schedule.run"}:
+        control = dict(action_data)
+        schedule_id = ""
+        if action != "schedule.create":
+            ok_ref, schedule_id, error = web_console_resolve_ref(refs, ui_ref, "schedule")
+            if not ok_ref:
+                return web_console_action_error(action, error)
+        if action == "schedule.run":
+            result = scheduler_tick(state, source="manual:web_console", target_schedule_id=schedule_id, force=True, record_skips=True)
+            return web_console_action_response(action=action, ok=True, message=format_scheduler_tick_result(result), state=state)
+        mapped_action = action.replace(".", "_")
+        if schedule_id:
+            control.setdefault("schedule_id", schedule_id)
+        result = apply_schedule_control(state, mapped_action, schedule_id, "", control, source="web_console")
+        ok = bool(result and not str(result).startswith(("找不到", "缺少")))
+        return web_console_action_response(action=action, ok=ok, message=result or "schedule action 未执行。", state=state)
+
+    if action == "scheduler.tick":
+        result = scheduler_tick(state, source="manual:web_console_tick", record_skips=True)
+        return web_console_action_response(action=action, ok=True, message=format_scheduler_tick_result(result), state=state)
+
+    if action in {"task.cancel", "task.fail", "task.retry", "task.release.lock"}:
+        ok_ref, task_id, error = web_console_resolve_ref(refs, ui_ref, "task")
+        if not ok_ref:
+            return web_console_action_error(action, error)
+        recovery_action = {
+            "task.cancel": "cancelled",
+            "task.fail": "failed",
+            "task.retry": "retry",
+            "task.release.lock": "release_lock",
+        }[action]
+        result = recover_task_action(state, task_id, recovery_action)
+        return web_console_action_response(action=action, ok=not result.startswith("找不到"), message=result, state=state)
+
+    if action == "model.set.default":
+        ok_model, model_name, model_error = web_console_model_name_from_payload(action_data, refs)
+        if not ok_model:
+            return web_console_action_error(action, model_error)
+        entries, mixin, preserved, error = load_llm_config_entries()
+        if error:
+            return web_console_action_error(action, error)
+        idx = entry_index_by_name(entries, model_name)
+        if idx < 0:
+            return web_console_action_error(action, f"找不到模型配置：{model_name}")
+        ok, result = save_default_model(entries, mixin, preserved, idx)
+        if ok:
+            remember_recent_model_name(model_name, entries)
+            result = f"已设置全局默认模型：{model_name}"
+        return web_console_action_response(action=action, ok=ok, message=result, state=state)
+
+    return web_console_action_error(action, f"不支持的 Web Console 动作：{action}", status=404)
 
 
 def web_console_html() -> str:
@@ -8277,7 +8624,7 @@ def web_console_html() -> str:
       letter-spacing: 0.01em;
     }
 
-    button { font: inherit; }
+    button, select { font: inherit; }
 
     .workbench {
       display: grid;
@@ -8510,6 +8857,14 @@ def web_console_html() -> str:
       color: var(--green);
     }
 
+    .action-status {
+      min-height: 1.5rem;
+      padding: 0.32rem 0;
+      color: var(--cyan);
+      font-size: 0.82rem;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
     .hero-card {
       margin: 0.9rem 0 0;
       padding: 0.9rem 1.05rem;
@@ -8659,10 +9014,56 @@ def web_console_html() -> str:
       font-size: 0.82rem;
     }
 
+    .row-side {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+
     .tag {
       color: var(--cyan);
       white-space: nowrap;
       font-size: 0.83rem;
+    }
+
+    .row-actions,
+    .agent-actions,
+    .inline-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.34rem;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .row-actions { justify-content: flex-end; }
+
+    .action-btn {
+      border: 1px solid var(--line-soft);
+      background: rgba(124, 233, 235, 0.04);
+      color: var(--cyan);
+      cursor: pointer;
+      min-height: 1.35rem;
+      padding: 0.08rem 0.42rem;
+      font-size: 0.74rem;
+    }
+
+    .action-btn:hover {
+      color: #f4fafc;
+      border-color: var(--line-bright);
+      background: rgba(124, 233, 235, 0.13);
+    }
+
+    .inline-select {
+      width: 100%;
+      min-height: 1.55rem;
+      border: 1px solid var(--line-soft);
+      background: var(--panel-soft);
+      color: var(--text);
+      padding: 0.1rem 0.28rem;
+      margin-top: 0.3rem;
     }
 
     .agent-matrix {
@@ -8696,6 +9097,10 @@ def web_console_html() -> str:
       color: var(--text);
       line-height: 1.48;
       font-size: 0.86rem;
+    }
+
+    .agent-actions {
+      margin-top: 0.55rem;
     }
 
     .mini-grid {
@@ -8785,6 +9190,8 @@ def web_console_html() -> str:
       .two-col,
       .agent-matrix { grid-template-columns: 1fr; }
       .row { grid-template-columns: 1fr; }
+      .row-side,
+      .row-actions { justify-content: flex-start; }
       .row-right,
       .tag { white-space: normal; }
     }
@@ -8793,7 +9200,7 @@ def web_console_html() -> str:
 <body>
   <div class="workbench">
     <aside class="leftbar">
-      <div class="brand"><strong>枢衡驾驶舱</strong><span>read-only</span></div>
+      <div class="brand"><strong>枢衡驾驶舱</strong><span>governed</span></div>
       <section class="block" id="left-current"></section>
       <section class="block" id="left-history"></section>
       <section class="status-panel" id="left-model"></section>
@@ -8802,6 +9209,7 @@ def web_console_html() -> str:
     <main class="center">
       <div class="topline"><span id="topline">当前时间: loading | 会话ID: web:gui | 当前轮次: -</span></div>
       <div class="view-switcher" id="nav"></div>
+      <div class="action-status" id="action-status"></div>
       <section class="hero-card" id="overview-card"></section>
       <section class="view active" id="view-overview"></section>
       <section class="view" id="view-agents"></section>
@@ -8815,7 +9223,7 @@ def web_console_html() -> str:
     </aside>
   </div>
   <script>
-    const app = {data: null, view: "overview"};
+    const app = {data: null, view: "overview", notice: ""};
 
     function node(tag, className, text) {
       const item = document.createElement(tag);
@@ -8851,13 +9259,32 @@ def web_console_html() -> str:
       return box;
     }
 
-    function row(title, meta, tag) {
+    function actionButton(label, action, uiRef, payloadFactory) {
+      const button = node("button", "action-btn", label);
+      button.type = "button";
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        const payload = typeof payloadFactory === "function" ? payloadFactory() : (payloadFactory || {});
+        if (payload === null) return;
+        sendAction(action, uiRef, payload);
+      });
+      return button;
+    }
+
+    function row(title, meta, tag, actions) {
       const item = node("div", "row");
       const left = node("div");
       left.append(node("strong", "", title || "未命名"));
       if (meta) left.append(node("em", "", meta));
       item.append(left);
-      item.append(node("span", "tag", tag || "-"));
+      const right = node("div", "row-side");
+      right.append(node("span", "tag", tag || "-"));
+      if (actions && actions.length) {
+        const actionWrap = node("div", "row-actions");
+        actions.forEach(action => actionWrap.append(action));
+        right.append(actionWrap);
+      }
+      item.append(right);
       return item;
     }
 
@@ -8875,6 +9302,39 @@ def web_console_html() -> str:
       }
       wrap.append(table);
       return wrap;
+    }
+
+    function actionPayload(action, uiRef, payload) {
+      return {
+        schema_version: "shuheng.web_console.action_request.v1",
+        action,
+        ui_ref: uiRef || "",
+        payload: payload || {}
+      };
+    }
+
+    async function sendAction(action, uiRef, payload) {
+      try {
+        app.notice = "执行中: " + action;
+        renderNotice();
+        const response = await fetch("/gui/action", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(actionPayload(action, uiRef, payload)),
+        });
+        const result = await response.json();
+        app.notice = (result.ok ? "完成: " : "失败: ") + (result.message || action);
+        if (result.snapshot) app.data = result.snapshot;
+        renderAll();
+      } catch (error) {
+        app.notice = "动作请求失败: " + error.message;
+        renderNotice();
+      }
+    }
+
+    function renderNotice() {
+      const target = document.getElementById("action-status");
+      if (target) target.textContent = app.notice || "本地动作通过 /gui/action 进入治理层，按钮不会绕过审批、任务和调度账本。";
     }
 
     function setView(view) {
@@ -8944,6 +9404,24 @@ def web_console_html() -> str:
       modelWrap.append(kv("model", model.model || "-"));
       modelWrap.append(kv("base", model.base || "-"));
       modelWrap.append(kv("scope", model.scope || "-"));
+      const entries = (data.model && data.model.entries) || [];
+      if (entries.length) {
+        const select = node("select", "inline-select");
+        select.id = "global-model-select";
+        entries.forEach(entry => {
+          const option = node("option", "", `${entry.default === "true" ? "★ " : ""}${entry.name || entry.model || "model"}`);
+          option.value = entry.ui_ref || "";
+          if (entry.default === "true") option.selected = true;
+          select.append(option);
+        });
+        modelWrap.append(select);
+        const actions = node("div", "inline-actions");
+        actions.append(actionButton("设为全局默认", "model.set_default", "", () => {
+          const chosen = document.getElementById("global-model-select");
+          return {model_ref: chosen ? chosen.value : ""};
+        }));
+        modelWrap.append(actions);
+      }
       replace("left-model", [modelWrap]);
 
       const tokens = sidebar.tokens || {};
@@ -9025,15 +9503,32 @@ def web_console_html() -> str:
       const schedules = data.schedules || [];
       const reports = data.scheduled_reports || [];
       const grid = node("div", "two-col");
-      grid.append(panel("当前待办", "未终态任务", tasks, item =>
-        row(item.title, `${item.owner || "主 agent"} · ${item.summary || item.time || ""}`, item.status)
-      ));
+      const workPanel = panel("当前待办", "未终态任务", tasks, item =>
+        row(item.title, `${item.owner || "主 agent"} · ${item.summary || item.time || ""}`, item.status, [
+          actionButton("取消", "task.cancel", item.ui_ref),
+          actionButton("重试", "task.retry", item.ui_ref),
+        ])
+      );
+      const workHeadActions = node("div", "agent-actions");
+      workHeadActions.append(actionButton("主控任务", "main.prompt", "", () => {
+        const prompt = window.prompt("发给主 agent 的任务");
+        return prompt ? {prompt} : null;
+      }));
+      workHeadActions.append(actionButton("调度扫描", "scheduler.tick", ""));
+      workPanel.insertBefore(workHeadActions, workPanel.children[1] || null);
+      grid.append(workPanel);
       const side = node("div");
       side.append(panel("最近定时任务", "任务定义", schedules.slice(0, 8), item =>
-        row(item.name, `${item.target || "主 agent"} · ${item.trigger || "-"}`, item.status)
+        row(item.name, `${item.target || "主 agent"} · ${item.trigger || "-"}`, item.status, [
+          actionButton(item.status === "启用" ? "停用" : "启用", item.status === "启用" ? "schedule.disable" : "schedule.enable", item.ui_ref),
+          actionButton("运行", "schedule.run", item.ui_ref),
+          actionButton("删除", "schedule.delete", item.ui_ref),
+        ])
       ));
       side.append(panel("最近任务", "共享任务账本", recent.slice(0, 6), item =>
-        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status)
+        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status, [
+          actionButton("取消", "task.cancel", item.ui_ref),
+        ])
       ));
       side.append(panel("最近汇报", "子代理最终回复", reports.slice(0, 4), item =>
         row(item.schedule, `${item.agent || "子代理"} · ${item.summary || ""}`, item.status)
@@ -9056,6 +9551,26 @@ def web_console_html() -> str:
         card.append(node("div", "agent-meta", `${agent.role || "specialist"} · ${agent.status || "idle"} · ${agent.model || "继承主控默认模型"}`));
         if (skills) card.append(node("div", "agent-meta", skills));
         card.append(node("p", "", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        const actions = node("div", "agent-actions");
+        actions.append(actionButton("发任务", "agent.task", agent.ui_ref, () => {
+          const prompt = window.prompt(`发给 ${agent.name || "子代理"} 的任务`);
+          return prompt ? {prompt} : null;
+        }));
+        actions.append(actionButton("聊天", "agent.chat", agent.ui_ref, () => {
+          const prompt = window.prompt(`和 ${agent.name || "子代理"} 对话`);
+          return prompt ? {prompt} : null;
+        }));
+        actions.append(actionButton("模型", "agent.set_model", agent.ui_ref, () => {
+          const modelName = window.prompt("模型名称；留空表示继承全局默认", "");
+          return modelName === null ? null : {model_name: modelName || "inherit"};
+        }));
+        actions.append(actionButton("加Skill", "agent.set_skills", agent.ui_ref, () => {
+          const refs = window.prompt("Skill ref，多个用空格或换行分隔");
+          return refs ? {operation: "add", skill_refs: refs} : null;
+        }));
+        actions.append(actionButton("清Skill", "agent.set_skills", agent.ui_ref, {operation: "clear"}));
+        actions.append(actionButton("停止", "agent.stop", agent.ui_ref));
+        card.append(actions);
         const minis = node("div", "mini-grid");
         (agent.metrics || []).forEach(item => {
           const mini = node("div");
@@ -9092,14 +9607,20 @@ def web_console_html() -> str:
     function renderGovernance(data) {
       const grid = node("div", "two-col");
       grid.append(panel("待审批", "隐藏审批编号，只展示摘要", data.approvals || [], item =>
-        row(item.summary, `${item.target || "主 agent"} · ${item.time || ""}`, item.type)
+        row(item.summary, `${item.target || "主 agent"} · ${item.time || ""}`, item.type, [
+          actionButton("批准", "approval.approve", item.ui_ref),
+          actionButton("拒绝", "approval.reject", item.ui_ref),
+        ])
       ));
       const side = node("div");
       side.append(panel("产物架", "类型、来源、大小", data.artifacts || [], item =>
         row(item.source, `size ${item.size || "-"}`, item.type)
       ));
       side.append(panel("最近任务", "状态回看", (data.tasks && data.tasks.recent) || [], item =>
-        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status)
+        row(item.title, `${item.owner || "主 agent"} · ${item.time || ""}`, item.status, [
+          actionButton("失败", "task.fail", item.ui_ref),
+          actionButton("释放锁", "task.release_lock", item.ui_ref),
+        ])
       ));
       grid.append(side);
       replace("view-governance", [grid]);
@@ -9123,6 +9644,7 @@ def web_console_html() -> str:
       renderRight(app.data);
       renderOverviewCard(app.data);
       renderViews(app.data);
+      renderNotice();
     }
 
     async function refresh() {
@@ -9348,6 +9870,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             actual_host, actual_port = self.server.server_address[:2]
             self.send_json({"ok": True, "service": gateway_service_descriptor(str(actual_host), int(actual_port)), "received": payload})
             return
+        if path == "/gui/action":
+            response, status = web_console_apply_action(payload)
+            self.send_json(response, status=status)
+            return
         if path == "/a2a/tasks/query":
             self.send_json(query_a2a_task_payload(payload))
             return
@@ -9441,7 +9967,7 @@ def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
         command="serve",
     )
     print(f"GA TUI gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
-    print("Endpoints: /gui /gui/snapshot /gateway /a2a /a2a/events /mcp /mcp/resources")
+    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /a2a /a2a/events /mcp /mcp/resources")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
