@@ -344,6 +344,87 @@ S01 修复左栏历史会话标题
 }
 ```
 
+## Scenario: Local Web Console Gateway
+
+### 1. Scope / Trigger
+
+- Trigger: The gateway exposes a local Web GUI that visualizes Shuheng governance data as a control-console surface.
+- Applies to: `GatewayRequestHandler`, `/gui`, `/dashboard`, `/console`, `/gui/snapshot`, dashboard/home derived data, scheduled reports, task ledger summaries, approval summaries, artifact summaries, and persistent-subagent status cards.
+- Non-goal: This does not replace the TUI runtime, does not create a new scheduler, task ledger, approval inbox, artifact store, memory writer, or executable browser-side action system.
+
+### 2. Signatures
+
+- HTTP routes:
+  - `GET /gui`, `GET /dashboard`, and `GET /console` return static HTML/CSS/JS for the local console.
+  - `GET /gui/snapshot` returns JSON with `schema_version:"shuheng.web_console.snapshot.v1"`.
+- Snapshot top-level fields:
+  - `updated_at`
+  - `mode:"read_only"`
+  - `source`
+  - `overview`
+  - `agents`
+  - `scheduled_reports`
+  - `tasks`
+  - `schedules`
+  - `approvals`
+  - `artifacts`
+  - `model`
+  - `totals`
+  - `navigation`
+
+### 3. Contracts
+
+- `/gui` serves a self-contained local page with no new frontend build dependency and no external asset requirement.
+- `/gui/snapshot` builds a read-only `State` with a non-runtime placeholder agent, loads persisted subagent metadata, and derives display data from the existing shared task ledger, schedule registry, schedule-run records, approval registry, artifact index, and model config.
+- `/gui` and `/gui/snapshot` must not call `ensure_gateway_registry(...)`, write `gateway.json`, append JSONL rows, queue approvals, dispatch tasks, mutate schedules, or write memory.
+- The Web console translates raw governance records into user-readable names, summaries, counts, and report bodies. Default visible HTML/JS-rendered content must not dump raw artifact URIs, approval ids, task ids, or internal agent ids as primary text.
+- Scheduled-report cards must use the same cleaned scheduled-report body path as TUI home pages: completed child subagent replies from subagent result artifacts first, then task summary fallback, with OMP/LLM process markers and approval-only audit rows excluded.
+- Artifact rows in the default Web console show type, source title, and size-style metadata only. Raw artifact refs remain available through existing gateway/MCP/resource drill-down routes, not the default GUI.
+- Approval rows in the default Web console show approval type, target name, and human-readable summary only. Actual approval decisions remain in the TUI approval flow and existing approval APIs.
+
+### 4. Validation & Error Matrix
+
+- `GET /gui` -> HTML with console shell and client fetch for `/gui/snapshot`.
+- `GET /dashboard` or `GET /console` -> same HTML alias as `/gui`.
+- `GET /gui/snapshot` with empty ledgers -> valid snapshot with empty arrays and zero counts.
+- Persistent subagents exist -> snapshot `agents` contains readable name, role, status, default model or inherited-model text, scoped skill refs, status narrative, and compact metrics.
+- Scheduled report exists with process/thinking text in the artifact -> snapshot report body excludes process/thinking text and includes final reply text.
+- Approval-required or cancelled schedule audit rows exist -> they do not appear in `scheduled_reports`; they may appear only as normal task or approval summaries when applicable.
+- Opening `/gui` or `/gui/snapshot` -> task ledger, approval registry, artifact index, and gateway registry file signatures stay unchanged.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `GET /gui/snapshot` shows `overview.metrics`, subagent cards, schedule definitions, full cleaned report bodies, and compact governance queues without writing any files.
+- Good: The default GUI says `待审批 3` and shows readable summaries, while approval ids stay out of the visible page.
+- Good: The default GUI says an artifact came from `主页巡检` with type `subagent-results`, while the raw `artifact://...` ref stays behind MCP/resource drill-down.
+- Base: A user can still open `/gateway`, `/a2a`, or `/mcp/resources` for raw protocol inspection.
+- Bad: The GUI fetch path calls `ensure_gateway_registry(...)` and rewrites `gateway.json` just because a browser opened the console.
+- Bad: The default GUI becomes a raw ledger viewer that prints `artifact://...`, `appr_...`, `task_...`, or schedule run ids as body text.
+- Bad: Browser buttons directly approve, dispatch, delete, or write memory without reusing existing policy gates.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
+- Tests must assert `/gui/snapshot` returns `shuheng.web_console.snapshot.v1`, `mode:"read_only"`, expected top-level sections, and populated overview metrics.
+- Tests must assert `/gui` and `/gui/snapshot` do not change signatures for `gateway.json`, task ledger, approval registry, or artifact index.
+- Tests must assert snapshot/default text does not leak raw artifact URIs or approval ids and does not include known schedule-run audit task ids.
+- `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+GET /gui -> ensure_gateway_registry() -> rewrite gateway.json -> render raw task/artifact/approval ids
+```
+
+#### Correct
+
+```text
+GET /gui -> static local console
+GET /gui/snapshot -> read ledgers -> sanitize display rows -> no writes, no approvals, no dispatch
+```
+
 ## Scenario: Per-Agent Dedicated Skills
 
 ### 1. Scope / Trigger

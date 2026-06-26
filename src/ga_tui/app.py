@@ -7813,6 +7813,1014 @@ def gateway_sse_events(*, limit: int = 20) -> list[dict[str, Any]]:
     return events[-limit:]
 
 
+class WebConsoleReadOnlyAgent:
+    log_path = ""
+
+    def get_llm_name(self, model: bool = True) -> str:
+        return "-"
+
+
+def web_console_state() -> State:
+    state = State(agent=WebConsoleReadOnlyAgent())
+    state.status = "idle"
+    state.current_title = "main"
+    load_subagents(state)
+    return state
+
+
+def web_console_timestamp(row: dict[str, Any]) -> float:
+    for key in ("timestamp", "updated_at", "created_at", "finished_at"):
+        parsed = parse_iso_timestamp(str(row.get(key) or ""))
+        if parsed:
+            return parsed
+    try:
+        return float(row.get("mtime") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def web_console_clean_visible(value: Any, limit: int = 320) -> str:
+    kept_lines: list[str] = []
+    for raw_line in str(value or "").splitlines():
+        if "APPROVAL_REQUIRED" in raw_line:
+            continue
+        kept_lines.append(raw_line)
+    text = clean_text(strip_inline_markdown("\n".join(kept_lines))).strip()
+    text = re.sub(r"artifact://\S+", "[artifact]", text)
+    text = re.sub(r"\bappr[_0-9][A-Za-z0-9_:-]+\b", "[approval]", text)
+    text = re.sub(r"\bapproval=[^\s,;，；]+", "approval=[hidden]", text)
+    text = re.sub(r"\btask_[A-Za-z0-9_:-]+\b", "[task]", text)
+    text = re.sub(r"\bagent-\d+\b", "子代理", text)
+    text = re.sub(r"\btmp-agent-[A-Za-z0-9_.:-]+\b", "临时代理", text)
+    return truncate_cells(text, limit).strip()
+
+
+def web_console_status_label(status: Any) -> str:
+    raw = str(status or "").strip()
+    mapping = {
+        "approval_required": "待审批",
+        "completed": "完成",
+        "working": "进行中",
+        "running": "运行中",
+        "created": "待开始",
+        "pending": "待处理",
+        "cancelled": "已取消",
+        "canceled": "已取消",
+        "failed": "失败",
+        "rejected": "已拒绝",
+        "enabled": "启用",
+        "disabled": "停用",
+    }
+    return mapping.get(raw.lower(), web_console_clean_visible(raw or "-", 60) or "-")
+
+
+def web_console_agent_name(state: State, agent_id: str, fallback: str = "") -> str:
+    agent_id = str(agent_id or "")
+    if agent_id in state.subagents:
+        return state.subagents[agent_id].name
+    if agent_id in {"", "orchestrator.main", "main"}:
+        return fallback or "主 agent"
+    meta = load_subagent_meta(agent_id)
+    return str(meta.get("name") or fallback or "子代理")
+
+
+def web_console_metric(label: str, value: Any, tone: str = "") -> dict[str, str]:
+    return {"label": str(label), "value": str(value), "tone": str(tone)}
+
+
+def web_console_main_summary(
+    state: State,
+    *,
+    tasks: list[dict[str, Any]],
+    open_tasks: list[dict[str, Any]],
+    approvals: list[dict[str, Any]],
+    schedule_registry: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    try:
+        model_name = str(state.agent.get_llm_name(model=True))
+    except Exception:
+        model_name = agent_current_backend_name(state.agent) or "-"
+    return {
+        "title": "主控运行概览",
+        "summary": dashboard_status_for_main(
+            state,
+            open_tasks=open_tasks,
+            approvals=approvals,
+            schedule_registry=schedule_registry,
+        ),
+        "metrics": [
+            web_console_metric("状态", state.status, "calm"),
+            web_console_metric("活跃任务", len(open_tasks), "hot" if open_tasks else "calm"),
+            web_console_metric("待审批", len(approvals), "warn" if approvals else "calm"),
+            web_console_metric("定时任务", f"{schedule_registry.get('active_job_count', 0)}/{schedule_registry.get('job_count', 0)}", "calm"),
+            web_console_metric("Artifact", len(artifacts), "calm"),
+            web_console_metric("子代理", len([sub for sub in state.subagents.values() if sub.persistent]), "calm"),
+        ],
+        "details": [
+            {"label": "当前会话", "value": state.current_title or "main"},
+            {"label": "运行模型", "value": model_name or "-"},
+            {"label": "调度来源", "value": "shared governance ledgers"},
+            {"label": "页面模式", "value": "local read-only web console"},
+        ],
+        "recent_workload": len(tasks),
+    }
+
+
+def web_console_task_rows(state: State, rows: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
+    sorted_rows = sorted(rows, key=web_console_timestamp, reverse=True)
+    result: list[dict[str, str]] = []
+    for row in sorted_rows[:limit]:
+        owner_id = str(row.get("assigned_agent") or "")
+        raw_status = str(row.get("status") or "-")
+        raw_summary = row.get("summary") or row.get("objective") or ""
+        if raw_status.lower() == "approval_required":
+            raw_summary = row.get("objective") or "等待人工审批"
+        summary = web_console_clean_visible(raw_summary, 180) or ("等待人工审批" if raw_status.lower() == "approval_required" else "")
+        result.append({
+            "title": web_console_clean_visible(task_display_title(row, state), 120) or "未命名任务",
+            "status": web_console_status_label(raw_status),
+            "owner": web_console_agent_name(state, owner_id, "主 agent"),
+            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
+            "summary": summary,
+        })
+    return result
+
+
+def web_console_schedule_rows(state: State, schedule_registry: dict[str, Any], limit: int = 10) -> list[dict[str, str]]:
+    jobs = list(schedule_registry.get("jobs") or [])
+    jobs.sort(key=web_console_timestamp, reverse=True)
+    rows: list[dict[str, str]] = []
+    for row in jobs[:limit]:
+        target = str(row.get("target") or "")
+        execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+        if not target:
+            target = schedule_execution_target(execution)
+        rows.append({
+            "name": web_console_clean_visible(row.get("name") or row.get("schedule_id") or "定时任务", 100),
+            "status": web_console_status_label(row.get("status") or "enabled"),
+            "trigger": web_console_clean_visible(row.get("trigger") or row.get("cron") or row.get("interval") or row.get("at") or "-", 100),
+            "target": web_console_agent_name(state, target, "主 agent"),
+        })
+    return rows
+
+
+def web_console_approval_rows(state: State, approvals: list[dict[str, Any]], limit: int = 8) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in sorted(approvals, key=web_console_timestamp, reverse=True)[:limit]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        target = str(row.get("target") or payload.get("subagent_id") or payload.get("target_subagent") or "")
+        summary = web_console_clean_visible(row.get("summary") or row.get("approval_required_for") or "待审批", 180)
+        rows.append({
+            "type": web_console_clean_visible(row.get("type") or "approval", 80),
+            "summary": summary or "等待人工审批",
+            "target": web_console_agent_name(state, target, "主 agent"),
+            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
+        })
+    return rows
+
+
+def web_console_artifact_rows(state: State, artifacts: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], limit: int = 8) -> list[dict[str, str]]:
+    del state
+    rows: list[dict[str, str]] = []
+    for row in sorted(artifacts, key=web_console_timestamp, reverse=True)[:limit]:
+        source_task_id = str(row.get("source_task_id") or "")
+        source_task = tasks.get(source_task_id, {})
+        rows.append({
+            "type": web_console_clean_visible(row.get("type") or "artifact", 80),
+            "source": web_console_clean_visible(task_display_title(source_task, None) if source_task else "治理产物", 120),
+            "size": str(row.get("size_bytes") or row.get("size") or "-"),
+            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
+        })
+    return rows
+
+
+def web_console_report_rows(state: State, limit: int = 12) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in scheduled_report_rows(state, limit=limit):
+        rows.append({
+            "schedule": web_console_clean_visible(row.get("schedule_name") or "定时任务", 100),
+            "agent": web_console_clean_visible(row.get("agent_name") or "子代理", 100),
+            "status": web_console_status_label(row.get("status") or "-"),
+            "time": str(row.get("timestamp") or ""),
+            "summary": web_console_clean_visible(row.get("summary") or row.get("body") or "", 220),
+            "body": web_console_clean_visible(row.get("body") or row.get("summary") or "", 6000),
+        })
+    return rows
+
+
+def web_console_agent_rows(state: State) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    reports_by_agent: dict[str, dict[str, str]] = {}
+    for report in scheduled_report_rows(state, limit=80):
+        agent_id = str(report.get("agent_id") or "")
+        if agent_id and agent_id not in reports_by_agent:
+            reports_by_agent[agent_id] = {
+                "schedule": web_console_clean_visible(report.get("schedule_name") or "定时任务", 100),
+                "summary": web_console_clean_visible(report.get("summary") or report.get("body") or "", 180),
+                "time": str(report.get("timestamp") or ""),
+            }
+    for sub in sorted(state.subagents.values(), key=lambda item: (not item.persistent, item.name.lower())):
+        active_tasks = agent_task_rows(sub.agent_id, include_terminal=False, limit=50)
+        schedule_rows = agent_schedule_rows(sub.agent_id, limit=20)
+        approval_rows = agent_approval_rows(state, sub.agent_id, limit=20)
+        rows.append({
+            "name": sub.name,
+            "role": normalized_subagent_role(sub.role),
+            "status": web_console_status_label(sub.status),
+            "lifecycle": "persistent" if sub.persistent else "temporary",
+            "model": sub.default_model or "继承主控默认模型",
+            "skills": [web_console_clean_visible(ref, 80) for ref in normalize_subagent_skill_refs(sub.skill_refs)[:8]],
+            "profile": web_console_clean_visible(profile_summary_for_subagent(sub, limit=400), 360),
+            "status_narrative": web_console_clean_visible(dashboard_status_for_subagent(sub), 240),
+            "metrics": [
+                web_console_metric("未终态任务", len(active_tasks), "hot" if active_tasks else "calm"),
+                web_console_metric("待审批", len(approval_rows), "warn" if approval_rows else "calm"),
+                web_console_metric("定时任务", len(schedule_rows), "calm"),
+                web_console_metric("聊天队列", len(sub.chat_queue), "calm"),
+            ],
+            "latest_report": reports_by_agent.get(sub.agent_id) or {},
+            "updated": rel_age(sub.updated_at),
+        })
+    return rows
+
+
+def web_console_snapshot() -> dict[str, Any]:
+    state = web_console_state()
+    task_map = latest_task_records()
+    tasks = list(task_map.values())
+    tasks.sort(key=web_console_timestamp, reverse=True)
+    open_tasks = [row for row in tasks if not terminal_task_status(str(row.get("status") or ""))]
+    approvals = pending_approvals(state)
+    schedule_registry = scheduled_task_registry(state)
+    artifacts = list(artifact_index_latest().values())
+    reports = web_console_report_rows(state, limit=16)
+    model_registry = model_orchestration_registry(state)
+    return {
+        "schema_version": "shuheng.web_console.snapshot.v1",
+        "updated_at": now_iso(),
+        "mode": "read_only",
+        "source": {
+            "tasks": "shared task ledger",
+            "schedules": "scheduled task registry",
+            "reports": "schedule runs + task ledger + subagent result artifacts",
+            "approvals": "approval registry",
+            "artifacts": "artifact index",
+        },
+        "overview": web_console_main_summary(
+            state,
+            tasks=tasks,
+            open_tasks=open_tasks,
+            approvals=approvals,
+            schedule_registry=schedule_registry,
+            artifacts=artifacts,
+        ),
+        "agents": web_console_agent_rows(state),
+        "scheduled_reports": reports,
+        "tasks": {
+            "open": web_console_task_rows(state, open_tasks, limit=10),
+            "recent": web_console_task_rows(state, tasks, limit=10),
+        },
+        "schedules": web_console_schedule_rows(state, schedule_registry, limit=12),
+        "approvals": web_console_approval_rows(state, approvals, limit=10),
+        "artifacts": web_console_artifact_rows(state, artifacts, task_map, limit=10),
+        "model": {
+            "current": model_registry.get("current") if isinstance(model_registry.get("current"), dict) else {},
+            "model_count": int(model_registry.get("model_count") or 0),
+            "capabilities": model_registry.get("capabilities") if isinstance(model_registry.get("capabilities"), dict) else {},
+        },
+        "totals": {
+            "open_tasks": len(open_tasks),
+            "approvals": len(approvals),
+            "schedules": int(schedule_registry.get("job_count") or 0),
+            "active_schedules": int(schedule_registry.get("active_job_count") or 0),
+            "artifacts": len(artifacts),
+            "reports": len(reports),
+            "agents": len([sub for sub in state.subagents.values() if sub.persistent]),
+        },
+        "navigation": [
+            {"key": "overview", "label": "主控台"},
+            {"key": "agents", "label": "子代理"},
+            {"key": "reports", "label": "定时汇报"},
+            {"key": "governance", "label": "治理队列"},
+        ],
+    }
+
+
+def web_console_html() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shuheng Console</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #111826;
+      --panel: #172132;
+      --panel-strong: #1d2b42;
+      --line: #30425e;
+      --soft: #93a4bd;
+      --text: #edf4ff;
+      --muted: #b7c5d8;
+      --copper: #d58b46;
+      --aqua: #72d0d6;
+      --green: #8ed39b;
+      --amber: #f0c05d;
+      --red: #f0847d;
+      --shadow: rgba(0, 0, 0, 0.32);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(114, 208, 214, 0.18), transparent 28rem),
+        radial-gradient(circle at 88% 12%, rgba(213, 139, 70, 0.16), transparent 30rem),
+        linear-gradient(135deg, #0f1724 0%, #121a28 45%, #111826 100%);
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+      letter-spacing: 0.01em;
+    }
+
+    button, input { font: inherit; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 17rem minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .rail {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.2rem;
+      border-right: 1px solid rgba(147, 164, 189, 0.22);
+      background: linear-gradient(180deg, rgba(17, 24, 38, 0.94), rgba(13, 19, 31, 0.86));
+      box-shadow: 1.2rem 0 3rem var(--shadow);
+    }
+
+    .brand {
+      display: grid;
+      gap: 0.25rem;
+      margin-bottom: 1.4rem;
+    }
+
+    .brand small {
+      color: var(--copper);
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      font-family: "JetBrains Mono", "Iosevka", monospace;
+      font-size: 0.68rem;
+    }
+
+    .brand strong {
+      font-family: "LXGW WenKai Screen", "Source Han Serif SC", Georgia, serif;
+      font-size: 1.55rem;
+      line-height: 1.05;
+      font-weight: 700;
+    }
+
+    .nav {
+      display: grid;
+      gap: 0.45rem;
+      margin: 1.2rem 0;
+    }
+
+    .nav button {
+      border: 1px solid transparent;
+      border-radius: 0.9rem;
+      padding: 0.76rem 0.85rem;
+      text-align: left;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .nav button:hover,
+    .nav button.active {
+      color: var(--text);
+      border-color: rgba(114, 208, 214, 0.35);
+      background: rgba(114, 208, 214, 0.09);
+    }
+
+    .rail-note {
+      margin-top: 1.5rem;
+      padding: 0.95rem;
+      border: 1px solid rgba(213, 139, 70, 0.32);
+      border-radius: 1rem;
+      color: var(--muted);
+      background: rgba(213, 139, 70, 0.08);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    main {
+      padding: 1.4rem;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "LXGW WenKai Screen", "Source Han Serif SC", Georgia, serif;
+      font-size: clamp(2rem, 5vw, 4.8rem);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+    }
+
+    .subhead {
+      max-width: 55rem;
+      color: var(--muted);
+      line-height: 1.65;
+      margin-top: 0.65rem;
+    }
+
+    .stamp {
+      min-width: 15rem;
+      padding: 0.95rem 1rem;
+      border: 1px solid rgba(147, 164, 189, 0.24);
+      border-radius: 1rem;
+      background: rgba(23, 33, 50, 0.76);
+      color: var(--muted);
+      font-family: "JetBrains Mono", "Iosevka", monospace;
+      font-size: 0.78rem;
+      text-align: right;
+    }
+
+    .stage {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(114, 208, 214, 0.3);
+      border-radius: 1.35rem;
+      padding: 1.25rem;
+      background:
+        linear-gradient(90deg, rgba(114, 208, 214, 0.08), transparent 35%),
+        rgba(23, 33, 50, 0.88);
+      box-shadow: 0 1.5rem 5rem var(--shadow);
+    }
+
+    .stage:before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 26px 26px;
+      pointer-events: none;
+      mask-image: linear-gradient(90deg, black, transparent 88%);
+    }
+
+    .stage > * { position: relative; }
+
+    .status-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .status-line h2,
+    .section-title h2 {
+      margin: 0;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--aqua);
+      font-family: "JetBrains Mono", "Iosevka", monospace;
+    }
+
+    .summary {
+      color: var(--text);
+      font-size: 1.08rem;
+      line-height: 1.7;
+      margin: 0.55rem 0 0;
+      max-width: 68rem;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 0.65rem;
+      margin: 1rem 0;
+    }
+
+    .metric {
+      min-height: 5.5rem;
+      padding: 0.8rem;
+      border: 1px solid rgba(147, 164, 189, 0.22);
+      border-radius: 0.95rem;
+      background: rgba(13, 19, 31, 0.48);
+    }
+
+    .metric span {
+      color: var(--soft);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 0.45rem;
+      font-size: 1.45rem;
+      letter-spacing: -0.02em;
+    }
+
+    .metric.warn strong { color: var(--amber); }
+    .metric.hot strong { color: var(--red); }
+    .metric.calm strong { color: var(--green); }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.65rem;
+      color: var(--muted);
+    }
+
+    .detail {
+      padding-top: 0.75rem;
+      border-top: 1px solid rgba(147, 164, 189, 0.18);
+    }
+
+    .detail span {
+      display: block;
+      color: var(--soft);
+      font-size: 0.72rem;
+    }
+
+    .detail strong {
+      display: block;
+      margin-top: 0.25rem;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .view {
+      display: none;
+      margin-top: 1rem;
+      animation: rise 220ms ease-out;
+    }
+
+    .view.active { display: block; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.75fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .panel {
+      border: 1px solid rgba(147, 164, 189, 0.22);
+      border-radius: 1.15rem;
+      background: rgba(23, 33, 50, 0.72);
+      padding: 1rem;
+      min-width: 0;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .section-title p {
+      margin: 0;
+      color: var(--soft);
+      font-size: 0.86rem;
+    }
+
+    .rows {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.72rem 0.8rem;
+      border: 1px solid rgba(147, 164, 189, 0.16);
+      border-radius: 0.85rem;
+      background: rgba(13, 19, 31, 0.38);
+    }
+
+    .row strong {
+      display: block;
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .row span,
+    .muted {
+      color: var(--soft);
+      font-size: 0.88rem;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(114, 208, 214, 0.35);
+      border-radius: 999px;
+      padding: 0.22rem 0.55rem;
+      color: var(--aqua);
+      background: rgba(114, 208, 214, 0.08);
+      white-space: nowrap;
+      font-size: 0.78rem;
+      font-family: "JetBrains Mono", "Iosevka", monospace;
+    }
+
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+
+    .agent-card,
+    .report-card {
+      border: 1px solid rgba(147, 164, 189, 0.22);
+      border-radius: 1.1rem;
+      background: rgba(23, 33, 50, 0.74);
+      padding: 1rem;
+      min-width: 0;
+    }
+
+    .agent-card h3,
+    .report-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .agent-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0.65rem 0;
+    }
+
+    .mini-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.45rem;
+      margin-top: 0.8rem;
+    }
+
+    .mini {
+      border-top: 1px solid rgba(147, 164, 189, 0.17);
+      padding-top: 0.5rem;
+    }
+
+    .mini span { color: var(--soft); font-size: 0.75rem; }
+    .mini strong { display: block; margin-top: 0.2rem; }
+
+    .report-list {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    details.report-card {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    details.report-card summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 1rem;
+    }
+
+    details.report-card summary::-webkit-details-marker { display: none; }
+
+    .report-body {
+      border-top: 1px solid rgba(147, 164, 189, 0.18);
+      padding: 1rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+      line-height: 1.68;
+      background: rgba(13, 19, 31, 0.32);
+    }
+
+    .empty {
+      padding: 1.2rem;
+      border: 1px dashed rgba(147, 164, 189, 0.28);
+      border-radius: 1rem;
+      color: var(--soft);
+      text-align: center;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(0.4rem); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail {
+        position: relative;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid rgba(147, 164, 189, 0.22);
+      }
+      .nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: 1fr; }
+      .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 720px) {
+      main { padding: 1rem; }
+      .topbar { display: block; }
+      .stamp { margin-top: 0.8rem; text-align: left; }
+      .nav { grid-template-columns: 1fr 1fr; }
+      .metrics,
+      .detail-grid,
+      .agent-grid,
+      .mini-metrics { grid-template-columns: 1fr; }
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <small>Shuheng local console</small>
+        <strong>枢衡驾驶舱</strong>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="rail-note">
+        本页面只读取共享治理数据，不执行任务、不审批、不写长期记忆。重操作继续回到 TUI。
+      </div>
+    </aside>
+    <main>
+      <div class="topbar">
+        <div>
+          <h1>主控台</h1>
+          <div class="subhead">一个强主控 Orchestrator、受限子代理、共享任务账本、定时汇报和审批门的可视化读面。</div>
+        </div>
+        <div class="stamp">
+          <div id="updated">loading</div>
+          <div id="mode">read-only</div>
+        </div>
+      </div>
+      <section class="stage" id="overview-card"></section>
+      <section class="view active" id="view-overview"></section>
+      <section class="view" id="view-agents"></section>
+      <section class="view" id="view-reports"></section>
+      <section class="view" id="view-governance"></section>
+    </main>
+  </div>
+  <script>
+    const app = { data: null, view: "overview" };
+
+    function node(tag, className, text) {
+      const item = document.createElement(tag);
+      if (className) item.className = className;
+      if (text !== undefined && text !== null) item.textContent = String(text);
+      return item;
+    }
+
+    function replace(id, children) {
+      const target = document.getElementById(id);
+      target.replaceChildren(...children);
+    }
+
+    function empty(label) {
+      return node("div", "empty", label || "暂无可展示内容");
+    }
+
+    function metric(item) {
+      const box = node("div", "metric " + (item.tone || ""));
+      box.append(node("span", "", item.label || ""));
+      box.append(node("strong", "", item.value || "0"));
+      return box;
+    }
+
+    function miniMetric(item) {
+      const box = node("div", "mini");
+      box.append(node("span", "", item.label || ""));
+      box.append(node("strong", "", item.value || "0"));
+      return box;
+    }
+
+    function titleBlock(title, note) {
+      const wrap = node("div", "section-title");
+      const left = node("div");
+      left.append(node("h2", "", title));
+      if (note) left.append(node("p", "", note));
+      wrap.append(left);
+      return wrap;
+    }
+
+    function pill(text) {
+      return node("span", "pill", text || "-");
+    }
+
+    function row(title, meta, tag) {
+      const item = node("div", "row");
+      const left = node("div");
+      left.append(node("strong", "", title || "未命名"));
+      if (meta) left.append(node("span", "", meta));
+      item.append(left);
+      item.append(pill(tag || "-"));
+      return item;
+    }
+
+    function renderNav() {
+      const nav = document.getElementById("nav");
+      nav.replaceChildren();
+      const items = (app.data && app.data.navigation) || [
+        {key: "overview", label: "主控台"},
+        {key: "agents", label: "子代理"},
+        {key: "reports", label: "定时汇报"},
+        {key: "governance", label: "治理队列"}
+      ];
+      for (const item of items) {
+        const button = node("button", app.view === item.key ? "active" : "", item.label);
+        button.type = "button";
+        button.addEventListener("click", () => {
+          app.view = item.key;
+          renderAll();
+        });
+        nav.append(button);
+      }
+    }
+
+    function renderOverviewCard(data) {
+      const overview = data.overview || {};
+      const card = document.getElementById("overview-card");
+      card.replaceChildren();
+      const line = node("div", "status-line");
+      const left = node("div");
+      left.append(node("h2", "", overview.title || "主控运行概览"));
+      left.append(node("p", "summary", overview.summary || "等待治理数据。"));
+      line.append(left);
+      line.append(pill(data.mode || "read_only"));
+      card.append(line);
+      const metrics = node("div", "metrics");
+      for (const item of overview.metrics || []) metrics.append(metric(item));
+      card.append(metrics);
+      const details = node("div", "detail-grid");
+      for (const item of overview.details || []) {
+        const detail = node("div", "detail");
+        detail.append(node("span", "", item.label || ""));
+        detail.append(node("strong", "", item.value || "-"));
+        details.append(detail);
+      }
+      card.append(details);
+    }
+
+    function renderRowsPanel(title, note, rowsData, mapper) {
+      const panel = node("section", "panel");
+      panel.append(titleBlock(title, note));
+      const rows = node("div", "rows");
+      if (!rowsData || !rowsData.length) {
+        rows.append(empty("暂无记录"));
+      } else {
+        rowsData.forEach(item => rows.append(mapper(item)));
+      }
+      panel.append(rows);
+      return panel;
+    }
+
+    function renderOverview() {
+      const data = app.data || {};
+      const tasks = (data.tasks && data.tasks.open) || [];
+      const recent = (data.tasks && data.tasks.recent) || [];
+      const schedules = data.schedules || [];
+      const reports = data.scheduled_reports || [];
+      const grid = node("div", "grid");
+      grid.append(renderRowsPanel("当前待办", "只显示未终态任务的可读标题", tasks, item =>
+        row(item.title, (item.owner || "主 agent") + " · " + (item.summary || item.time || ""), item.status)
+      ));
+      const side = node("div", "rows");
+      side.append(renderRowsPanel("最近定时任务", "任务定义，不混入历史运行记录", schedules.slice(0, 5), item =>
+        row(item.name, (item.target || "主 agent") + " · " + (item.trigger || "-"), item.status)
+      ));
+      side.append(renderRowsPanel("最近完成的汇报", "来自子代理最终回复正文", reports.slice(0, 3), item =>
+        row(item.schedule, (item.agent || "子代理") + " · " + (item.summary || ""), item.status)
+      ));
+      grid.append(side);
+      replace("view-overview", [grid]);
+    }
+
+    function renderAgents() {
+      const wrap = node("div", "agent-grid");
+      const agents = (app.data && app.data.agents) || [];
+      if (!agents.length) {
+        replace("view-agents", [empty("还没有持久子代理")]);
+        return;
+      }
+      for (const agent of agents) {
+        const card = node("article", "agent-card");
+        card.append(node("h3", "", agent.name || "子代理"));
+        const meta = node("div", "agent-meta");
+        meta.append(pill(agent.role || "specialist"));
+        meta.append(pill(agent.status || "idle"));
+        meta.append(pill(agent.model || "继承主控默认模型"));
+        for (const skill of agent.skills || []) meta.append(pill(skill));
+        card.append(meta);
+        card.append(node("p", "muted", agent.status_narrative || agent.profile || "暂无状态叙述。"));
+        if (agent.latest_report && agent.latest_report.summary) {
+          card.append(node("p", "muted", "最近汇报：" + agent.latest_report.summary));
+        }
+        const minis = node("div", "mini-metrics");
+        for (const item of agent.metrics || []) minis.append(miniMetric(item));
+        card.append(minis);
+        wrap.append(card);
+      }
+      replace("view-agents", [wrap]);
+    }
+
+    function renderReports() {
+      const list = node("div", "report-list");
+      const reports = (app.data && app.data.scheduled_reports) || [];
+      if (!reports.length) {
+        replace("view-reports", [empty("还没有可读的子代理定时汇报")]);
+        return;
+      }
+      reports.forEach((report, index) => {
+        const card = node("details", "report-card");
+        if (index < 2) card.open = true;
+        const summary = node("summary");
+        summary.append(node("h3", "", report.schedule || "定时任务"));
+        summary.append(node("p", "muted", (report.agent || "子代理") + " · " + (report.status || "-") + " · " + (report.time || "")));
+        summary.append(node("p", "muted", report.summary || ""));
+        card.append(summary);
+        card.append(node("div", "report-body", report.body || report.summary || "暂无正文"));
+        list.append(card);
+      });
+      replace("view-reports", [list]);
+    }
+
+    function renderGovernance() {
+      const data = app.data || {};
+      const grid = node("div", "grid");
+      grid.append(renderRowsPanel("待审批", "默认隐藏审批编号，只展示人需要判断的摘要", data.approvals || [], item =>
+        row(item.summary, (item.target || "主 agent") + " · " + (item.time || ""), item.type)
+      ));
+      const side = node("div", "rows");
+      side.append(renderRowsPanel("最近任务", "从共享任务账本读取", (data.tasks && data.tasks.recent) || [], item =>
+        row(item.title, (item.owner || "主 agent") + " · " + (item.time || ""), item.status)
+      ));
+      side.append(renderRowsPanel("产物架", "只显示类型和来源，不在默认界面倾倒 URI", data.artifacts || [], item =>
+        row(item.source, "size " + (item.size || "-"), item.type)
+      ));
+      grid.append(side);
+      replace("view-governance", [grid]);
+    }
+
+    function renderViews() {
+      for (const id of ["overview", "agents", "reports", "governance"]) {
+        document.getElementById("view-" + id).classList.toggle("active", app.view === id);
+      }
+      renderOverview();
+      renderAgents();
+      renderReports();
+      renderGovernance();
+    }
+
+    function renderAll() {
+      if (!app.data) return;
+      document.getElementById("updated").textContent = "updated " + (app.data.updated_at || "-");
+      document.getElementById("mode").textContent = app.data.mode || "read_only";
+      renderNav();
+      renderOverviewCard(app.data);
+      renderViews();
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/gui/snapshot", {cache: "no-store"});
+        app.data = await response.json();
+        renderAll();
+      } catch (error) {
+        replace("overview-card", [empty("无法读取本地 GUI 快照：" + error.message)]);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>
+"""
+
+
 def gateway_push_endpoint_allowed(endpoint: str) -> tuple[bool, str]:
     parsed = urllib.parse.urlparse(str(endpoint or ""))
     if parsed.scheme not in {"http", "https"}:
@@ -7930,7 +8938,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except OSError as exc:
+            log_diagnostic("gateway.http.disconnect", exc, detail=str(getattr(self, "client_address", "")))
+
+    def send_html(self, html: str, status: int = 200) -> None:
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except OSError as exc:
+            log_diagnostic("gateway.http.disconnect", exc, detail=str(getattr(self, "client_address", "")))
 
     def send_error_json(self, status: int, message: str) -> None:
         self.send_json({"schema_version": "agentgateway.error.v1", "error": message, "status": status}, status=status)
@@ -7939,11 +8962,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         query = urllib.parse.parse_qs(parsed.query)
-        registry = ensure_gateway_registry(None)
+        if path in {"/gui", "/dashboard", "/console"}:
+            self.send_html(web_console_html())
+            return
+        if path == "/gui/snapshot":
+            self.send_json(web_console_snapshot())
+            return
         if path in {"/", "/health"}:
             actual_host, actual_port = self.server.server_address[:2]
             self.send_json({"ok": True, "service": gateway_service_descriptor(str(actual_host), int(actual_port)), "registry_path": AGENT_GATEWAY_PATH})
             return
+        registry = ensure_gateway_registry(None)
         if path == "/gateway":
             self.send_json(registry)
             return
@@ -8090,7 +9119,7 @@ def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
         command="serve",
     )
     print(f"GA TUI gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
-    print("Endpoints: /gateway /a2a /a2a/events /mcp /mcp/resources")
+    print("Endpoints: /gui /gui/snapshot /gateway /a2a /a2a/events /mcp /mcp/resources")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -17,6 +17,7 @@ import curses
 import zipfile
 import contextlib
 import io
+import re
 from pathlib import Path
 
 
@@ -3847,6 +3848,29 @@ def run_gateway_server_checks() -> None:
     host, port = server.server_address[:2]
     base = f"http://{host}:{port}"
     try:
+        gateway_sig_before = a.jsonl_file_signature(a.AGENT_GATEWAY_PATH)
+        task_sig_before = a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH)
+        approval_sig_before = a.jsonl_file_signature(a.AGENT_APPROVALS_PATH)
+        artifact_sig_before = a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH)
+        with urllib.request.urlopen(f"{base}/gui", timeout=5) as response:
+            html = response.read().decode("utf-8")
+        assert "Shuheng Console" in html and "枢衡驾驶舱" in html, html[:500]
+        assert "/gui/snapshot" in html, html[:1000]
+        assert "artifact://" not in html and "appr_" not in html and "task_" not in html, html[:2000]
+        snapshot = get_json(f"{base}/gui/snapshot")
+        assert snapshot["schema_version"] == "shuheng.web_console.snapshot.v1", snapshot
+        assert snapshot["mode"] == "read_only", snapshot
+        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts"} <= set(snapshot), snapshot
+        assert snapshot["overview"]["metrics"], snapshot
+        snapshot_text = json.dumps(snapshot, ensure_ascii=False)
+        assert "artifact://" not in snapshot_text and "appr_" not in snapshot_text, snapshot_text
+        assert "APPROVAL_REQUIRED" not in snapshot_text and "approval=" not in snapshot_text, snapshot_text
+        assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", snapshot_text) is None, snapshot_text
+        assert "task_dashboard_agent_run_record" not in snapshot_text, snapshot_text
+        assert a.jsonl_file_signature(a.AGENT_GATEWAY_PATH) == gateway_sig_before
+        assert a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH) == task_sig_before
+        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
+        assert a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH) == artifact_sig_before
         health = get_json(f"{base}/health")
         assert health["ok"] is True, health
         assert health["service"]["schema_version"] == "agentgateway.service.v1", health
