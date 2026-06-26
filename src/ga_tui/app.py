@@ -8440,6 +8440,38 @@ def web_console_model_name_from_payload(action_data: dict[str, Any], refs: dict[
     return True, "", ""
 
 
+def web_console_schedule_control_from_payload(
+    action_data: dict[str, Any],
+    refs: dict[str, tuple[str, str]],
+) -> tuple[bool, dict[str, Any], str]:
+    control = dict(action_data)
+    target_agent_ref = str(
+        control.pop("target_agent_ref", "")
+        or control.pop("agent_ref", "")
+        or control.pop("agent_ui_ref", "")
+        or ""
+    ).strip()
+    if not target_agent_ref:
+        return True, control, ""
+    ok_ref, agent_id, error = web_console_resolve_ref(refs, target_agent_ref, "agent")
+    if not ok_ref:
+        return False, {}, error
+    execution = control.get("execution") if isinstance(control.get("execution"), dict) else {}
+    execution = dict(execution)
+    if str(execution.get("mode") or "").strip().lower().replace("-", "_") != "agent_task":
+        execution["mode"] = "agent_task"
+    routing = execution.get("routing") if isinstance(execution.get("routing"), dict) else {}
+    routing = dict(routing)
+    routing["selected_agent"] = agent_id
+    selector = routing.get("target_selector") if isinstance(routing.get("target_selector"), dict) else {}
+    selector = dict(selector)
+    selector.setdefault("agent_id", agent_id)
+    routing["target_selector"] = selector
+    execution["routing"] = routing
+    control["execution"] = execution
+    return True, control, ""
+
+
 def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     action = str(payload.get("action") or "").strip().lower().replace("_", ".")
     if payload.get("schema_version") != WEB_CONSOLE_ACTION_REQUEST_SCHEMA:
@@ -8479,6 +8511,11 @@ def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], i
 
     if action == "agent.create":
         control = dict(action_data)
+        ok_model, model_name, model_error = web_console_model_name_from_payload(control, refs)
+        if not ok_model:
+            return web_console_action_error(action, model_error)
+        if model_name:
+            control["default_model"] = model_name
         result = apply_subagent_control(state, "agent_create", "", "", control, source="web_console")
         return web_console_action_response(action=action, ok=bool(result and "缺少" not in result), message=result or "agent.create 未执行。", state=state)
 
@@ -8530,7 +8567,9 @@ def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], i
         return web_console_action_response(action=action, ok=not result.startswith("找不到"), message=result, state=state)
 
     if action in {"schedule.create", "schedule.update", "schedule.enable", "schedule.disable", "schedule.delete", "schedule.run"}:
-        control = dict(action_data)
+        ok_control, control, control_error = web_console_schedule_control_from_payload(action_data, refs)
+        if not ok_control:
+            return web_console_action_error(action, control_error)
         schedule_id = ""
         if action != "schedule.create":
             ok_ref, schedule_id, error = web_console_resolve_ref(refs, ui_ref, "schedule")
@@ -8624,7 +8663,7 @@ def web_console_html() -> str:
       letter-spacing: 0.01em;
     }
 
-    button, select { font: inherit; }
+    button, select, input, textarea { font: inherit; }
 
     .workbench {
       display: grid;
@@ -8863,6 +8902,98 @@ def web_console_html() -> str:
       color: var(--cyan);
       font-size: 0.82rem;
       border-bottom: 1px solid var(--line-soft);
+    }
+
+    .action-composer {
+      margin: 0.85rem 0 0;
+      border-top: 2px solid var(--line-bright);
+      background: rgba(5, 11, 18, 0.66);
+    }
+
+    .composer-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: center;
+      min-height: 2rem;
+      padding: 0.45rem 0.6rem;
+      color: var(--amber);
+      border-bottom: 1px solid var(--line-soft);
+      font-weight: 800;
+    }
+
+    .composer-head span {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .composer-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.65rem;
+      padding: 0.65rem;
+    }
+
+    .composer-field {
+      min-width: 0;
+    }
+
+    .composer-field.wide {
+      grid-column: span 2;
+    }
+
+    .composer-field.full {
+      grid-column: 1 / -1;
+    }
+
+    .composer-field label {
+      display: block;
+      margin-bottom: 0.22rem;
+      color: var(--cyan);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .composer-input,
+    .composer-textarea {
+      width: 100%;
+      border: 1px solid var(--line-soft);
+      background: rgba(7, 19, 29, 0.95);
+      color: var(--strong);
+      padding: 0.38rem 0.45rem;
+      outline: none;
+    }
+
+    .composer-input:focus,
+    .composer-textarea:focus {
+      border-color: var(--line-bright);
+      box-shadow: 0 0 0 1px rgba(124, 233, 235, 0.18);
+    }
+
+    .composer-textarea {
+      min-height: 6.4rem;
+      resize: vertical;
+      line-height: 1.48;
+    }
+
+    .composer-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+      padding: 0 0.65rem 0.65rem;
+    }
+
+    .composer-help {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }
+
+    .is-hidden {
+      display: none !important;
     }
 
     .hero-card {
@@ -9187,8 +9318,11 @@ def web_console_html() -> str:
     @media (max-width: 780px) {
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid,
+      .composer-grid,
       .two-col,
       .agent-matrix { grid-template-columns: 1fr; }
+      .composer-field.wide,
+      .composer-field.full { grid-column: auto; }
       .row { grid-template-columns: 1fr; }
       .row-side,
       .row-actions { justify-content: flex-start; }
@@ -9210,6 +9344,7 @@ def web_console_html() -> str:
       <div class="topline"><span id="topline">当前时间: loading | 会话ID: web:gui | 当前轮次: -</span></div>
       <div class="view-switcher" id="nav"></div>
       <div class="action-status" id="action-status"></div>
+      <section class="action-composer" id="action-composer"></section>
       <section class="hero-card" id="overview-card"></section>
       <section class="view active" id="view-overview"></section>
       <section class="view" id="view-agents"></section>
@@ -9223,7 +9358,36 @@ def web_console_html() -> str:
     </aside>
   </div>
   <script>
-    const app = {data: null, view: "overview", notice: ""};
+    const app = {
+      data: null,
+      view: "overview",
+      notice: "",
+      composer: {
+        mode: "main.prompt",
+        agent_ref: "",
+        model_ref: "",
+        title: "",
+        name: "",
+        role: "researcher",
+        text: "",
+        skill_operation: "add",
+        trigger_kind: "interval",
+        trigger_value: "1h",
+        execution_mode: "agent_task"
+      }
+    };
+
+    const composerModes = [
+      ["main.prompt", "主控任务"],
+      ["agent.create", "新建子代理"],
+      ["agent.task", "子代理任务"],
+      ["agent.chat", "子代理聊天"],
+      ["agent.set_model", "设置子代理模型"],
+      ["agent.set_skills", "设置子代理 Skill"],
+      ["schedule.create", "新建定时任务"]
+    ];
+
+    const composerLabels = Object.fromEntries(composerModes);
 
     function node(tag, className, text) {
       const item = document.createElement(tag);
@@ -9269,6 +9433,312 @@ def web_console_html() -> str:
         sendAction(action, uiRef, payload);
       });
       return button;
+    }
+
+    function prefillButton(label, mode, options) {
+      const button = node("button", "action-btn", label);
+      button.type = "button";
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        setComposer(mode, options || {});
+      });
+      return button;
+    }
+
+    function modelEntries(data) {
+      return (data && data.model && data.model.entries) || [];
+    }
+
+    function agentEntries(data) {
+      return (data && data.agents) || [];
+    }
+
+    function firstAgentRef(data) {
+      const agents = agentEntries(data);
+      return agents.length ? (agents[0].ui_ref || "") : "";
+    }
+
+    function setComposer(mode, options) {
+      syncComposerFromDom();
+      app.composer = Object.assign({}, app.composer, options || {}, {mode: mode || app.composer.mode || "main.prompt"});
+      if (app.composer.mode.startsWith("agent.") && !app.composer.agent_ref) {
+        app.composer.agent_ref = firstAgentRef(app.data);
+      }
+      if (app.composer.mode === "schedule.create" && app.composer.execution_mode === "agent_task" && !app.composer.agent_ref) {
+        app.composer.agent_ref = firstAgentRef(app.data);
+      }
+      renderAll();
+      const focusTarget = document.getElementById(
+        app.composer.mode === "agent.create" ? "composer-name" : "composer-text"
+      );
+      if (focusTarget) focusTarget.focus();
+    }
+
+    function syncComposerFromDom() {
+      const form = document.getElementById("action-composer-form");
+      if (!form) return;
+      const value = id => {
+        const el = document.getElementById(id);
+        return el ? el.value : "";
+      };
+      app.composer = Object.assign({}, app.composer, {
+        mode: value("composer-mode") || app.composer.mode,
+        agent_ref: value("composer-agent"),
+        model_ref: value("composer-model"),
+        title: value("composer-title"),
+        name: value("composer-name"),
+        role: value("composer-role"),
+        text: value("composer-text"),
+        skill_operation: value("composer-skill-operation") || "add",
+        trigger_kind: value("composer-trigger-kind") || "interval",
+        trigger_value: value("composer-trigger-value") || "",
+        execution_mode: value("composer-execution-mode") || "agent_task"
+      });
+    }
+
+    function composerField(id, label, control, extraClass) {
+      const wrap = node("div", "composer-field" + (extraClass ? " " + extraClass : ""));
+      if (id) wrap.id = id;
+      wrap.append(node("label", "", label));
+      wrap.append(control);
+      return wrap;
+    }
+
+    function selectControl(id, options, value) {
+      const select = node("select", "composer-input");
+      select.id = id;
+      options.forEach(optionData => {
+        const option = node("option", "", optionData[1]);
+        option.value = optionData[0];
+        if (optionData[0] === value) option.selected = true;
+        select.append(option);
+      });
+      return select;
+    }
+
+    function inputControl(id, value, placeholder) {
+      const input = node("input", "composer-input");
+      input.id = id;
+      input.value = value || "";
+      input.placeholder = placeholder || "";
+      return input;
+    }
+
+    function textareaControl(id, value, placeholder) {
+      const textarea = node("textarea", "composer-textarea");
+      textarea.id = id;
+      textarea.value = value || "";
+      textarea.placeholder = placeholder || "";
+      return textarea;
+    }
+
+    function renderActionComposer(data) {
+      const composer = app.composer;
+      const mode = composer.mode || "main.prompt";
+      const target = document.getElementById("action-composer");
+      if (!target) return;
+      const head = node("div", "composer-head");
+      head.append(node("b", "", "操作面板"));
+      head.append(node("span", "", composerLabels[mode] || mode));
+
+      const form = node("form");
+      form.id = "action-composer-form";
+      form.addEventListener("submit", submitComposer);
+      const grid = node("div", "composer-grid");
+      const agentOptions = agentEntries(data).map(agent => [agent.ui_ref || "", agent.name || "子代理"]);
+      const modelOptions = [["", "继承/不设置"]].concat(modelEntries(data).map(entry => [
+        entry.ui_ref || "",
+        `${entry.default === "true" ? "★ " : ""}${entry.name || entry.model || "model"}`
+      ]));
+      if (agentOptions.length && !composer.agent_ref) composer.agent_ref = agentOptions[0][0];
+
+      const modeSelect = selectControl("composer-mode", composerModes, mode);
+      modeSelect.addEventListener("change", event => {
+        syncComposerFromDom();
+        app.composer.mode = event.target.value || "main.prompt";
+        renderActionComposer(app.data);
+      });
+      grid.append(composerField("", "动作", modeSelect));
+
+      const agentSelect = selectControl("composer-agent", agentOptions.length ? agentOptions : [["", "暂无子代理"]], composer.agent_ref || "");
+      grid.append(composerField("composer-agent-field", "目标子代理", agentSelect));
+
+      const modelSelect = selectControl("composer-model", modelOptions, composer.model_ref || "");
+      grid.append(composerField("composer-model-field", "模型", modelSelect));
+
+      grid.append(composerField("composer-skill-operation-field", "Skill 操作", selectControl("composer-skill-operation", [
+        ["add", "追加"],
+        ["replace", "替换"],
+        ["remove", "移除"],
+        ["clear", "清空"]
+      ], composer.skill_operation || "add")));
+
+      grid.append(composerField("composer-title-field", "标题/任务名", inputControl("composer-title", composer.title, "可选标题"), "wide"));
+      grid.append(composerField("composer-name-field", "代理名称", inputControl("composer-name", composer.name, "例如：留学生获客运营官")));
+      grid.append(composerField("composer-role-field", "角色", inputControl("composer-role", composer.role || "researcher", "researcher / ops / coder")));
+
+      grid.append(composerField("composer-trigger-kind-field", "触发器", selectControl("composer-trigger-kind", [
+        ["interval", "interval"],
+        ["cron", "cron"],
+        ["at", "at"]
+      ], composer.trigger_kind || "interval")));
+      grid.append(composerField("composer-trigger-value-field", "触发值", inputControl("composer-trigger-value", composer.trigger_value, "1h / 0 8 * * * / 2026-06-27T08:00:00+0800"), "wide"));
+      grid.append(composerField("composer-execution-mode-field", "执行", selectControl("composer-execution-mode", [
+        ["agent_task", "子代理任务"],
+        ["tui_action", "本机蜂鸣"]
+      ], composer.execution_mode || "agent_task")));
+
+      grid.append(composerField("composer-text-field", "内容", textareaControl("composer-text", composer.text, "输入任务、聊天消息、Skill ref 或定时任务正文"), "full"));
+      form.append(grid);
+
+      const actions = node("div", "composer-actions");
+      const submit = node("button", "action-btn", "执行");
+      submit.type = "submit";
+      actions.append(submit);
+      actions.append(actionButton("刷新", "refresh_snapshot", ""));
+      const clear = node("button", "action-btn", "清空");
+      clear.type = "button";
+      clear.addEventListener("click", () => {
+        app.composer.text = "";
+        app.composer.title = "";
+        app.composer.name = "";
+        renderActionComposer(app.data);
+      });
+      actions.append(clear);
+      actions.append(node("span", "composer-help", "所有写操作都会进入 /gui/action；审批、调度、任务和模型切换仍由后端治理层处理。"));
+      form.append(actions);
+
+      target.replaceChildren(head, form);
+      applyComposerVisibility();
+    }
+
+    function applyComposerVisibility() {
+      const mode = app.composer.mode || "main.prompt";
+      const executionMode = document.getElementById("composer-execution-mode");
+      const scheduleAgentTask = mode === "schedule.create" && (!executionMode || executionMode.value === "agent_task");
+      const showAgent = mode.startsWith("agent.") && mode !== "agent.create" || scheduleAgentTask;
+      const showModel = mode === "agent.create" || mode === "agent.set_model";
+      const showSkills = mode === "agent.set_skills";
+      const showCreate = mode === "agent.create";
+      const showSchedule = mode === "schedule.create";
+      const toggle = (id, visible) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle("is-hidden", !visible);
+      };
+      toggle("composer-agent-field", showAgent);
+      toggle("composer-model-field", showModel);
+      toggle("composer-skill-operation-field", showSkills);
+      toggle("composer-name-field", showCreate);
+      toggle("composer-role-field", showCreate);
+      toggle("composer-title-field", mode !== "agent.set_model" && mode !== "agent.set_skills");
+      toggle("composer-trigger-kind-field", showSchedule);
+      toggle("composer-trigger-value-field", showSchedule);
+      toggle("composer-execution-mode-field", showSchedule);
+      const modeSelect = document.getElementById("composer-execution-mode");
+      if (modeSelect) {
+        modeSelect.onchange = () => {
+          syncComposerFromDom();
+          applyComposerVisibility();
+        };
+      }
+    }
+
+    function composerError(message) {
+      app.notice = "缺少输入: " + message;
+      renderNotice();
+    }
+
+    function buildSchedulePayload(composer) {
+      const trigger = (composer.trigger_value || "").trim();
+      if (!trigger) {
+        composerError("定时任务触发值");
+        return null;
+      }
+      const payload = {
+        name: (composer.title || "Web 定时任务").trim(),
+        execution: {}
+      };
+      if (composer.trigger_kind === "cron") payload.cron = trigger;
+      else if (composer.trigger_kind === "at") payload.at = trigger;
+      else payload.interval = trigger;
+      if (composer.execution_mode === "tui_action") {
+        payload.execution = {mode: "tui_action", action: "beep"};
+        if ((composer.text || "").trim()) payload.execution.message = composer.text.trim();
+      } else {
+        if (!composer.agent_ref) {
+          composerError("目标子代理");
+          return null;
+        }
+        const objective = (composer.text || "").trim();
+        if (!objective) {
+          composerError("子代理定时任务内容");
+          return null;
+        }
+        payload.target_agent_ref = composer.agent_ref;
+        payload.execution = {
+          mode: "agent_task",
+          routing: {},
+          work_order: {
+            objective,
+            success_criteria: ["return a concise scheduled report"],
+            stop_condition: "return the scheduled report and stop"
+          },
+          capability_contract: {tools_allowed: ["read"], tools_forbidden: ["repo.write"], write_policy: "none"},
+          context_contract: {history_mode: "summary", artifact_reference_only: true},
+          output_contract: {format: "structured_markdown", required_sections: ["summary", "findings", "artifact_refs"]}
+        };
+      }
+      return payload;
+    }
+
+    function submitComposer(event) {
+      event.preventDefault();
+      syncComposerFromDom();
+      const composer = app.composer;
+      const text = (composer.text || "").trim();
+      const title = (composer.title || "").trim();
+      if (composer.mode === "main.prompt") {
+        if (!text) return composerError("主控任务内容");
+        return sendAction("main.prompt", "", {prompt: text, title});
+      }
+      if (composer.mode === "agent.create") {
+        const name = (composer.name || title).trim();
+        if (!name) return composerError("代理名称");
+        const payload = {
+          name,
+          role: (composer.role || "researcher").trim(),
+          profile: text,
+          lifecycle: "persistent",
+          model_ref: composer.model_ref || ""
+        };
+        return sendAction("agent.create", "", payload);
+      }
+      if (composer.mode === "agent.task") {
+        if (!composer.agent_ref) return composerError("目标子代理");
+        if (!text) return composerError("子代理任务内容");
+        return sendAction("agent.task", composer.agent_ref, {prompt: text, title});
+      }
+      if (composer.mode === "agent.chat") {
+        if (!composer.agent_ref) return composerError("目标子代理");
+        if (!text) return composerError("聊天内容");
+        return sendAction("agent.chat", composer.agent_ref, {prompt: text});
+      }
+      if (composer.mode === "agent.set_model") {
+        if (!composer.agent_ref) return composerError("目标子代理");
+        return sendAction("agent.set_model", composer.agent_ref, {model_ref: composer.model_ref || "", model_name: composer.model_ref ? "" : "inherit"});
+      }
+      if (composer.mode === "agent.set_skills") {
+        if (!composer.agent_ref) return composerError("目标子代理");
+        if (composer.skill_operation === "clear") return sendAction("agent.set_skills", composer.agent_ref, {operation: "clear"});
+        if (!text) return composerError("Skill ref");
+        return sendAction("agent.set_skills", composer.agent_ref, {operation: composer.skill_operation || "add", skill_refs: text});
+      }
+      if (composer.mode === "schedule.create") {
+        const payload = buildSchedulePayload(composer);
+        if (!payload) return null;
+        return sendAction("schedule.create", "", payload);
+      }
+      return composerError("未知动作");
     }
 
     function row(title, meta, tag, actions) {
@@ -9510,10 +9980,8 @@ def web_console_html() -> str:
         ])
       );
       const workHeadActions = node("div", "agent-actions");
-      workHeadActions.append(actionButton("主控任务", "main.prompt", "", () => {
-        const prompt = window.prompt("发给主 agent 的任务");
-        return prompt ? {prompt} : null;
-      }));
+      workHeadActions.append(prefillButton("主控任务", "main.prompt", {text: "", title: ""}));
+      workHeadActions.append(prefillButton("新建定时", "schedule.create", {title: "", text: "", trigger_kind: "interval", trigger_value: "1h"}));
       workHeadActions.append(actionButton("调度扫描", "scheduler.tick", ""));
       workPanel.insertBefore(workHeadActions, workPanel.children[1] || null);
       grid.append(workPanel);
@@ -9552,22 +10020,10 @@ def web_console_html() -> str:
         if (skills) card.append(node("div", "agent-meta", skills));
         card.append(node("p", "", agent.status_narrative || agent.profile || "暂无状态叙述。"));
         const actions = node("div", "agent-actions");
-        actions.append(actionButton("发任务", "agent.task", agent.ui_ref, () => {
-          const prompt = window.prompt(`发给 ${agent.name || "子代理"} 的任务`);
-          return prompt ? {prompt} : null;
-        }));
-        actions.append(actionButton("聊天", "agent.chat", agent.ui_ref, () => {
-          const prompt = window.prompt(`和 ${agent.name || "子代理"} 对话`);
-          return prompt ? {prompt} : null;
-        }));
-        actions.append(actionButton("模型", "agent.set_model", agent.ui_ref, () => {
-          const modelName = window.prompt("模型名称；留空表示继承全局默认", "");
-          return modelName === null ? null : {model_name: modelName || "inherit"};
-        }));
-        actions.append(actionButton("加Skill", "agent.set_skills", agent.ui_ref, () => {
-          const refs = window.prompt("Skill ref，多个用空格或换行分隔");
-          return refs ? {operation: "add", skill_refs: refs} : null;
-        }));
+        actions.append(prefillButton("发任务", "agent.task", {agent_ref: agent.ui_ref, title: "", text: ""}));
+        actions.append(prefillButton("聊天", "agent.chat", {agent_ref: agent.ui_ref, text: ""}));
+        actions.append(prefillButton("模型", "agent.set_model", {agent_ref: agent.ui_ref, model_ref: ""}));
+        actions.append(prefillButton("加Skill", "agent.set_skills", {agent_ref: agent.ui_ref, skill_operation: "add", text: ""}));
         actions.append(actionButton("清Skill", "agent.set_skills", agent.ui_ref, {operation: "clear"}));
         actions.append(actionButton("停止", "agent.stop", agent.ui_ref));
         card.append(actions);
@@ -9642,6 +10098,7 @@ def web_console_html() -> str:
       renderNav();
       renderLeft(app.data);
       renderRight(app.data);
+      renderActionComposer(app.data);
       renderOverviewCard(app.data);
       renderViews(app.data);
       renderNotice();
@@ -9649,6 +10106,7 @@ def web_console_html() -> str:
 
     async function refresh() {
       try {
+        syncComposerFromDom();
         const response = await fetch("/gui/snapshot", {cache: "no-store"});
         app.data = await response.json();
         renderAll();

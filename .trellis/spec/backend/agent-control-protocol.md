@@ -389,10 +389,12 @@ S01 修复左栏历史会话标题
 ### 3. Contracts
 
 - `/gui` serves a self-contained local page with no new frontend build dependency and no external asset requirement.
+- `/gui` must collect mutable user input through native in-page controls and forms, not browser prompt/alert dialogs. Row buttons may prefill the governed action composer, while one-click actions still post directly to `/gui/action`.
 - `/gui/snapshot` builds a read-only `State` with a non-runtime placeholder agent, loads persisted subagent metadata, and derives display data from the existing shared task ledger, schedule registry, schedule-run records, approval registry, artifact index, and model config.
 - `/gui` and `/gui/snapshot` must not call `ensure_gateway_registry(...)`, write `gateway.json`, append JSONL rows, queue approvals, dispatch tasks, mutate schedules, switch models, or write memory.
 - `/gui/action` is the only Web-console mutation route. It must validate the request schema, allowlist known actions, resolve sanitized `ui_ref` handles server-side, and call existing governed functions such as `decide_approval(...)`, `apply_schedule_control(...)`, `scheduler_tick(...)`, `recover_task_action(...)`, `start_main_agent_task(...)`, `start_subagent_task(...)`, `start_subagent_chat(...)`, `set_subagent_default_model(...)`, `set_subagent_skill_refs(...)`, and `save_default_model(...)`.
 - `/gui/action` must not accept raw task ids, approval ids, artifact URIs, filesystem session paths, or internal agent ids as the normal browser contract. Snapshot rows may carry opaque `ui_ref` values that map back to current server-side ledgers.
+- Schedule create/update actions from the browser may submit a sanitized `target_agent_ref`; `/gui/action` resolves it server-side into the existing `agent_task.execution.routing.selected_agent` field before calling the shared scheduler registry.
 - Browser-triggered runtime work must still drain the normal runtime queues so task completion, artifacts, token usage, memory candidates, TUI controls, traces, and ledger updates are persisted through the same paths used by the TUI.
 - The Web console translates raw governance records into user-readable names, summaries, counts, and report bodies. Default visible HTML/JS-rendered content must not dump raw artifact URIs, approval ids, task ids, or internal agent ids as primary text.
 - Scheduled-report cards must use the same cleaned scheduled-report body path as TUI home pages: completed child subagent replies from subagent result artifacts first, then task summary fallback, with OMP/LLM process markers and approval-only audit rows excluded.
@@ -431,11 +433,13 @@ S01 修复左栏历史会话标题
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
+- Tests must assert `/gui` contains real in-page action controls, does not use browser prompt dialogs for core actions, and advertises the supported governed action modes.
 - Tests must assert `/gui/snapshot` returns `shuheng.web_console.snapshot.v1`, `mode:"read_only"`, expected top-level sections, and populated overview metrics.
 - Tests must assert `/gui/snapshot.sidebar` has the expected read-only shell sections and still excludes raw session paths or internal ids.
 - Tests must assert `/gui` and `/gui/snapshot` do not change signatures for `gateway.json`, task ledger, approval registry, or artifact index.
 - Tests must assert `/gui/action` rejects invalid schemas and unknown `ui_ref` values without mutating ledgers.
 - Tests must assert `/gui/action` schedule and approval actions mutate only through the governed registry/approval paths and return sanitized messages/snapshots.
+- Tests must assert `/gui/action` schedule create/update can resolve a browser `target_agent_ref` into the server-side subagent routing field without exposing or accepting raw agent ids in the browser contract.
 - Tests must assert `/gui/action` and `/gui/snapshot` do not expose raw task ids, approval ids, artifact URIs, filesystem session paths, or internal agent ids in default browser payloads.
 - Tests must assert snapshot/default text does not leak raw artifact URIs or approval ids and does not include known schedule-run audit task ids.
 - `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.

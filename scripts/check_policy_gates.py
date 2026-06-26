@@ -3860,6 +3860,7 @@ def post_json_any_status(url: str, payload: dict) -> dict:
 
 def run_gateway_server_checks() -> None:
     state = a.web_console_state()
+    sample_subagent = a.create_subagent(state, "Web Console Worker", role="researcher")
     sample_approval_id = a.queue_approval(
         approval_type="policy_approval_request",
         summary="Web console approval sample",
@@ -3899,6 +3900,9 @@ def run_gateway_server_checks() -> None:
         assert "Shuheng Console" in html and "枢衡驾驶舱" in html, html[:500]
         assert "/gui/snapshot" in html, html[:1000]
         assert "/gui/action" in html, html[:1000]
+        assert "window.prompt" not in html, html[:2000]
+        assert "action-composer" in html and "composer-mode" in html, html[:2000]
+        assert "agent.task" in html and "schedule.create" in html and "target_agent_ref" in html, html[:3000]
         assert "artifact://" not in html and "appr_" not in html and "task_" not in html, html[:2000]
         snapshot = get_json(f"{base}/gui/snapshot")
         assert snapshot["schema_version"] == "shuheng.web_console.snapshot.v1", snapshot
@@ -3939,7 +3943,8 @@ def run_gateway_server_checks() -> None:
         assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
         approval_ref = next((row.get("ui_ref") for row in snapshot["approvals"] if "Web console approval sample" in row.get("summary", "")), "")
         schedule_ref = next((row.get("ui_ref") for row in snapshot["schedules"] if row.get("name") == "Web Console Toggle"), "")
-        assert approval_ref and schedule_ref, snapshot
+        agent_ref = next((row.get("ui_ref") for row in snapshot["agents"] if row.get("name") == "Web Console Worker"), "")
+        assert approval_ref and schedule_ref and agent_ref, snapshot
         schedule_action = post_json(
             f"{base}/gui/action",
             {
@@ -3960,7 +3965,32 @@ def run_gateway_server_checks() -> None:
         )
         assert approval_action["ok"] is True, approval_action
         assert a.approval_latest_records()[sample_approval_id]["status"] == "rejected", a.approval_latest_records()[sample_approval_id]
-        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action}, ensure_ascii=False)
+        created_schedule = post_json(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "schedule.create",
+                "payload": {
+                    "schedule_id": "sched_web_console_agent_task",
+                    "name": "Web Console Agent Task",
+                    "interval": "2h",
+                    "target_agent_ref": agent_ref,
+                    "execution": {
+                        "mode": "agent_task",
+                        "routing": {},
+                        "work_order": {"objective": "Write a short web-console report."},
+                        "capability_contract": {"tools_allowed": ["read"], "write_policy": "none"},
+                        "context_contract": {"history_mode": "summary", "artifact_reference_only": True},
+                        "output_contract": {"format": "structured_markdown", "required_sections": ["summary"]},
+                    },
+                },
+            },
+        )
+        assert created_schedule["ok"] is True, created_schedule
+        agent_schedule = a.latest_schedule_records()["sched_web_console_agent_task"]
+        assert agent_schedule["target"] == sample_subagent.agent_id, agent_schedule
+        assert agent_schedule["execution"]["routing"]["selected_agent"] == sample_subagent.agent_id, agent_schedule
+        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action, "created": created_schedule}, ensure_ascii=False)
         assert "artifact://" not in action_text and "appr_" not in action_text and "task_" not in action_text, action_text
         assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", action_text) is None, action_text
         health = get_json(f"{base}/health")
