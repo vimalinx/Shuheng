@@ -5225,7 +5225,15 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
         "**LLM Running (Turn 1) ...**\n"
         "<summary>Reading files and deciding how to produce the report.</summary>\n"
         "<thinking>internal chain should not be visible in scheduled reports</thinking>\n\n"
-        "定时巡检完成：主页健康，待办事项已同步。",
+        "## Summary\n"
+        "定时巡检完成：主页健康，待办事项已同步。\n\n"
+        "## Findings\n"
+        "- 核心面板可读，任务状态已刷新。\n"
+        "- 待办事项已同步到主页。\n\n"
+        "## Risks\n"
+        "- 无新增运行风险。\n\n"
+        "## Next Actions\n"
+        "- 继续观察下一次定时任务输出。",
         source_task_id=scheduled_report_task_id,
         provenance={"generated_by": sub.agent_id, "source": "test_scheduled_report"},
     )
@@ -5321,6 +5329,8 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert "## 最近定时任务" in home_text and "主页巡检" in home_text, home_text
     assert "last:" not in home_text and "task_dashboard_agent_run_record" not in home_text, home_text
     assert "## 定时汇报" in home_text and "定时巡检完成：主页健康" in home_text, home_text
+    assert "核心面板可读，任务状态已刷新" in home_text and "无新增运行风险" in home_text, home_text
+    assert "继续观察下一次定时任务输出" in home_text, home_text
     assert "LLM Running" not in home_text and "<thinking>" not in home_text and "APPROVAL_REQUIRED" not in home_text, home_text
     assert approval_report_task_id not in home_text and cancelled_report_task_id not in home_text, home_text
     assert "## 最近任务" in home_text and "主页任务" in home_text, home_text
@@ -5334,6 +5344,8 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     report_home_text = "\n".join(line.text for line in a.home_lines(state, 100))
     assert "定时汇报" in report_home_text and "Dashboard Agent" in report_home_text, report_home_text
     assert "主页巡检" in report_home_text and "定时巡检完成：主页健康" in report_home_text, report_home_text
+    assert "核心面板可读，任务状态已刷新" in report_home_text and "待办事项已同步到主页" in report_home_text, report_home_text
+    assert "无新增运行风险" in report_home_text and "继续观察下一次定时任务输出" in report_home_text, report_home_text
     assert "artifact://" not in report_home_text, report_home_text
     assert "task_dashboard_agent_run_record" not in report_home_text, report_home_text
     assert "LLM Running" not in report_home_text and "<summary>" not in report_home_text and "<thinking>" not in report_home_text, report_home_text

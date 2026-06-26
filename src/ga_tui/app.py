@@ -16330,10 +16330,24 @@ def scheduled_report_visible_text(text: str) -> str:
     else:
         visible = visible_reply_text(cleaned, hide_detail_fences=process_has_tool_noise(cleaned)).strip()
     visible = clean_text(strip_inline_markdown(visible)).strip()
+    visible = sanitize_scheduled_report_visible_text(visible)
     noise_markers = ("LLM Running", "<summary>", "<thinking>", "<think>", "过程组", "过程 Turn")
     if not visible or any(marker in visible for marker in noise_markers):
         return ""
     return visible
+
+
+def sanitize_scheduled_report_visible_text(text: str) -> str:
+    cleaned = text or ""
+    cleaned = re.sub(r"artifact://\S+", "[artifact]", cleaned)
+    cleaned = re.sub(r"\bappr_[A-Za-z0-9_:-]+\b", "[approval]", cleaned)
+    cleaned = re.sub(r"\btask_[A-Za-z0-9_:-]+\b", "[task]", cleaned)
+    lines: list[str] = []
+    for raw_line in cleaned.splitlines():
+        if "APPROVAL_REQUIRED" in raw_line:
+            continue
+        lines.append(raw_line.rstrip())
+    return clean_text("\n".join(lines)).strip()
 
 
 def scheduled_report_excerpt(text: str, limit: int = 260) -> str:
@@ -16350,6 +16364,13 @@ def scheduled_report_excerpt(text: str, limit: int = 260) -> str:
             lines.append(line)
     excerpt = " / ".join(lines[:3]).strip()
     return truncate_cells(excerpt or cleaned.replace("\n", " "), limit)
+
+
+def scheduled_report_body(text: str, limit: int = 12000) -> str:
+    cleaned = scheduled_report_visible_text(text)
+    if not cleaned:
+        return ""
+    return truncate_cells(cleaned, limit).strip()
 
 
 def task_artifact_ref_for_scheduled_report(task_row: dict[str, Any], artifacts_by_task: dict[str, dict[str, Any]]) -> str:
@@ -16401,12 +16422,13 @@ def scheduled_report_rows(state: Optional[State] = None, *, agent_id: str = "", 
         schedule_name = str(run.get("schedule_name") or schedule.get("name") or schedule_id or "定时任务")
         artifact_ref = task_artifact_ref_for_scheduled_report(task, artifacts_by_task)
         artifact_body = subagent_result_body_from_artifact(artifact_ref) if artifact_ref else ""
-        summary = (
-            scheduled_report_excerpt(artifact_body)
-            or scheduled_report_excerpt(str(task.get("summary") or ""))
+        body = (
+            scheduled_report_body(artifact_body)
+            or scheduled_report_body(str(task.get("summary") or ""), limit=4000)
         )
-        if not summary:
+        if not body:
             continue
+        summary = scheduled_report_excerpt(body) or truncate_cells(body.replace("\n", " "), 260)
         timestamp = str(task.get("timestamp") or run.get("finished_at") or run.get("timestamp") or "").strip()
         row = {
             "schedule_id": schedule_id,
@@ -16418,6 +16440,7 @@ def scheduled_report_rows(state: Optional[State] = None, *, agent_id: str = "", 
             "status": status or "-",
             "timestamp": timestamp,
             "summary": summary,
+            "body": body,
             "artifact_ref": artifact_ref,
         }
         rows.append(row)
@@ -16426,7 +16449,47 @@ def scheduled_report_rows(state: Optional[State] = None, *, agent_id: str = "", 
     return rows[:limit]
 
 
-def scheduled_report_lines(rows: list[dict[str, Any]], *, include_agent: bool = True) -> list[RenderLine | str]:
+def scheduled_report_body_lines(
+    body: str,
+    *,
+    width: int,
+    limit: int,
+    max_lines: int,
+    payload: dict[str, str],
+) -> list[RenderLine]:
+    text = truncate_cells(str(body or "").strip(), limit).strip()
+    if not text:
+        return []
+    rendered = markdown_blocks(text, max(24, width - 4))
+    lines: list[RenderLine] = []
+    blank_seen = False
+    truncated = False
+    for item in rendered:
+        if len(lines) >= max_lines:
+            truncated = True
+            break
+        text_line = item.text.rstrip()
+        if not text_line:
+            if blank_seen:
+                continue
+            blank_seen = True
+            lines.append(RenderLine("", item.attr, kind="scheduled_report", payload=dict(payload)))
+            continue
+        blank_seen = False
+        lines.append(RenderLine(f"  {text_line}", item.attr, kind="scheduled_report", payload=dict(payload)))
+    if truncated:
+        lines.append(RenderLine("  ...（汇报内容过长，更多见任务详情）", cp(9), kind="scheduled_report", payload=dict(payload)))
+    return lines
+
+
+def scheduled_report_lines(
+    rows: list[dict[str, Any]],
+    *,
+    include_agent: bool = True,
+    width: int = 100,
+    body_limit: int = 12000,
+    max_body_lines: int = 120,
+) -> list[RenderLine | str]:
     lines: list[RenderLine | str] = []
     for row in rows:
         parts = [str(row.get("schedule_name") or row.get("schedule_id") or "定时任务")]
@@ -16436,20 +16499,27 @@ def scheduled_report_lines(rows: list[dict[str, Any]], *, include_agent: bool = 
         timestamp = str(row.get("timestamp") or "").strip()
         if timestamp:
             parts.append(timestamp)
+        payload = {
+            "task_id": str(row.get("task_id") or ""),
+            "schedule_id": str(row.get("schedule_id") or ""),
+            "agent_id": str(row.get("agent_id") or ""),
+            "artifact_ref": str(row.get("artifact_ref") or ""),
+        }
         lines.append(RenderLine(
             f"- {' · '.join(parts)}",
             cp(2),
             kind="scheduled_report",
-            payload={
-                "task_id": str(row.get("task_id") or ""),
-                "schedule_id": str(row.get("schedule_id") or ""),
-                "agent_id": str(row.get("agent_id") or ""),
-                "artifact_ref": str(row.get("artifact_ref") or ""),
-            },
+            payload=payload,
         ))
-        summary = str(row.get("summary") or "").strip()
-        if summary:
-            lines.append(f"  {summary}")
+        body = str(row.get("body") or row.get("summary") or "").strip()
+        if body:
+            lines.extend(scheduled_report_body_lines(
+                body,
+                width=width,
+                limit=body_limit,
+                max_lines=max_body_lines,
+                payload=payload,
+            ))
     return lines
 
 
@@ -16862,7 +16932,12 @@ def scheduled_reports_home_lines_uncached(state: State, width: int) -> list[Rend
         ],
         width=width,
     )
-    append_home_section(lines, "最近定时汇报", scheduled_report_lines(rows, include_agent=True), width)
+    append_home_section(
+        lines,
+        "最近定时汇报",
+        scheduled_report_lines(rows, include_agent=True, width=width, body_limit=12000, max_body_lines=120),
+        width,
+    )
     append_home_action_panel(lines, "详情入口", [
         ("定时任务", "/schedules"),
         ("任务账本", "/tasks"),
@@ -16871,7 +16946,7 @@ def scheduled_reports_home_lines_uncached(state: State, width: int) -> list[Rend
     return lines
 
 
-def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict[str, Any]) -> list[str | RenderLine]:
+def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict[str, Any], *, width: int = 100) -> list[str | RenderLine]:
     section_type = str(section.get("type") or "")
     if section_type == "function":
         profile = profile_summary_for_subagent(sub)
@@ -16901,6 +16976,9 @@ def subagent_home_section_body(state: State, sub: SubAgentRuntime, section: dict
         return scheduled_report_lines(
             scheduled_report_rows(state, agent_id=sub.agent_id, limit=8),
             include_agent=False,
+            width=width,
+            body_limit=10000,
+            max_body_lines=100,
         )
     if section_type == "tasks":
         return [
@@ -16963,13 +17041,13 @@ def subagent_home_lines_uncached(state: State, sub: SubAgentRuntime, width: int)
     sections = dashboard_sections_for_subagent(sub)
     for section in sections:
         title = str(section.get("title") or section.get("type") or "section")
-        body = subagent_home_section_body(state, sub, section)
+        body = subagent_home_section_body(state, sub, section, width=width)
         append_home_section(lines, title, body, width)
     if not any(str(section.get("type") or "") == "scheduled_reports" for section in sections):
         append_home_section(
             lines,
             "定时汇报",
-            subagent_home_section_body(state, sub, {"type": "scheduled_reports"}),
+            subagent_home_section_body(state, sub, {"type": "scheduled_reports"}, width=width),
             width,
         )
     append_home_action_panel(lines, "详情入口", [
