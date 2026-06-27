@@ -774,3 +774,36 @@ Implemented and documented release-readiness hardening for the Shuheng TUI: expl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: Extract standalone Web GUI project
+
+**Date**: 2026-06-27
+**Task**: Extract standalone Web GUI project
+**Branch**: `main`
+
+### Summary
+
+Extracted the Shuheng Web Console into a standalone sibling project, kept the gateway as governed API owner, added external GUI loading, tests, specs, and committed the standalone GUI repo at c3c1a19.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8b99f3b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
