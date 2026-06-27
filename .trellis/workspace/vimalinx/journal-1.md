@@ -807,3 +807,36 @@ Extracted the Shuheng Web Console into a standalone sibling project, kept the ga
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: Move Web GUI project to Projects
+
+**Date**: 2026-06-27
+**Task**: Move Web GUI project to Projects
+**Branch**: `main`
+
+### Summary
+
+Moved the standalone Shuheng Web GUI repository from Programs to Projects, updated the Shuheng loader default path and docs/spec references, and committed the GUI repo path update at 3695c04.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3003efb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

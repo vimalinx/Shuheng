@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-06-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~809 | Active |
+| `journal-1.md` | ~842 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-06-27 | Move Web GUI project to Projects | `3003efb` | `main` |
 | 24 | 2026-06-27 | Extract standalone Web GUI project | `8b99f3b` | `main` |
 | 23 | 2026-06-27 | Harden TUI release readiness | `deb5b13`, `0f6b76f` | `main` |
 | 22 | 2026-06-15 | GA-TUI agent bridge and OMP plugin | `8ffb953` | `experiment/ohmypi-runtime-memory` |
