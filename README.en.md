@@ -41,6 +41,8 @@ Bring session management, multi-agent orchestration, task planning, memory gover
 
 `Shuheng` is a terminal control plane for local multi-agent work. It evolved from the earlier `GenericAgent TUI`: it does not reimplement agent runtimes, but separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
 
+Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, and Secret Vault are the primary stable surfaces. The Web Console, HTTP gateway, A2A/MCP surfaces, baseline report, eval/trace quality scoring, and scheduler automation are still experimental compatibility surfaces. They are useful for local integration and verification, but should not be read as full protocol certification or production-grade remote services.
+
 Think of it as:
 
 ```text
@@ -59,7 +61,7 @@ Shuheng makes OMP, GenericAgent, Codex, Claude Code, and other local agent runti
 | Long conversations become hard to manage | Restore, pin, categorize, filter, archive, and trash sessions |
 | Multi-agent work can drift | Keep one orchestrator responsible for planning, dispatch, synthesis, and validation |
 | Subagent identities need continuity | Support temporary and persistent subagents with profile, role, model, and memory candidates |
-| Task progress needs visibility | Expose task ledger, step plans, agent mail, artifacts, evals, and traces |
+| Task progress needs visibility | Expose task ledger, step plans, agent mail, artifacts, heuristic evals, and traces |
 | Sensitive sessions should not leak into normal history | Use local encrypted Secret Vault and clear plaintext state on lock |
 
 The implementation uses Python `curses` for a small, controlled, low-dependency terminal surface. This avoids common input issues that can appear in heavier UI stacks under some terminal, Wayland, and mouse-mode combinations.
@@ -79,7 +81,7 @@ The implementation uses Python `curses` for a small, controlled, low-dependency 
 | Subagent orchestration | Create, reuse, stop, and remove temporary or persistent subagents | `Start a temporary researcher to check best practices for this library` |
 | Main orchestration | Let the main agent plan, delegate, wait, and synthesize | `Wait for the subagents before summarizing` |
 | Automation entrypoint | File, code, browser, log, memory, and system operations | `Ask the reviewer to inspect the code I just wrote` |
-| Governance views | Task ledger, approvals, artifacts, recovery, evals, traces | `Check whether that background task has returned` |
+| Governance views | Task ledger, approvals, artifacts, recovery, heuristic evals, traces | `Check whether that background task has returned` |
 
 ### Session Workspace
 
@@ -317,9 +319,9 @@ Type `/help` inside the TUI for the full command list.
 /reject <id>         Reject an item
 /artifacts           Open artifact store
 /recover             View or handle recoverable tasks
-/evals               View eval and trace records
-/gateway             View A2A/MCP gateway scaffold
-/baseline            View architecture baseline report
+/evals               View heuristic eval and trace records
+/gateway             View A2A/MCP compatibility surface and local gateway metadata
+/baseline            View architecture baseline report and evidence levels
 /memory              Inspect memory system
 /mem                 Alias for /memory
 ```
@@ -354,6 +356,7 @@ Type `/help` inside the TUI for the full command list.
 │       ├── integration.py
 │       ├── runtime.py
 │       ├── scheduler.py
+│       ├── release_readiness.py
 │       ├── control_protocol.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
@@ -375,6 +378,7 @@ Type `/help` inside the TUI for the full command list.
 | `src/ga_tui/integration.py` | GenericAgent core discovery, doctor checks, launcher shim |
 | `src/ga_tui/runtime.py` | Runtime provider abstractions and registry |
 | `src/ga_tui/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
+| `src/ga_tui/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
 | `src/ga_tui/control_protocol.py` | Agent task control protocol (v2) parsing |
 | `src/ga_tui/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
 | `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
@@ -414,9 +418,17 @@ docs/agent-harness-architecture.md
 | Single-writer discipline | Read work can be parallel; writes stay controlled |
 | Auditability | task ledger, progress ledger, mail, artifacts, approvals, evals, and traces remain inspectable |
 | Human approval gates | Long-term memory, Secret operations, deletion, deployment, and external side effects require approval |
-| Protocol compatibility | A2A/MCP gateway surfaces prepare for cross-agent and cross-tool workflows |
+| Protocol compatibility | A2A/MCP gateway surfaces are local compatibility surfaces; full protocol certification requires real third-party client E2E evidence |
 
 Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery, eval/trace, A2A/MCP, or orchestration should be checked against the architecture baseline before completion.
+
+### Release Readiness
+
+Shuheng's release-readiness metadata lives in `src/ga_tui/release_readiness.py` and is exposed through the `/gateway` `release_readiness` field. Current default posture:
+
+- Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault.
+- Experimental surfaces: Web Console, HTTP gateway, A2A/MCP compatibility surfaces, baseline report, heuristic eval, scheduler runtime dispatch.
+- Known gaps: `app.py` remains a large composition module; the gateway has no built-in authentication and should stay loopback by default; eval does not prove factual/citation correctness; A2A/MCP still need real client interoperability tests.
 
 ## Development
 

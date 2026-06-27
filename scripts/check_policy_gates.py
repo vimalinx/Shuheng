@@ -30,6 +30,7 @@ from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
+from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
 
 
@@ -204,6 +205,7 @@ def assert_scheduler_module_boundary() -> None:
         assert getattr(sched, name).__module__ == "ga_tui.scheduler", name
     assert a.SCHEDULER_TICK_SECONDS == sched.SCHEDULER_TICK_SECONDS
     assert a.SCHEDULE_RUN_ATTEMPT_STATUSES is sched.SCHEDULE_RUN_ATTEMPT_STATUSES
+    assert sched.scheduler_runtime_ownership is rr.scheduler_runtime_ownership
     source = Path(sched.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "import curses",
@@ -3588,6 +3590,9 @@ def assert_trace_schema(row: dict) -> None:
 
 def assert_eval_schema(row: dict) -> None:
     assert row["schema_version"] == "agenteval.v2", row
+    assert row["score_method"]["method"] == "heuristic", row
+    assert row["score_method"]["limitations"], row
+    assert "independently verified" in " ".join(row["score_method"]["limitations"]), row
     scores = row["scores"]
     missing_scores = EVAL_SCORE_KEYS - set(scores)
     assert not missing_scores, f"eval scores missing {missing_scores}: {row}"
@@ -3646,17 +3651,23 @@ def assert_recovery_plan_schema(row: dict, *, action: str = "") -> None:
 def assert_gateway_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.v1", registry
     assert registry["internal_agent_mail"]["governance"] == a.AGENT_GOVERNANCE_PATH, registry
+    assert_release_readiness_schema(registry["release_readiness"])
     service = registry["gateway_service"]
     assert service["schema_version"] == "agentgateway.service.v1", service
-    assert service["status"] == "network_capable", service
+    assert service["status"] == "local_no_auth_compatibility_surface", service
+    assert service["security"]["auth"] == "none", service
+    assert service["security"]["local_only"] is True, service
+    assert service["release_posture"] == "experimental_alpha", service
     assert service["request_response"]["registry"].endswith("/gateway"), service
     assert service["sse"]["endpoint"].endswith("/a2a/events"), service
     assert service["push_notifications"]["subscriptions_path"] == a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, service
+    assert service["push_notifications"]["auth"] == "none", service
     assert {"start", "stop", "restart", "status"} <= set(service["daemon"]["commands"]), service
     assert service["daemon"]["status_path"] == a.AGENT_GATEWAY_DAEMON_STATUS_PATH, service
     a2a = registry["a2a_gateway"]
     assert a2a["schema_version"] == "a2a.gateway.v1", a2a
-    assert a2a["status"] == "network_capable", a2a
+    assert a2a["status"] == "compatibility_surface", a2a
+    assert a2a["compatibility"]["certification"] == "not_protocol_certified", a2a
     assert a2a["contextId"] == "ga-tui", a2a
     for key in ("AgentCard", "Task", "Message", "Part", "Artifact", "contextId"):
         assert key in a2a["objects"], a2a
@@ -3667,7 +3678,8 @@ def assert_gateway_schema(registry: dict) -> None:
     assert a2a["subscriptions"]["push_notifications"] == "/a2a/push-subscriptions", a2a
     mcp = registry["mcp_gateway"]
     assert mcp["schema_version"] == "mcp.gateway.v1", mcp
-    assert mcp["status"] == "network_capable", mcp
+    assert mcp["status"] == "compatibility_surface", mcp
+    assert mcp["compatibility"]["certification"] == "not_protocol_certified", mcp
     assert mcp["tools"], mcp
     assert mcp["resources"], mcp
     assert mcp["request_response"]["resource_read"] == "/mcp/resource?uri={uri}", mcp
@@ -3720,6 +3732,8 @@ def assert_gateway_schema(registry: dict) -> None:
     assert scheduled["schema_version"] == "scheduledtask.registry.v1", scheduled
     assert scheduled["owner"] == "ga-tui.control_plane", scheduled
     assert scheduled["dispatch"]["contract"] == "agenttask.v2", scheduled
+    assert scheduled["runtime_ownership"]["always_on"] is False, scheduled
+    assert scheduled["runtime_ownership"]["tick_owner"] == "tui_loop_or_gateway_manual_action", scheduled
     assert scheduled["job_count"] >= 1, scheduled
     bridges = registry["bridge_registry"]
     assert bridges["schema_version"] == "agentbridge.registry.v1", bridges
@@ -3727,6 +3741,19 @@ def assert_gateway_schema(registry: dict) -> None:
     assert all((item["policy"] or {}).get("approval_required_for") for item in bridges["bridges"]), bridges
     assert_governance_schema(registry["governance_components"])
     assert_baseline_report_schema(registry["baseline_comparison"])
+
+
+def assert_release_readiness_schema(report: dict) -> None:
+    assert report["schema_version"] == "shuheng.release_readiness.v1", report
+    assert report["status"] == "experimental_alpha", report
+    assert "experimental gateway/protocol surfaces" in report["public_position"], report
+    support = report["support_level"]
+    assert support["stable_local_surfaces"], report
+    assert "A2A compatibility surface" in support["experimental_surfaces"], report
+    assert "MCP compatibility surface" in support["experimental_surfaces"], report
+    assert any("app.py remains" in gap for gap in support["known_gaps"]), report
+    assert report["monolith_risk"]["status"] in {"known_gap", "bounded"}, report
+    assert report["verification_commands"], report
 
 
 def assert_governance_schema(registry: dict) -> None:
@@ -3762,12 +3789,15 @@ def assert_baseline_report_schema(report: dict) -> None:
     assert report["schema_version"] == "architecture.baseline_report.v1", report
     assert report["baseline_refs"], report
     assert all(item.get("exists") for item in report["baseline_refs"]), report["baseline_refs"]
+    assert report["evidence_model"]["schema_version"] == "architecture.evidence_model.v1", report
+    assert "structural" in report["evidence_model"]["levels"], report
     assert report["report_path"] == a.AGENT_BASELINE_REPORT_PATH, report
     summary = report["summary"]
     assert summary["items"] >= len(BASELINE_ITEM_IDS), summary
     assert summary["complete"] + summary["partial"] + summary["missing"] == summary["items"], summary
     assert summary["partial"] == 0 and summary["missing"] == 0, summary
     assert 0.0 <= summary["completion_ratio"] <= 1.0, summary
+    assert summary["strongest_evidence_levels"]["structural"] >= 1, summary
     item_ids = {item.get("id") for item in report["items"]}
     missing_ids = BASELINE_ITEM_IDS - item_ids
     assert not missing_ids, f"baseline report missing {missing_ids}: {item_ids}"
@@ -3775,6 +3805,9 @@ def assert_baseline_report_schema(report: dict) -> None:
         assert item["status"] in {"complete", "partial", "missing"}, item
         assert item["requirement"], item
         assert isinstance(item["evidence"], list), item
+        assert item["evidence_checks"], item
+        assert item["strongest_evidence_level"] in {"structural", "runtime", "e2e", "unknown"}, item
+        assert item["claim_limit"], item
         assert isinstance(item["missing_evidence"], list), item
         assert isinstance(item["gaps"], list), item
     assert isinstance(report["remaining_gaps"], list), report
@@ -4086,6 +4119,9 @@ def run_gateway_server_checks() -> None:
 
 
 def run_gateway_daemon_checks() -> None:
+    remote_default = a.start_gateway_daemon("0.0.0.0", 0, extra_env={"GA_TUI_HARNESS_DIR": a.AGENT_HARNESS_DIR})
+    assert remote_default["status"] == "failed", remote_default
+    assert remote_default["message"] == "remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND", remote_default
     status = a.start_gateway_daemon("127.0.0.1", 0, extra_env={"GA_TUI_HARNESS_DIR": a.AGENT_HARNESS_DIR})
     try:
         assert status["schema_version"] == "agentgateway.daemon.v1", status

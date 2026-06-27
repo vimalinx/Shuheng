@@ -41,6 +41,8 @@
 
 `枢衡 Shuheng` 是面向本地多 Agent 的终端控制面。它从早期 `GenericAgent TUI` 演进而来：不重写底层 agent runtime，而是把用户每天真正接触的执行、调度、审批、记忆和会话工作台单独维护起来。
 
+当前发布定位是 **experimental local alpha**：本地 curses TUI、会话、任务账本、artifact、审批和 Secret Vault 是主要稳定面；Web Console、HTTP gateway、A2A/MCP、baseline report、eval/trace 质量评分和 scheduler 自动执行仍按实验性兼容面维护。它们可以用于本地集成和验证，但不应被理解为完整协议认证或生产级远程服务。
+
 你可以把它理解成：
 
 ```text
@@ -59,7 +61,7 @@
 | 长会话容易混乱 | 历史恢复、置顶、分类、过滤、归档和回收站 |
 | 多 Agent 容易失控 | 主控 orchestrator 统一拆解、调度、汇总和验收 |
 | 子 Agent 身份不稳定 | 支持临时/持久子 Agent、profile、role、模型和记忆候选 |
-| 任务进展难追踪 | 任务账本、步骤计划、agent mail、artifact、eval 和 trace |
+| 任务进展难追踪 | 任务账本、步骤计划、agent mail、artifact、启发式 eval 和 trace |
 | Secret 内容不应混入普通历史 | 本地加密 Secret Vault，锁定后清除明文状态 |
 
 当前实现基于 Python `curses`，刻意选择低依赖、可控、稳定的终端方案，避免复杂 UI 框架在部分终端、Wayland 或鼠标模式组合下引入输入污染。
@@ -79,7 +81,7 @@
 | 子 Agent 调度 | 创建、复用、停止、删除临时或持久子 Agent | `开一个临时研究员，帮我查这个库的最佳实践` |
 | 主控编排 | 由主 agent 统一拆解任务、分派、等待和汇总 | `等子 Agent 返回后再汇总，不要现在结束` |
 | 自动化入口 | 文件、代码、浏览器、日志、记忆、系统操作 | `让审查员检查刚才写的代码` |
-| 治理视图 | 任务账本、审批、artifact、recovery、eval、trace | `看看后台那个任务有结果了吗` |
+| 治理视图 | 任务账本、审批、artifact、recovery、启发式 eval、trace | `看看后台那个任务有结果了吗` |
 
 ### 会话工作区
 
@@ -317,9 +319,9 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 /reject <id>         拒绝待审批事项
 /artifacts           打开 artifact store
 /recover             查看或处理可恢复任务
-/evals               查看任务评估和 trace
-/gateway             查看 A2A/MCP gateway 脚手架
-/baseline            查看架构基线对比报告
+/evals               查看启发式任务评估和 trace
+/gateway             查看 A2A/MCP 兼容面和本地 gateway 元数据
+/baseline            查看架构基线对比报告和证据等级
 /memory              打开记忆系统可视化检查
 /mem                 /memory 的别名
 ```
@@ -354,6 +356,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 │       ├── integration.py
 │       ├── runtime.py
 │       ├── scheduler.py
+│       ├── release_readiness.py
 │       ├── control_protocol.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
@@ -375,6 +378,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 | `src/ga_tui/integration.py` | GenericAgent 核心发现、doctor 检查和 launcher shim |
 | `src/ga_tui/runtime.py` | runtime provider 抽象层与注册表 |
 | `src/ga_tui/scheduler.py` | 定时任务注册表与触发判定(cron / interval / at) |
+| `src/ga_tui/release_readiness.py` | 发布成熟度、baseline 证据等级、gateway 安全姿态和启发式 eval 纯函数 |
 | `src/ga_tui/control_protocol.py` | agent task 控制协议(v2)解析 |
 | `src/ga_tui/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
 | `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter(进程、host tool、usage 同步) |
@@ -414,9 +418,17 @@ docs/agent-harness-architecture.md
 | 单写者原则 | 读任务可并行，写操作保持受控 |
 | 可审计 | task ledger、progress ledger、mail、artifact、approval、eval、trace 可追踪 |
 | 人类审批门 | 长期记忆、Secret、删除、部署和外部副作用需要审批 |
-| 协议兼容 | A2A/MCP gateway 为跨 agent、跨工具协作预留接口 |
+| 协议兼容 | A2A/MCP gateway 是本地兼容面；完整协议认证需要真实第三方客户端 E2E 证据 |
 
 如果改动触及 TUI、子 Agent、审批、记忆、artifact、recovery、eval/trace、A2A/MCP 或 orchestration 行为，完成前都应对照架构基线检查。
+
+### Release Readiness
+
+Shuheng 的发布成熟度元数据由 `src/ga_tui/release_readiness.py` 维护，并通过 `/gateway` 的 `release_readiness` 字段暴露。当前默认结论：
+
+- 稳定本地面：curses TUI、会话工作区、任务账本、artifact、审批、Secret Vault。
+- 实验面：Web Console、HTTP gateway、A2A/MCP 兼容面、baseline report、heuristic eval、scheduler runtime dispatch。
+- 已知缺口：`app.py` 仍是大型 composition module；gateway 无内建认证且默认应仅绑定 loopback；eval 不证明事实/引用正确；A2A/MCP 还需要真实客户端互操作测试。
 
 ## 开发
 

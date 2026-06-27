@@ -2238,6 +2238,119 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - Bad: A plugin scrapes `context_packs/` or `subagents/` files directly instead of calling the bridge.
 - Bad: The bridge adds a second memory-candidate schema instead of reusing `queue_curated_memory_candidate(...)`.
 
+## Scenario: Release Readiness And Evidence Posture
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng exposes public release, gateway, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
+- Applies to: `src/ga_tui/release_readiness.py`, `ensure_gateway_registry(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, scheduler registry metadata, README release wording, and gateway/policy smoke tests.
+- Non-goal: This does not certify full A2A/MCP compliance, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
+
+### 2. Signatures
+
+- Release readiness report:
+  - `schema_version:"shuheng.release_readiness.v1"`
+  - `status:"experimental_alpha"`
+  - `public_position`
+  - `support_level.stable_local_surfaces`
+  - `support_level.experimental_surfaces`
+  - `support_level.known_gaps`
+  - `monolith_risk`
+  - `repository_hygiene`
+  - `verification_commands`
+- Gateway service descriptor:
+  - `schema_version:"agentgateway.service.v1"`
+  - `status:"local_no_auth_compatibility_surface"`
+  - `security.schema_version:"shuheng.gateway_bind_safety.v1"`
+  - `security.auth:"none"`
+  - `security.local_only`
+  - `security.allowed`
+  - `release_posture:"experimental_alpha"`
+- Baseline item fields:
+  - `evidence_checks[]` with `ok`, `description`, and `level`
+  - `evidence_levels`
+  - `strongest_evidence_level`
+  - `claim_limit`
+- Eval rows:
+  - `score_method.method:"heuristic"`
+  - `score_method.basis`
+  - `score_method.limitations`
+
+### 3. Contracts
+
+- Public release posture must be explicit: stable local surfaces, experimental surfaces, and known gaps are separate lists.
+- A2A and MCP gateway metadata must use compatibility-surface wording until real third-party client end-to-end tests exist.
+- Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1`.
+- Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
+- Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
+- Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or gateway/manual ticks, not by an installed always-on service by default.
+- Release-readiness helpers should remain pure and must not import `app.py`.
+
+### 4. Validation & Error Matrix
+
+- `/gateway` registry missing `release_readiness` -> release posture regression.
+- Gateway service status is `network_capable` without no-auth/local wording -> overclaiming regression.
+- Non-loopback gateway daemon start without `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` -> failed daemon status with `remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND`.
+- A2A/MCP status says certified/network-capable without compatibility metadata -> protocol overclaiming regression.
+- Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
+- Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
+- Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/gateway` says Shuheng is `experimental_alpha`, A2A/MCP are compatibility surfaces, gateway auth is `none`, and baseline items show structural evidence limits.
+- Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
+- Base: Local `127.0.0.1` gateway works without auth because it is loopback-only by default.
+- Base: Operator deliberately sets `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
+- Bad: README or gateway metadata implies production-ready remote gateway or certified A2A/MCP support without client E2E evidence.
+- Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `/gateway` contains `release_readiness` with stable, experimental, and known-gap lists.
+- Tests must assert gateway service descriptors use `local_no_auth_compatibility_surface`, `security.auth:"none"`, and loopback safety by default.
+- Tests must assert non-loopback gateway daemon start fails unless `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
+- Tests must assert A2A/MCP metadata carries `certification:"not_protocol_certified"`.
+- Tests must assert baseline reports contain evidence model, per-item evidence checks, strongest evidence level, and claim limits.
+- Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.
+- Tests must assert scheduler registry has `runtime_ownership.always_on:false`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```json
+{
+  "gateway_service": {"status": "network_capable"},
+  "a2a_gateway": {"status": "network_capable"},
+  "baseline_comparison": {"items": [{"status": "complete"}]}
+}
+```
+
+#### Correct
+
+```json
+{
+  "gateway_service": {
+    "status": "local_no_auth_compatibility_surface",
+    "security": {"auth": "none", "local_only": true}
+  },
+  "a2a_gateway": {
+    "status": "compatibility_surface",
+    "compatibility": {"certification": "not_protocol_certified"}
+  },
+  "baseline_comparison": {
+    "items": [
+      {
+        "status": "complete",
+        "strongest_evidence_level": "structural",
+        "claim_limit": "Structural evidence only..."
+      }
+    ]
+  }
+}
+```
+
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"ga-tui.agent_bridge.v1"`, owner `ga-tui.control_plane`, supported bridge actions, and `provider_direct_writes:false`.

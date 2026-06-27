@@ -13,6 +13,10 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "requests>=2.31",
     "urllib3>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
     "pytest>=7.0",
 ]
 

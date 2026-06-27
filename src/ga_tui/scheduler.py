@@ -11,8 +11,10 @@ from typing import Any, Callable, Optional
 
 try:
     from .control_protocol import AGENT_TASK_SCHEMA, execution_control_from_v2
+    from .release_readiness import scheduler_runtime_ownership
 except Exception:
     from control_protocol import AGENT_TASK_SCHEMA, execution_control_from_v2  # type: ignore
+    from release_readiness import scheduler_runtime_ownership  # type: ignore
 
 
 SCHEDULE_RUN_ATTEMPT_STATUSES = {"starting", "dispatched", "queued", "approval_required", "failed", "rejected"}
@@ -147,6 +149,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
             "agent_mail": _runtime.agent_mail_path,
             "artifact_policy": "artifact_refs_required",
         },
+        "runtime_ownership": scheduler_runtime_ownership(),
         "capabilities": {
             "register_recurring_jobs": True,
             "dispatch_to_runtime_provider": True,

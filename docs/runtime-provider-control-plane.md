@@ -16,6 +16,10 @@ The TUI owns these top-level responsibilities:
 - Scheduled task registry and recurring dispatch through governed `agenttask.v2` delegation.
 - A2A/MCP gateway metadata for external agents and tools.
 
+The current public posture is experimental local alpha. Gateway, A2A, MCP,
+baseline, eval, and scheduler automation metadata are compatibility surfaces
+unless backed by explicit end-to-end client tests.
+
 Runtime providers own narrow execution:
 
 - Accept a bounded work order.
@@ -142,6 +146,8 @@ Runtime and top-level control metadata are exposed through:
   `ga_tui_memory_candidate_submit` by calling the local Shuheng bridge CLI.
 - MCP resources: `resource://agent-mail/runtime-providers`, `resource://agent-mail/schedules`, and `resource://agent-mail/schedule-runs`.
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
+- Release readiness: `/gateway` exposes `release_readiness` with stable local
+  surfaces, experimental surfaces, known gaps, and verification commands.
 
 ## Design Rules
 
@@ -156,6 +162,12 @@ Runtime and top-level control metadata are exposed through:
 - Do not let OMP permission profiles override policy gates. `full` means normal
   runtime tool availability, not direct long-term memory writes or automatic
   approval for high-risk actions.
+- Do not describe A2A/MCP as certified protocol implementations without real
+  third-party client interoperability tests; use compatibility-surface wording
+  until those tests exist.
+- Do not bind the Web Console/gateway to a non-loopback interface unless
+  `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is deliberately set and an external
+  trusted access boundary is in place. The built-in gateway has no auth layer.
 - Keep provider selection explicit and reversible; this experiment branch defaults
   to `ohmypi`, with `genericagent` retained as the fallback adapter.
 - Do not make an OMP plugin a new memory owner. Plugin tools may read context and

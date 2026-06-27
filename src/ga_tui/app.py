@@ -121,6 +121,18 @@ try:
         write_ohmypi_memory_prompt,
     )
     from .runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec
+    from .release_readiness import (
+        EVIDENCE_LEVEL_DESCRIPTIONS,
+        HeuristicEvalInput,
+        baseline_claim_limit,
+        evidence_level_summary,
+        gateway_bind_safety,
+        heuristic_eval_assessment,
+        normalize_evidence_checks,
+        protocol_compatibility_metadata,
+        release_readiness_report,
+        strongest_passed_evidence_level,
+    )
 except Exception:
     from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
     from compat_legacy import (  # type: ignore
@@ -197,6 +209,18 @@ except Exception:
         write_ohmypi_memory_prompt,
     )
     from runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec  # type: ignore
+    from release_readiness import (  # type: ignore
+        EVIDENCE_LEVEL_DESCRIPTIONS,
+        HeuristicEvalInput,
+        baseline_claim_limit,
+        evidence_level_summary,
+        gateway_bind_safety,
+        heuristic_eval_assessment,
+        normalize_evidence_checks,
+        protocol_compatibility_metadata,
+        release_readiness_report,
+        strongest_passed_evidence_level,
+    )
 
 
 SCHEDULE_RUN_ATTEMPT_STATUSES = scheduler_runtime.SCHEDULE_RUN_ATTEMPT_STATUSES
@@ -6255,12 +6279,18 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
     tool_calls = len(audit_refs["tool_calls"])
     approval_count = len(audit_refs["approvals"])
     artifact_count = len(audit_refs["artifacts"])
-    citation_accuracy = bounded_score(0.85 if artifact_count else 0.25)
-    source_quality = bounded_score(0.85 if artifact_count else 0.4)
-    factual_accuracy = bounded_score(0.78 if artifact_count else (0.55 if clean.strip() else 0.0))
-    tool_efficiency = bounded_score(1.0 - min(tool_calls / max_tools, 1.0) * 0.25)
-    policy_compliance = bounded_score(0.85 if approval_count and role in {"coder", "ops"} else 1.0)
-    human_takeover_cost = bounded_score(min(1.0, approval_count / 3.0))
+    assessment = heuristic_eval_assessment(HeuristicEvalInput(
+        has_text=bool(clean.strip()),
+        role=role,
+        max_tools=max_tools,
+        tool_calls=tool_calls,
+        approval_count=approval_count,
+        artifact_count=artifact_count,
+        artifact_recorded=bool(artifact_ref),
+    ))
+    scores = dict(assessment.get("scores") or {})
+    policy_compliance = float(assessment.get("policy_compliance") or scores.get("policy_compliance") or 0.0)
+    human_takeover_cost = float(assessment.get("human_takeover_cost") or scores.get("human_takeover_cost") or 0.0)
     row = {
         "schema_version": "agenteval.v2",
         "eval_id": short_uid("eval"),
@@ -6269,17 +6299,12 @@ def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, arti
         "timestamp": now_iso(),
         "agent_id": sub.agent_id,
         "role": role,
-        "scores": {
-            "completion": 1.0 if clean.strip() else 0.0,
-            "factual_accuracy": factual_accuracy,
-            "citation_accuracy": citation_accuracy,
-            "source_quality": source_quality,
-            "tool_efficiency": tool_efficiency,
-            "policy_compliance": policy_compliance,
-            "human_takeover_cost": human_takeover_cost,
-            "evidence_quality": 0.85 if artifact_count else 0.45,
-            "artifact_recorded": 1.0 if artifact_ref else 0.0,
-            "needs_review": 1.0 if approval_count or role in {"coder", "ops"} else 0.0,
+        "scores": scores,
+        "score_method": {
+            "schema_version": assessment.get("schema_version"),
+            "method": assessment.get("method"),
+            "basis": assessment.get("basis") or {},
+            "limitations": assessment.get("limitations") or [],
         },
         "audit_refs": audit_refs,
         "coverage": {
@@ -7618,6 +7643,23 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
     ]
 
 
+def count_text_file_lines(path: str) -> int:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return sum(1 for _line in fh)
+    except OSError:
+        return 0
+
+
+def current_release_readiness_report() -> dict[str, Any]:
+    return release_readiness_report(
+        app_py_lines=count_text_file_lines(__file__),
+        has_license=bool(glob.glob(os.path.join(APP_ROOT_DIR, "LICEN[SC]E*"))),
+        has_ci=os.path.isdir(os.path.join(APP_ROOT_DIR, ".github", "workflows")),
+        has_security_policy=os.path.exists(os.path.join(APP_ROOT_DIR, "SECURITY.md")),
+    )
+
+
 def gateway_base_url(host: str, port: int) -> str:
     display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else (host or "127.0.0.1")
     return f"http://{display_host}:{int(port)}"
@@ -7719,11 +7761,14 @@ def gateway_daemon_alive() -> bool:
 
 def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
     base_url = gateway_base_url(host, port)
+    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
     return {
         "schema_version": "agentgateway.service.v1",
-        "status": "network_capable",
+        "status": "local_no_auth_compatibility_surface",
         "bind": {"host": host, "port": int(port)},
         "base_url": base_url,
+        "security": bind_safety,
+        "release_posture": "experimental_alpha",
         "request_response": {
             "health": f"{base_url}/health",
             "registry": f"{base_url}/gateway",
@@ -7743,6 +7788,7 @@ def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dic
             "subscriptions_path": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
             "deliveries_path": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
             "default_endpoint_policy": "loopback_only_unless_GA_TUI_GATEWAY_ALLOW_REMOTE_PUSH=1",
+            "auth": "none",
         },
         "daemon": {
             "commands": ["start", "stop", "restart", "status"],
@@ -10889,6 +10935,18 @@ def make_gateway_http_server(host: str = "127.0.0.1", port: int = 8765) -> Threa
 
 
 def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
+    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
+    if not bind_safety.get("allowed"):
+        write_gateway_daemon_status(
+            "failed",
+            pid=os.getpid(),
+            host=str(host),
+            port=int(port),
+            message=str(bind_safety.get("reason") or "remote bind is not allowed"),
+            command="serve",
+        )
+        print(str(bind_safety.get("operator_note") or "Gateway bind denied."), file=sys.stderr)
+        return 2
     server = make_gateway_http_server(host, port)
     actual_host, actual_port = server.server_address[:2]
     write_gateway_daemon_status(
@@ -10943,6 +11001,17 @@ def wait_for_gateway_daemon(pid: int, *, timeout: float = 5.0) -> dict[str, Any]
 
 
 def start_gateway_daemon(host: str = "127.0.0.1", port: int = 8765, *, extra_env: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    allow_remote = os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1" or bool((extra_env or {}).get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
+    bind_safety = gateway_bind_safety(host, allow_remote=allow_remote)
+    if not bind_safety.get("allowed"):
+        return write_gateway_daemon_status(
+            "failed",
+            pid=0,
+            host=str(host),
+            port=int(port),
+            message=str(bind_safety.get("reason") or "remote bind is not allowed"),
+            command="start",
+        )
     current = read_gateway_daemon_status()
     if current.get("alive") and current.get("status") == "running":
         current["message"] = "gateway daemon already running"
@@ -11241,22 +11310,28 @@ def baseline_item(
     item_id: str,
     title: str,
     requirement: str,
-    checks: list[tuple[bool, str]],
+    checks: list[Any],
     *,
     gaps: Optional[list[str]] = None,
     notes: str = "",
 ) -> dict[str, Any]:
-    pass_count = sum(1 for ok, _desc in checks if ok)
-    status = baseline_status(pass_count, len(checks))
-    failed = [desc for ok, desc in checks if not ok]
+    normalized_checks = normalize_evidence_checks(checks)
+    pass_count = sum(1 for check in normalized_checks if check.get("ok"))
+    status = baseline_status(pass_count, len(normalized_checks))
+    failed = [str(check.get("description") or "") for check in normalized_checks if not check.get("ok")]
+    strongest_level = strongest_passed_evidence_level(normalized_checks)
     return {
         "id": item_id,
         "title": title,
         "requirement": requirement,
         "status": status,
         "pass_count": pass_count,
-        "check_count": len(checks),
-        "evidence": [desc for ok, desc in checks if ok],
+        "check_count": len(normalized_checks),
+        "evidence": [str(check.get("description") or "") for check in normalized_checks if check.get("ok")],
+        "evidence_checks": normalized_checks,
+        "evidence_levels": evidence_level_summary(normalized_checks),
+        "strongest_evidence_level": strongest_level,
+        "claim_limit": baseline_claim_limit(strongest_level),
         "missing_evidence": failed,
         "gaps": gaps or failed,
         "notes": notes,
@@ -11420,7 +11495,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
         baseline_item(
             "a2a_mcp_gateway",
             "A2A/MCP Gateway",
-            "A2A 用于 Agent-to-Agent，MCP 用于 Agent-to-tool/resource，并提供 request/response、SSE 和 push notification 网络入口。",
+            "A2A 用于 Agent-to-Agent，MCP 用于 Agent-to-tool/resource；当前发布口径是 Shuheng 兼容面，完整协议认证需要真实客户端 E2E 证据。",
             [
                 (a2a.get("schema_version") == "a2a.gateway.v1", "A2A gateway schema is present"),
                 (bool(a2a.get("agent_cards")), "A2A AgentCard objects are present"),
@@ -11468,6 +11543,15 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
             "partial": summary_counts["partial"],
             "missing": summary_counts["missing"],
             "completion_ratio": bounded_score(summary_counts["complete"] / max(1, len(items))),
+            "strongest_evidence_levels": {
+                level: sum(1 for item in items if item.get("strongest_evidence_level") == level)
+                for level in ("structural", "runtime", "e2e", "unknown")
+            },
+        },
+        "evidence_model": {
+            "schema_version": "architecture.evidence_model.v1",
+            "levels": EVIDENCE_LEVEL_DESCRIPTIONS,
+            "claim_limit": "Baseline completion is an implementation-readiness signal. It is not protocol certification unless e2e evidence is present.",
         },
         "items": items,
         "remaining_gaps": remaining_gaps,
@@ -11490,7 +11574,10 @@ def format_baseline_report(report: dict[str, Any], *, max_items: int = 20) -> st
         "Items:",
     ]
     for item in (report.get("items") or [])[:max_items]:
-        lines.append(f"- [{item.get('status', '-')}] {item.get('id', '')}: {item.get('title', '')}")
+        lines.append(
+            f"- [{item.get('status', '-')}/{item.get('strongest_evidence_level', 'unknown')}] "
+            f"{item.get('id', '')}: {item.get('title', '')}"
+        )
         for gap in (item.get("gaps") or [])[:3]:
             lines.append(f"  gap: {gap}")
     gaps = report.get("remaining_gaps") or []
@@ -11518,6 +11605,8 @@ def baseline_panel_items(state: Optional[State] = None) -> list[PanelItem]:
         detail = "\n".join([
             f"Requirement: {item.get('requirement', '')}",
             f"Status: {item.get('status', '')} ({item.get('pass_count', 0)}/{item.get('check_count', 0)})",
+            f"Strongest evidence: {item.get('strongest_evidence_level', 'unknown')}",
+            f"Claim limit: {item.get('claim_limit', '')}",
             "",
             "Evidence:",
             evidence,
@@ -11589,8 +11678,9 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         },
         "mcp_gateway": {
             "schema_version": "mcp.gateway.v1",
-            "status": "network_capable",
-            "purpose": "agent-to-tool/resource bridge",
+            "status": "compatibility_surface",
+            "purpose": "agent-to-tool/resource compatibility surface",
+            "compatibility": protocol_compatibility_metadata("MCP"),
             "policy": "least-privilege, approval-required for risky tools",
             "request_response": {
                 "tools": "/mcp/tools",
@@ -11606,8 +11696,9 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         },
         "a2a_gateway": {
             "schema_version": "a2a.gateway.v1",
-            "status": "network_capable",
-            "purpose": "agent-to-agent interoperability",
+            "status": "compatibility_surface",
+            "purpose": "agent-to-agent compatibility surface",
+            "compatibility": protocol_compatibility_metadata("A2A"),
             "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
             "contextId": "ga-tui",
             "request_response": {
@@ -11636,6 +11727,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "governance_components": governance_registry,
         "gateway_service": gateway_service_descriptor(),
         "bridge_registry": bridge_registry,
+        "release_readiness": current_release_readiness_report(),
         "role_templates": ROLE_TEMPLATES,
         "agent_cards": list(role_cards),
     }
