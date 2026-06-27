@@ -19,7 +19,9 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 
 ### Main Changes
 
-(Add details)
+- Added `src/ga_tui/release_readiness.py` for release posture, baseline evidence levels, heuristic eval method metadata, gateway bind safety, protocol compatibility metadata, and scheduler runtime ownership.
+- Updated gateway/baseline/eval/scheduler metadata so public surfaces no longer overclaim production readiness or protocol certification.
+- Updated README, runtime-provider docs, Trellis backend spec, and policy gates for the release-readiness contracts.
 
 ### Git Commits
 
@@ -29,7 +31,11 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
+- [OK] `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider` (`171 passed`)
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=src python3 -m ga_tui.integration doctor --root /home/vimalinx/Programs/GenericAgent`
 
 ### Status
 
@@ -722,6 +728,40 @@ Added a GA-TUI-owned local agent bridge plus repo-managed OMP plugin tools for c
 | Hash | Message |
 |------|---------|
 | `8ffb953` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 23: Harden TUI release readiness
+
+**Date**: 2026-06-27
+**Task**: Harden TUI release readiness
+**Branch**: `main`
+
+### Summary
+
+Implemented and documented release-readiness hardening for the Shuheng TUI: explicit alpha posture, baseline evidence levels, heuristic eval labels, gateway bind safety, A2A/MCP compatibility wording, scheduler runtime ownership, policy-gate coverage, and Trellis task record.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `deb5b13` | (see git log) |
+| `0f6b76f` | (see git log) |
 
 ### Testing
 

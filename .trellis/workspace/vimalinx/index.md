@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-06-15
+- **Total Sessions**: 23
+- **Last Active**: 2026-06-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~736 | Active |
+| `journal-1.md` | ~770 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-06-27 | Harden TUI release readiness | `deb5b13`, `0f6b76f` | `main` |
 | 22 | 2026-06-15 | GA-TUI agent bridge and OMP plugin | `8ffb953` | `experiment/ohmypi-runtime-memory` |
 | 21 | 2026-06-14 | OMP-first runtime orchestration foundation | `8a01cf0`, `2cd8ad3` | `experiment/ohmypi-runtime-memory` |
 | 20 | 2026-06-13 | Fix temp subagent resolution | `0815437` | `experiment/ohmypi-runtime-memory` |
