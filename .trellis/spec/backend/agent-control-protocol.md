@@ -358,6 +358,12 @@ S01 修复左栏历史会话标题
   - `GET /gui`, `GET /dashboard`, and `GET /console` return static HTML/CSS/JS for the local console.
   - `GET /gui/snapshot` returns JSON with `schema_version:"shuheng.web_console.snapshot.v1"`.
   - `POST /gui/action` accepts JSON with `schema_version:"shuheng.web_console.action_request.v1"` and returns `schema_version:"shuheng.web_console.action_response.v1"`.
+- External GUI loader:
+  - `src/ga_tui/web_console_static.py`.
+  - `web_console_html()` in `app.py` delegates to `ga_tui.web_console_static.web_console_html`.
+  - `SHUHENG_WEB_GUI_INDEX` points directly at a standalone `index.html`.
+  - `SHUHENG_WEB_GUI_DIR` points at a standalone GUI project directory and resolves `public/index.html` or `index.html`.
+  - Default local sibling: `<repo-parent>/Shuheng-Web-GUI/public/index.html`.
 - Snapshot top-level fields:
   - `updated_at`
   - `mode:"read_only"`
@@ -388,7 +394,11 @@ S01 修复左栏历史会话标题
 
 ### 3. Contracts
 
-- `/gui` serves a self-contained local page with no new frontend build dependency and no external asset requirement.
+- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/ga_tui/app.py`, normally in the sibling `Shuheng-Web-GUI` project.
+- The standalone GUI page stays self-contained HTML/CSS/JS and must not require a frontend build step for the local gateway path.
+- `app.py` must not reintroduce a large embedded Web Console HTML/JS/CSS string. Backend code owns snapshot/action/state functions; the standalone GUI owns browser source.
+- If no standalone GUI file is found, `/gui` returns a clear fallback page explaining `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, and checked paths; it must not silently write files or mutate gateway state.
+- The standalone GUI dev server may proxy `/gui/*` to an existing Shuheng gateway, but browser mutations still go through the same `POST /gui/action` backend route.
 - `/gui` default chrome uses a restrained workspace layout: persistent left channel/session/model navigation, a central channel header plus action composer plus open message/list rows, and a right context rail for agents/tasks. It must not default to a card grid, dramatic command-center shell, or raw admin dashboard visual model.
 - `/gui` Slack-like navigation is functional, not decorative. Channel entries switch the central view, history/session rows open a sanitized session preview through `session.open`, and agent rows in the left direct-agent list, central agent list, and right context rail select that agent and prefill agent-scoped composer actions.
 - `/gui` browser navigation state is keyed by both the active center view and an explicit channel key. The workspace brand mark may navigate home, but only real rail channel buttons participate in active highlighting; main home, `# main`, reports, governance, agents, session preview, and selected-agent states must not double-highlight unrelated channels.
@@ -410,6 +420,10 @@ S01 修复左栏历史会话标题
 ### 4. Validation & Error Matrix
 
 - `GET /gui` -> HTML with console shell and client fetch for `/gui/snapshot`.
+- `GET /gui` with a valid `SHUHENG_WEB_GUI_INDEX` -> returns that file exactly.
+- `GET /gui` with only `SHUHENG_WEB_GUI_DIR` -> tries `<dir>/public/index.html`, then `<dir>/index.html`.
+- `GET /gui` with no available standalone GUI file -> returns the fallback page and does not call `ensure_gateway_registry(...)` or mutate ledgers.
+- Standalone GUI dev server `GET /` -> returns the same static console shell, while `GET /gui/snapshot` and `POST /gui/action` are proxied to the configured `SHUHENG_API_BASE`.
 - `POST /gui/action` with a missing or wrong schema -> rejected without mutating ledgers.
 - `POST /gui/action` with an unknown `ui_ref` -> rejected without mutating ledgers.
 - `POST /gui/action` with `action:"session.open"` and a valid session `ui_ref` -> returns a sanitized preview payload and a refreshed snapshot; unknown or non-session refs are rejected without mutating ledgers.
@@ -427,6 +441,8 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: `GET /gui/snapshot` shows `overview.metrics`, subagent rows, schedule definitions, full cleaned report bodies, and compact governance queues without writing any files.
+- Good: `app.py` delegates `/gui` HTML loading to `web_console_static.py`, and the current browser UI source lives in `Shuheng-Web-GUI/public/index.html`.
+- Good: Running the standalone GUI dev server serves `/` locally and proxies `/gui/snapshot` plus `/gui/action` to a running Shuheng gateway without introducing a Node/Vite dependency.
 - Good: `GET /gui` renders a Slack-like shell with channel navigation, a central channel header, open message rows, and a right context rail instead of `hero-card`, `agent-card`, or card-grid defaults.
 - Good: Clicking a session row posts `session.open` with `session:<digest>` and opens a center-channel preview; clicking a persistent agent row selects that agent and sets the composer target without exposing its raw `agent-...` id.
 - Good: The default GUI says `待审批 3` and shows readable summaries, while approval ids stay out of the visible page.
@@ -435,12 +451,16 @@ S01 修复左栏历史会话标题
 - Good: Clicking a subagent task button starts `start_subagent_task(...)` and later task completion/artifact rows appear because the Web-console runtime pump processed the normal queue.
 - Base: A user can still open `/gateway`, `/a2a`, or `/mcp/resources` for raw protocol inspection.
 - Bad: The GUI fetch path calls `ensure_gateway_registry(...)` and rewrites `gateway.json` just because a browser opened the console.
+- Bad: Re-embedding the full Web Console HTML/JS/CSS in `src/ga_tui/app.py`, because that makes the backend module the browser source of truth again.
 - Bad: The default GUI becomes a raw ledger viewer that prints `artifact://...`, `appr_...`, `task_...`, or schedule run ids as body text.
 - Bad: Browser buttons directly approve, dispatch, delete, switch models, or write memory without reusing existing policy gates and ledgers.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
+- Tests must assert `SHUHENG_WEB_GUI_INDEX` overrides the default standalone GUI lookup and `app.web_console_html()` returns the external file content.
+- Tests must assert the fallback page names `SHUHENG_WEB_GUI_INDEX` and `SHUHENG_WEB_GUI_DIR` when no standalone file is available.
+- Standalone GUI tests must assert `public/index.html` contains `/gui/snapshot`, `/gui/action`, and the current action schema; HTTP smoke should start both the Shuheng gateway and standalone GUI proxy and verify root HTML plus proxied snapshot/action error behavior.
 - Tests must assert `/gui` contains real in-page action controls, does not use browser prompt dialogs for core actions, and advertises the supported governed action modes.
 - Tests must assert `/gui` keeps the restrained collaboration shell structure and does not reintroduce card-grid classes such as `hero-card`, `agent-card`, or `agent-matrix`.
 - Tests must assert `/gui` includes the Slack-like global rail, direct-agent section, session preview view, and client handlers for selecting agents and opening session refs.
@@ -470,6 +490,23 @@ GET /gui -> ensure_gateway_registry() -> rewrite gateway.json -> render raw task
 GET /gui -> static local console
 GET /gui/snapshot -> read ledgers -> sanitize display rows -> no writes, no approvals, no dispatch
 POST /gui/action -> validate schema -> resolve ui_ref -> call existing governed backend function -> sanitized response + refreshed snapshot
+```
+
+#### Wrong
+
+```python
+def web_console_html() -> str:
+    return """<!doctype html>
+    <html>...thousands of lines of browser UI...</html>"""
+```
+
+#### Correct
+
+```python
+def web_console_html() -> str:
+    from ga_tui.web_console_static import web_console_html as load_web_console_html
+
+    return load_web_console_html()
 ```
 
 ## Scenario: Per-Agent Dedicated Skills

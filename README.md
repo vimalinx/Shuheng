@@ -326,6 +326,8 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 /mem                 /memory 的别名
 ```
 
+本地 Web GUI 已拆到独立项目 `/home/vimalinx/Programs/Shuheng-Web-GUI`。当前 gateway 仍提供 `/gui`、`/gui/snapshot` 和 `/gui/action`；静态页面优先从 `SHUHENG_WEB_GUI_INDEX`、`SHUHENG_WEB_GUI_DIR` 或相邻的 `Shuheng-Web-GUI/public/index.html` 加载。也可以在独立项目中运行 `python3 -m shuheng_web_gui.server`，让它代理当前 Shuheng gateway。
+
 ### Secret Vault
 
 ```text

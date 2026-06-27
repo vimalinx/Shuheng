@@ -326,6 +326,8 @@ Type `/help` inside the TUI for the full command list.
 /mem                 Alias for /memory
 ```
 
+The local Web GUI now lives in the standalone project `/home/vimalinx/Programs/Shuheng-Web-GUI`. This gateway still provides `/gui`, `/gui/snapshot`, and `/gui/action`; the static page is loaded from `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, or the sibling `Shuheng-Web-GUI/public/index.html`. You can also run `python3 -m shuheng_web_gui.server` inside the standalone project and let it proxy the current Shuheng gateway.
+
 ### Secret Vault
 
 ```text
