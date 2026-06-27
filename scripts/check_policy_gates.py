@@ -3916,6 +3916,13 @@ def run_gateway_server_checks() -> None:
         assert "global-rail" in html and "left-agents" in html and "view-session" in html, html[:4000]
         assert "agent-list" in html and "workspace-split" in html and "rightbar" in html, html[:4000]
         assert "openSession" in html and "setActiveAgent" in html and "session.open" in html, html[:5000]
+        assert 'id="workspace-home"' in html and 'class="workspace-mark"' in html, html[:4000]
+        assert 'workspace-mark" type="button" data-view' not in html, html[:4000]
+        assert '.global-rail .rail-btn[data-view]' in html, html[:5000]
+        assert "activeChannelKey" in html and "data-channel-key" in html, html[:5000]
+        assert "syncComposerForNavigation" in html, html[:5000]
+        assert 'syncComposerForNavigation("session", "session")' in html, html[:5000]
+        assert "if (app.view !== \"agents\") app.activeAgentRef = \"\";" in html, html[:5000]
         for removed_shell in ("hero-card", "agent-card", "agent-matrix", "term-panel", "two-col"):
             assert removed_shell not in html, removed_shell
         assert "agent.task" in html and "schedule.create" in html and "target_agent_ref" in html, html[:3000]

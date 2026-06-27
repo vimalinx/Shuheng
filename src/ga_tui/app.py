@@ -8346,9 +8346,9 @@ def web_console_sidebar_snapshot(state: State, model_registry: dict[str, Any]) -
     history_rows = web_console_history_rows(state)
     return {
         "current_sessions": [
-            {"title": "主 agent 主页", "status": "home", "target": "overview", "active": True},
-            {"title": "定时汇报", "status": "reports", "target": "reports", "active": False},
-            {"title": state.current_title or "main", "status": state.status or "idle", "target": "overview", "active": False},
+            {"key": "home", "title": "主 agent 主页", "status": "home", "target": "overview", "active": True},
+            {"key": "reports", "title": "定时汇报", "status": "reports", "target": "reports", "active": False},
+            {"key": "main", "title": state.current_title or "main", "status": state.status or "idle", "target": "overview", "active": False},
         ],
         "history": {
             "count": len(history_rows),
@@ -9552,13 +9552,13 @@ def web_console_html() -> str:
 <body>
   <div class="workbench">
     <aside class="global-rail" aria-label="全局导航">
-      <button class="workspace-mark" type="button" data-view="overview">枢</button>
-      <button class="rail-btn active" type="button" data-view="overview">⌂<span>Home</span></button>
-      <button class="rail-btn" type="button" data-view="agents">◎<span>Agents</span></button>
-      <button class="rail-btn" type="button" data-view="reports">◷<span>Reports</span></button>
-      <button class="rail-btn" type="button" data-view="governance">⚙<span>Gov</span></button>
+      <button class="workspace-mark" id="workspace-home" type="button">枢</button>
+      <button class="rail-btn active" type="button" data-view="overview" data-channel-key="home">⌂<span>Home</span></button>
+      <button class="rail-btn" type="button" data-view="agents" data-channel-key="agents">◎<span>Agents</span></button>
+      <button class="rail-btn" type="button" data-view="reports" data-channel-key="reports">◷<span>Reports</span></button>
+      <button class="rail-btn" type="button" data-view="governance" data-channel-key="governance">⚙<span>Gov</span></button>
       <div class="rail-spacer"></div>
-      <button class="rail-btn" type="button" data-view="overview">＋<span>New</span></button>
+      <button class="rail-btn" id="rail-new" type="button">＋<span>New</span></button>
     </aside>
     <aside class="leftbar">
       <div class="brand"><strong>枢衡工作区</strong><span>governed</span></div>
@@ -9594,6 +9594,7 @@ def web_console_html() -> str:
       notice: "",
       activeAgentRef: "",
       activeSession: null,
+      activeChannelKey: "home",
       composer: {
         mode: "main.prompt",
         agent_ref: "",
@@ -9695,6 +9696,30 @@ def web_console_html() -> str:
       return agents.find(agent => agent.ui_ref && agent.ui_ref === app.activeAgentRef) || null;
     }
 
+    function defaultChannelKeyForView(view) {
+      if (view === "agents" || view === "reports" || view === "governance") return view;
+      if (view === "session") return "session";
+      return "home";
+    }
+
+    function setActiveChannel(view, channelKey) {
+      app.activeChannelKey = channelKey || defaultChannelKeyForView(view || app.view);
+    }
+
+    function syncComposerForNavigation(view, channelKey) {
+      const nextView = view || app.view;
+      const nextChannel = channelKey || app.activeChannelKey;
+      const isMainSurface = nextView === "overview" || nextView === "reports" || nextView === "governance" || nextView === "session";
+      if (nextView === "overview" || (isMainSurface && (app.composer.mode || "").startsWith("agent."))) {
+        app.composer.mode = "main.prompt";
+        app.composer.agent_ref = "";
+      }
+      if (nextView === "overview" && nextChannel === "main") {
+        app.composer.mode = "main.prompt";
+        app.composer.agent_ref = "";
+      }
+    }
+
     function setActiveAgent(agentRef, preferredMode) {
       app.activeAgentRef = agentRef || "";
       app.activeSession = null;
@@ -9702,15 +9727,18 @@ def web_console_html() -> str:
         app.composer.agent_ref = agentRef;
         if (preferredMode) app.composer.mode = preferredMode;
         app.view = "agents";
+        setActiveChannel("agents", "agents");
       } else {
         app.view = "overview";
+        setActiveChannel("overview", "home");
+        syncComposerForNavigation("overview", "home");
       }
       renderAll();
     }
 
-    function openChannel(view) {
+    function openChannel(view, channelKey) {
       app.activeSession = null;
-      setView(view || "overview");
+      setView(view || "overview", {channelKey});
     }
 
     function openSession(uiRef) {
@@ -9823,7 +9851,6 @@ def web_console_html() -> str:
       const agentSelect = selectControl("composer-agent", agentOptions.length ? agentOptions : [["", "暂无子代理"]], composer.agent_ref || "");
       agentSelect.addEventListener("change", event => {
         app.composer.agent_ref = event.target.value || "";
-        if (app.composer.agent_ref) app.activeAgentRef = app.composer.agent_ref;
       });
       grid.append(composerField("composer-agent-field", "目标子代理", agentSelect));
 
@@ -10061,7 +10088,10 @@ def web_console_html() -> str:
         if (result.snapshot) app.data = result.snapshot;
         if (result.session) {
           app.activeSession = result.session;
+          app.activeAgentRef = "";
           app.view = "session";
+          setActiveChannel("session", "session");
+          syncComposerForNavigation("session", "session");
         }
         renderAll();
       } catch (error) {
@@ -10075,18 +10105,36 @@ def web_console_html() -> str:
       if (target) target.textContent = app.notice || "本地动作通过 /gui/action 进入治理层，按钮不会绕过审批、任务和调度账本。";
     }
 
-    function setView(view) {
+    function setView(view, options) {
+      const opts = options || {};
       app.view = view || "overview";
       if (app.view !== "session") app.activeSession = null;
+      if (app.view !== "agents") app.activeAgentRef = "";
+      setActiveChannel(app.view, opts.channelKey);
+      syncComposerForNavigation(app.view, app.activeChannelKey);
       renderAll();
     }
 
     function renderRail() {
-      document.querySelectorAll("[data-view]").forEach(button => {
+      const workspaceHome = document.getElementById("workspace-home");
+      if (workspaceHome) {
+        workspaceHome.classList.remove("active");
+        workspaceHome.onclick = () => openChannel("overview", "home");
+      }
+      document.querySelectorAll(".global-rail .rail-btn[data-view]").forEach(button => {
         const view = button.getAttribute("data-view") || "overview";
-        button.classList.toggle("active", app.view === view || (app.view === "session" && view === "overview"));
-        button.onclick = () => openChannel(view);
+        const channelKey = button.getAttribute("data-channel-key") || defaultChannelKeyForView(view);
+        button.classList.toggle("active", app.view === view && app.activeChannelKey === channelKey);
+        button.onclick = () => openChannel(view, channelKey);
       });
+      const newButton = document.getElementById("rail-new");
+      if (newButton) {
+        newButton.classList.remove("active");
+        newButton.onclick = () => {
+          setView("overview", {channelKey: "main"});
+          setComposer("main.prompt", {title: "", text: ""});
+        };
+      }
     }
 
     function renderNav() {
@@ -10112,9 +10160,11 @@ def web_console_html() -> str:
       const currentWrap = node("div");
       currentWrap.append(blockTitle("CHANNELS", current.length));
       current.forEach(item => {
-        const button = node("button", "session-button" + (app.view === item.target ? " active" : ""));
+        const channelKey = item.key || defaultChannelKeyForView(item.target || "overview");
+        const active = app.view === (item.target || "overview") && app.activeChannelKey === channelKey;
+        const button = node("button", "session-button" + (active ? " active" : ""));
         button.type = "button";
-        button.addEventListener("click", () => openChannel(item.target || "overview"));
+        button.addEventListener("click", () => openChannel(item.target || "overview", channelKey));
         button.append(node("b", "", "# " + (item.title || "会话")));
         button.append(node("span", "", item.status || ""));
         currentWrap.append(button);
@@ -10249,8 +10299,9 @@ def web_console_html() -> str:
     function renderTopline(data) {
       const now = new Date().toLocaleString("zh-CN", {hour12: false});
       const totals = data.totals || {};
-      const title = app.view === "session" && app.activeSession ? "session:preview" : app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : "home:main";
-      const channel = app.view === "session" && app.activeSession ? "# " + app.activeSession.title : app.view === "reports" ? "# 定时汇报" : app.view === "agents" ? "# 子代理" : app.view === "governance" ? "# 治理队列" : "# 主控台";
+      const overviewChannel = app.activeChannelKey === "main" ? "# main" : "# 主控台";
+      const title = app.view === "session" && app.activeSession ? "session:preview" : app.view === "reports" ? "home:scheduled_reports" : app.view === "agents" ? "home:agents" : app.view === "governance" ? "home:governance" : app.activeChannelKey === "main" ? "session:main" : "home:main";
+      const channel = app.view === "session" && app.activeSession ? "# " + app.activeSession.title : app.view === "reports" ? "# 定时汇报" : app.view === "agents" ? "# 子代理" : app.view === "governance" ? "# 治理队列" : overviewChannel;
       document.getElementById("topline").textContent = `${channel} · ${now} · ${title} · 汇报 ${totals.reports || 0} / 待办 ${totals.open_tasks || 0}`;
     }
 
@@ -10270,6 +10321,40 @@ def web_console_html() -> str:
           {label: "分类", value: session.category || "未分类"},
           {label: "轮次", value: session.rounds || "0"},
           {label: "更新时间", value: session.age || "-"}
+        ].forEach(item => metrics.append(metric(item)));
+        header.append(metrics);
+        return;
+      }
+      if (app.view === "reports") {
+        const totals = data.totals || {};
+        const title = node("div", "channel-title");
+        title.append(node("h1", "", "定时汇报"));
+        title.append(node("span", "", "子代理定时任务最终回复"));
+        header.append(title);
+        header.append(node("p", "summary-line", `已汇总 ${totals.reports || 0} 条可读汇报；这里只显示完成后的子代理回复。`));
+        const metrics = node("div", "metric-grid");
+        [
+          {label: "汇报", value: totals.reports || "0"},
+          {label: "子代理", value: totals.agents || "0"},
+          {label: "定时任务", value: `${totals.active_schedules || 0}/${totals.schedules || 0}`},
+          {label: "Artifact", value: totals.artifacts || "0"}
+        ].forEach(item => metrics.append(metric(item)));
+        header.append(metrics);
+        return;
+      }
+      if (app.view === "governance") {
+        const totals = data.totals || {};
+        const title = node("div", "channel-title");
+        title.append(node("h1", "", "治理队列"));
+        title.append(node("span", "", "审批、产物与任务状态"));
+        header.append(title);
+        header.append(node("p", "summary-line", "所有审批、调度和任务动作仍通过 /gui/action 进入后端治理层。"));
+        const metrics = node("div", "metric-grid");
+        [
+          {label: "待审批", value: totals.approvals || "0", tone: totals.approvals ? "warn" : "calm"},
+          {label: "未终态任务", value: totals.open_tasks || "0", tone: totals.open_tasks ? "hot" : "calm"},
+          {label: "Artifact", value: totals.artifacts || "0"},
+          {label: "定时任务", value: totals.schedules || "0"}
         ].forEach(item => metrics.append(metric(item)));
         header.append(metrics);
         return;
@@ -10294,11 +10379,29 @@ def web_console_html() -> str:
         header.append(details);
         return;
       }
+      if (app.view === "agents") {
+        const agents = data.agents || [];
+        const persistent = agents.filter(agent => agent.lifecycle !== "temporary").length;
+        const title = node("div", "channel-title");
+        title.append(node("h1", "", "子代理"));
+        title.append(node("span", "", "选择一个 agent 查看状态或发起聊天"));
+        header.append(title);
+        header.append(node("p", "summary-line", "左侧 Direct Agents 和右侧上下文列表都可以切换当前子代理；composer 里的目标选择只决定动作目标。"));
+        const metrics = node("div", "metric-grid");
+        [
+          {label: "全部", value: agents.length || "0"},
+          {label: "持久", value: persistent || "0"},
+          {label: "临时", value: Math.max(0, agents.length - persistent)},
+          {label: "待选中", value: "点击列表"}
+        ].forEach(item => metrics.append(metric(item)));
+        header.append(metrics);
+        return;
+      }
       const title = node("div", "channel-title");
-      title.append(node("h1", "", overview.title || "主控运行概览"));
-      title.append(node("span", "", "频道主页 · 受控动作入口"));
+      title.append(node("h1", "", app.activeChannelKey === "main" ? "# main" : (overview.title || "主控运行概览")));
+      title.append(node("span", "", app.activeChannelKey === "main" ? "当前会话 · 受控动作入口" : "频道主页 · 受控动作入口"));
       header.append(title);
-      header.append(node("p", "summary-line", overview.summary || "等待治理数据。"));
+      header.append(node("p", "summary-line", app.activeChannelKey === "main" ? "主 agent 当前会话入口；输入主控任务会通过 /gui/action 启动 governed runtime。" : (overview.summary || "等待治理数据。")));
       const metrics = node("div", "metric-grid");
       (overview.metrics || []).forEach(item => metrics.append(metric(item)));
       header.append(metrics);
