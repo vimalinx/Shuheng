@@ -363,7 +363,7 @@ S01 修复左栏历史会话标题
   - `web_console_html()` in `app.py` delegates to `ga_tui.web_console_static.web_console_html`.
   - `SHUHENG_WEB_GUI_INDEX` points directly at a standalone `index.html`.
   - `SHUHENG_WEB_GUI_DIR` points at a standalone GUI project directory and resolves `public/index.html` or `index.html`.
-  - Default local sibling: `<repo-parent>/Shuheng-Web-GUI/public/index.html`.
+  - Default local project path: `<home-or-workspace>/Projects/Shuheng-Web-GUI/public/index.html`, with the old sibling `<repo-parent>/Shuheng-Web-GUI/public/index.html` kept only as a compatibility fallback.
 - Snapshot top-level fields:
   - `updated_at`
   - `mode:"read_only"`
@@ -394,7 +394,7 @@ S01 修复左栏历史会话标题
 
 ### 3. Contracts
 
-- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/ga_tui/app.py`, normally in the sibling `Shuheng-Web-GUI` project.
+- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/ga_tui/app.py`, normally in `/home/vimalinx/Projects/Shuheng-Web-GUI`.
 - The standalone GUI page stays self-contained HTML/CSS/JS and must not require a frontend build step for the local gateway path.
 - `app.py` must not reintroduce a large embedded Web Console HTML/JS/CSS string. Backend code owns snapshot/action/state functions; the standalone GUI owns browser source.
 - If no standalone GUI file is found, `/gui` returns a clear fallback page explaining `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, and checked paths; it must not silently write files or mutate gateway state.
@@ -441,7 +441,7 @@ S01 修复左栏历史会话标题
 ### 5. Good/Base/Bad Cases
 
 - Good: `GET /gui/snapshot` shows `overview.metrics`, subagent rows, schedule definitions, full cleaned report bodies, and compact governance queues without writing any files.
-- Good: `app.py` delegates `/gui` HTML loading to `web_console_static.py`, and the current browser UI source lives in `Shuheng-Web-GUI/public/index.html`.
+- Good: `app.py` delegates `/gui` HTML loading to `web_console_static.py`, and the current browser UI source lives in `/home/vimalinx/Projects/Shuheng-Web-GUI/public/index.html`.
 - Good: Running the standalone GUI dev server serves `/` locally and proxies `/gui/snapshot` plus `/gui/action` to a running Shuheng gateway without introducing a Node/Vite dependency.
 - Good: `GET /gui` renders a Slack-like shell with channel navigation, a central channel header, open message rows, and a right context rail instead of `hero-card`, `agent-card`, or card-grid defaults.
 - Good: Clicking a session row posts `session.open` with `session:<digest>` and opens a center-channel preview; clicking a persistent agent row selects that agent and sets the composer target without exposing its raw `agent-...` id.

@@ -33,6 +33,7 @@ def web_gui_index_candidates() -> list[Path]:
 
     root = repo_root()
     candidates.extend([
+        root.parent.parent / "Projects" / "Shuheng-Web-GUI" / "public" / "index.html",
         root.parent / "Shuheng-Web-GUI" / "public" / "index.html",
         root / "web-gui" / "public" / "index.html",
     ])
