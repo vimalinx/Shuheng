@@ -840,3 +840,37 @@ Moved the standalone Shuheng Web GUI repository from Programs to Projects, updat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: Open-source release readiness
+
+**Date**: 2026-06-29
+**Task**: Open-source release readiness
+**Branch**: `main`
+
+### Summary
+
+Hardened Shuheng for open-source alpha release with governance files, CI, release hygiene checks, package metadata, docs, plugin branding, and verified release checks.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25e5684` | (see git log) |
+| `cdba57e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
