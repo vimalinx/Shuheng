@@ -326,7 +326,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 /mem                 /memory 的别名
 ```
 
-本地 Web GUI 已拆到独立项目 `/home/vimalinx/Projects/Shuheng-Web-GUI`。当前 gateway 仍提供 `/gui`、`/gui/snapshot` 和 `/gui/action`；静态页面优先从 `SHUHENG_WEB_GUI_INDEX`、`SHUHENG_WEB_GUI_DIR` 或 Projects 下的 `Shuheng-Web-GUI/public/index.html` 加载。也可以在独立项目中运行 `python3 -m shuheng_web_gui.server`，让它代理当前 Shuheng gateway。
+本地 Web GUI 已拆到独立项目。当前 gateway 仍提供 `/gui`、`/gui/snapshot` 和 `/gui/action`；静态页面优先从 `SHUHENG_WEB_GUI_INDEX`、`SHUHENG_WEB_GUI_DIR` 或 Projects 下的 `Shuheng-Web-GUI/public/index.html` 加载。也可以在独立 Web GUI 项目中运行 `python3 -m shuheng_web_gui.server`，让它代理当前 Shuheng gateway。
 
 ### Secret Vault
 
@@ -449,13 +449,24 @@ shuheng-check
 提交前建议：
 
 ```bash
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
+python -m compileall -q src scripts
+python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 git diff --check
-python -m py_compile src/ga_tui/*.py
-PYTHONPATH=src python -m ga_tui.integration doctor
-python -m pytest tests/ -q
 ```
 
-发布前确认不要把本地绝对路径、密钥、模型配置、普通会话日志或 Secret Vault 内容写进仓库。
+发布前确认不要把本地绝对路径、密钥、模型配置、普通会话日志或 Secret Vault 内容写进仓库。`scripts/check_release_hygiene.py` 会检查治理文件、包元数据、私有路径、真实密钥形态和公开 alpha 口径。
+
+### 开源发布边界
+
+- License: MIT，见 `LICENSE`。
+- 安全报告与边界：见 `SECURITY.md`。Gateway/Web Console 无内建认证，默认只应绑定 loopback。
+- 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
+- 发布记录：见 `CHANGELOG.md`。
+- CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、pytest、compile 和 package build。
 
 ## Community
 

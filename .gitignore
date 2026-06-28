@@ -33,3 +33,9 @@ tmp/
 *.log
 *.pem
 *.key
+
+# Private/local release-excluded notes and tool configs.
+config/*.json
+references/
+docs/foreign-student-acquisition-research.md
+docs/homework-pricing-research.md

@@ -326,7 +326,7 @@ Type `/help` inside the TUI for the full command list.
 /mem                 Alias for /memory
 ```
 
-The local Web GUI now lives in the standalone project `/home/vimalinx/Projects/Shuheng-Web-GUI`. This gateway still provides `/gui`, `/gui/snapshot`, and `/gui/action`; the static page is loaded from `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, or `Shuheng-Web-GUI/public/index.html` under Projects. You can also run `python3 -m shuheng_web_gui.server` inside the standalone project and let it proxy the current Shuheng gateway.
+The local Web GUI now lives in a standalone project. This gateway still provides `/gui`, `/gui/snapshot`, and `/gui/action`; the static page is loaded from `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, or `Shuheng-Web-GUI/public/index.html` under Projects. You can also run `python3 -m shuheng_web_gui.server` inside the standalone Web GUI project and let it proxy the current Shuheng gateway.
 
 ### Secret Vault
 
@@ -449,13 +449,24 @@ shuheng-check
 Recommended checks before committing:
 
 ```bash
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
+python -m compileall -q src scripts
+python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 git diff --check
-python -m py_compile src/ga_tui/*.py
-PYTHONPATH=src python -m ga_tui.integration doctor
-python -m pytest tests/ -q
 ```
 
-Before publishing, verify that no local absolute paths, secrets, model credentials, normal session logs, or Secret Vault content are added.
+Before publishing, verify that no local absolute paths, secrets, model credentials, normal session logs, or Secret Vault content are added. `scripts/check_release_hygiene.py` checks governance files, package metadata, private paths, realistic secret patterns, and public alpha wording.
+
+### Open-Source Release Boundaries
+
+- License: MIT, see `LICENSE`.
+- Security reporting and boundaries: see `SECURITY.md`. Gateway/Web Console has no built-in auth and should bind to loopback by default.
+- Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
+- Release notes: see `CHANGELOG.md`.
+- CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, pytest, compile, and package build.
 
 ## Community
 

@@ -1,3 +1,3 @@
-"""Standalone launcher package for the GenericAgent curses TUI."""
+"""Shuheng governed local-agent TUI package."""
 
 __version__ = "0.1.0"

@@ -184,6 +184,22 @@ def release_readiness_report(
     has_ci: bool = False,
     has_security_policy: bool = False,
 ) -> dict[str, Any]:
+    known_gaps = [
+        "app.py remains a large composition module and is not fully decomposed",
+        "A2A/MCP surfaces need real third-party client conformance tests before certification language",
+        "heuristic eval does not prove factual or citation correctness",
+        "gateway has no built-in authentication and should stay loopback by default",
+        "scheduler is runtime-owned rather than an installed always-on service",
+    ]
+    missing_hygiene = []
+    if not has_license:
+        missing_hygiene.append("LICENSE")
+    if not has_ci:
+        missing_hygiene.append("CI")
+    if not has_security_policy:
+        missing_hygiene.append("SECURITY.md")
+    if missing_hygiene:
+        known_gaps.append("repository-level open-source hygiene still missing: " + ", ".join(missing_hygiene))
     return {
         "schema_version": "shuheng.release_readiness.v1",
         "status": "experimental_alpha",
@@ -204,14 +220,7 @@ def release_readiness_report(
                 "heuristic eval and trace quality scoring",
                 "scheduler runtime dispatch",
             ],
-            "known_gaps": [
-                "app.py remains a large composition module and is not fully decomposed",
-                "A2A/MCP surfaces need real third-party client conformance tests before certification language",
-                "heuristic eval does not prove factual or citation correctness",
-                "gateway has no built-in authentication and should stay loopback by default",
-                "scheduler is runtime-owned rather than an installed always-on service",
-                "repository-level open-source hygiene such as LICENSE/SECURITY/CI may still need dedicated follow-up",
-            ],
+            "known_gaps": known_gaps,
         },
         "monolith_risk": {
             "app_py_lines": int(app_py_lines or 0),
@@ -224,9 +233,12 @@ def release_readiness_report(
             "security_policy": bool(has_security_policy),
         },
         "verification_commands": [
+            "python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py",
+            "python3 scripts/check_release_hygiene.py",
             "python3 -m pytest -q -p no:cacheprovider",
             "python3 scripts/check_policy_gates.py",
             "python3 -m compileall -q src scripts",
+            "python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist",
             "git diff --check",
         ],
     }

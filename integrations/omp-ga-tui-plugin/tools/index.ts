@@ -13,7 +13,7 @@ function envPath(name: string): string {
 }
 
 function findRepoRoot(): string {
-	const configured = envPath("GA_TUI_REPO") || envPath("GA_TUI_ROOT");
+	const configured = envPath("SHUHENG_REPO") || envPath("GA_TUI_REPO") || envPath("GA_TUI_ROOT");
 	if (configured) return path.resolve(configured);
 
 	let current = import.meta.dir;
@@ -58,11 +58,11 @@ function parseBridgeJson(stdout: string): Record<string, unknown> {
 		.filter(Boolean)
 		.at(-1);
 	if (!line) {
-		throw new Error("GA-TUI bridge returned empty stdout.");
+		throw new Error("Shuheng bridge returned empty stdout.");
 	}
 	const parsed = JSON.parse(line);
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		throw new Error("GA-TUI bridge returned non-object JSON.");
+		throw new Error("Shuheng bridge returned non-object JSON.");
 	}
 	return parsed as Record<string, unknown>;
 }
@@ -80,7 +80,7 @@ async function callBridge(pi: Parameters<CustomToolFactory>[0], payload: BridgeP
 	});
 	const parsed = parseBridgeJson(result.stdout);
 	if (result.code !== 0 && parsed.status !== "error") {
-		throw new Error(result.stderr || `GA-TUI bridge exited with code ${result.code}`);
+		throw new Error(result.stderr || `Shuheng bridge exited with code ${result.code}`);
 	}
 	return parsed;
 }
@@ -91,11 +91,11 @@ const factory: CustomToolFactory = pi => {
 	return [
 		{
 			name: "ga_tui_context_get",
-			label: "GA-TUI Context",
+			label: "Shuheng Context",
 			description:
-				"Read a GA-TUI-managed context pack for the current project or a target subagent. This is read-only and returns an artifact ref plus bounded context JSON.",
+				"Read a Shuheng-managed context pack for the current project or a target subagent. This is read-only and returns an artifact ref plus bounded context JSON.",
 			parameters: z.object({
-				target: z.string().optional().describe("Optional GA-TUI subagent id or unique name."),
+				target: z.string().optional().describe("Optional Shuheng subagent id or unique name."),
 				objective: z.string().describe("Objective that the context pack should support."),
 				task_id: z.string().optional().describe("Optional task id for context-pack provenance."),
 				parent_task_id: z.string().optional().describe("Optional parent task id."),
@@ -123,14 +123,14 @@ const factory: CustomToolFactory = pi => {
 		},
 		{
 			name: "ga_tui_memory_candidate_submit",
-			label: "GA-TUI Memory Candidate",
+			label: "Shuheng Memory Candidate",
 			description:
-				"Submit a durable memory candidate to GA-TUI. This never writes long-term memory directly; GA-TUI validates it and queues human approval.",
+				"Submit a durable memory candidate to Shuheng. This never writes long-term memory directly; Shuheng validates it and queues human approval.",
 			parameters: z.object({
-				target: z.string().describe("Target GA-TUI persistent subagent id or unique name."),
+				target: z.string().describe("Target Shuheng persistent subagent id or unique name."),
 				statement: z.string().describe("Durable, verified memory candidate statement."),
 				evidence_ref: z.string().optional().describe("Optional artifact/runtime evidence reference."),
-				task_id: z.string().optional().describe("Optional related GA-TUI task id."),
+				task_id: z.string().optional().describe("Optional related Shuheng task id."),
 			}),
 
 			async execute(_toolCallId, params, _onUpdate, _ctx, signal) {

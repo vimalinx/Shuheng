@@ -1,13 +1,13 @@
 {
-  "name": "@ga-tui/omp-bridge",
+  "name": "@shuheng/omp-bridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Oh My Pi plugin that exposes GA-TUI-managed context and governed memory proposals.",
+  "description": "Oh My Pi plugin that exposes Shuheng-managed context and governed memory proposals.",
   "omp": {
-    "name": "GA-TUI Bridge",
+    "name": "Shuheng Bridge",
     "version": "0.1.0",
-    "description": "Read GA-TUI context packs and submit memory candidates through GA-TUI approval gates.",
+    "description": "Read Shuheng context packs and submit memory candidates through Shuheng approval gates.",
     "tools": "tools/index.ts",
     "settings": {
       "python": {
@@ -18,7 +18,7 @@
       },
       "repoRoot": {
         "type": "string",
-        "description": "GenericAgent-TUI repository root. Auto-detected when empty.",
+        "description": "Shuheng repository root. Auto-detected when empty. Legacy GA_TUI_REPO is still accepted.",
         "default": "",
         "env": "GA_TUI_REPO"
       }

@@ -57,6 +57,102 @@ Keep advertising `ga-tui` as a user-facing compatibility command, or rename ever
 
 Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preserving legacy protocol/module/env names until a dedicated compatibility migration is designed.
 
+## Scenario: Open-Source Release Hygiene
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng is prepared for a public open-source alpha release.
+- Applies to: root governance files, package metadata, README release commands,
+  GitHub Actions CI, source distribution contents, release-readiness metadata,
+  ignored local/private paths, and OMP plugin public wording.
+- Non-goal: This does not publish the repository, change the remote URL, certify
+  A2A/MCP protocol compliance, add production remote gateway auth, or rename
+  internal compatibility identifiers such as `src/ga_tui`, `GA_TUI_*`,
+  `ga_tui_query`, and `ga-tui.*` schemas.
+
+### 2. Signatures
+
+- Required governance files: `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, and `CHANGELOG.md`.
+- Release guard command: `python3 scripts/check_release_hygiene.py`.
+- CI workflow: `.github/workflows/ci.yml`.
+- Package metadata source: `pyproject.toml`.
+- Source distribution manifest: `MANIFEST.in`.
+- Ignored private/local paths: `config/*.json`, `references/`,
+  `docs/foreign-student-acquisition-research.md`, and
+  `docs/homework-pricing-research.md`.
+
+### 3. Contracts
+
+- Public release posture stays `experimental local alpha`.
+- `scripts/check_release_hygiene.py` must fail on missing governance files,
+  missing package metadata, public legacy `ga-tui*` console scripts, unignored
+  private/local paths, realistic secret literals, local absolute user paths in
+  public files, or missing public alpha/security wording.
+- CI must run Ruff check, release hygiene, policy gates, pytest, compileall, and
+  package build.
+- `release_readiness_report(...)` must expose repository hygiene booleans and
+  include repository-hygiene gaps only when required files are missing.
+- The sdist must include intended public docs and integration plugin files while
+  excluding private research/config/reference paths.
+- OMP plugin user-facing labels and docs should say Shuheng. Compatibility tool
+  ids may remain `ga_tui_*`.
+
+### 4. Validation & Error Matrix
+
+- Missing `LICENSE` / `SECURITY.md` / CI -> release hygiene fails.
+- `config/mcporter.json` or private research docs are tracked or unignored ->
+  release hygiene fails.
+- Public file contains realistic API key/private-key material -> release hygiene
+  fails.
+- Public file contains a local absolute user path -> release hygiene fails.
+- `pyproject.toml` exports public `ga-tui*` scripts -> release hygiene fails.
+- OMP plugin package name is not Shuheng-branded -> release hygiene fails.
+- `release_readiness_report(...)` is called with all hygiene booleans true ->
+  known gaps do not include repository-level hygiene.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `scripts/check_release_hygiene.py` passes and the sdist contains
+  `README.en.md`, `SECURITY.md`, docs, and the OMP plugin, but not private
+  research docs.
+- Good: `@shuheng/omp-bridge` exposes compatibility tool names
+  `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
+- Base: Internal schemas and env names keep `ga_tui` / `GA_TUI` identifiers for
+  compatibility.
+- Bad: Publishing `docs/homework-pricing-research.md` or a machine-specific MCP
+  config in the public repository.
+- Bad: Claiming full A2A/MCP certification without real third-party client E2E
+  evidence.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert release-readiness metadata reports
+  true license/CI/security booleans and lists release hygiene, Ruff, and package
+  build commands.
+- CI must run `scripts/check_release_hygiene.py`.
+- Manual release verification must run: Ruff check, release hygiene, policy
+  gates, pytest, compileall, build, isolated wheel `shuheng-check`, and
+  `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+Publish the repository with local config, private research notes, no license,
+and README claims that A2A/MCP are certified production surfaces.
+```
+
+#### Correct
+
+```text
+Publish as experimental local alpha with MIT license, security/contributing
+docs, CI, release hygiene checks, private-path exclusions, compatibility wording,
+and explicit known gaps for gateway auth, protocol certification, heuristic eval,
+and app.py monolith risk.
+```
+
 ## Scenario: Session History Titles Ignore Process Summaries
 
 ### 1. Scope / Trigger

@@ -2697,7 +2697,7 @@ def shared_user_profile_project_hints(text: str) -> list[str]:
     hints: list[str] = []
     if re.search(r"Shuheng|枢衡|agent|代理|OMP|Oh My Pi", sanitized, re.IGNORECASE):
         hints.append("Shuheng multi-agent harness")
-    for match in re.finditer(r"(?:~|/home/vimalinx|\.{1,2})/[^\s，。；,;:：]+", sanitized):
+    for match in re.finditer(r"(?:~|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+|\.{1,2})/[^\s，。；,;:：]+", sanitized):
         path = match.group(0).strip()
         if path:
             hints.append(truncate_cells(path, 120))
@@ -20093,7 +20093,7 @@ def interaction_footer(payload: Optional[dict[str, Any]]) -> str:
     if candidates and is_approval_interaction(payload):
         return "↑/↓ 选择，空输入 Enter 执行选中审批动作；选“稍后处理”保留待审批项。"
     if candidates:
-        return f"↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
+        return "↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
     if interaction_questions(payload):
         return "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
     return "等待你的输入：直接在下面回答；Enter 发送。"
@@ -21128,7 +21128,7 @@ def format_subagent_result_context_update(
         f"- session_key: {session_key_value or 'current'}",
         f"- subagent: {name or agent_id or 'subagent'} ({agent_id or '-'})",
         f"- task_id: {bus_task_id or '-'}",
-        f"- status: completed",
+        "- status: completed",
     ]
     if role:
         lines.append(f"- role: {role}")

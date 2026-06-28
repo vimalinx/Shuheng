@@ -1,0 +1,25 @@
+include README.md
+include README.en.md
+include LICENSE
+include SECURITY.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include CHANGELOG.md
+include pyproject.toml
+recursive-include docs *.md
+exclude docs/foreign-student-acquisition-research.md
+exclude docs/homework-pricing-research.md
+recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts
+recursive-include tests *.py
+include scripts/check_policy_gates.py
+include scripts/check_release_hygiene.py
+prune .codex
+prune .pytest_cache
+prune .trellis
+prune config
+prune references
+prune goal-*
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.secret
+global-exclude *.log

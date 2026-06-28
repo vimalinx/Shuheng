@@ -141,9 +141,10 @@ Runtime and top-level control metadata are exposed through:
 - OMP host tools: compatibility aliases `ga_tui_query` / `ga_tui_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
-- OMP plugin tools: repo-managed plugin
-  `integrations/omp-ga-tui-plugin` exposes `ga_tui_context_get` and
-  `ga_tui_memory_candidate_submit` by calling the local Shuheng bridge CLI.
+- OMP plugin tools: repo-managed Shuheng plugin
+  `integrations/omp-ga-tui-plugin` exposes compatibility tools
+  `ga_tui_context_get` and `ga_tui_memory_candidate_submit` by calling the
+  local Shuheng bridge CLI.
 - MCP resources: `resource://agent-mail/runtime-providers`, `resource://agent-mail/schedules`, and `resource://agent-mail/schedule-runs`.
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
 - Release readiness: `/gateway` exposes `release_readiness` with stable local

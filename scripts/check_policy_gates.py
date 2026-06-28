@@ -3753,7 +3753,13 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert "MCP compatibility surface" in support["experimental_surfaces"], report
     assert any("app.py remains" in gap for gap in support["known_gaps"]), report
     assert report["monolith_risk"]["status"] in {"known_gap", "bounded"}, report
-    assert report["verification_commands"], report
+    hygiene = report["repository_hygiene"]
+    assert hygiene["license"] is True, report
+    assert hygiene["ci"] is True, report
+    assert hygiene["security_policy"] is True, report
+    assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
+    assert any("ruff check" in command for command in report["verification_commands"]), report
+    assert any("build --sdist --wheel" in command for command in report["verification_commands"]), report
 
 
 def assert_governance_schema(registry: dict) -> None:

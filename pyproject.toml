@@ -8,6 +8,31 @@ version = "0.1.0"
 description = "Shuheng: governed terminal control plane for local agents"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Vimalinx" },
+]
+keywords = [
+    "agent",
+    "terminal",
+    "orchestration",
+    "multi-agent",
+    "tui",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "PyNaCl>=1.5.0",
     "beautifulsoup4>=4.12",
@@ -15,9 +40,17 @@ dependencies = [
     "urllib3>=1.26",
 ]
 
+[project.urls]
+Homepage = "https://github.com/vimalinx/Shuheng"
+Repository = "https://github.com/vimalinx/Shuheng"
+Issues = "https://github.com/vimalinx/Shuheng/issues"
+Documentation = "https://github.com/vimalinx/Shuheng#readme"
+
 [project.optional-dependencies]
 dev = [
+    "build>=1.2.0",
     "pytest>=7.0",
+    "ruff>=0.15.0",
 ]
 
 [project.scripts]
@@ -33,3 +66,18 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/ga_tui/app.py" = [
+    "E402",  # GenericAgent import path is prepared dynamically before imports.
+    "F401",  # Imported protocol/provider symbols are intentionally re-exported for compatibility.
+    "F402",  # Legacy local names overlap with imports in the large compatibility module.
+    "F841",  # Existing release-alpha monolith keeps some audit-only locals.
+]
