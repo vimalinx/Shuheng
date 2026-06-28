@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and active guideline routing for release-readiness work."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Brand entrypoint, gateway, runtime provider, policy, and compatibility contracts affected by release hardening."}
+{"file": "docs/agent-harness-architecture.md", "reason": "Architecture baseline to compare open-source release changes against."}
+{"file": "docs/runtime-provider-control-plane.md", "reason": "Runtime provider, gateway, protocol compatibility, and release-posture constraints."}
+{"file": ".trellis/tasks/06-28-open-source-release-readiness/research/release-audit-baseline.md", "reason": "Concrete release gaps and verification baseline from the audit turn."}

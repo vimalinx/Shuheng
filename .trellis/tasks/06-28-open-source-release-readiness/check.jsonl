@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for final quality verification."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Check public branding, protocol compatibility, gateway, and policy gate contracts."}
+{"file": "docs/agent-harness-architecture.md", "reason": "Verify changes move the system closer to the architecture baseline."}
+{"file": "docs/runtime-provider-control-plane.md", "reason": "Verify runtime/gateway/protocol release posture remains accurate."}
+{"file": ".trellis/tasks/06-28-open-source-release-readiness/research/release-audit-baseline.md", "reason": "Check all audited release gaps are either fixed or guarded."}
