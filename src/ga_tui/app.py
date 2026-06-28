@@ -14227,7 +14227,7 @@ def subagent_runtime_error_text(text: str) -> str:
     if not clean:
         return ""
     lower = clean.lower()
-    if clean.startswith("[ERROR] put_task"):
+    if clean.startswith("[ERROR]"):
         return clean
     if re.match(r"^\[Oh My Pi\]\s*[45]\d\d\b", clean):
         return clean
@@ -16965,6 +16965,12 @@ def queue_subagent_chat_input(state: State, sub: SubAgentRuntime, text: str, *, 
     if interrupt_requested:
         sub.chat_queue_interrupt_requested = True
     sub.updated_at = time.time()
+    append_subagent_visible_system_notice(
+        state,
+        sub,
+        f"已排队聊天输入：{truncate_cells(queued, 160)}\n当前子 agent 正在回复，队列会在当前输出结束后自动发送。",
+        source="subagent_chat_queued",
+    )
     mark_dirty(state)
     return f"{sub.name} 正在回复，已排队 {len(sub.chat_queue)} 条聊天输入。"
 
@@ -26092,15 +26098,32 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     if not prompt:
         return "子 agent 聊天输入为空。"
     role = normalized_subagent_role(sub.role)
+
+    def fail_visible(message: str) -> str:
+        if prompt:
+            sub.messages.append(Message("user", prompt))
+        sub.messages.append(Message("assistant", message, done=True))
+        sub.pending_interaction = None
+        sub.active_task_id = None
+        sub.active_bus_task_id = ""
+        sub.status = "error"
+        sub.updated_at = time.time()
+        save_subagent_meta(sub, state)
+        save_subagent_chat_session(state, sub, source=f"{source}:blocked")
+        mark_subagent_messages_changed(state, sub)
+        append_subagent_event(sub, source, prompt, state=state)
+        append_subagent_event(sub, "assistant", message, state=state)
+        return message
+
     if sub.security_context == "secret" and (not state.secret_vault.unlocked or not state.secret_vault.key):
-        return "Secret Vault 已锁定，不能与 Secret 子 agent 聊天。"
+        return fail_visible("Secret Vault 已锁定，不能与 Secret 子 agent 聊天。")
     record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
         return queue_subagent_chat_input(state, sub, prompt, interrupt_requested=sub.status == "aborting")
     agent = ensure_subagent_agent(state, sub)
     ok_model, model_msg = apply_subagent_default_model(state, sub)
     if not ok_model:
-        return f"{sub.name} 默认模型未应用，已阻止发送：{model_msg}"
+        return fail_visible(f"{sub.name} 默认模型未应用，已阻止发送：{model_msg}")
     sub.task_id += 1
     task_id = sub.task_id
     sub.active_task_id = task_id
@@ -26141,6 +26164,8 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
         error = f"{type(exc).__name__}: {exc}"
         sub.status = "error"
         sub.active_task_id = None
+        sub.active_bus_task_id = ""
+        sub.pending_interaction = None
         sub.messages[-1] = Message("assistant", f"[ERROR] put_task: {error}")
         save_subagent_meta(sub, state)
         save_subagent_chat_session(state, sub, source=f"{source}:error")
@@ -26491,7 +26516,10 @@ def consume_stream_queue_to_ui(state: State, kind: str, target_ref: Any, task_id
             usage = item.get("usage")
             if usage:
                 state.ui_queue.put(("token_usage", kind, target_ref, task_id, usage))
-            state.ui_queue.put((kind, target_ref, task_id, str(item.get("done") or buf), True))
+            done_text = str(item.get("done") or buf)
+            if not done_text.strip():
+                done_text = "[ERROR] runtime completed without a visible reply."
+            state.ui_queue.put((kind, target_ref, task_id, done_text, True))
             return
 
 
@@ -26511,7 +26539,11 @@ def append_subagent_visible_system_notice(state: State, sub: SubAgentRuntime, te
     notice = clean_text(text).strip()
     if not notice:
         return
-    sub.messages.append(Message("system", notice))
+    notice_message = Message("system", notice)
+    if sub.messages and sub.messages[-1].role == "assistant" and not sub.messages[-1].done:
+        sub.messages.insert(len(sub.messages) - 1, notice_message)
+    else:
+        sub.messages.append(notice_message)
     save_subagent_chat_session(state, sub, source=source)
     mark_subagent_messages_changed(state, sub)
 

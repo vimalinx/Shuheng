@@ -4615,6 +4615,8 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     first_chat_task_id = chat_sub.active_task_id
     queued = a.start_subagent_chat(state, chat_sub, "queued after rpc failure", source="subagent_chat")
     assert "已排队" in queued, queued
+    assert any(msg.role == "system" and "已排队聊天输入" in msg.content and "queued after rpc failure" in msg.content for msg in chat_sub.messages), chat_sub.messages
+    assert chat_sub.messages[-1].role == "assistant" and chat_sub.messages[-1].done is False, chat_sub.messages
     state.ui_queue.put(("sub_chat_stream", chat_sub.agent_id, first_chat_task_id, "[Oh My Pi] RPC prompt failed: Agent is already processing.", True))
     assert a.process_ui_queue(state) is True
     assert chat_sub.status == "running", chat_sub.status
@@ -4639,6 +4641,43 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
         assert not a.read_jsonl(a.AGENT_TASK_LEDGER_PATH), a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
     finally:
         a.apply_subagent_default_model = old_apply
+
+    chat_model_root = tempfile.mkdtemp(prefix="ga_tui_subagent_chat_model_block_")
+    retarget_harness(chat_model_root)
+    chat_model_state = a.State(agent=ContextFakeAgent())
+    chat_model_state.running = True
+    chat_model_sub = a.create_subagent(chat_model_state, "Chat Model Block Agent", role="researcher")
+    chat_model_sub.agent = BlockingAbortFakeAgent()
+    chat_model_sub.default_model = "missing-model"
+    old_apply = a.apply_subagent_default_model
+    try:
+        a.apply_subagent_default_model = lambda _state, _sub: (False, "missing runtime model")
+        blocked_chat = a.start_subagent_chat(chat_model_state, chat_model_sub, "visible blocked chat", source="subagent_chat")
+        assert "默认模型未应用，已阻止发送" in blocked_chat, blocked_chat
+        assert chat_model_sub.status == "error", chat_model_sub.status
+        assert chat_model_sub.agent.prompts == [], chat_model_sub.agent.prompts
+        assert [msg.role for msg in chat_model_sub.messages] == ["user", "assistant"], chat_model_sub.messages
+        assert chat_model_sub.messages[0].content == "visible blocked chat", chat_model_sub.messages
+        assert "missing runtime model" in chat_model_sub.messages[1].content, chat_model_sub.messages
+        assert chat_model_sub.messages[1].done is True, chat_model_sub.messages
+        session_entries = a.subagent_chat_session_entries(chat_model_state, chat_model_sub)
+        assert session_entries and session_entries[0]["message_count"] == 2, session_entries
+    finally:
+        a.apply_subagent_default_model = old_apply
+
+    empty_done_root = tempfile.mkdtemp(prefix="ga_tui_subagent_chat_empty_done_")
+    retarget_harness(empty_done_root)
+    empty_done_state = a.State(agent=ContextFakeAgent())
+    empty_done_state.running = True
+    empty_done_sub = a.create_subagent(empty_done_state, "Empty Done Chat Agent", role="researcher")
+    empty_done_sub.agent = SequencedFakeAgent([""])
+    empty_started = a.start_subagent_chat(empty_done_state, empty_done_sub, "empty runtime reply", source="subagent_chat")
+    assert empty_started.startswith("已发送给子 agent"), empty_started
+    drain_ui(empty_done_state)
+    assert empty_done_sub.status == "idle", empty_done_sub.status
+    assert empty_done_sub.active_task_id is None, empty_done_sub.active_task_id
+    assert "[ERROR] runtime completed without a visible reply." in empty_done_sub.messages[-1].content, empty_done_sub.messages
+    assert "子 agent 聊天失败" in empty_done_state.last_error, empty_done_state.last_error
 
 
 def assert_selected_subagent_chat_is_direct_session() -> None:
@@ -4845,6 +4884,8 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert sub.status == "running", sub.status
     a.submit(state, "queued direct chat")
     assert sub.chat_queue == ["queued direct chat"], sub.chat_queue
+    assert any(msg.role == "system" and "已排队聊天输入" in msg.content and "queued direct chat" in msg.content for msg in sub.messages), sub.messages
+    assert sub.messages[-1].role == "assistant" and sub.messages[-1].done is False, sub.messages
     assert not a.read_jsonl(a.AGENT_TASK_LEDGER_PATH), a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
     hint = a.queued_user_input_hint_lines(state, 100)
     assert hint and "queued direct chat" in hint[0][0], hint

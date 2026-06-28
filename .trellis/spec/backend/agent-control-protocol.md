@@ -440,6 +440,77 @@ S01 修复左栏历史会话标题
 }
 ```
 
+## Scenario: Direct Subagent Chat Visibility
+
+### 1. Scope / Trigger
+
+- Trigger: A user sends direct chat text to a selected persistent or temporary subagent through TUI plain text, persistent-subagent home input, `/chat`, or Web-console `agent.chat`.
+- Applies to: `start_subagent_chat(...)`, `queue_subagent_chat_input(...)`, `consume_stream_queue_to_ui(...)`, `process_ui_queue(...)`, subagent chat session persistence, subagent event logs, and Web-console runtime pump behavior.
+- Non-goal: This does not convert direct chat into a task-ledger `subagent_task`, bypass approval policy, or add free-form peer-to-peer agent chat outside the governed Orchestrator-owned runtime.
+
+### 2. Signatures
+
+- TUI direct chat entry: `submit(state, text)` when `selected_subagent(state)` or `selected_home_subagent(state)` is active.
+- Dispatcher: `start_subagent_chat(state, sub, prompt, source="subagent_chat") -> str`.
+- Queue path: `queue_subagent_chat_input(state, sub, text, interrupt_requested=False) -> str`.
+- Stream path: `consume_subagent_chat_queue(...)` emits `("sub_chat_stream", subagent_id, task_id, text, done)`.
+- Web action: `POST /gui/action` with `action:"agent.chat"` resolves a sanitized agent `ui_ref` and calls the same dispatcher.
+
+### 3. Contracts
+
+- Every non-empty accepted direct-chat input must create visible feedback in the subagent chat pane: a pending assistant row, a completed assistant error row, or a system queue notice.
+- A queued direct-chat input must be stored in `sub.chat_queue`, increment `chat_queued` in metadata, and add a readable system notice to the chat session without displacing the trailing unfinished assistant stream row.
+- A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
+- A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
+- Successful direct-chat replies continue to save chat session messages, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
+- Direct chat must keep using role permissions, runtime context packs, and memory-candidate approval flow. It must not write task-result artifacts or task-ledger completion rows unless dispatched as `start_subagent_task(...)`.
+
+### 4. Validation & Error Matrix
+
+- Empty prompt -> return `子 agent 聊天输入为空。`; no chat mutation.
+- Secret subagent while vault locked -> visible assistant error row; no runtime task.
+- Default model cannot be applied -> visible assistant error row; no runtime prompt sent.
+- Subagent already running/aborting or runtime has unfinished work -> queue input and render a system queue notice.
+- Runtime stream emits partial text -> update the pending assistant row without losing follow-bottom behavior.
+- Runtime stream emits empty final text -> visible `[ERROR] runtime completed without a visible reply.` and user-visible failure status.
+- Runtime stream emits OMP/RPC terminal error -> release `active_task_id`, keep queued-chat progression, and surface failure in `state.last_error`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: User types on a persistent-agent home; Shuheng switches to that agent chat, appends `user` + pending `assistant`, then streams the reply.
+- Good: User types again while the subagent is still running; the new text appears as a queue system notice and is sent after the current assistant row completes.
+- Good: A missing subagent default model writes `user: <attempt>` and `assistant: <model failure>` to the chat session, so the user sees why no runtime reply arrived.
+- Base: Direct chat remains a chat session, not a governed work-order artifact, unless the user or Orchestrator dispatches `agent.task`.
+- Bad: Returning only `state.last_error` for model failure while the chat pane has no new row.
+- Bad: Appending a queue notice after an unfinished assistant row, causing `process_ui_queue()` to stop updating the active stream.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert direct-chat model-block failures create visible user/assistant chat rows and do not send a runtime prompt.
+- Tests must assert queued direct-chat input renders a system notice while preserving the trailing unfinished assistant row for stream updates.
+- Tests must assert empty runtime `done` output becomes an explicit error and sets the user-visible last-error path to chat failure.
+- Tests must keep direct-chat memory-candidate approvals visible and ensure direct chat does not write `subagent-results` artifacts or task-ledger rows.
+- Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+start_subagent_chat -> default model missing -> return last_error only
+chat pane remains unchanged
+user thinks the subagent ignored the message
+```
+
+#### Correct
+
+```text
+start_subagent_chat -> default model missing
+chat pane: user attempted message + assistant error row
+runtime prompt is not sent
+state.last_error carries the same short reason
+```
+
 ## Scenario: Local Web Console Gateway
 
 ### 1. Scope / Trigger

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Subagent direct chat, approval, task ledger, dashboard and runtime control contracts"}
+{"file": "docs/runtime-provider-control-plane.md", "reason": "Runtime provider responsibilities for subagents, approvals, ledgers and final replies"}
