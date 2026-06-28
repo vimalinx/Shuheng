@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
+- **Total Sessions**: 27
 - **Last Active**: 2026-06-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~876 | Active |
+| `journal-1.md` | ~909 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-06-29 | Fix direct subagent chat no-reply states | `a138398` | `main` |
 | 26 | 2026-06-29 | Open-source release readiness | `25e5684`, `cdba57e` | `main` |
 | 25 | 2026-06-27 | Move Web GUI project to Projects | `3003efb` | `main` |
 | 24 | 2026-06-27 | Extract standalone Web GUI project | `8b99f3b` | `main` |

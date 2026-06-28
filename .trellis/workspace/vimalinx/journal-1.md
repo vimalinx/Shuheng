@@ -874,3 +874,36 @@ Hardened Shuheng for open-source alpha release with governance files, CI, releas
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: Fix direct subagent chat no-reply states
+
+**Date**: 2026-06-29
+**Task**: Fix direct subagent chat no-reply states
+**Branch**: `main`
+
+### Summary
+
+Made direct subagent chat always surface queued, blocked, and empty-runtime states visibly; added policy gate regressions and documented the contract in agent-control protocol.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a138398` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
