@@ -139,6 +139,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Manual release verification must run: Ruff check, release hygiene, policy
   gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
   `shuheng-check`, and `git diff --check`.
+- Wheel smoke must assert all public console scripts are installed. It may run
+  `--help` for helper scripts that do not import the full TUI runtime, and it
+  must run installed `shuheng-check` against an isolated GenericAgent stub.
 
 ### 7. Wrong vs Correct
 

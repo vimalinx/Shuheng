@@ -24,6 +24,20 @@ REQUIRED_CONTINUE_FUNCS = (
     "restore",
 )
 
+PUBLIC_CONSOLE_SCRIPTS = (
+    "shuheng",
+    "shuheng-agent-bridge",
+    "shuheng-check",
+    "shuheng-install-core-shim",
+    "shuheng-integration",
+)
+
+HELP_SAFE_CONSOLE_SCRIPTS = (
+    "shuheng-agent-bridge",
+    "shuheng-install-core-shim",
+    "shuheng-integration",
+)
+
 
 def latest_wheel(dist_dir: Path) -> Path:
     wheels = sorted(dist_dir.glob("shuheng-*.whl"), key=lambda path: path.stat().st_mtime, reverse=True)
@@ -91,14 +105,19 @@ def run_wheel_smoke(wheel: Path) -> dict[str, object]:
         py = venv_python(venv_dir)
         env = clean_env()
         run([str(py), "-m", "pip", "install", "--no-deps", str(wheel)], cwd=tmp, env=env)
+        scripts = {name: venv_script(venv_dir, name) for name in PUBLIC_CONSOLE_SCRIPTS}
         module_result = run([str(py), "-m", "ga_tui.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
-        entrypoint = venv_script(venv_dir, "shuheng-check")
+        for name in HELP_SAFE_CONSOLE_SCRIPTS:
+            run([str(scripts[name]), "--help"], cwd=tmp, env=env)
+        entrypoint = scripts["shuheng-check"]
         entrypoint_result = run([str(entrypoint), "--root", str(fake_root)], cwd=tmp, env=env)
         return {
             "schema_version": "shuheng.wheel_smoke.v1",
             "ok": True,
             "wheel": wheel.name,
             "checks": [
+                *[{"command": f"script exists: {name}", "returncode": 0} for name in PUBLIC_CONSOLE_SCRIPTS],
+                *[{"command": f"{name} --help", "returncode": 0} for name in HELP_SAFE_CONSOLE_SCRIPTS],
                 {"command": "python -m ga_tui.integration doctor", "returncode": module_result.returncode},
                 {"command": "shuheng-check", "returncode": entrypoint_result.returncode},
             ],
