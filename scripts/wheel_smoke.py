@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the built Shuheng wheel in a clean venv and run public entrypoints."""
+"""Install built Shuheng distribution artifacts in clean venvs and run public entrypoints."""
 
 from __future__ import annotations
 
@@ -39,11 +39,19 @@ HELP_SAFE_CONSOLE_SCRIPTS = (
 )
 
 
+def latest_artifact(dist_dir: Path, pattern: str, label: str) -> Path:
+    artifacts = sorted(dist_dir.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not artifacts:
+        raise FileNotFoundError(f"no Shuheng {label} found in {dist_dir}; run python -m build first")
+    return artifacts[0]
+
+
 def latest_wheel(dist_dir: Path) -> Path:
-    wheels = sorted(dist_dir.glob("shuheng-*.whl"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not wheels:
-        raise FileNotFoundError(f"no shuheng wheel found in {dist_dir}; run python -m build first")
-    return wheels[0]
+    return latest_artifact(dist_dir, "shuheng-*.whl", "wheel")
+
+
+def latest_sdist(dist_dir: Path) -> Path:
+    return latest_artifact(dist_dir, "shuheng-*.tar.gz", "sdist")
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -93,11 +101,11 @@ def write_fake_genericagent_root(root: Path) -> Path:
     return ga_root
 
 
-def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
-    wheel = wheel.resolve()
-    if not wheel.is_file():
-        raise FileNotFoundError(f"wheel not found: {wheel}")
-    with tempfile.TemporaryDirectory(prefix="shuheng_wheel_smoke_") as tmp_s:
+def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = False) -> dict[str, object]:
+    artifact = artifact.resolve()
+    if not artifact.is_file():
+        raise FileNotFoundError(f"{artifact_kind} not found: {artifact}")
+    with tempfile.TemporaryDirectory(prefix=f"shuheng_{artifact_kind}_smoke_") as tmp_s:
         tmp = Path(tmp_s)
         venv_dir = tmp / "venv"
         fake_root = write_fake_genericagent_root(tmp)
@@ -107,7 +115,7 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
         install_cmd = [str(py), "-m", "pip", "install"]
         if no_deps:
             install_cmd.append("--no-deps")
-        install_cmd.append(str(wheel))
+        install_cmd.append(str(artifact))
         run(install_cmd, cwd=tmp, env=env)
         scripts = {name: venv_script(venv_dir, name) for name in PUBLIC_CONSOLE_SCRIPTS}
         module_result = run([str(py), "-m", "ga_tui.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
@@ -119,7 +127,8 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
         return {
             "schema_version": "shuheng.wheel_smoke.v1",
             "ok": True,
-            "wheel": wheel.name,
+            "artifact": artifact.name,
+            "artifact_kind": artifact_kind,
             "install_mode": "no_deps" if no_deps else "with_dependencies",
             "checks": [
                 *[{"command": f"script exists: {name}", "returncode": 0} for name in PUBLIC_CONSOLE_SCRIPTS],
@@ -131,15 +140,49 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
         }
 
 
+def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
+    return run_artifact_smoke(wheel, artifact_kind="wheel", no_deps=no_deps)
+
+
+def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
+    return run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
+
+
+def run_distribution_smoke(wheel: Path, sdist: Path | None, *, no_deps: bool = False) -> dict[str, object]:
+    artifact_reports = [run_wheel_smoke(wheel, no_deps=no_deps)]
+    if sdist is not None:
+        artifact_reports.append(run_sdist_smoke(sdist, no_deps=no_deps))
+    checks: list[dict[str, object]] = []
+    for report in artifact_reports:
+        artifact_kind = str(report["artifact_kind"])
+        artifact = str(report["artifact"])
+        for check in report["checks"]:
+            row = dict(check)
+            row["artifact_kind"] = artifact_kind
+            row["artifact"] = artifact
+            checks.append(row)
+    return {
+        "schema_version": "shuheng.wheel_smoke.v1",
+        "ok": all(bool(report.get("ok")) for report in artifact_reports),
+        "install_mode": "no_deps" if no_deps else "with_dependencies",
+        "artifacts": artifact_reports,
+        "checks": checks,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Install the built Shuheng wheel in a clean venv and run public entrypoints")
-    parser.add_argument("--dist-dir", default="/tmp/shuheng-dist", help="directory containing shuheng-*.whl")
+    parser = argparse.ArgumentParser(description="Install built Shuheng wheel/sdist artifacts in clean venvs and run public entrypoints")
+    parser.add_argument("--dist-dir", default="/tmp/shuheng-dist", help="directory containing built shuheng wheel and sdist artifacts")
     parser.add_argument("--wheel", default="", help="explicit wheel path; overrides --dist-dir")
-    parser.add_argument("--no-deps", action="store_true", help="install the wheel without dependencies for offline debugging")
+    parser.add_argument("--sdist", default="", help="explicit source distribution path; overrides --dist-dir")
+    parser.add_argument("--wheel-only", action="store_true", help="smoke only the wheel artifact for local debugging")
+    parser.add_argument("--no-deps", action="store_true", help="install artifacts without dependencies for offline debugging")
     args = parser.parse_args(argv)
 
-    wheel = Path(args.wheel).expanduser() if args.wheel else latest_wheel(Path(args.dist_dir).expanduser())
-    report = run_wheel_smoke(wheel, no_deps=args.no_deps)
+    dist_dir = Path(args.dist_dir).expanduser()
+    wheel = Path(args.wheel).expanduser() if args.wheel else latest_wheel(dist_dir)
+    sdist = None if args.wheel_only else (Path(args.sdist).expanduser() if args.sdist else latest_sdist(dist_dir))
+    report = run_distribution_smoke(wheel, sdist, no_deps=args.no_deps)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

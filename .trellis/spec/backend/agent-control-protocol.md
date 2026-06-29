@@ -93,8 +93,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, and wheel smoke.
 - CI and README release-command examples must run wheel smoke in its default
-  dependency-resolving mode; `--no-deps` is only an explicit offline debugging
-  option and must not appear in public release gates.
+  dependency-resolving mode for both the built wheel and the built sdist;
+  `--no-deps` and `--wheel-only` are explicit local debugging options and must
+  not appear in public release gates.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
   include repository-hygiene gaps only when required files are missing.
 - The sdist must include intended public docs and integration plugin files while
@@ -111,8 +112,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   release hygiene fails.
 - MANIFEST drops release scripts or private-path exclusions -> release hygiene
   fails.
-- CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` -> release
-  hygiene fails because the public gate no longer matches real installation.
+- CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` or
+  `--wheel-only` -> release hygiene fails because the public gate no longer
+  matches real wheel+sdist installation.
 - Public file contains realistic API key/private-key material -> release hygiene
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.
@@ -123,8 +125,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `scripts/check_release_hygiene.py` passes and the sdist contains
-  `README.en.md`, `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
+- Good: `scripts/check_release_hygiene.py` passes, wheel smoke installs both
+  the latest wheel and sdist, and the sdist contains `README.en.md`,
+  `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
   research docs.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
   `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
@@ -144,12 +147,14 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Manual release verification must run: Ruff check, release hygiene, policy
   gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
   `shuheng-check`, and `git diff --check`.
-- Wheel smoke must assert all public console scripts are installed. It may run
-  `--help` for helper scripts that do not import the full TUI runtime, must run
-  `shuheng --help` after a dependency-resolving wheel install, and must run
-  installed `shuheng-check` against an isolated GenericAgent stub.
+- Wheel smoke must assert all public console scripts are installed from both
+  the latest wheel and latest sdist. It may run `--help` for helper scripts
+  that do not import the full TUI runtime, must run `shuheng --help` after each
+  dependency-resolving install, and must run installed `shuheng-check` against
+  an isolated GenericAgent stub.
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
-  use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without `--no-deps`.
+  use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
+  `--no-deps` or `--wheel-only`.
 
 ### 7. Wrong vs Correct
 

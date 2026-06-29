@@ -237,6 +237,8 @@ def check_wheel_smoke_release_mode(errors: list[str]) -> None:
         for line in lines:
             if "--no-deps" in line:
                 errors.append(f"{path} release wheel smoke must not use --no-deps: {line}")
+            if "--wheel-only" in line:
+                errors.append(f"{path} release wheel smoke must include sdist, not --wheel-only: {line}")
 
 
 def check_ci_workflow(errors: list[str]) -> None:
