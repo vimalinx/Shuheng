@@ -86,9 +86,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - Public release posture stays `experimental local alpha`.
 - `scripts/check_release_hygiene.py` must fail on missing governance files,
-  missing package metadata, public legacy `ga-tui*` console scripts, unignored
-  private/local paths, realistic secret literals, local absolute user paths in
-  public files, or missing public alpha/security wording.
+  missing release scripts, missing package metadata, public legacy `ga-tui*`
+  console scripts, unignored private/local paths, realistic secret literals,
+  local absolute user paths in public files, missing MANIFEST public
+  inclusions/private exclusions, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, and wheel smoke.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
@@ -101,8 +102,12 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 ### 4. Validation & Error Matrix
 
 - Missing `LICENSE` / `SECURITY.md` / CI -> release hygiene fails.
+- Missing `scripts/runtime_smoke.py` or `scripts/wheel_smoke.py` -> release
+  hygiene fails.
 - `config/mcporter.json` or private research docs are tracked or unignored ->
   release hygiene fails.
+- MANIFEST drops release scripts or private-path exclusions -> release hygiene
+  fails.
 - Public file contains realistic API key/private-key material -> release hygiene
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.

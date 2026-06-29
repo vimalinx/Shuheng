@@ -22,6 +22,10 @@ REQUIRED_FILES = (
     "README.en.md",
     "MANIFEST.in",
     ".github/workflows/ci.yml",
+    "scripts/check_policy_gates.py",
+    "scripts/check_release_hygiene.py",
+    "scripts/runtime_smoke.py",
+    "scripts/wheel_smoke.py",
 )
 
 PRIVATE_PATH_PREFIXES = (
@@ -67,6 +71,32 @@ SECRET_PATTERNS = (
 LOCAL_PATH_PATTERNS = (
     re.compile(r"/home/[A-Za-z0-9._-]+/"),
     re.compile(r"/Users/[A-Za-z0-9._-]+/"),
+)
+
+REQUIRED_MANIFEST_LINES = (
+    "include README.md",
+    "include README.en.md",
+    "include LICENSE",
+    "include SECURITY.md",
+    "include CONTRIBUTING.md",
+    "include CODE_OF_CONDUCT.md",
+    "include CHANGELOG.md",
+    "recursive-include docs *.md",
+    "recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts",
+    "recursive-include tests *.py",
+    "include scripts/check_policy_gates.py",
+    "include scripts/check_release_hygiene.py",
+    "include scripts/runtime_smoke.py",
+    "include scripts/wheel_smoke.py",
+)
+
+REQUIRED_MANIFEST_EXCLUSIONS = (
+    "exclude docs/foreign-student-acquisition-research.md",
+    "exclude docs/homework-pricing-research.md",
+    "prune .trellis",
+    "prune config",
+    "prune references",
+    "prune goal-*",
 )
 
 
@@ -149,6 +179,16 @@ def check_pyproject_metadata(errors: list[str]) -> None:
         errors.append(f"legacy ga-tui console scripts are public: {', '.join(public_legacy)}")
 
 
+def check_manifest_contract(errors: list[str]) -> None:
+    manifest = read_text("MANIFEST.in")
+    for line in REQUIRED_MANIFEST_LINES:
+        if line not in manifest:
+            errors.append(f"MANIFEST.in missing public release inclusion: {line}")
+    for line in REQUIRED_MANIFEST_EXCLUSIONS:
+        if line not in manifest:
+            errors.append(f"MANIFEST.in missing private/local exclusion: {line}")
+
+
 def check_public_positioning(errors: list[str]) -> None:
     readme = read_text("README.md")
     readme_en = read_text("README.en.md")
@@ -196,6 +236,7 @@ def main() -> int:
     check_private_files_are_not_tracked(errors)
     check_secret_and_local_literals(errors)
     check_pyproject_metadata(errors)
+    check_manifest_contract(errors)
     check_public_positioning(errors)
     check_ci_workflow(errors)
 
