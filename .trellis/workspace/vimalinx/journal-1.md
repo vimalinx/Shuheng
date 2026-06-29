@@ -907,3 +907,61 @@ Made direct subagent chat always surface queued, blocked, and empty-runtime stat
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: Unify subagent history and release readiness hardening
+
+**Date**: 2026-06-30
+**Task**: Unify subagent history and release readiness hardening
+**Branch**: `main`
+
+### Summary
+
+Unified persistent non-secret subagent direct chat around canonical Shuheng history and hardened the open-source release gate with executable wheel/sdist artifact checks, release-readiness metadata, policy gates, docs, specs, and full verification evidence.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e7dec64` | (see git log) |
+| `7ee3c8a` | (see git log) |
+| `6b0fabc` | (see git log) |
+| `ef07b54` | (see git log) |
+| `81fdc84` | (see git log) |
+| `775f0a8` | (see git log) |
+| `616c228` | (see git log) |
+| `cd2b73a` | (see git log) |
+| `5ed97d7` | (see git log) |
+| `338c639` | (see git log) |
+| `a0026be` | (see git log) |
+| `eb1c42b` | (see git log) |
+| `1955434` | (see git log) |
+| `56cfffd` | (see git log) |
+| `5c59370` | (see git log) |
+| `4445b8a` | (see git log) |
+| `99a036d` | (see git log) |
+| `1c5d5e7` | (see git log) |
+| `1cd0b28` | (see git log) |
+| `9ca29cc` | (see git log) |
+| `a15fece` | (see git log) |
+| `6571d9c` | (see git log) |
+| `6afc343` | (see git log) |
+| `d7f540e` | (see git log) |
+| `873a0f5` | (see git log) |
+| `818c2ce` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
