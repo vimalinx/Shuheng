@@ -5,6 +5,7 @@ import io
 import os
 from pathlib import Path
 import tarfile
+import zipfile
 
 from scripts import wheel_smoke
 
@@ -16,6 +17,34 @@ def write_sdist_fixture(path: Path, members: list[str]) -> None:
             info = tarfile.TarInfo(f"shuheng-0.1.0/{member}")
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
+
+
+def wheel_entry_points_text(missing_script: str = "") -> str:
+    scripts = [
+        script
+        for script in wheel_smoke.PUBLIC_CONSOLE_SCRIPTS
+        if script != missing_script
+    ]
+    return "\n".join(["[console_scripts]", *[f"{script} = ga_tui.__main__:main" for script in scripts], ""])
+
+
+def write_wheel_fixture(path: Path, members: list[str], *, missing_script: str = "") -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        for member in members:
+            if member.endswith("/METADATA"):
+                archive.writestr(member, "Name: shuheng\nVersion: 0.1.0\n")
+            elif member.endswith("/entry_points.txt"):
+                archive.writestr(member, wheel_entry_points_text(missing_script))
+            else:
+                archive.writestr(member, "fixture\n")
+
+
+def expected_wheel_members() -> list[str]:
+    dist_info_dir = "shuheng-0.1.0.dist-info"
+    return [
+        *wheel_smoke.WHEEL_REQUIRED_PACKAGE_MEMBERS,
+        *[f"{dist_info_dir}/{member}" for member in wheel_smoke.WHEEL_REQUIRED_DIST_INFO_MEMBERS],
+    ]
 
 
 def test_latest_sdist_selects_newest_artifact(tmp_path: Path) -> None:
@@ -98,3 +127,51 @@ def test_sdist_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         assert "forbidden members present: config/mcporter.json" in str(exc)
     else:
         raise AssertionError("private sdist member should fail")
+
+
+def test_wheel_archive_contract_accepts_metadata_and_public_members(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, expected_wheel_members())
+
+    check = wheel_smoke.wheel_archive_contract_check(wheel)
+
+    assert check["command"] == "wheel archive metadata/private member contract"
+    assert check["returncode"] == 0
+    assert check["console_scripts"] == len(wheel_smoke.PUBLIC_CONSOLE_SCRIPTS)
+
+
+def test_wheel_archive_contract_rejects_missing_metadata_member(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    members = [member for member in expected_wheel_members() if not member.endswith("/METADATA")]
+    write_wheel_fixture(wheel, members)
+
+    try:
+        wheel_smoke.wheel_archive_contract_check(wheel)
+    except ValueError as exc:
+        assert "missing required members: shuheng-0.1.0.dist-info/METADATA" in str(exc)
+    else:
+        raise AssertionError("missing wheel metadata should fail")
+
+
+def test_wheel_archive_contract_rejects_private_member(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, [*expected_wheel_members(), "memory/secret_vault/session.secret"])
+
+    try:
+        wheel_smoke.wheel_archive_contract_check(wheel)
+    except ValueError as exc:
+        assert "forbidden members present: memory/secret_vault/session.secret" in str(exc)
+    else:
+        raise AssertionError("private wheel member should fail")
+
+
+def test_wheel_archive_contract_rejects_missing_console_script_metadata(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, expected_wheel_members(), missing_script="shuheng-check")
+
+    try:
+        wheel_smoke.wheel_archive_contract_check(wheel)
+    except ValueError as exc:
+        assert "entry_points.txt missing console scripts: shuheng-check" in str(exc)
+    else:
+        raise AssertionError("missing wheel console script metadata should fail")
