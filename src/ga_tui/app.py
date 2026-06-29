@@ -8221,6 +8221,8 @@ def web_console_agent_conversation(state: State, agent_id: str, limit: int = 40)
     sub = resolve_subagent(state, agent_id)
     if sub is None:
         return {"title": "", "messages": [], "rounds": 0}
+    if sub.persistent and sub.status not in {"running", "aborting"} and sub.active_task_id is None:
+        load_subagent_chat_session(state, sub, sub.chat_session_id)
     messages: list[dict[str, str]] = []
     for msg in sub.messages[-limit:]:
         role = msg.role

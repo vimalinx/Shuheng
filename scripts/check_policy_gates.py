@@ -4968,6 +4968,15 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
     a.show_subagent_home(reloaded_empty, reloaded_empty_sub)
     a.submit(reloaded_empty, "/chat")
+    web_state = a.State(agent=ContextFakeAgent())
+    web_state.running = True
+    assert a.load_subagents(web_state) is True
+    web_sub = web_state.subagents.get(sub.agent_id)
+    assert web_sub is not None
+    web_sub.messages = []
+    web_conversation = a.web_console_agent_conversation(web_state, web_sub.agent_id)
+    assert any(row["role"] == "user" and row["content"] == "hello direct" for row in web_conversation["messages"]), web_conversation
+    assert any(row["role"] == "assistant" and row["content"] == "direct reply" for row in web_conversation["messages"]), web_conversation
 
     legacy_sub = a.create_subagent(state, "Legacy Chat Agent", role="researcher")
     legacy_session_id = "legacy-chat-session"
