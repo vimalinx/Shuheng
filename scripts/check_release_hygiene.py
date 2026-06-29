@@ -56,6 +56,7 @@ PUBLIC_SCAN_PREFIXES = (
     "integrations/",
     "scripts/",
     "src/",
+    "tests/",
 )
 
 PUBLIC_SCAN_FILES = {

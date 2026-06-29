@@ -1,6 +1,8 @@
 """Tests for release hygiene guards."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from scripts import check_release_hygiene as hygiene
 
 
@@ -130,3 +132,18 @@ def test_private_runtime_paths_are_release_blockers(monkeypatch) -> None:
     assert "private/local path is tracked: goal-6/tasks.md" in errors
     assert "private/local path is tracked: .trellis/.runtime/current.json" in errors
     assert "private/local path is unignored and could be committed: tmp/local-smoke/output.json" in errors
+
+
+def test_public_secret_scan_covers_packaged_tests(monkeypatch, tmp_path: Path) -> None:
+    test_path = tmp_path / "tests" / "test_leaky_fixture.py"
+    test_path.parent.mkdir(parents=True)
+    secret_like = "sk-" + "testfixture12345678901234567890"
+    test_path.write_text(f'TOKEN = "{secret_like}"\n', encoding="utf-8")
+
+    monkeypatch.setattr(hygiene, "ROOT", tmp_path)
+    monkeypatch.setattr(hygiene, "git_lines", lambda *args: ["tests/test_leaky_fixture.py"] if args == ("ls-files",) else [])
+
+    errors: list[str] = []
+    hygiene.check_secret_and_local_literals(errors)
+
+    assert "secret-like literal found in public file: tests/test_leaky_fixture.py" in errors

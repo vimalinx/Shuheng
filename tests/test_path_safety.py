@@ -24,8 +24,8 @@ from ga_tui.app import (
 
 class TestNormalizedPath:
     def test_expands_user(self, monkeypatch) -> None:
-        monkeypatch.setenv("HOME", "/home/test")
-        assert normalized_path("~/x") == "/home/test/x"
+        monkeypatch.setenv("HOME", "/tmp/shuheng-test-home")
+        assert normalized_path("~/x") == "/tmp/shuheng-test-home/x"
 
     def test_makes_absolute(self) -> None:
         # Relative path resolved against cwd.

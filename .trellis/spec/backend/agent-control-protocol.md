@@ -92,6 +92,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   console scripts, unignored private/local paths, realistic secret literals,
   local absolute user paths in public files, missing MANIFEST public
   inclusions/private exclusions, or missing public alpha/security wording.
+- Public secret/local literal scanning must include packaged test files because
+  `tests/` is part of the source distribution.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, wheel smoke, and `git diff --check`.
 - `CONTRIBUTING.md` must list the same reproducible local release checks so
@@ -132,6 +134,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Public file contains realistic API key/private-key material -> release hygiene
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.
+- Packaged test file contains realistic API key/private-key material or local
+  absolute user paths -> release hygiene fails.
 - `pyproject.toml` exports public `ga-tui*` scripts -> release hygiene fails.
 - CI matrix omits the minimum supported Python version or highest advertised
   Python classifier -> release hygiene fails.
@@ -191,6 +195,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - `scripts/check_release_hygiene.py` must assert runtime state directories such
   as `memory/`, `temp/`, `tmp/`, `goal-*`, and local Trellis runtime/cache files
   are not tracked or unignored and stay excluded from the release manifest.
+- `scripts/check_release_hygiene.py` must assert packaged tests are included in
+  public secret/local literal scanning.
 
 ### 7. Wrong vs Correct
 
