@@ -99,6 +99,8 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
     "prune goal-*",
 )
 
+RELEASE_WHEEL_SMOKE_FRAGMENT = "scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
+
 
 def git_lines(*args: str) -> list[str]:
     result = subprocess.run(
@@ -213,6 +215,30 @@ def check_public_positioning(errors: list[str]) -> None:
         errors.append("OMP plugin package name should use Shuheng public branding")
 
 
+def wheel_smoke_release_lines(text: str) -> list[str]:
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if RELEASE_WHEEL_SMOKE_FRAGMENT in line
+    ]
+
+
+def check_wheel_smoke_release_mode(errors: list[str]) -> None:
+    surfaces = {
+        "README.md": read_text("README.md"),
+        "README.en.md": read_text("README.en.md"),
+        ".github/workflows/ci.yml": read_text(".github/workflows/ci.yml"),
+    }
+    for path, text in surfaces.items():
+        lines = wheel_smoke_release_lines(text)
+        if not lines:
+            errors.append(f"{path} must run dependency-resolving wheel smoke: {RELEASE_WHEEL_SMOKE_FRAGMENT}")
+            continue
+        for line in lines:
+            if "--no-deps" in line:
+                errors.append(f"{path} release wheel smoke must not use --no-deps: {line}")
+
+
 def check_ci_workflow(errors: list[str]) -> None:
     workflow = read_text(".github/workflows/ci.yml")
     required_fragments = (
@@ -238,6 +264,7 @@ def main() -> int:
     check_pyproject_metadata(errors)
     check_manifest_contract(errors)
     check_public_positioning(errors)
+    check_wheel_smoke_release_mode(errors)
     check_ci_workflow(errors)
 
     if errors:

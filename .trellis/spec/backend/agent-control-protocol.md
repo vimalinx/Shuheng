@@ -92,6 +92,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   inclusions/private exclusions, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, and wheel smoke.
+- CI and README release-command examples must run wheel smoke in its default
+  dependency-resolving mode; `--no-deps` is only an explicit offline debugging
+  option and must not appear in public release gates.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
   include repository-hygiene gaps only when required files are missing.
 - The sdist must include intended public docs and integration plugin files while
@@ -108,6 +111,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   release hygiene fails.
 - MANIFEST drops release scripts or private-path exclusions -> release hygiene
   fails.
+- CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` -> release
+  hygiene fails because the public gate no longer matches real installation.
 - Public file contains realistic API key/private-key material -> release hygiene
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.
@@ -143,6 +148,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   `--help` for helper scripts that do not import the full TUI runtime, must run
   `shuheng --help` after a dependency-resolving wheel install, and must run
   installed `shuheng-check` against an isolated GenericAgent stub.
+- `scripts/check_release_hygiene.py` must assert README and CI release commands
+  use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without `--no-deps`.
 
 ### 7. Wrong vs Correct
 
