@@ -2456,7 +2456,7 @@ pack["workspace_context"] = workspace_context
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary sessions do not mutate the profile.
+- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct

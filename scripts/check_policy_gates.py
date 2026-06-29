@@ -1023,6 +1023,16 @@ def assert_shared_user_profile_context_is_global() -> None:
     profile_state_after_temp = a.read_json_dict_file(profile_state_path)
     assert profile_state_after_temp["interaction_count"] == 1, profile_state_after_temp
 
+    secret_marker = "secret-profile-leak-marker"
+    secret_state = a.State(agent=FakeLLMAgent())
+    secret_state.secret_vault.unlocked = True
+    a.record_shared_user_profile_interaction(f"Secret Vault 输入不要写入共享画像 {secret_marker}", source="user", state=secret_state)
+    profile_state_after_secret = a.read_json_dict_file(profile_state_path)
+    assert profile_state_after_secret["interaction_count"] == 1, profile_state_after_secret
+    profile_text_after_secret = Path(profile_path).read_text(encoding="utf-8")
+    assert secret_marker not in profile_text_after_secret, profile_text_after_secret
+    assert secret_marker not in json.dumps(profile_state_after_secret, ensure_ascii=False), profile_state_after_secret
+
 
 def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_legacy_bootstrap_")
