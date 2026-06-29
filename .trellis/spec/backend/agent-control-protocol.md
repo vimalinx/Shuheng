@@ -124,6 +124,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   `PKG-INFO`, `src/shuheng.egg-info/PKG-INFO`, `entry_points.txt`, and
   `top_level.txt` prove package name/version and public console scripts before
   install.
+- Wheel smoke must verify built sdist `src/shuheng.egg-info/SOURCES.txt`
+  directly so the sdist's own file manifest matches actual tarball file
+  members, except build-generated top-level `PKG-INFO` and `setup.cfg` members.
 - Wheel smoke must scan built wheel and sdist artifact member contents for
   realistic secret-like literals and local absolute paths, not only source
   checkout files.
@@ -147,6 +150,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   `tmp/`, `goal-*`, or private research docs -> wheel smoke fails.
 - Built sdist metadata omits `Name: shuheng`, `Version`, `ga_tui` top-level
   package, or any public console-script entry point -> wheel smoke fails.
+- Built sdist `SOURCES.txt` is missing, has duplicate/unsafe rows, omits a real
+  archive file member, or references a file that is not in the archive -> wheel
+  smoke fails.
 - Built wheel archive omits required `ga_tui` package modules, dist-info
   metadata, license, or public console-script entry point metadata, or contains
   private/local paths -> wheel smoke fails.
@@ -218,6 +224,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   sdist `PKG-INFO`, `src/shuheng.egg-info/PKG-INFO`,
   `src/shuheng.egg-info/entry_points.txt`, and
   `src/shuheng.egg-info/top_level.txt` before installing the sdist. It must
+  verify `src/shuheng.egg-info/SOURCES.txt` against actual sdist file members,
+  allowing only build-generated top-level `PKG-INFO` and `setup.cfg` to be
+  absent from the manifest. It must
   scan both artifact contents for realistic secret-like literals and local
   absolute user paths before installing either artifact. It may run `--help`
   for helper scripts that do not import the full TUI runtime, must run

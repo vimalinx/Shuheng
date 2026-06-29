@@ -19,20 +19,32 @@ def console_scripts_text(missing_script: str = "") -> str:
     return "\n".join(["[console_scripts]", *[f"{script} = ga_tui.__main__:main" for script in scripts], ""])
 
 
-def sdist_fixture_content(member: str, *, missing_script: str = "") -> bytes:
+def sdist_fixture_content(member: str, *, missing_script: str = "", sources_members: list[str] | None = None) -> bytes:
     if member in {"PKG-INFO", "src/shuheng.egg-info/PKG-INFO"}:
         return b"Metadata-Version: 2.4\nName: shuheng\nVersion: 0.1.0\n"
     if member == "src/shuheng.egg-info/entry_points.txt":
         return console_scripts_text(missing_script).encode()
     if member == "src/shuheng.egg-info/top_level.txt":
         return b"ga_tui\n"
+    if member == wheel_smoke.SDIST_SOURCES_MEMBER:
+        rows = sources_members or []
+        return ("\n".join(rows) + "\n").encode()
     return b"fixture\n"
 
 
-def write_sdist_fixture(path: Path, members: list[str], *, missing_script: str = "") -> None:
+def write_sdist_fixture(
+    path: Path,
+    members: list[str],
+    *,
+    missing_script: str = "",
+    sources_members: list[str] | None = None,
+) -> None:
+    if sources_members is None:
+        generated = set(wheel_smoke.SDIST_GENERATED_MEMBERS_NOT_IN_SOURCES)
+        sources_members = [member for member in members if member not in generated]
     with tarfile.open(path, "w:gz") as archive:
         for member in members:
-            data = sdist_fixture_content(member, missing_script=missing_script)
+            data = sdist_fixture_content(member, missing_script=missing_script, sources_members=sources_members)
             info = tarfile.TarInfo(f"shuheng-0.1.0/{member}")
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
@@ -206,6 +218,61 @@ def test_sdist_metadata_contract_rejects_missing_console_script_metadata(tmp_pat
         assert "entry_points.txt missing console scripts: shuheng-check" in str(exc)
     else:
         raise AssertionError("missing sdist console script metadata should fail")
+
+
+def test_sdist_sources_integrity_accepts_manifest(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    write_sdist_fixture(sdist, list(wheel_smoke.SDIST_REQUIRED_MEMBERS))
+
+    check = wheel_smoke.sdist_sources_integrity_check(sdist)
+
+    assert check["command"] == "sdist SOURCES manifest integrity"
+    assert check["returncode"] == 0
+    assert "PKG-INFO" in check["generated_members_not_required"]
+
+
+def test_sdist_sources_integrity_rejects_missing_sources_member(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    members = [member for member in wheel_smoke.SDIST_REQUIRED_MEMBERS if member != wheel_smoke.SDIST_SOURCES_MEMBER]
+    write_sdist_fixture(sdist, members)
+
+    try:
+        wheel_smoke.sdist_sources_integrity_check(sdist)
+    except ValueError as exc:
+        assert f"missing {wheel_smoke.SDIST_SOURCES_MEMBER}" in str(exc)
+    else:
+        raise AssertionError("missing sdist SOURCES.txt should fail")
+
+
+def test_sdist_sources_integrity_rejects_missing_archive_member_row(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    members = list(wheel_smoke.SDIST_REQUIRED_MEMBERS)
+    generated = set(wheel_smoke.SDIST_GENERATED_MEMBERS_NOT_IN_SOURCES)
+    sources_members = [member for member in members if member not in generated and member != "README.md"]
+    write_sdist_fixture(sdist, members, sources_members=sources_members)
+
+    try:
+        wheel_smoke.sdist_sources_integrity_check(sdist)
+    except ValueError as exc:
+        assert "SOURCES missing rows for archive members: README.md" in str(exc)
+    else:
+        raise AssertionError("sdist SOURCES missing member row should fail")
+
+
+def test_sdist_sources_integrity_rejects_missing_archive_member_from_sources(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    members = list(wheel_smoke.SDIST_REQUIRED_MEMBERS)
+    generated = set(wheel_smoke.SDIST_GENERATED_MEMBERS_NOT_IN_SOURCES)
+    sources_members = [member for member in members if member not in generated]
+    sources_members.append("docs/not-packaged.md")
+    write_sdist_fixture(sdist, members, sources_members=sources_members)
+
+    try:
+        wheel_smoke.sdist_sources_integrity_check(sdist)
+    except ValueError as exc:
+        assert "SOURCES rows for missing archive members: docs/not-packaged.md" in str(exc)
+    else:
+        raise AssertionError("sdist SOURCES extra member row should fail")
 
 
 def test_artifact_content_leak_scan_rejects_secret_like_literal() -> None:

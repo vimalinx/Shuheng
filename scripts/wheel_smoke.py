@@ -46,6 +46,9 @@ HELP_SAFE_CONSOLE_SCRIPTS = (
     "shuheng-integration",
 )
 
+SDIST_SOURCES_MEMBER = "src/shuheng.egg-info/SOURCES.txt"
+SDIST_GENERATED_MEMBERS_NOT_IN_SOURCES = ("PKG-INFO", "setup.cfg")
+
 SDIST_REQUIRED_MEMBERS = (
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
@@ -68,6 +71,7 @@ SDIST_REQUIRED_MEMBERS = (
     "scripts/wheel_smoke.py",
     "src/ga_tui/app.py",
     "src/shuheng.egg-info/PKG-INFO",
+    SDIST_SOURCES_MEMBER,
     "src/shuheng.egg-info/entry_points.txt",
     "src/shuheng.egg-info/top_level.txt",
     "tests/test_release_hygiene.py",
@@ -286,6 +290,25 @@ def normalized_sdist_members(sdist: Path) -> set[str]:
     return normalized
 
 
+def normalized_sdist_file_members(sdist: Path) -> set[str]:
+    with tarfile.open(sdist, "r:gz") as archive:
+        members = [member for member in archive.getmembers() if member.isfile()]
+
+    top_levels: set[str] = set()
+    normalized: set[str] = set()
+    for member in members:
+        parts = normalized_archive_parts(member.name)
+        if not parts:
+            continue
+        top_levels.add(parts[0])
+        if len(parts) > 1:
+            normalized.add("/".join(parts[1:]))
+
+    if len(top_levels) != 1:
+        raise ValueError(f"sdist archive must have one top-level directory, found: {sorted(top_levels)}")
+    return normalized
+
+
 def sdist_archive_contract_check(sdist: Path) -> dict[str, object]:
     members = normalized_sdist_members(sdist)
     missing = sorted(member for member in SDIST_REQUIRED_MEMBERS if member not in members)
@@ -340,6 +363,56 @@ def sdist_metadata_contract_check(sdist: Path) -> dict[str, object]:
         "returncode": 0,
         "required_members": len(SDIST_METADATA_MEMBERS),
         "console_scripts": len(PUBLIC_CONSOLE_SCRIPTS),
+    }
+
+
+def sdist_sources_integrity_check(sdist: Path) -> dict[str, object]:
+    members = normalized_sdist_file_members(sdist)
+    if SDIST_SOURCES_MEMBER not in members:
+        raise ValueError(f"sdist SOURCES integrity failed: missing {SDIST_SOURCES_MEMBER}")
+
+    sources_text = sdist_text_by_member(sdist, (SDIST_SOURCES_MEMBER,)).get(SDIST_SOURCES_MEMBER, "")
+    rows = [line.strip() for line in sources_text.splitlines() if line.strip()]
+    source_paths: list[str] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    invalid_rows: list[str] = []
+    for row in rows:
+        try:
+            parts = normalized_archive_parts(row)
+        except ValueError:
+            invalid_rows.append(row)
+            continue
+        if not parts:
+            invalid_rows.append(row)
+            continue
+        path = "/".join(parts)
+        if path in seen:
+            duplicates.append(path)
+        seen.add(path)
+        source_paths.append(path)
+
+    source_set = set(source_paths)
+    allowed_missing = set(SDIST_GENERATED_MEMBERS_NOT_IN_SOURCES)
+    missing_rows = sorted(member for member in members if member not in source_set and member not in allowed_missing)
+    extra_rows = sorted(path for path in source_set if path not in members)
+    errors: list[str] = []
+    if invalid_rows:
+        errors.append("invalid SOURCES rows: " + ", ".join(sorted(invalid_rows)))
+    if duplicates:
+        errors.append("duplicate SOURCES rows: " + ", ".join(sorted(set(duplicates))))
+    if missing_rows:
+        errors.append("SOURCES missing rows for archive members: " + ", ".join(missing_rows))
+    if extra_rows:
+        errors.append("SOURCES rows for missing archive members: " + ", ".join(extra_rows))
+    if errors:
+        raise ValueError("sdist SOURCES integrity failed: " + "; ".join(errors))
+    return {
+        "command": "sdist SOURCES manifest integrity",
+        "returncode": 0,
+        "manifest_rows": len(rows),
+        "archive_members": len(members),
+        "generated_members_not_required": sorted(allowed_missing & members),
     }
 
 
@@ -541,9 +614,10 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
 def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = sdist_archive_contract_check(sdist)
     metadata_check = sdist_metadata_contract_check(sdist)
+    sources_check = sdist_sources_integrity_check(sdist)
     content_check = check_archive_text_has_no_release_leaks(sdist_text_rows(sdist), artifact_kind="sdist")
     report = run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
-    report["checks"] = [archive_check, metadata_check, content_check, *list(report["checks"])]
+    report["checks"] = [archive_check, metadata_check, sources_check, content_check, *list(report["checks"])]
     return report
 
 

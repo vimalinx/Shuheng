@@ -3930,6 +3930,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert "wheel artifact content leak scan" in distribution_smoke["checks"], report
     assert "sdist archive public/private member contract" in distribution_smoke["checks"], report
     assert "sdist metadata/entry points contract" in distribution_smoke["checks"], report
+    assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
     assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"], report
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
