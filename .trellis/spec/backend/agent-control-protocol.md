@@ -353,14 +353,14 @@ S01 修复左栏历史会话标题
 - The fixed top status card must render as an authored native TUI control-panel layout, not a flat list of equal-weight label/value lines and not raw Markdown/table syntax. It should keep a full panel frame, status narrative, a visible compact short-metric grid, and lower single-column detail rows for long runtime/governance values so the user can scan current state, workload, ownership, and next context separately.
 - The status-card metric grid must default to visible content under a plain `核心指标` divider. The current default should not show `▸/▾` collapsed-state chrome for the whole metric grid.
 - Default home pages should show readable function, status, todo, schedule, and recent-task sections below the fixed card. They should not show recent-session sections by default. Approval ids, artifact URIs, and internal owner ids stay behind deliberate `/approvals`, `/artifacts`, and drill-down panels unless an agent explicitly declares a readable dashboard section.
-- Explicit `sessions` dashboard sections, when declared, must show readable titles and compact activity metadata only. Main home session rows open normal Shuheng history/current sessions; persistent-subagent session rows open that subagent's own chat sessions. Home row payloads may carry paths or subagent session ids, but the visible text must not dump raw filesystem paths.
+- Explicit `sessions` dashboard sections, when declared, must show readable titles and compact activity metadata only. Main home session rows open normal Shuheng history/current sessions; persistent-subagent session rows open that subagent's own history-backed chat sessions. Home row payloads may carry sanitized history refs or subagent session ids, but the visible text must not dump raw filesystem paths.
 - Dashboard schedule sections must render schedule definitions from `scheduled_task_registry(...)` / `latest_schedule_records(...)` only. Schedule run audit records stay in drill-down schedule panels and must not appear as `last:<status>` or task-run ids in the default home-page schedule section.
 - Scheduled-report sections render completed child subagent replies for scheduled agent-task runs by joining `scheduledtask.run.v1.task_id` to the task ledger and subagent result artifact rows. They must display the cleaned report body, not just a notification or one-line summary. They must exclude approval-waiting, cancelled, rejected, dispatched-only, and other non-reply audit rows. They are display-only derived views: no extra scheduler, result store, approval action, or memory write is created for the page itself. Default persistent-subagent home pages include a pinned `scheduled_reports` section even when the agent did not declare it, and the main sidebar exposes a global scheduled-report home page.
 - Scheduled-report bodies must be user-readable final reply text from the subagent result artifact first, falling back to the task summary only when no artifact body is available. OMP/LLM process markers such as `LLM Running`, `<summary>`, `<thinking>`, tool payloads, approval ids, raw artifact URIs, and task-run ids stay out of the default visible text.
 - Dashboard task, approval, and artifact data must be read from the shared task ledger, approval registry, and artifact index. Artifact bodies stay as refs/previews.
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home restores that agent's last entered chat session, auto-switches to that agent's chat interface, and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
-- Entering a persistent subagent chat through `/chat`, a sidebar subagent-session row, or home plain text input must persist the selected subagent chat session id to metadata so a later restart restores the last entered subagent conversation instead of the newest empty session.
+- Entering a persistent subagent chat through `/chat`, a sidebar subagent-session row, or home plain text input must persist the selected subagent chat session id/ref to subagent metadata so a later restart restores the last entered subagent conversation from canonical history instead of the newest empty session. Subagent metadata must not own the transcript.
 
 ### 4. Validation & Error Matrix
 
@@ -381,7 +381,7 @@ S01 修复左栏历史会话标题
 - Good: The fixed status card uses native TUI panel separators such as `├─ 核心指标`; aligned metric tiles are visible by default, and long values stay below in a single `运行详情` section instead of being squeezed into one horizontal line.
 - Good: A persistent agent may explicitly declare readable lower sections such as `markdown` or `todos`; those sections render below the card while unsupported fields are dropped.
 - Good: Default home pages omit recent-session sections, keeping chat history in the sidebar/session views instead of the dashboard body.
-- Good: `/chat` from a persistent-agent home restores the previously entered subagent chat session and marks it as the metadata current session for the next restart.
+- Good: `/chat` from a persistent-agent home restores the previously entered history-backed subagent chat session and marks its ref as the metadata current session for the next restart.
 - Base: An explicitly declared `sessions` dashboard section can still render readable session rows and route them through the same normal-history or subagent-session switching paths as the sidebars.
 - Good: A persistent agent emits `dashboard.update` with `sections:[{"type":"markdown"},{"type":"todos"}]`; unsupported fields are dropped and the accepted declaration is persisted in subagent metadata with provenance.
 - Base: `/chat` from a home page switches to the corresponding chat session without changing the stored dashboard declaration.
@@ -397,7 +397,7 @@ S01 修复左栏历史会话标题
 - Tests must assert default home pages show readable function/status/todo/schedule/recent-task sections while keeping recent-session sections, schedule run records, artifact URIs, and approval ids out of the default view.
 - Tests must assert scheduled subagent result rows and cleaned report body content are visible in the subagent `scheduled_reports` home section and in the global scheduled-report page, while the normal schedule section still shows schedule definitions only.
 - Tests must assert scheduled-report rendering strips process/thinking metadata and excludes approval-required or cancelled schedule audit rows.
-- Tests must assert entering a persistent subagent chat through `/chat` or a subagent-session switch persists the selected chat session id and a later restart restores that session.
+- Tests must assert entering a persistent subagent chat through `/chat` or a subagent-session switch persists the selected chat session id/ref and a later restart restores that session from canonical history, not from a per-agent transcript store.
 - Tests must assert repeated `home_lines(...)` calls for an unchanged home page reuse the cached render instead of rereading the task ledger.
 - Tests must assert default main and persistent-agent home rendering shows readable task and schedule rows while keeping raw artifact and approval rows behind detail-entry actions.
 - Tests must assert explicitly declared readable dashboard sections still render from persisted dashboard declarations.
@@ -445,7 +445,7 @@ S01 修复左栏历史会话标题
 ### 1. Scope / Trigger
 
 - Trigger: A user sends direct chat text to a selected persistent or temporary subagent through TUI plain text, persistent-subagent home input, `/chat`, or Web-console `agent.chat`.
-- Applies to: `start_subagent_chat(...)`, `queue_subagent_chat_input(...)`, `consume_stream_queue_to_ui(...)`, `process_ui_queue(...)`, subagent chat session persistence, subagent event logs, and Web-console runtime pump behavior.
+- Applies to: `start_subagent_chat(...)`, `queue_subagent_chat_input(...)`, `consume_stream_queue_to_ui(...)`, `process_ui_queue(...)`, history-backed subagent chat persistence, subagent event logs, and Web-console runtime pump behavior.
 - Non-goal: This does not convert direct chat into a task-ledger `subagent_task`, bypass approval policy, or add free-form peer-to-peer agent chat outside the governed Orchestrator-owned runtime.
 
 ### 2. Signatures
@@ -462,7 +462,9 @@ S01 修复左栏历史会话标题
 - A queued direct-chat input must be stored in `sub.chat_queue`, increment `chat_queued` in metadata, and add a readable system notice to the chat session without displacing the trailing unfinished assistant stream row.
 - A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
 - A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
-- Successful direct-chat replies continue to save chat session messages, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
+- Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts.
+- Secret subagent direct-chat transcripts must stay encrypted in Secret Vault storage and must not be copied into normal plaintext history.
+- Successful direct-chat replies continue to save chat session messages in canonical history, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
 - Direct chat must keep using role permissions, runtime context packs, and memory-candidate approval flow. It must not write task-result artifacts or task-ledger completion rows unless dispatched as `start_subagent_task(...)`.
 
 ### 4. Validation & Error Matrix
@@ -491,6 +493,7 @@ S01 修复左栏历史会话标题
 - Tests must assert empty runtime `done` output becomes an explicit error and sets the user-visible last-error path to chat failure.
 - Tests must keep direct-chat memory-candidate approvals visible and ensure direct chat does not write `subagent-results` artifacts or task-ledger rows.
 - Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher.
+- Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files; legacy per-agent JSON files remain non-destructively importable.
 
 ### 7. Wrong vs Correct
 

@@ -378,6 +378,8 @@ SECRET_SUBAGENT_SESSION_ID = "secret_subagents"
 SECRET_SUBAGENT_META_KIND = "subagents"
 SECRET_SUBAGENT_MEMORY_KIND = "subagent-memory"
 SECRET_SUBAGENT_CHAT_KIND = "subagent-chat"
+SUBAGENT_CHAT_HISTORY_SCOPE = "subagent_chat"
+SUBAGENT_CHAT_MESSAGES_META_KEY = "subagent_chat_messages"
 SECRET_VAULT_MIN_PASSWORD_CHARS = 8
 SECRET_COPY_CONFIRM_TTL_SECONDS = 20.0
 SECRET_VAULT_PASSWORD_RULE_TEXT = f"至少 {SECRET_VAULT_MIN_PASSWORD_CHARS} 个字符，并包含大写字母、小写字母、数字和特殊字符"
@@ -10967,6 +10969,316 @@ def messages_from_subagent_chat_payload(payload: dict[str, Any]) -> list[Message
     return normalize_loaded_subagent_chat_messages([msg for msg in (secret_message_from_record(item) for item in records) if msg is not None])
 
 
+def subagent_chat_history_meta_matches(meta: dict[str, Any], sub: SubAgentRuntime, session_id: str = "") -> bool:
+    if str(meta.get("conversation_scope") or "") != SUBAGENT_CHAT_HISTORY_SCOPE:
+        return False
+    if str(meta.get("agent_id") or "") != sub.agent_id:
+        return False
+    if session_id and str(meta.get("subagent_chat_session_id") or "") != session_id:
+        return False
+    return True
+
+
+def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    pending_user: Optional[str] = None
+    for msg in messages:
+        role = str(msg.role or "")
+        content = clean_text(msg.content or "")
+        if role == "user":
+            if pending_user is not None:
+                pairs.append((pending_user, ""))
+            pending_user = content
+        elif role == "assistant" and pending_user is not None:
+            pairs.append((pending_user, content))
+            pending_user = None
+    if pending_user is not None:
+        pairs.append((pending_user, ""))
+    return pairs
+
+
+def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -> None:
+    lines: list[str] = []
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    for user_text, assistant_text in subagent_chat_message_pairs(messages):
+        if not clean_text(user_text).strip():
+            continue
+        prompt = {"role": "user", "content": [{"type": "text", "text": clean_text(user_text)}]}
+        response = [{"type": "text", "text": clean_text(assistant_text)}]
+        lines.append(f"=== Prompt === {now}\n{json.dumps(prompt, ensure_ascii=False, indent=2)}")
+        lines.append(f"=== Response === {now}\n{repr(response)}")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_text_atomic(path, "\n\n".join(lines).rstrip() + ("\n\n" if lines else ""))
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+
+def subagent_chat_history_preview_messages(messages: list[Message], limit: int = 20) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for msg in messages[-limit:]:
+        role = str(msg.role or "")
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = clean_text(msg.content or "").strip()
+        if not content:
+            continue
+        records.append({"role": role, "content": content})
+    return records
+
+
+def subagent_chat_history_preview(messages: list[Message], sub: SubAgentRuntime) -> str:
+    title = suggested_session_title(messages)
+    if title:
+        return compact_title(title, 90)
+    for msg in messages:
+        if msg.role == "user":
+            preview = compact_description(msg.content or "", 90)
+            if preview:
+                return preview
+    return compact_title(sub.chat_title or f"{sub.name} 会话", 90)
+
+
+def subagent_chat_history_description(messages: list[Message], preview: str = "") -> str:
+    users = [compact_description(msg.content or "", 90) for msg in messages if msg.role == "user" and (msg.content or "").strip()]
+    assistants = [
+        compact_description(latest_visible_reply_text(msg.content or ""), 110)
+        for msg in messages
+        if msg.role == "assistant" and (msg.content or "").strip()
+    ]
+    snippets: list[str] = []
+    if users:
+        snippets.append(f"开始：{users[0]}")
+        if users[-1] != users[0]:
+            snippets.append(f"最近：{users[-1]}")
+    if assistants:
+        snippets.append(f"摘要：{assistants[-1]}")
+    if not snippets and preview:
+        snippets.append(preview)
+    return compact_description("；".join(snippets), SESSION_DESCRIPTION_LIMIT)
+
+
+def subagent_chat_history_rounds(messages: list[Message]) -> int:
+    return sum(1 for msg in messages if msg.role == "user" and str(msg.content or "").strip())
+
+
+def subagent_chat_history_last_user_at(messages: list[Message], fallback: float) -> float:
+    return fallback if any(msg.role == "user" and str(msg.content or "").strip() for msg in messages) else fallback
+
+
+def subagent_chat_history_path_for_session(
+    state: Optional[State],
+    sub: SubAgentRuntime,
+    session_id: str,
+    *,
+    create: bool = False,
+) -> str:
+    session_id = str(session_id or sub.chat_session_id or "").strip()
+    if not session_id:
+        return ""
+    registry = load_session_meta_registry()
+    for key, meta in registry.items():
+        if not isinstance(meta, dict):
+            continue
+        if bool(meta.get("deleted")):
+            continue
+        if subagent_chat_history_meta_matches(meta, sub, session_id):
+            return os.path.join(MODEL_RESPONSES_DIR, key)
+    if not create:
+        return ""
+    path = new_session_log_path()
+    registry[session_key(path)] = {
+        "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
+        "agent_id": sub.agent_id,
+        "agent_name": sub.name,
+        "subagent_chat_session_id": session_id,
+        "security_context": sub.security_context,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "title": sub.chat_title or f"{sub.name} 会话",
+        "preview": sub.chat_title or f"{sub.name} 会话",
+        "rounds": 0,
+        "last_user_at": time.time(),
+        "ui_preview_messages": [],
+        "ui_preview_loaded_rounds": 0,
+        "ui_preview_total_rounds": 0,
+        "ui_preview_message_count": 0,
+        SUBAGENT_CHAT_MESSAGES_META_KEY: [],
+    }
+    save_session_meta_registry(registry)
+    if state is not None:
+        state.session_meta = registry
+    return path
+
+
+def save_subagent_chat_messages_to_history(
+    state: Optional[State],
+    sub: SubAgentRuntime,
+    *,
+    session_id: str,
+    title: str,
+    messages: list[Message],
+    source: str,
+    legacy_path: str = "",
+) -> tuple[bool, str]:
+    session_id = str(session_id or sub.chat_session_id or "").strip()
+    if not session_id:
+        return False, "子 agent 会话 id 为空。"
+    path = subagent_chat_history_path_for_session(state, sub, session_id, create=True)
+    if not path:
+        return False, "无法创建子 agent history 会话。"
+    persisted_messages = list(messages)
+    write_subagent_chat_history_transcript(path, persisted_messages)
+    try:
+        stat = os.stat(path)
+    except OSError:
+        stat = None
+    updated_at = time.time()
+    preview = subagent_chat_history_preview(persisted_messages, sub)
+    title = compact_title(title or preview or f"{sub.name} 会话", 80)
+    description = subagent_chat_history_description(persisted_messages, preview)
+    preview_messages = subagent_chat_history_preview_messages(persisted_messages)
+    rounds = subagent_chat_history_rounds(persisted_messages)
+    registry = load_session_meta_registry()
+    key = session_key(path)
+    entry = dict(registry.get(key, {}))
+    entry.update({
+        "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
+        "agent_id": sub.agent_id,
+        "agent_name": sub.name,
+        "subagent_chat_session_id": session_id,
+        "security_context": sub.security_context,
+        "title": title,
+        "preview": preview,
+        "description": description,
+        "rounds": rounds,
+        "last_user_at": subagent_chat_history_last_user_at(persisted_messages, updated_at),
+        "updated_at": updated_at,
+        "source": source,
+        "message_count": len(persisted_messages),
+        "ui_preview_messages": preview_messages,
+        "ui_preview_loaded_rounds": rounds,
+        "ui_preview_total_rounds": rounds,
+        "ui_preview_message_count": len(preview_messages),
+        SUBAGENT_CHAT_MESSAGES_META_KEY: [secret_message_record(msg) for msg in persisted_messages],
+    })
+    if stat is not None:
+        entry["cache_mtime"] = stat.st_mtime
+        entry["cache_size"] = stat.st_size
+    if legacy_path:
+        entry["legacy_subagent_session_file"] = legacy_path
+    registry[key] = entry
+    save_session_meta_registry(registry)
+    if state is not None:
+        state.session_meta = registry
+    return True, path
+
+
+def messages_from_history_transcript(path: str) -> list[Message]:
+    try:
+        content = read_text_file(path, "")
+    except Exception:
+        return []
+    messages: list[Message] = []
+    for prompt, response in _pairs(content):
+        user = _user_text(prompt)
+        if user:
+            messages.append(Message("user", user))
+        assistant = assistant_text_from_response_body(response)
+        if assistant:
+            messages.append(Message("assistant", assistant))
+    return normalize_loaded_subagent_chat_messages(messages)
+
+
+def messages_from_subagent_history_meta(path: str, meta: dict[str, Any]) -> list[Message]:
+    raw_messages = meta.get(SUBAGENT_CHAT_MESSAGES_META_KEY)
+    if isinstance(raw_messages, list):
+        messages = [msg for msg in (secret_message_from_record(item) for item in raw_messages) if msg is not None]
+        return normalize_loaded_subagent_chat_messages(messages)
+    return messages_from_history_transcript(path)
+
+
+def legacy_subagent_chat_session_entries(sub: SubAgentRuntime) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    root = subagent_sessions_dir(sub)
+    for path in sorted(glob.glob(os.path.join(root, "*.json"))):
+        try:
+            raw = json.loads(read_text_file(path, "{}"))
+        except Exception as exc:
+            entries.append({"path": path, "agent_id": sub.agent_id, "session_id": os.path.basename(path).removesuffix(".json"), "title": os.path.basename(path), "updated_at": "", "error": f"{type(exc).__name__}: {exc}", "legacy": True})
+            continue
+        payload = raw if isinstance(raw, dict) else {}
+        if str(payload.get("agent_id") or sub.agent_id) != sub.agent_id:
+            continue
+        messages = payload.get("messages")
+        entries.append({
+            "path": path,
+            "agent_id": sub.agent_id,
+            "session_id": str(payload.get("session_id") or os.path.basename(path).removesuffix(".json")),
+            "title": compact_title(str(payload.get("title") or "子 agent 会话"), 80),
+            "updated_at": str(payload.get("updated_at") or ""),
+            "message_count": len(messages) if isinstance(messages, list) else 0,
+            "payload": payload,
+            "legacy": True,
+        })
+    return entries
+
+
+def import_legacy_subagent_chat_sessions(state: Optional[State], sub: SubAgentRuntime) -> None:
+    if sub.security_context == "secret" or not sub.persistent:
+        return
+    for entry in legacy_subagent_chat_session_entries(sub):
+        if entry.get("error"):
+            continue
+        session_id = str(entry.get("session_id") or "")
+        if not session_id or subagent_chat_history_path_for_session(state, sub, session_id):
+            continue
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        messages = messages_from_subagent_chat_payload(payload)
+        save_subagent_chat_messages_to_history(
+            state,
+            sub,
+            session_id=session_id,
+            title=str(entry.get("title") or payload.get("title") or f"{sub.name} 会话"),
+            messages=messages,
+            source="legacy-subagent-session-import",
+            legacy_path=str(entry.get("path") or ""),
+        )
+
+
+def subagent_history_chat_session_entries(state: Optional[State], sub: SubAgentRuntime) -> list[dict[str, Any]]:
+    registry = load_session_meta_registry()
+    entries: list[dict[str, Any]] = []
+    for key, meta in registry.items():
+        if not isinstance(meta, dict):
+            continue
+        if bool(meta.get("deleted")):
+            continue
+        if not subagent_chat_history_meta_matches(meta, sub):
+            continue
+        path = os.path.join(MODEL_RESPONSES_DIR, key)
+        session_id = str(meta.get("subagent_chat_session_id") or "")
+        if not session_id:
+            continue
+        raw_messages = meta.get(SUBAGENT_CHAT_MESSAGES_META_KEY)
+        message_count = len(raw_messages) if isinstance(raw_messages, list) else int(meta.get("message_count") or 0)
+        entries.append({
+            "path": path,
+            "history_path": path,
+            "agent_id": sub.agent_id,
+            "session_id": session_id,
+            "title": compact_title(str(meta.get("title") or meta.get("preview") or "子 agent 会话"), 80),
+            "updated_at": str(meta.get("updated_at") or meta.get("last_user_at") or ""),
+            "message_count": message_count,
+            "meta": meta,
+        })
+    entries.sort(key=lambda item: (session_meta_epoch(item.get("updated_at")), str(item.get("session_id") or "")), reverse=True)
+    if state is not None:
+        state.session_meta = registry
+    return entries
+
+
 def save_secret_subagent_memory(state: Optional[State], sub: SubAgentRuntime) -> tuple[bool, str]:
     if state is None or not state.secret_vault.unlocked or not state.secret_vault.key:
         return False, "Secret Vault 已锁定，拒绝保存 Secret 子 agent 记忆。"
@@ -10997,9 +11309,9 @@ def load_secret_subagent_memory(state: State, agent_id: str) -> str:
 def save_subagent_chat_session(state: Optional[State], sub: SubAgentRuntime, *, source: str = "ui") -> tuple[bool, str]:
     if not sub.persistent:
         return False, "临时子 agent 聊天不持久化。"
-    payload = subagent_chat_session_payload(sub, source=source)
     sub.updated_at = time.time()
     if sub.security_context == "secret":
+        payload = subagent_chat_session_payload(sub, source=source)
         if state is None or not state.secret_vault.unlocked or not state.secret_vault.key:
             return False, "Secret Vault 已锁定，拒绝保存 Secret 子 agent 会话。"
         ok, ref = secret_write_subagent_json(
@@ -11011,13 +11323,19 @@ def save_subagent_chat_session(state: Optional[State], sub: SubAgentRuntime, *, 
         if ok:
             save_subagent_meta(sub, state)
         return ok, ref
-    os.makedirs(subagent_sessions_dir(sub), exist_ok=True)
-    write_text_atomic(
-        subagent_chat_session_file(sub, sub.chat_session_id),
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    if not sub.chat_session_id:
+        sub.chat_session_id = subagent_new_chat_session_id()
+    sub.chat_title = subagent_chat_title_for_messages(sub)
+    ok, ref = save_subagent_chat_messages_to_history(
+        state,
+        sub,
+        session_id=sub.chat_session_id,
+        title=sub.chat_title,
+        messages=sub.messages,
+        source=source,
     )
     save_subagent_meta(sub)
-    return True, subagent_chat_session_file(sub, sub.chat_session_id)
+    return ok, ref
 
 
 def subagent_chat_session_entries(state: Optional[State], sub: SubAgentRuntime) -> list[dict[str, Any]]:
@@ -11049,27 +11367,9 @@ def subagent_chat_session_entries(state: Optional[State], sub: SubAgentRuntime) 
                 "payload": payload,
             })
     else:
-        root = subagent_sessions_dir(sub)
-        for path in sorted(glob.glob(os.path.join(root, "*.json"))):
-            try:
-                raw = json.loads(read_text_file(path, "{}"))
-            except Exception as exc:
-                entries.append({"path": path, "agent_id": sub.agent_id, "session_id": os.path.basename(path).removesuffix(".json"), "title": os.path.basename(path), "updated_at": "", "error": f"{type(exc).__name__}: {exc}"})
-                continue
-            payload = raw if isinstance(raw, dict) else {}
-            if str(payload.get("agent_id") or sub.agent_id) != sub.agent_id:
-                continue
-            messages = payload.get("messages")
-            entries.append({
-                "path": path,
-                "agent_id": sub.agent_id,
-                "session_id": str(payload.get("session_id") or os.path.basename(path).removesuffix(".json")),
-                "title": compact_title(str(payload.get("title") or "子 agent 会话"), 80),
-                "updated_at": str(payload.get("updated_at") or ""),
-                "message_count": len(messages) if isinstance(messages, list) else 0,
-                "payload": payload,
-            })
-    entries.sort(key=lambda item: (str(item.get("updated_at") or ""), str(item.get("session_id") or "")), reverse=True)
+        import_legacy_subagent_chat_sessions(state, sub)
+        entries.extend(subagent_history_chat_session_entries(state, sub))
+    entries.sort(key=lambda item: (session_meta_epoch(item.get("updated_at")), str(item.get("session_id") or "")), reverse=True)
     return entries
 
 
@@ -11082,6 +11382,15 @@ def load_subagent_chat_session(state: Optional[State], sub: SubAgentRuntime, ses
         target = next((entry for entry in entries if str(entry.get("session_id") or "") == sub.chat_session_id), None)
     if target is None and entries:
         target = entries[0]
+    if target and isinstance(target.get("meta"), dict):
+        meta = target["meta"]
+        path = str(target.get("history_path") or target.get("path") or "")
+        sub.chat_session_id = str(meta.get("subagent_chat_session_id") or target.get("session_id") or subagent_new_chat_session_id())
+        sub.chat_title = str(meta.get("title") or target.get("title") or f"{sub.name} 会话")
+        sub.messages = messages_from_subagent_history_meta(path, meta)
+        if sub.agent is not None:
+            restore_backend_from_secret_messages(sub.agent, sub.messages)
+        return True
     if target and isinstance(target.get("payload"), dict):
         payload = target["payload"]
         sub.chat_session_id = str(payload.get("session_id") or target.get("session_id") or subagent_new_chat_session_id())
@@ -11755,7 +12064,7 @@ def subagent_storage_summary(sub: SubAgentRuntime) -> str:
         chat_ref = secret_virtual_ref(SECRET_SUBAGENT_CHAT_KIND, f"{sub.agent_id}-{sub.chat_session_id or 'current'}")
         return f"Secret encrypted refs: memory={memory_ref}; chat={chat_ref}"
     memory_ref = subagent_memory_file(sub) if sub.persistent else "(disabled)"
-    chat_ref = subagent_chat_session_file(sub, sub.chat_session_id or "current") if sub.persistent else "(ephemeral)"
+    chat_ref = subagent_chat_session_ref(sub) if sub.persistent else "(ephemeral)"
     return f"Local refs: profile={subagent_profile_file(sub)}; memory={memory_ref}; chat={chat_ref}"
 
 
@@ -11763,7 +12072,10 @@ def subagent_chat_session_ref(sub: SubAgentRuntime) -> str:
     if sub.security_context == "secret":
         return secret_virtual_ref(SECRET_SUBAGENT_CHAT_KIND, f"{sub.agent_id}-{sub.chat_session_id or 'current'}")
     if sub.persistent:
-        return subagent_chat_session_file(sub, sub.chat_session_id or "current")
+        history_path = subagent_chat_history_path_for_session(None, sub, sub.chat_session_id or "")
+        if history_path:
+            return history_path
+        return f"history://subagent-chat/{sub.agent_id}/{sub.chat_session_id or 'current'}"
     return f"subagent-chat://{sub.agent_id}/{sub.chat_session_id or 'ephemeral'}"
 
 
@@ -18185,7 +18497,17 @@ def subagent_chat_history_home_signature(state: State, sub: SubAgentRuntime, lim
         if state is None or not state.secret_vault.unlocked:
             return ("secret-locked",)
         return ("secret", secret_file_signature(SECRET_SUBAGENT_CHAT_KIND, "*.secret")[:limit])
-    rows: list[tuple[str, int, int]] = []
+    history_rows: list[tuple[str, float, int]] = []
+    for key, meta in load_session_meta_registry().items():
+        if not isinstance(meta, dict) or not subagent_chat_history_meta_matches(meta, sub):
+            continue
+        history_rows.append((
+            str(meta.get("subagent_chat_session_id") or key),
+            session_meta_epoch(meta.get("updated_at") or meta.get("last_user_at")),
+            int(meta.get("message_count") or 0),
+        ))
+    history_rows.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    legacy_rows: list[tuple[str, int, int]] = []
     try:
         paths = glob.glob(os.path.join(subagent_sessions_dir(sub), "*.json"))
     except OSError:
@@ -18195,9 +18517,13 @@ def subagent_chat_history_home_signature(state: State, sub: SubAgentRuntime, lim
             stat = os.stat(path)
         except OSError:
             continue
-        rows.append((os.path.basename(path), int(stat.st_mtime_ns), int(stat.st_size)))
-    rows.sort(key=lambda item: (item[1], item[0]), reverse=True)
-    return tuple(rows[:limit])
+        legacy_rows.append((os.path.basename(path), int(stat.st_mtime_ns), int(stat.st_size)))
+    legacy_rows.sort(key=lambda item: (item[1], item[0]), reverse=True)
+    return (
+        jsonl_file_signature(SESSION_META_PATH),
+        tuple(history_rows[:limit]),
+        tuple(legacy_rows[:limit]),
+    )
 
 
 def home_line_cache_key(state: State, width: int) -> tuple[Any, ...]:

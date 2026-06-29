@@ -39,11 +39,12 @@ memory, schedules, artifacts, and traces in the TUI control plane.
 GenericAgent remains a runtime/source dependency, not the owner of Shuheng state.
 By default Shuheng stores its durable control-plane data under `~/.shuheng`:
 
-- `model_responses/`: main session transcripts, metadata, names, token usage, and trash.
+- `model_responses/`: canonical visible conversation history for main sessions and
+  non-secret subagent direct chats, plus metadata, names, token usage, and trash.
 - `memory/agent_harness/`: task ledgers, agent mail, approvals, artifacts, traces, checkpoints, schedules, gateway metadata, runtime provider metadata, and memory candidates.
-- `memory/subagents/`: persistent subagent profiles, memories, events, transcripts, and session snapshots.
+- `memory/subagents/`: persistent subagent profiles, memories, events, dashboard/runtime metadata, and refs into canonical history. It must not own non-secret conversation transcripts.
 - `temp/subagents/`: temporary/session-bound subagents.
-- `memory/secret_vault/`: encrypted Secret Vault state.
+- `memory/secret_vault/`: encrypted Secret Vault state, including encrypted Secret subagent chat history that cannot be copied into normal plaintext history.
 - `memory/agent_harness/runtime/ohmypi/agent`: isolated OMP config, models, and active `PI_CODING_AGENT_DIR`.
 
 `SHUHENG_HOME` overrides the whole Shuheng-owned storage root. The legacy
