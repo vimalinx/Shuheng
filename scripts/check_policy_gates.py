@@ -4245,7 +4245,25 @@ def run_gateway_server_checks() -> None:
         agent_schedule = a.latest_schedule_records()["sched_web_console_agent_task"]
         assert agent_schedule["target"] == sample_subagent.agent_id, agent_schedule
         assert agent_schedule["execution"]["routing"]["selected_agent"] == sample_subagent.agent_id, agent_schedule
-        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action, "created": created_schedule}, ensure_ascii=False)
+
+        profile_state_before_chat = a.read_json_dict_file(a.shared_user_profile_state_path())
+        profile_count_before_chat = int(profile_state_before_chat.get("interaction_count") or 0)
+        web_chat_marker = "web-console-shared-profile-marker"
+        web_chat = post_json(
+            f"{base}/gui/action",
+            {
+                "schema_version": "shuheng.web_console.action_request.v1",
+                "action": "agent.chat",
+                "ui_ref": agent_ref,
+                "payload": {"message": f"请记录 Web Console 用户意图 {web_chat_marker}"},
+            },
+        )
+        assert web_chat["ok"] is True, web_chat
+        profile_state_after_chat = a.read_json_dict_file(a.shared_user_profile_state_path())
+        assert int(profile_state_after_chat.get("interaction_count") or 0) == profile_count_before_chat + 1, profile_state_after_chat
+        assert any(web_chat_marker in str(item.get("summary") or "") for item in profile_state_after_chat.get("recent_intents") or []), profile_state_after_chat
+
+        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action, "created": created_schedule, "chat": web_chat}, ensure_ascii=False)
         assert "artifact://" not in action_text and "appr_" not in action_text and "task_" not in action_text, action_text
         assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", action_text) is None, action_text
         health = get_json(f"{base}/health")

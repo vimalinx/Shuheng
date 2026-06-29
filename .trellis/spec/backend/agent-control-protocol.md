@@ -2432,7 +2432,7 @@ pack["workspace_context"] = workspace_context
 
 - All main and persistent-subagent context packs must include the same shared user profile refs and a bounded redacted summary.
 - The shared profile is an operational interaction-state summary, not an approved L2 long-term fact store.
-- Normal user-originated main prompts, direct subagent chats, and user-originated subagent tasks update interaction count, last interaction time, bounded recent intents, focus terms, project hints, source counts, and estimated work time.
+- Normal user-originated main prompts, direct subagent chats, user-originated subagent tasks, and Web Console `main.prompt` / `agent.chat` / `agent.task` actions update interaction count, last interaction time, bounded recent intents, focus terms, project hints, source counts, and estimated work time.
 - Secret Vault sessions and temporary sessions must not write into the normal shared profile.
 - OMP append-system-prompt generation must read the same `user_profile.md` path without importing `app.py` or mutating TUI state.
 - If the shared profile conflicts with an explicit current user instruction, agents must treat the profile as stale context and obey the current instruction.
@@ -2445,6 +2445,7 @@ pack["workspace_context"] = workspace_context
 - OMP memory prompt generation -> includes `Shared User Profile` and the same file path.
 - Temporary session input -> does not increase shared profile interaction count.
 - Secret Vault input -> does not write normal shared profile state.
+- Web Console `agent.chat` -> dispatches through the shared direct-chat path and updates the normal shared profile once.
 
 ### 5. Good/Base/Bad Cases
 
@@ -2456,7 +2457,7 @@ pack["workspace_context"] = workspace_context
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
+- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions and Web Console user actions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct

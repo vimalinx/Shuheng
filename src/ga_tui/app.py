@@ -2816,7 +2816,7 @@ def record_shared_user_profile_interaction(
     if state is not None and (state.temporary_session or state.secret_vault.unlocked):
         return read_shared_user_profile_state()
     source = str(source or "user").strip() or "user"
-    if not (source.startswith("user") or source in {"subagent_chat", "agent_home_input", "main_home_input"}):
+    if not (source.startswith("user") or source in {"subagent_chat", "agent_home_input", "main_home_input", "web_console"}):
         return read_shared_user_profile_state()
     summary = shared_profile_sanitized_text(text, limit=180)
     if not summary:
