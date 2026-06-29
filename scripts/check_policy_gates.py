@@ -4926,6 +4926,19 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert chat_meta["agent_id"] == sub.agent_id, chat_meta
     assert chat_meta["subagent_chat_session_id"] == sub.chat_session_id, chat_meta
     assert chat_meta[a.SUBAGENT_CHAT_MESSAGES_META_KEY][0]["content"] == "hello direct", chat_meta
+    stale_meta = a.load_subagent_meta_file(a.subagent_meta_file(sub))
+    stale_meta.update({
+        "messages": [{"role": "user", "content": "stale private transcript"}],
+        a.SUBAGENT_CHAT_MESSAGES_META_KEY: [{"role": "assistant", "content": "stale private transcript"}],
+        "sessions": [{"messages": ["stale"]}],
+    })
+    a.write_text_atomic(a.subagent_meta_file(sub), json.dumps(stale_meta, ensure_ascii=False, indent=2) + "\n")
+    a.save_subagent_meta(sub, state)
+    sanitized_meta = a.load_subagent_meta_file(a.subagent_meta_file(sub))
+    for forbidden_key in ("messages", a.SUBAGENT_CHAT_MESSAGES_META_KEY, "sessions"):
+        assert forbidden_key not in sanitized_meta, sanitized_meta
+    assert sanitized_meta["chat_session_id"] == sub.chat_session_id, sanitized_meta
+    assert sanitized_meta["chat_title"], sanitized_meta
     assert not list(Path(a.subagent_sessions_dir(sub)).glob("*.json")), "non-secret subagent chat must not persist per-agent transcript JSON"
     reloaded = a.State(agent=ContextFakeAgent())
     reloaded.running = True

@@ -381,6 +381,8 @@ SECRET_SUBAGENT_MEMORY_KIND = "subagent-memory"
 SECRET_SUBAGENT_CHAT_KIND = "subagent-chat"
 SUBAGENT_CHAT_HISTORY_SCOPE = "subagent_chat"
 SUBAGENT_CHAT_MESSAGES_META_KEY = "subagent_chat_messages"
+SUBAGENT_META_LIFECYCLE_FIELDS = frozenset({"deleted", "deleted_at", "deleted_by"})
+SUBAGENT_META_ALLOWED_EXTRA_FIELDS = SUBAGENT_META_LIFECYCLE_FIELDS
 SECRET_VAULT_MIN_PASSWORD_CHARS = 8
 SECRET_COPY_CONFIRM_TTL_SECONDS = 20.0
 SECRET_VAULT_PASSWORD_RULE_TEXT = f"至少 {SECRET_VAULT_MIN_PASSWORD_CHARS} 个字符，并包含大写字母、小写字母、数字和特殊字符"
@@ -11498,13 +11500,13 @@ def load_subagent_meta_file(path: str) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) -> dict[str, Any]:
-    meta = {
+def subagent_runtime_meta_payload(sub: SubAgentRuntime, *, security_context: str) -> dict[str, Any]:
+    meta: dict[str, Any] = {
         "id": sub.agent_id,
         "name": sub.name,
         "role": normalized_subagent_role(sub.role),
         "default_model": sub.default_model,
-        "security_context": "secret",
+        "security_context": normalized_security_context(security_context),
         "owner_session": sub.owner_session,
         "persistent": sub.persistent,
         "created_at": sub.created_at,
@@ -11516,9 +11518,20 @@ def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) ->
         "chat_title": sub.chat_title,
         "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
         "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
-        "memory_ref": secret_virtual_ref(SECRET_SUBAGENT_MEMORY_KIND, sub.agent_id) if sub.persistent else "",
     }
-    meta.update(fields)
+    if security_context == "secret":
+        meta["security_context"] = "secret"
+        meta["memory_ref"] = secret_virtual_ref(SECRET_SUBAGENT_MEMORY_KIND, sub.agent_id) if sub.persistent else ""
+    return meta
+
+
+def allowed_subagent_meta_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in fields.items() if key in SUBAGENT_META_ALLOWED_EXTRA_FIELDS}
+
+
+def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) -> dict[str, Any]:
+    meta = subagent_runtime_meta_payload(sub, security_context="secret")
+    meta.update(allowed_subagent_meta_fields(fields))
     return {
         "schema_version": "secret.subagent.v1",
         "meta": meta,
@@ -11545,26 +11558,10 @@ def save_subagent_meta(sub: SubAgentRuntime, state: Optional[State] = None, **fi
             raw = json.load(fh)
     except Exception:
         raw = {}
-    meta = raw if isinstance(raw, dict) else {}
-    meta.update({
-        "id": sub.agent_id,
-        "name": sub.name,
-        "role": normalized_subagent_role(sub.role),
-        "default_model": sub.default_model,
-        "security_context": normalized_security_context(sub.security_context),
-        "owner_session": sub.owner_session,
-        "persistent": sub.persistent,
-        "created_at": sub.created_at,
-        "updated_at": sub.updated_at,
-        "status": sub.status,
-        "queued": len(sub.task_queue),
-        "chat_queued": len(sub.chat_queue),
-        "chat_session_id": sub.chat_session_id,
-        "chat_title": sub.chat_title,
-        "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
-        "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
-    })
-    meta.update(fields)
+    raw_meta = raw if isinstance(raw, dict) else {}
+    meta = allowed_subagent_meta_fields(raw_meta)
+    meta.update(subagent_runtime_meta_payload(sub, security_context=sub.security_context))
+    meta.update(allowed_subagent_meta_fields(fields))
     os.makedirs(sub.home, exist_ok=True)
     write_text_atomic(subagent_meta_file(sub), json.dumps(meta, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 

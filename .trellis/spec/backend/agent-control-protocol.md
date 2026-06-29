@@ -603,6 +603,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
 - A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
 - Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts. Subagent runtime agents must use a non-persistent transcript sink such as `os.devnull`, not `sub.home/model_responses.txt`, so agent-local state stays metadata/refs/runtime only.
+- Subagent metadata must be written from a positive runtime/navigation schema. Saving `meta.json` or encrypted meta must not carry forward stale transcript fields such as `messages`, `subagent_chat_messages`, or embedded session payloads from older metadata files.
 - Secret subagent direct-chat transcripts must stay encrypted in Secret Vault storage and must not be copied into normal plaintext history.
 - Successful direct-chat replies continue to save chat session messages in canonical history, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
 - Direct chat must keep using role permissions, runtime context packs, and memory-candidate approval flow. It must not write task-result artifacts or task-ledger completion rows unless dispatched as `start_subagent_task(...)`.
@@ -635,6 +636,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Tests must keep direct-chat memory-candidate approvals visible and ensure direct chat does not write `subagent-results` artifacts or task-ledger rows.
 - Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher, and assert Web agent conversation can hydrate from canonical history-backed subagent chat state instead of relying only on process-local `sub.messages`.
 - Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files or `sub.home/model_responses.txt` runtime transcript files; legacy per-agent JSON files remain non-destructively importable.
+- Tests must seed stale transcript-like fields in subagent `meta.json`, save metadata again, and assert the saved metadata only keeps runtime/navigation/lifecycle fields.
 
 ### 7. Wrong vs Correct
 
