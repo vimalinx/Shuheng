@@ -3917,6 +3917,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert any("ruff check" in command for command in report["verification_commands"]), report
     assert any("runtime_smoke.py" in command for command in report["verification_commands"]), report
     assert any("build --sdist --wheel" in command for command in report["verification_commands"]), report
+    assert any("wheel_smoke.py" in command for command in report["verification_commands"]), report
     assert any("shuheng-check" in command for command in report["verification_commands"]), report
 
 

@@ -90,7 +90,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   private/local paths, realistic secret literals, local absolute user paths in
   public files, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
-  compileall, and package build.
+  compileall, package build, and wheel smoke.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
   include repository-hygiene gaps only when required files are missing.
 - The sdist must include intended public docs and integration plugin files while
@@ -114,7 +114,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 ### 5. Good/Base/Bad Cases
 
 - Good: `scripts/check_release_hygiene.py` passes and the sdist contains
-  `README.en.md`, `SECURITY.md`, docs, and the OMP plugin, but not private
+  `README.en.md`, `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
   research docs.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
   `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
@@ -129,10 +129,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - `scripts/check_policy_gates.py` must assert release-readiness metadata reports
   true license/CI/security booleans and lists release hygiene, Ruff, runtime
-  smoke, package build, and `shuheng-check` commands.
+  smoke, package build, wheel smoke, and `shuheng-check` commands.
 - CI must run `scripts/check_release_hygiene.py`.
 - Manual release verification must run: Ruff check, release hygiene, policy
-  gates, runtime smoke, pytest, compileall, build, isolated wheel
+  gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
   `shuheng-check`, and `git diff --check`.
 
 ### 7. Wrong vs Correct

@@ -449,13 +449,14 @@ shuheng-check
 提交前建议：
 
 ```bash
-python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
+PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
 git diff --check
 ```
 
@@ -467,7 +468,7 @@ git diff --check
 - 安全报告与边界：见 `SECURITY.md`。Gateway/Web Console 无内建认证，默认只应绑定 loopback。
 - 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
 - 发布记录：见 `CHANGELOG.md`。
-- CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile 和 package build。
+- CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build 和 wheel smoke。
 
 ## Community
 

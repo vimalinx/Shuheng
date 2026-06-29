@@ -163,6 +163,10 @@ def check_public_positioning(errors: list[str]) -> None:
             errors.append(f"{path} must list runtime smoke in release checks")
         if "runtime smoke" not in text.lower():
             errors.append(f"{path} CI summary must mention runtime smoke")
+        if "scripts/wheel_smoke.py" not in text:
+            errors.append(f"{path} must list wheel smoke in release checks")
+        if "wheel smoke" not in text.lower():
+            errors.append(f"{path} CI summary must mention wheel smoke")
 
     package_json = read_text("integrations/omp-ga-tui-plugin/package.json")
     if '"name": "@shuheng/omp-bridge"' not in package_json:
@@ -172,13 +176,14 @@ def check_public_positioning(errors: list[str]) -> None:
 def check_ci_workflow(errors: list[str]) -> None:
     workflow = read_text(".github/workflows/ci.yml")
     required_fragments = (
-        "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py",
+        "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
         "python scripts/check_release_hygiene.py",
         "python scripts/check_policy_gates.py",
         "python scripts/runtime_smoke.py",
         "python -m pytest -q -p no:cacheprovider",
         "python -m compileall -q src scripts",
         "python -m build --sdist --wheel --outdir /tmp/shuheng-dist",
+        "python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
     )
     for fragment in required_fragments:
         if fragment not in workflow:
