@@ -93,7 +93,7 @@ def write_fake_genericagent_root(root: Path) -> Path:
     return ga_root
 
 
-def run_wheel_smoke(wheel: Path) -> dict[str, object]:
+def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
     wheel = wheel.resolve()
     if not wheel.is_file():
         raise FileNotFoundError(f"wheel not found: {wheel}")
@@ -104,9 +104,14 @@ def run_wheel_smoke(wheel: Path) -> dict[str, object]:
         venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
         py = venv_python(venv_dir)
         env = clean_env()
-        run([str(py), "-m", "pip", "install", "--no-deps", str(wheel)], cwd=tmp, env=env)
+        install_cmd = [str(py), "-m", "pip", "install"]
+        if no_deps:
+            install_cmd.append("--no-deps")
+        install_cmd.append(str(wheel))
+        run(install_cmd, cwd=tmp, env=env)
         scripts = {name: venv_script(venv_dir, name) for name in PUBLIC_CONSOLE_SCRIPTS}
         module_result = run([str(py), "-m", "ga_tui.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
+        main_help_result = run([str(scripts["shuheng"]), "--help"], cwd=tmp, env=env)
         for name in HELP_SAFE_CONSOLE_SCRIPTS:
             run([str(scripts[name]), "--help"], cwd=tmp, env=env)
         entrypoint = scripts["shuheng-check"]
@@ -115,8 +120,10 @@ def run_wheel_smoke(wheel: Path) -> dict[str, object]:
             "schema_version": "shuheng.wheel_smoke.v1",
             "ok": True,
             "wheel": wheel.name,
+            "install_mode": "no_deps" if no_deps else "with_dependencies",
             "checks": [
                 *[{"command": f"script exists: {name}", "returncode": 0} for name in PUBLIC_CONSOLE_SCRIPTS],
+                {"command": "shuheng --help", "returncode": main_help_result.returncode},
                 *[{"command": f"{name} --help", "returncode": 0} for name in HELP_SAFE_CONSOLE_SCRIPTS],
                 {"command": "python -m ga_tui.integration doctor", "returncode": module_result.returncode},
                 {"command": "shuheng-check", "returncode": entrypoint_result.returncode},
@@ -128,10 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install the built Shuheng wheel in a clean venv and run public entrypoints")
     parser.add_argument("--dist-dir", default="/tmp/shuheng-dist", help="directory containing shuheng-*.whl")
     parser.add_argument("--wheel", default="", help="explicit wheel path; overrides --dist-dir")
+    parser.add_argument("--no-deps", action="store_true", help="install the wheel without dependencies for offline debugging")
     args = parser.parse_args(argv)
 
     wheel = Path(args.wheel).expanduser() if args.wheel else latest_wheel(Path(args.dist_dir).expanduser())
-    report = run_wheel_smoke(wheel)
+    report = run_wheel_smoke(wheel, no_deps=args.no_deps)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
