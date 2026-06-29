@@ -449,9 +449,10 @@ shuheng-check
 Recommended checks before committing:
 
 ```bash
-python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
@@ -466,7 +467,7 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 - Security reporting and boundaries: see `SECURITY.md`. Gateway/Web Console has no built-in auth and should bind to loopback by default.
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
-- CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, pytest, compile, and package build.
+- CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, and package build.
 
 ## Community
 

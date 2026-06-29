@@ -159,10 +159,30 @@ def check_public_positioning(errors: list[str]) -> None:
             errors.append(f"{path} must mention A2A/MCP compatibility boundaries")
         if "Secret Vault" not in text:
             errors.append(f"{path} must mention Secret Vault release boundary")
+        if "scripts/runtime_smoke.py" not in text:
+            errors.append(f"{path} must list runtime smoke in release checks")
+        if "runtime smoke" not in text.lower():
+            errors.append(f"{path} CI summary must mention runtime smoke")
 
     package_json = read_text("integrations/omp-ga-tui-plugin/package.json")
     if '"name": "@shuheng/omp-bridge"' not in package_json:
         errors.append("OMP plugin package name should use Shuheng public branding")
+
+
+def check_ci_workflow(errors: list[str]) -> None:
+    workflow = read_text(".github/workflows/ci.yml")
+    required_fragments = (
+        "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py",
+        "python scripts/check_release_hygiene.py",
+        "python scripts/check_policy_gates.py",
+        "python scripts/runtime_smoke.py",
+        "python -m pytest -q -p no:cacheprovider",
+        "python -m compileall -q src scripts",
+        "python -m build --sdist --wheel --outdir /tmp/shuheng-dist",
+    )
+    for fragment in required_fragments:
+        if fragment not in workflow:
+            errors.append(f"CI workflow missing release command: {fragment}")
 
 
 def main() -> int:
@@ -172,6 +192,7 @@ def main() -> int:
     check_secret_and_local_literals(errors)
     check_pyproject_metadata(errors)
     check_public_positioning(errors)
+    check_ci_workflow(errors)
 
     if errors:
         print("release hygiene checks failed:", file=sys.stderr)

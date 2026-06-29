@@ -89,8 +89,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   missing package metadata, public legacy `ga-tui*` console scripts, unignored
   private/local paths, realistic secret literals, local absolute user paths in
   public files, or missing public alpha/security wording.
-- CI must run Ruff check, release hygiene, policy gates, pytest, compileall, and
-  package build.
+- CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
+  compileall, and package build.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
   include repository-hygiene gaps only when required files are missing.
 - The sdist must include intended public docs and integration plugin files while
@@ -132,8 +132,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   build commands.
 - CI must run `scripts/check_release_hygiene.py`.
 - Manual release verification must run: Ruff check, release hygiene, policy
-  gates, pytest, compileall, build, isolated wheel `shuheng-check`, and
-  `git diff --check`.
+  gates, runtime smoke, pytest, compileall, build, isolated wheel
+  `shuheng-check`, and `git diff --check`.
 
 ### 7. Wrong vs Correct
 
