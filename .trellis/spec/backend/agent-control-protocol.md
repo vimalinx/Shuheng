@@ -634,7 +634,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Tests must assert empty runtime `done` output becomes an explicit error and sets the user-visible last-error path to chat failure.
 - Tests must keep direct-chat memory-candidate approvals visible and ensure direct chat does not write `subagent-results` artifacts or task-ledger rows.
 - Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher.
-- Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files; legacy per-agent JSON files remain non-destructively importable.
+- Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files or `sub.home/model_responses.txt` runtime transcript files; legacy per-agent JSON files remain non-destructively importable.
 
 ### 7. Wrong vs Correct
 
