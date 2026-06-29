@@ -7430,7 +7430,7 @@ def format_model_orchestration_registry(data: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def external_bridge_registry() -> dict[str, Any]:
+def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
     bridge_specs = [
         {
             "id": "cli",
@@ -7557,7 +7557,8 @@ def external_bridge_registry() -> dict[str, Any]:
         "bridges": bridges,
         "bridge_ids": [item["id"] for item in bridges],
     }
-    write_text_atomic(AGENT_BRIDGE_REGISTRY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    if write_registry:
+        write_text_atomic(AGENT_BRIDGE_REGISTRY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return data
 
 
@@ -9371,7 +9372,7 @@ def governance_store_paths() -> dict[str, str]:
     }
 
 
-def governance_component_registry(state: Optional[State] = None) -> dict[str, Any]:
+def governance_component_registry(state: Optional[State] = None, *, write_registry: bool = True) -> dict[str, Any]:
     stores = governance_store_paths()
     components: list[dict[str, Any]] = []
     for spec in GOVERNANCE_COMPONENT_SPECS:
@@ -9419,7 +9420,8 @@ def governance_component_registry(state: Optional[State] = None) -> dict[str, An
             "unstructured_swarm": False,
         },
     }
-    write_text_atomic(AGENT_GOVERNANCE_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    if write_registry:
+        write_text_atomic(AGENT_GOVERNANCE_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return data
 
 
@@ -9465,6 +9467,37 @@ def baseline_item(
     }
 
 
+def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
+    """Build protocol/governance evidence without rewriting gateway registry files."""
+
+    task_rows = list(latest_task_records().values())[-20:]
+    mail_rows = read_jsonl(AGENT_MAIL_PATH, limit=30)
+    artifact_rows = read_jsonl(AGENT_ARTIFACT_INDEX_PATH, limit=30)
+    role_cards = [a2a_agent_card_for_role(role, template) for role, template in sorted(ROLE_TEMPLATES.items())]
+    agent_cards = list(role_cards)
+    if state is not None:
+        for sub in sorted(state.subagents.values(), key=lambda item: item.agent_id):
+            agent_cards.append(a2a_agent_card_for_subagent(sub))
+    return {
+        "a2a_gateway": {
+            "schema_version": "a2a.gateway.v1",
+            "agent_cards": agent_cards,
+            "tasks": [a2a_task_object(row) for row in task_rows],
+            "messages": [a2a_message_object(row) for row in mail_rows],
+            "artifacts": [a2a_artifact_object(row) for row in artifact_rows],
+        },
+        "mcp_gateway": {
+            "schema_version": "mcp.gateway.v1",
+            "tools": mcp_tool_registry(),
+            "resources": mcp_resource_registry(),
+        },
+        "capability_registry": gateway_capability_registry(state, write_runtime_artifacts=False),
+        "governance_components": governance_component_registry(state, write_registry=False),
+        "gateway_service": gateway_service_descriptor(),
+        "bridge_registry": external_bridge_registry(write_registry=False),
+    }
+
+
 def architecture_baseline_report(state: Optional[State] = None, gateway_data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     tasks = read_jsonl(AGENT_TASK_LEDGER_PATH)
     progress = read_jsonl(AGENT_PROGRESS_LEDGER_PATH)
@@ -9479,7 +9512,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
     checkpoints = read_jsonl(AGENT_CHECKPOINT_INDEX_PATH)
     recovery = read_jsonl(AGENT_RECOVERY_PATH)
     recovery_plans = read_jsonl(AGENT_RECOVERY_PLANS_PATH)
-    gateway = gateway_data or {}
+    gateway = gateway_data or gateway_baseline_evidence(state)
     a2a = gateway.get("a2a_gateway") if isinstance(gateway.get("a2a_gateway"), dict) else {}
     mcp = gateway.get("mcp_gateway") if isinstance(gateway.get("mcp_gateway"), dict) else {}
     capabilities = gateway.get("capability_registry") if isinstance(gateway.get("capability_registry"), dict) else {}

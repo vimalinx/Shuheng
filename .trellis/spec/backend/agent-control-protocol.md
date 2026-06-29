@@ -2585,12 +2585,36 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - Bad: A plugin scrapes `context_packs/` or `subagents/` files directly instead of calling the bridge.
 - Bad: The bridge adds a second memory-candidate schema instead of reusing `queue_curated_memory_candidate(...)`.
 
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"ga-tui.agent_bridge.v1"`, owner `ga-tui.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
+- Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `ga-tui.query.v1` response with `context_pack_ref`.
+- Tests must assert bridge `memory_candidate_submit` queues a `ga-tui.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
+- Tests must assert unknown bridge actions return a structured bridge error.
+- Tests must assert the repo-managed OMP plugin manifest points to `tools/index.ts`.
+- Tests must assert the OMP plugin tool source contains `ga_tui_context_get`, `ga_tui_memory_candidate_submit`, `ga_tui.agent_bridge`, and `PYTHONPATH=<repo>/src` wiring.
+- Smoke checks should include `PYTHONPATH=src python3 -m ga_tui.agent_bridge ...`, Bun-loading the plugin tool factory, and a temporary-HOME OMP plugin dry-run or process-local `--tool` smoke so the user's real system OMP config is not mutated.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+OMP plugin opens `${SUBAGENTS_DIR}/researcher/memory.md` and appends a learned fact directly.
+```
+
+#### Correct
+
+```text
+OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a memory_candidate.v1 record, writes artifact refs, queues human approval, and only approved memory writes reach subagent memory.
+```
+
 ## Scenario: Release Readiness And Evidence Posture
 
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng exposes public release, gateway, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
-- Applies to: `src/ga_tui/release_readiness.py`, `ensure_gateway_registry(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, scheduler registry metadata, README release wording, and gateway/policy smoke tests.
+- Applies to: `src/ga_tui/release_readiness.py`, `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, scheduler registry metadata, README release wording, and gateway/policy smoke tests.
 - Non-goal: This does not certify full A2A/MCP compliance, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
 
 ### 2. Signatures
@@ -2613,6 +2637,17 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
   - `security.local_only`
   - `security.allowed`
   - `release_posture:"experimental_alpha"`
+- Gateway baseline evidence:
+  - `gateway_baseline_evidence(state=None) -> dict`
+  - `a2a_gateway.schema_version:"a2a.gateway.v1"`
+  - `a2a_gateway.agent_cards[]`
+  - `a2a_gateway.tasks[]`, `messages[]`, `artifacts[]`
+  - `mcp_gateway.schema_version:"mcp.gateway.v1"`
+  - `mcp_gateway.tools[]`, `resources[]`
+  - `capability_registry`
+  - `governance_components`
+  - `gateway_service`
+  - `bridge_registry`
 - Baseline item fields:
   - `evidence_checks[]` with `ok`, `description`, and `level`
   - `evidence_levels`
@@ -2629,6 +2664,9 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - A2A and MCP gateway metadata must use compatibility-surface wording until real third-party client end-to-end tests exist.
 - Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1`.
 - Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
+- `architecture_baseline_report(...)` must be self-contained: when `gateway_data` is omitted, it must build a no-write `gateway_baseline_evidence(...)` snapshot instead of reporting existing A2A/MCP/gateway evidence as missing due to caller ordering.
+- No-write evidence construction may read ledgers and daemon status, but must not rewrite `gateway.json`, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
+- `ensure_gateway_registry(...)` remains the write path for refreshing the durable gateway registry file; direct baseline reporting is only a report/evidence path.
 - Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
 - Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or gateway/manual ticks, not by an installed always-on service by default.
 - Release-readiness helpers should remain pure and must not import `app.py`.
@@ -2639,6 +2677,8 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - Gateway service status is `network_capable` without no-auth/local wording -> overclaiming regression.
 - Non-loopback gateway daemon start without `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` -> failed daemon status with `remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND`.
 - A2A/MCP status says certified/network-capable without compatibility metadata -> protocol overclaiming regression.
+- Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
+- Direct baseline report rewrites `gateway.json`, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
 - Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
 - Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
 - Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
@@ -2646,11 +2686,13 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 ### 5. Good/Base/Bad Cases
 
 - Good: `/gateway` says Shuheng is `experimental_alpha`, A2A/MCP are compatibility surfaces, gateway auth is `none`, and baseline items show structural evidence limits.
+- Good: `architecture_baseline_report()` called directly still reports A2A/MCP, governance, and external bridge evidence from a no-write snapshot.
 - Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
 - Base: Local `127.0.0.1` gateway works without auth because it is loopback-only by default.
 - Base: Operator deliberately sets `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
 - Bad: README or gateway metadata implies production-ready remote gateway or certified A2A/MCP support without client E2E evidence.
 - Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
+- Bad: Baseline report depends on the caller remembering to call `ensure_gateway_registry(...)` first.
 
 ### 6. Tests Required
 
@@ -2659,6 +2701,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - Tests must assert non-loopback gateway daemon start fails unless `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
 - Tests must assert A2A/MCP metadata carries `certification:"not_protocol_certified"`.
 - Tests must assert baseline reports contain evidence model, per-item evidence checks, strongest evidence level, and claim limits.
+- Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating gateway/governance/bridge registry file signatures.
 - Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.
 - Tests must assert scheduler registry has `runtime_ownership.always_on:false`.
 
@@ -2672,6 +2715,13 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
   "a2a_gateway": {"status": "network_capable"},
   "baseline_comparison": {"items": [{"status": "complete"}]}
 }
+```
+
+```python
+def architecture_baseline_report(state=None, gateway_data=None):
+    gateway = gateway_data or {}
+    # Existing gateway evidence is now invisible unless caller remembered
+    # to call ensure_gateway_registry(...) first.
 ```
 
 #### Correct
@@ -2698,26 +2748,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 }
 ```
 
-### 6. Tests Required
-
-- `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"ga-tui.agent_bridge.v1"`, owner `ga-tui.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
-- Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `ga-tui.query.v1` response with `context_pack_ref`.
-- Tests must assert bridge `memory_candidate_submit` queues a `ga-tui.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
-- Tests must assert unknown bridge actions return a structured bridge error.
-- Tests must assert the repo-managed OMP plugin manifest points to `tools/index.ts`.
-- Tests must assert the OMP plugin tool source contains `ga_tui_context_get`, `ga_tui_memory_candidate_submit`, `ga_tui.agent_bridge`, and `PYTHONPATH=<repo>/src` wiring.
-- Smoke checks should include `PYTHONPATH=src python3 -m ga_tui.agent_bridge ...`, Bun-loading the plugin tool factory, and a temporary-HOME OMP plugin dry-run or process-local `--tool` smoke so the user's real system OMP config is not mutated.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```text
-OMP plugin opens `${SUBAGENTS_DIR}/researcher/memory.md` and appends a learned fact directly.
-```
-
-#### Correct
-
-```text
-OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a memory_candidate.v1 record, writes artifact refs, queues human approval, and only approved memory writes reach subagent memory.
+```python
+def architecture_baseline_report(state=None, gateway_data=None):
+    gateway = gateway_data or gateway_baseline_evidence(state)
 ```

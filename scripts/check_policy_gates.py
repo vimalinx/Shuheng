@@ -8254,6 +8254,21 @@ def run_checks() -> None:
     assert_gateway_schema(registry)
     baseline_report = registry["baseline_comparison"]
     assert_baseline_report_schema(baseline_report)
+    registry_file_signatures = {
+        "gateway": a.jsonl_file_signature(a.AGENT_GATEWAY_PATH),
+        "governance": a.jsonl_file_signature(a.AGENT_GOVERNANCE_PATH),
+        "bridges": a.jsonl_file_signature(a.AGENT_BRIDGE_REGISTRY_PATH),
+    }
+    direct_baseline = a.architecture_baseline_report(state)
+    assert_baseline_report_schema(direct_baseline)
+    direct_items = {item["id"]: item for item in direct_baseline["items"]}
+    for item_id in ("strong_orchestrator", "governance_components", "a2a_mcp_gateway", "external_bridges"):
+        assert direct_items[item_id]["status"] == "complete", direct_items[item_id]
+    assert {
+        "gateway": a.jsonl_file_signature(a.AGENT_GATEWAY_PATH),
+        "governance": a.jsonl_file_signature(a.AGENT_GOVERNANCE_PATH),
+        "bridges": a.jsonl_file_signature(a.AGENT_BRIDGE_REGISTRY_PATH),
+    } == registry_file_signatures
     baseline_items = a.baseline_panel_items(state)
     assert baseline_items and baseline_items[0].key == "summary", baseline_items
     assert any(item.key == "a2a_mcp_gateway" for item in baseline_items), baseline_items
