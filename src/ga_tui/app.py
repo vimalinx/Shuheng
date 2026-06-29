@@ -84,6 +84,9 @@ try:
     )
     from . import scheduler as scheduler_runtime
     from . import ledger_store
+    from . import runtime_evidence as runtime_evidence_store
+    from . import baseline as baseline_report
+    from . import gateway_registry as gateway_registry_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -124,14 +127,10 @@ try:
     from .release_readiness import (
         EVIDENCE_LEVEL_DESCRIPTIONS,
         HeuristicEvalInput,
-        baseline_claim_limit,
-        evidence_level_summary,
         gateway_bind_safety,
         heuristic_eval_assessment,
-        normalize_evidence_checks,
         protocol_compatibility_metadata,
         release_readiness_report,
-        strongest_passed_evidence_level,
     )
 except Exception:
     from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
@@ -173,6 +172,9 @@ except Exception:
     )
     import scheduler as scheduler_runtime  # type: ignore
     import ledger_store  # type: ignore
+    import runtime_evidence as runtime_evidence_store  # type: ignore
+    import baseline as baseline_report  # type: ignore
+    import gateway_registry as gateway_registry_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -213,14 +215,10 @@ except Exception:
     from release_readiness import (  # type: ignore
         EVIDENCE_LEVEL_DESCRIPTIONS,
         HeuristicEvalInput,
-        baseline_claim_limit,
-        evidence_level_summary,
         gateway_bind_safety,
         heuristic_eval_assessment,
-        normalize_evidence_checks,
         protocol_compatibility_metadata,
         release_readiness_report,
-        strongest_passed_evidence_level,
     )
 
 
@@ -5687,28 +5685,7 @@ def recent_progress_records(limit: int = 8) -> list[dict[str, Any]]:
     return read_jsonl(AGENT_PROGRESS_LEDGER_PATH, limit=limit)
 
 
-RUNTIME_EVIDENCE_SCHEMA = "agentruntime.evidence.v1"
-_RUNTIME_EVIDENCE_LEVEL_RANK = {"unknown": 0, "structural": 1, "runtime": 2, "e2e": 3}
-
-
-def _runtime_evidence_level(level: str) -> str:
-    level = str(level or "runtime")
-    return level if level in EVIDENCE_LEVEL_DESCRIPTIONS else "unknown"
-
-
-def _runtime_evidence_targets(value: Any) -> list[str]:
-    if isinstance(value, str):
-        raw_items = [value]
-    elif isinstance(value, (list, tuple, set)):
-        raw_items = list(value)
-    else:
-        raw_items = []
-    targets: list[str] = []
-    for item in raw_items:
-        text = str(item or "").strip()
-        if text and text not in targets:
-            targets.append(text)
-    return targets
+RUNTIME_EVIDENCE_SCHEMA = runtime_evidence_store.RUNTIME_EVIDENCE_SCHEMA
 
 
 def append_runtime_evidence(
@@ -5724,23 +5701,20 @@ def append_runtime_evidence(
     targets: Any = None,
     details: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    item_targets = _runtime_evidence_targets(target_items)
-    check_targets = _runtime_evidence_targets(targets) or list(item_targets)
-    row = {
-        "schema_version": RUNTIME_EVIDENCE_SCHEMA,
-        "evidence_id": short_uid("rtev"),
-        "timestamp": now_iso(),
-        "target_items": item_targets,
-        "targets": check_targets,
-        "check_id": str(check_id or ""),
-        "level": _runtime_evidence_level(level),
-        "passed": bool(passed),
-        "summary": str(summary or ""),
-        "source": str(source or ""),
-        "command": str(command or ""),
-        "evidence_refs": [str(ref) for ref in (evidence_refs or []) if str(ref)],
-        "details": details or {},
-    }
+    row = runtime_evidence_store.build_runtime_evidence_record(
+        evidence_id=short_uid("rtev"),
+        timestamp=now_iso(),
+        target_items=target_items,
+        check_id=check_id,
+        level=level,
+        passed=passed,
+        summary=summary,
+        source=source,
+        command=command,
+        evidence_refs=evidence_refs,
+        targets=targets,
+        details=details,
+    )
     append_jsonl(AGENT_RUNTIME_EVIDENCE_PATH, row)
     return row
 
@@ -5752,76 +5726,18 @@ def runtime_evidence_records(
     min_level: str = "runtime",
     limit: int = 0,
 ) -> list[dict[str, Any]]:
-    min_rank = _RUNTIME_EVIDENCE_LEVEL_RANK.get(_runtime_evidence_level(min_level), 0)
-    target = str(target or "").strip()
     rows = read_jsonl(AGENT_RUNTIME_EVIDENCE_PATH, limit=limit)
-    records: list[dict[str, Any]] = []
-    for row in rows:
-        if row.get("schema_version") != RUNTIME_EVIDENCE_SCHEMA:
-            continue
-        if passed is not None and bool(row.get("passed")) is not bool(passed):
-            continue
-        level = _runtime_evidence_level(str(row.get("level") or ""))
-        if _RUNTIME_EVIDENCE_LEVEL_RANK.get(level, 0) < min_rank:
-            continue
-        row_targets = set(_runtime_evidence_targets(row.get("target_items")))
-        row_targets.update(_runtime_evidence_targets(row.get("targets")))
-        if target and target not in row_targets:
-            continue
-        records.append(row)
-    return records
+    return runtime_evidence_store.runtime_evidence_records(rows, target, passed=passed, min_level=min_level)
 
 
 def runtime_evidence_checks_for(item_id: str, *, min_level: str = "runtime", limit: int = 3) -> list[dict[str, Any]]:
     rows = runtime_evidence_records(item_id, passed=True, min_level=min_level)
-    checks: list[dict[str, Any]] = []
-    slice_limit = max(0, int(limit))
-    for row in (rows[-slice_limit:] if slice_limit else []):
-        level = _runtime_evidence_level(str(row.get("level") or ""))
-        summary = str(row.get("summary") or row.get("check_id") or "runtime smoke passed")
-        evidence_id = str(row.get("evidence_id") or "")
-        source = str(row.get("source") or row.get("command") or "")
-        suffix = f" ({evidence_id})" if evidence_id else ""
-        if source:
-            suffix = f"{suffix} via {source}"
-        checks.append({
-            "ok": True,
-            "description": f"{level} evidence: {summary}{suffix}",
-            "level": level,
-        })
-    return checks
+    return runtime_evidence_store.runtime_evidence_checks_for_records(rows, limit=limit)
 
 
 def runtime_evidence_summary(rows: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     records = rows if rows is not None else read_jsonl(AGENT_RUNTIME_EVIDENCE_PATH)
-    summary = {
-        "schema_version": "agentruntime.evidence_summary.v1",
-        "path": AGENT_RUNTIME_EVIDENCE_PATH,
-        "total": 0,
-        "passed": 0,
-        "failed": 0,
-        "levels": {level: 0 for level in ("structural", "runtime", "e2e", "unknown")},
-        "targets": {},
-    }
-    for row in records:
-        if row.get("schema_version") != RUNTIME_EVIDENCE_SCHEMA:
-            continue
-        summary["total"] += 1
-        if row.get("passed"):
-            summary["passed"] += 1
-        else:
-            summary["failed"] += 1
-        level = _runtime_evidence_level(str(row.get("level") or ""))
-        summary["levels"][level] += 1
-        for target in _runtime_evidence_targets(row.get("target_items")):
-            target_summary = summary["targets"].setdefault(target, {"passed": 0, "failed": 0, "strongest_level": "unknown"})
-            if row.get("passed"):
-                target_summary["passed"] += 1
-                if _RUNTIME_EVIDENCE_LEVEL_RANK[level] > _RUNTIME_EVIDENCE_LEVEL_RANK[target_summary["strongest_level"]]:
-                    target_summary["strongest_level"] = level
-            else:
-                target_summary["failed"] += 1
-    return summary
+    return runtime_evidence_store.runtime_evidence_summary(AGENT_RUNTIME_EVIDENCE_PATH, records)
 
 
 def task_history(task_id: str) -> list[dict[str, Any]]:
@@ -7725,24 +7641,24 @@ def mcp_tool_registry() -> list[dict[str, Any]]:
 
 
 def mcp_resource_registry() -> list[dict[str, Any]]:
-    return [
-        {"uri": "resource://agent-mail/messages", "path": AGENT_MAIL_PATH, "description": "Internal Agent Mail JSONL"},
-        {"uri": "resource://agent-mail/tasks", "path": AGENT_TASK_LEDGER_PATH, "description": "Task ledger JSONL"},
-        {"uri": "resource://agent-mail/progress", "path": AGENT_PROGRESS_LEDGER_PATH, "description": "Progress ledger JSONL"},
-        {"uri": "resource://agent-mail/artifacts", "path": AGENT_ARTIFACT_INDEX_PATH, "description": "Artifact index JSONL"},
-        {"uri": "resource://agent-mail/checkpoints", "path": AGENT_CHECKPOINT_INDEX_PATH, "description": "Checkpoint index JSONL"},
-        {"uri": "resource://agent-mail/recovery", "path": AGENT_RECOVERY_PATH, "description": "Recovery records JSONL"},
-        {"uri": "resource://agent-mail/recovery-plans", "path": AGENT_RECOVERY_PLANS_PATH, "description": "Replayable recovery plan JSONL"},
-        {"uri": "resource://agent-mail/runtime-evidence", "path": AGENT_RUNTIME_EVIDENCE_PATH, "description": "Runtime and E2E smoke evidence JSONL"},
-        {"uri": "resource://agent-mail/runtime-providers", "path": AGENT_RUNTIME_REGISTRY_PATH, "description": "Agent runtime provider registry JSON"},
-        {"uri": "resource://agent-mail/schedules", "path": AGENT_SCHEDULES_PATH, "description": "Top-level scheduled task registry JSONL"},
-        {"uri": "resource://agent-mail/schedule-runs", "path": AGENT_SCHEDULE_RUNS_PATH, "description": "Scheduled task run audit JSONL"},
-        {"uri": "resource://agent-mail/gateway-daemon", "path": AGENT_GATEWAY_DAEMON_STATUS_PATH, "description": "Gateway daemon status JSON"},
-        {"uri": "resource://agent-mail/gateway-push-subscriptions", "path": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, "description": "Gateway push subscriptions JSONL"},
-        {"uri": "resource://agent-mail/gateway-push-deliveries", "path": AGENT_GATEWAY_PUSH_DELIVERIES_PATH, "description": "Gateway push delivery audit JSONL"},
-        {"uri": "resource://agent-mail/bridges", "path": AGENT_BRIDGE_REGISTRY_PATH, "description": "External bridge registry JSON"},
-        {"uri": "resource://agent-mail/policy", "path": AGENT_POLICY_PATH, "description": "Policy gate config"},
-    ]
+    return gateway_registry_helpers.mcp_resource_registry({
+        "messages": AGENT_MAIL_PATH,
+        "tasks": AGENT_TASK_LEDGER_PATH,
+        "progress": AGENT_PROGRESS_LEDGER_PATH,
+        "artifacts": AGENT_ARTIFACT_INDEX_PATH,
+        "checkpoints": AGENT_CHECKPOINT_INDEX_PATH,
+        "recovery": AGENT_RECOVERY_PATH,
+        "recovery_plans": AGENT_RECOVERY_PLANS_PATH,
+        "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
+        "runtime_providers": AGENT_RUNTIME_REGISTRY_PATH,
+        "schedules": AGENT_SCHEDULES_PATH,
+        "schedule_runs": AGENT_SCHEDULE_RUNS_PATH,
+        "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
+        "gateway_push_subscriptions": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
+        "gateway_push_deliveries": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
+        "bridges": AGENT_BRIDGE_REGISTRY_PATH,
+        "policy": AGENT_POLICY_PATH,
+    })
 
 
 def count_text_file_lines(path: str) -> int:
@@ -7763,8 +7679,7 @@ def current_release_readiness_report() -> dict[str, Any]:
 
 
 def gateway_base_url(host: str, port: int) -> str:
-    display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else (host or "127.0.0.1")
-    return f"http://{display_host}:{int(port)}"
+    return gateway_registry_helpers.gateway_base_url(host, port)
 
 
 def process_is_alive(pid: int) -> bool:
@@ -7862,44 +7777,18 @@ def gateway_daemon_alive() -> bool:
 
 
 def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
-    base_url = gateway_base_url(host, port)
     bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
-    return {
-        "schema_version": "agentgateway.service.v1",
-        "status": "local_no_auth_compatibility_surface",
-        "bind": {"host": host, "port": int(port)},
-        "base_url": base_url,
-        "security": bind_safety,
-        "release_posture": "experimental_alpha",
-        "request_response": {
-            "health": f"{base_url}/health",
-            "registry": f"{base_url}/gateway",
-            "a2a": f"{base_url}/a2a",
-            "mcp": f"{base_url}/mcp",
-            "a2a_task_query": f"{base_url}/a2a/tasks/query",
-            "mcp_resource_read": f"{base_url}/mcp/resource?uri=resource://agent-mail/tasks",
-        },
-        "sse": {
-            "endpoint": f"{base_url}/a2a/events",
-            "content_type": "text/event-stream",
-            "event_sources": ["agent_mail", "trace"],
-        },
-        "push_notifications": {
-            "subscribe_endpoint": f"{base_url}/a2a/push-subscriptions",
-            "test_endpoint": f"{base_url}/a2a/push-test",
-            "subscriptions_path": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-            "deliveries_path": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
-            "default_endpoint_policy": "loopback_only_unless_GA_TUI_GATEWAY_ALLOW_REMOTE_PUSH=1",
-            "auth": "none",
-        },
-        "daemon": {
-            "commands": ["start", "stop", "restart", "status"],
-            "pid_path": AGENT_GATEWAY_DAEMON_PID_PATH,
-            "status_path": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-            "log_path": AGENT_GATEWAY_DAEMON_LOG_PATH,
-            "state": read_gateway_daemon_status(),
-        },
-    }
+    return gateway_registry_helpers.gateway_service_descriptor(
+        host=host,
+        port=port,
+        bind_safety=bind_safety,
+        daemon_state=read_gateway_daemon_status(),
+        gateway_push_subscriptions_path=AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
+        gateway_push_deliveries_path=AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
+        gateway_daemon_pid_path=AGENT_GATEWAY_DAEMON_PID_PATH,
+        gateway_daemon_status_path=AGENT_GATEWAY_DAEMON_STATUS_PATH,
+        gateway_daemon_log_path=AGENT_GATEWAY_DAEMON_LOG_PATH,
+    )
 
 
 def mcp_resource_contents(uri: str) -> dict[str, Any]:
@@ -9565,46 +9454,8 @@ def governance_component_registry(state: Optional[State] = None, *, write_regist
     return data
 
 
-def baseline_status(pass_count: int, required_count: int) -> str:
-    if required_count <= 0:
-        return "missing"
-    if pass_count >= required_count:
-        return "complete"
-    if pass_count > 0:
-        return "partial"
-    return "missing"
-
-
-def baseline_item(
-    item_id: str,
-    title: str,
-    requirement: str,
-    checks: list[Any],
-    *,
-    gaps: Optional[list[str]] = None,
-    notes: str = "",
-) -> dict[str, Any]:
-    normalized_checks = normalize_evidence_checks(checks)
-    pass_count = sum(1 for check in normalized_checks if check.get("ok"))
-    status = baseline_status(pass_count, len(normalized_checks))
-    failed = [str(check.get("description") or "") for check in normalized_checks if not check.get("ok")]
-    strongest_level = strongest_passed_evidence_level(normalized_checks)
-    return {
-        "id": item_id,
-        "title": title,
-        "requirement": requirement,
-        "status": status,
-        "pass_count": pass_count,
-        "check_count": len(normalized_checks),
-        "evidence": [str(check.get("description") or "") for check in normalized_checks if check.get("ok")],
-        "evidence_checks": normalized_checks,
-        "evidence_levels": evidence_level_summary(normalized_checks),
-        "strongest_evidence_level": strongest_level,
-        "claim_limit": baseline_claim_limit(strongest_level),
-        "missing_evidence": failed,
-        "gaps": gaps or failed,
-        "notes": notes,
-    }
+baseline_status = baseline_report.baseline_status
+baseline_item = baseline_report.baseline_item
 
 
 def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
@@ -9887,23 +9738,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
 
 
 def format_baseline_report(report: dict[str, Any], *, max_items: int = 20) -> str:
-    summary = report.get("summary") or {}
-    lines = [
-        "Architecture Baseline Comparison",
-        f"complete={summary.get('complete', 0)} partial={summary.get('partial', 0)} missing={summary.get('missing', 0)} ratio={summary.get('completion_ratio', 0)}",
-        "",
-        "Items:",
-    ]
-    for item in (report.get("items") or [])[:max_items]:
-        lines.append(
-            f"- [{item.get('status', '-')}/{item.get('strongest_evidence_level', 'unknown')}] "
-            f"{item.get('id', '')}: {item.get('title', '')}"
-        )
-        for gap in (item.get("gaps") or [])[:3]:
-            lines.append(f"  gap: {gap}")
-    gaps = report.get("remaining_gaps") or []
-    lines.extend(["", f"Remaining gap groups: {len(gaps)}", f"Report path: {AGENT_BASELINE_REPORT_PATH}"])
-    return "\n".join(lines)
+    return baseline_report.format_baseline_report(report, report_path=AGENT_BASELINE_REPORT_PATH, max_items=max_items)
 
 
 def baseline_panel_items(state: Optional[State] = None) -> list[PanelItem]:

@@ -2614,7 +2614,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng exposes public release, gateway, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
-- Applies to: `src/ga_tui/release_readiness.py`, `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and gateway/policy/runtime smoke tests.
+- Applies to: `src/ga_tui/release_readiness.py`, `src/ga_tui/runtime_evidence.py`, `src/ga_tui/baseline.py`, `src/ga_tui/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and gateway/policy/runtime smoke tests.
 - Non-goal: This does not certify full A2A/MCP compliance, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
 
 ### 2. Signatures
@@ -2683,6 +2683,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
 - Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or gateway/manual ticks, not by an installed always-on service by default.
 - Release-readiness helpers should remain pure and must not import `app.py`.
+- Runtime evidence, baseline item formatting, and gateway descriptor/resource payload helpers live outside `app.py`. These helper modules must not import `ga_tui.app`; `app.py` owns runtime state, paths, daemon state, HTTP handlers, and compatibility wrapper names.
 
 ### 4. Validation & Error Matrix
 
@@ -2693,6 +2694,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
 - Direct baseline report rewrites `gateway.json`, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
 - Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
+- `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `ga_tui.app` -> monolith backslide regression.
 - Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
 - Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
 
@@ -2718,6 +2720,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Tests must assert baseline reports contain evidence model, per-item evidence checks, strongest evidence level, and claim limits.
 - Tests must assert `runtime_evidence.jsonl` is registered in governance paths, MCP resources, and gateway internal-mail metadata.
 - Tests must assert a passed runtime/e2e evidence row upgrades a matching baseline item's `strongest_evidence_level` without changing the protocol-certification wording.
+- Tests must assert extracted release/baseline/gateway helper modules stay independent from `ga_tui.app` and preserve the app compatibility wrapper behavior.
 - CI must run `scripts/runtime_smoke.py` as an isolated local smoke path in addition to function-level policy gates.
 - Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating gateway/governance/bridge registry file signatures.
 - Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.

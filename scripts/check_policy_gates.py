@@ -26,12 +26,15 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ga_tui import app as a  # noqa: E402
 from ga_tui import agent_bridge as bridge  # noqa: E402
+from ga_tui import baseline as baseline_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
+from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
+from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
 
 
@@ -222,6 +225,17 @@ def assert_scheduler_module_boundary() -> None:
         "State",
     ):
         assert forbidden not in source, forbidden
+
+
+def assert_release_gateway_module_boundaries() -> None:
+    assert a.RUNTIME_EVIDENCE_SCHEMA == runtime_evidence_mod.RUNTIME_EVIDENCE_SCHEMA
+    assert a.baseline_item is baseline_mod.baseline_item
+    assert a.baseline_status is baseline_mod.baseline_status
+    assert a.gateway_base_url("0.0.0.0", 8765) == gateway_registry_mod.gateway_base_url("0.0.0.0", 8765)
+    for module in (runtime_evidence_mod, baseline_mod, gateway_registry_mod):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "ga_tui.app" not in source, module.__file__
+        assert "from .app" not in source, module.__file__
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -6908,6 +6922,7 @@ def assert_ohmypi_main_turn_persists_model_response_history() -> None:
 
 def run_checks() -> None:
     assert_scheduler_module_boundary()
+    assert_release_gateway_module_boundaries()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
