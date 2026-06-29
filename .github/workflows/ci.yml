@@ -33,13 +33,16 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Ruff check
-        run: python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py
+        run: python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py
 
       - name: Release hygiene
         run: PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 
       - name: Policy gates
         run: PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+
+      - name: Runtime smoke
+        run: PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 
       - name: Tests
         run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider

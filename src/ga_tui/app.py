@@ -333,6 +333,7 @@ AGENT_ARTIFACT_INDEX_PATH = os.path.join(AGENT_HARNESS_DIR, "artifacts.jsonl")
 AGENT_CONTEXT_PACKS_DIR = os.path.join(AGENT_HARNESS_DIR, "context_packs")
 AGENT_TRACES_PATH = os.path.join(AGENT_HARNESS_DIR, "traces.jsonl")
 AGENT_EVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "evals.jsonl")
+AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
 AGENT_LOCKS_PATH = os.path.join(AGENT_HARNESS_DIR, "locks.json")
 AGENT_GATEWAY_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway.json")
 AGENT_POLICY_PATH = os.path.join(AGENT_HARNESS_DIR, "policy.json")
@@ -5686,6 +5687,143 @@ def recent_progress_records(limit: int = 8) -> list[dict[str, Any]]:
     return read_jsonl(AGENT_PROGRESS_LEDGER_PATH, limit=limit)
 
 
+RUNTIME_EVIDENCE_SCHEMA = "agentruntime.evidence.v1"
+_RUNTIME_EVIDENCE_LEVEL_RANK = {"unknown": 0, "structural": 1, "runtime": 2, "e2e": 3}
+
+
+def _runtime_evidence_level(level: str) -> str:
+    level = str(level or "runtime")
+    return level if level in EVIDENCE_LEVEL_DESCRIPTIONS else "unknown"
+
+
+def _runtime_evidence_targets(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    else:
+        raw_items = []
+    targets: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in targets:
+            targets.append(text)
+    return targets
+
+
+def append_runtime_evidence(
+    *,
+    target_items: Any,
+    check_id: str,
+    level: str = "runtime",
+    passed: bool = True,
+    summary: str = "",
+    source: str = "",
+    command: str = "",
+    evidence_refs: Optional[list[str]] = None,
+    targets: Any = None,
+    details: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    item_targets = _runtime_evidence_targets(target_items)
+    check_targets = _runtime_evidence_targets(targets) or list(item_targets)
+    row = {
+        "schema_version": RUNTIME_EVIDENCE_SCHEMA,
+        "evidence_id": short_uid("rtev"),
+        "timestamp": now_iso(),
+        "target_items": item_targets,
+        "targets": check_targets,
+        "check_id": str(check_id or ""),
+        "level": _runtime_evidence_level(level),
+        "passed": bool(passed),
+        "summary": str(summary or ""),
+        "source": str(source or ""),
+        "command": str(command or ""),
+        "evidence_refs": [str(ref) for ref in (evidence_refs or []) if str(ref)],
+        "details": details or {},
+    }
+    append_jsonl(AGENT_RUNTIME_EVIDENCE_PATH, row)
+    return row
+
+
+def runtime_evidence_records(
+    target: str = "",
+    *,
+    passed: Optional[bool] = True,
+    min_level: str = "runtime",
+    limit: int = 0,
+) -> list[dict[str, Any]]:
+    min_rank = _RUNTIME_EVIDENCE_LEVEL_RANK.get(_runtime_evidence_level(min_level), 0)
+    target = str(target or "").strip()
+    rows = read_jsonl(AGENT_RUNTIME_EVIDENCE_PATH, limit=limit)
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("schema_version") != RUNTIME_EVIDENCE_SCHEMA:
+            continue
+        if passed is not None and bool(row.get("passed")) is not bool(passed):
+            continue
+        level = _runtime_evidence_level(str(row.get("level") or ""))
+        if _RUNTIME_EVIDENCE_LEVEL_RANK.get(level, 0) < min_rank:
+            continue
+        row_targets = set(_runtime_evidence_targets(row.get("target_items")))
+        row_targets.update(_runtime_evidence_targets(row.get("targets")))
+        if target and target not in row_targets:
+            continue
+        records.append(row)
+    return records
+
+
+def runtime_evidence_checks_for(item_id: str, *, min_level: str = "runtime", limit: int = 3) -> list[dict[str, Any]]:
+    rows = runtime_evidence_records(item_id, passed=True, min_level=min_level)
+    checks: list[dict[str, Any]] = []
+    slice_limit = max(0, int(limit))
+    for row in (rows[-slice_limit:] if slice_limit else []):
+        level = _runtime_evidence_level(str(row.get("level") or ""))
+        summary = str(row.get("summary") or row.get("check_id") or "runtime smoke passed")
+        evidence_id = str(row.get("evidence_id") or "")
+        source = str(row.get("source") or row.get("command") or "")
+        suffix = f" ({evidence_id})" if evidence_id else ""
+        if source:
+            suffix = f"{suffix} via {source}"
+        checks.append({
+            "ok": True,
+            "description": f"{level} evidence: {summary}{suffix}",
+            "level": level,
+        })
+    return checks
+
+
+def runtime_evidence_summary(rows: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    records = rows if rows is not None else read_jsonl(AGENT_RUNTIME_EVIDENCE_PATH)
+    summary = {
+        "schema_version": "agentruntime.evidence_summary.v1",
+        "path": AGENT_RUNTIME_EVIDENCE_PATH,
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "levels": {level: 0 for level in ("structural", "runtime", "e2e", "unknown")},
+        "targets": {},
+    }
+    for row in records:
+        if row.get("schema_version") != RUNTIME_EVIDENCE_SCHEMA:
+            continue
+        summary["total"] += 1
+        if row.get("passed"):
+            summary["passed"] += 1
+        else:
+            summary["failed"] += 1
+        level = _runtime_evidence_level(str(row.get("level") or ""))
+        summary["levels"][level] += 1
+        for target in _runtime_evidence_targets(row.get("target_items")):
+            target_summary = summary["targets"].setdefault(target, {"passed": 0, "failed": 0, "strongest_level": "unknown"})
+            if row.get("passed"):
+                target_summary["passed"] += 1
+                if _RUNTIME_EVIDENCE_LEVEL_RANK[level] > _RUNTIME_EVIDENCE_LEVEL_RANK[target_summary["strongest_level"]]:
+                    target_summary["strongest_level"] = level
+            else:
+                target_summary["failed"] += 1
+    return summary
+
+
 def task_history(task_id: str) -> list[dict[str, Any]]:
     return ledger_store.rows_matching(AGENT_TASK_LEDGER_PATH, "task_id", task_id)
 
@@ -7595,6 +7733,7 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
         {"uri": "resource://agent-mail/checkpoints", "path": AGENT_CHECKPOINT_INDEX_PATH, "description": "Checkpoint index JSONL"},
         {"uri": "resource://agent-mail/recovery", "path": AGENT_RECOVERY_PATH, "description": "Recovery records JSONL"},
         {"uri": "resource://agent-mail/recovery-plans", "path": AGENT_RECOVERY_PLANS_PATH, "description": "Replayable recovery plan JSONL"},
+        {"uri": "resource://agent-mail/runtime-evidence", "path": AGENT_RUNTIME_EVIDENCE_PATH, "description": "Runtime and E2E smoke evidence JSONL"},
         {"uri": "resource://agent-mail/runtime-providers", "path": AGENT_RUNTIME_REGISTRY_PATH, "description": "Agent runtime provider registry JSON"},
         {"uri": "resource://agent-mail/schedules", "path": AGENT_SCHEDULES_PATH, "description": "Top-level scheduled task registry JSONL"},
         {"uri": "resource://agent-mail/schedule-runs", "path": AGENT_SCHEDULE_RUNS_PATH, "description": "Scheduled task run audit JSONL"},
@@ -9320,7 +9459,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "governance",
         "responsibility": "Score final state, evidence, citation, source quality, tool efficiency, and policy compliance.",
         "functions": ["append_task_eval", "collect_task_audit_refs", "eval_panel_items"],
-        "stores": ["evals", "traces", "artifacts", "tasks", "progress"],
+        "stores": ["evals", "runtime_evidence", "traces", "artifacts", "tasks", "progress"],
         "write_policy": "eval_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9338,7 +9477,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "protocol",
         "responsibility": "Expose internal Agent Mail as A2A-compatible objects, MCP tool/resource registries, external bridge descriptors, and an optional network gateway.",
         "functions": ["ensure_gateway_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry", "serve_gateway", "start_gateway_daemon", "stop_gateway_daemon", "GatewayRequestHandler"],
-        "stores": ["gateway", "messages", "tasks", "progress", "artifacts", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
+        "stores": ["gateway", "messages", "tasks", "progress", "artifacts", "runtime_evidence", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
         "write_policy": "registry_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9358,6 +9497,7 @@ def governance_store_paths() -> dict[str, str]:
         "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
         "traces": AGENT_TRACES_PATH,
         "evals": AGENT_EVALS_PATH,
+        "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
         "checkpoints": AGENT_CHECKPOINT_INDEX_PATH,
         "checkpoint_store": AGENT_CHECKPOINTS_DIR,
         "recovery": AGENT_RECOVERY_PATH,
@@ -9495,6 +9635,7 @@ def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
         "governance_components": governance_component_registry(state, write_registry=False),
         "gateway_service": gateway_service_descriptor(),
         "bridge_registry": external_bridge_registry(write_registry=False),
+        "runtime_evidence": runtime_evidence_summary(),
     }
 
 
@@ -9509,6 +9650,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
     memory_candidates = read_jsonl(AGENT_MEMORY_CANDIDATES_PATH)
     traces = read_jsonl(AGENT_TRACES_PATH)
     evals = read_jsonl(AGENT_EVALS_PATH)
+    runtime_evidence = read_jsonl(AGENT_RUNTIME_EVIDENCE_PATH)
     checkpoints = read_jsonl(AGENT_CHECKPOINT_INDEX_PATH)
     recovery = read_jsonl(AGENT_RECOVERY_PATH)
     recovery_plans = read_jsonl(AGENT_RECOVERY_PLANS_PATH)
@@ -9539,6 +9681,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(start_subagent_task), "orchestrator delegation entrypoint is implemented"),
                 (callable(process_ui_queue), "orchestrator result synthesis path is implemented"),
                 ({"meta_orchestrator", "planner", "router"} <= governance_ids, "governance registry exposes orchestrator/planner/router components"),
+                *runtime_evidence_checks_for("strong_orchestrator"),
             ],
         ),
         baseline_item(
@@ -9551,6 +9694,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 ({"approval_controller", "risk_guard", "memory_curator", "eval_controller", "recovery_controller"} <= governance_ids, "governance components are registered"),
                 ("protocol_gateway" in governance_ids, "protocol gateway component is registered"),
                 (all(item.get("status") == "complete" for item in governance.get("components") or []), "registered components have function/store evidence"),
+                *runtime_evidence_checks_for("governance_components"),
             ],
         ),
         baseline_item(
@@ -9562,6 +9706,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(permissions_for_role), "role permissions builder is implemented"),
                 (callable(task_contract_for_role), "task contract builder provides boundaries and stop conditions"),
                 (all(role_write_policy(role) for role in ROLE_TEMPLATES), "role write policies are defined"),
+                *runtime_evidence_checks_for("restricted_subagents"),
             ],
         ),
         baseline_item(
@@ -9575,6 +9720,8 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (bool(AGENT_MAIL_PATH), "agent mail path is configured"),
                 (bool(AGENT_TRACES_PATH), "trace ledger path is configured"),
                 (bool(AGENT_APPROVALS_PATH), "approvals.jsonl path is registered"),
+                (bool(AGENT_RUNTIME_EVIDENCE_PATH), "runtime evidence path is configured"),
+                *runtime_evidence_checks_for("shared_ledgers"),
             ],
         ),
         baseline_item(
@@ -9585,6 +9732,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (bool(AGENT_ARTIFACT_INDEX_PATH), "artifact index path is configured"),
                 (callable(append_artifact_index), "artifact index writer includes hash/provenance"),
                 (callable(write_harness_artifact), "artifact:// writer is implemented"),
+                *runtime_evidence_checks_for("artifact_store"),
             ],
         ),
         baseline_item(
@@ -9597,6 +9745,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(queue_policy_approval), "approval request queue is implemented"),
                 (callable(decide_approval), "approval execution path is implemented"),
                 ({"approval_controller", "risk_guard"} <= governance_ids, "approval/risk governance components are registered"),
+                *runtime_evidence_checks_for("approval_gates"),
             ],
         ),
         baseline_item(
@@ -9607,6 +9756,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (bool(AGENT_LOCKS_PATH), "single-writer lock file path is configured"),
                 (any((row.get("permissions") or {}).get("write_policy") == "single_writer" for row in tasks) or "coder" in ROLE_TEMPLATES, "single_writer write policy exists"),
                 (callable(acquire_single_writer_lock) and callable(release_single_writer_lock), "single-writer acquire/release code path is active"),
+                *runtime_evidence_checks_for("single_writer"),
             ],
         ),
         baseline_item(
@@ -9618,6 +9768,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(context_layers_for_task), "L0-L8 context layer builder is implemented"),
                 (callable(memory_hydration_pack), "memory hydration pack builder is implemented"),
                 ("context_engineer" in governance_ids, "context engineer component is registered"),
+                *runtime_evidence_checks_for("context_engineering"),
             ],
         ),
         baseline_item(
@@ -9629,6 +9780,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(build_memory_candidate), "memory candidate builder includes scope/type/TTL/conflict/dedupe fields"),
                 (callable(queue_curated_memory_candidate), "curated memory candidate approval path is implemented"),
                 (callable(memory_candidate_rejection_reason), "memory curator can reject secrets/weak candidates before approval"),
+                *runtime_evidence_checks_for("external_memory"),
             ],
         ),
         baseline_item(
@@ -9640,6 +9792,8 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(append_task_eval), "agenteval writer is implemented"),
                 (callable(collect_task_audit_refs), "eval audit-ref collector is implemented"),
                 (callable(eval_panel_items), "eval/trace inspection panel is implemented"),
+                (bool(AGENT_RUNTIME_EVIDENCE_PATH), "runtime/e2e evidence store path is configured"),
+                *runtime_evidence_checks_for("eval_trace"),
             ],
         ),
         baseline_item(
@@ -9653,6 +9807,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (callable(append_recovery_record), "recovery record writer is implemented"),
                 (callable(recover_task_action), "approval-gated recovery action path is implemented"),
                 (bool(AGENT_RECOVERY_PLANS_PATH), "recovery plan store path is configured"),
+                *runtime_evidence_checks_for("checkpoint_recovery"),
             ],
         ),
         baseline_item(
@@ -9672,6 +9827,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (bool((service.get("push_notifications") or {}).get("subscribe_endpoint")), "push notification subscription endpoint is registered"),
                 ({"start", "stop", "restart", "status"} <= set(((service.get("daemon") or {}).get("commands") or [])), "managed daemon lifecycle commands are registered"),
                 (bool(((service.get("daemon") or {}).get("status_path"))), "gateway daemon status path is registered"),
+                *runtime_evidence_checks_for("a2a_mcp_gateway"),
             ],
         ),
         baseline_item(
@@ -9684,6 +9840,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 ({"codex", "claude_code", "deer_flow"} <= bridge_ids, "Codex/Claude/Deer Flow runtime bridges are registered"),
                 ({"cli", "dashboard", "approval_inbox"} <= bridge_ids, "CLI/Dashboard/Approval Inbox human interfaces are registered"),
                 (all((item.get("policy") or {}).get("approval_required_for") for item in (bridge_registry.get("bridges") or [])), "bridge policies carry approval boundaries"),
+                *runtime_evidence_checks_for("external_bridges"),
             ],
         ),
     ]
@@ -9716,6 +9873,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
             "levels": EVIDENCE_LEVEL_DESCRIPTIONS,
             "claim_limit": "Baseline completion is an implementation-readiness signal. It is not protocol certification unless e2e evidence is present.",
         },
+        "runtime_evidence": runtime_evidence_summary(runtime_evidence),
         "items": items,
         "remaining_gaps": remaining_gaps,
         "report_path": AGENT_BASELINE_REPORT_PATH,
@@ -9823,6 +9981,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
             "traces": AGENT_TRACES_PATH,
             "evals": AGENT_EVALS_PATH,
+            "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
             "checkpoints": AGENT_CHECKPOINT_INDEX_PATH,
             "checkpoint_store": AGENT_CHECKPOINTS_DIR,
             "recovery": AGENT_RECOVERY_PATH,
@@ -9891,6 +10050,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "governance_components": governance_registry,
         "gateway_service": gateway_service_descriptor(),
         "bridge_registry": bridge_registry,
+        "runtime_evidence": runtime_evidence_summary(),
         "release_readiness": current_release_readiness_report(),
         "role_templates": ROLE_TEMPLATES,
         "agent_cards": list(role_cards),

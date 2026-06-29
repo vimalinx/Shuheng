@@ -13,6 +13,7 @@ recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts
 recursive-include tests *.py
 include scripts/check_policy_gates.py
 include scripts/check_release_hygiene.py
+include scripts/runtime_smoke.py
 prune .codex
 prune .pytest_cache
 prune .trellis

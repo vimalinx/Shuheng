@@ -60,6 +60,7 @@ def retarget_harness(root: str) -> None:
     a.AGENT_CONTEXT_PACKS_DIR = os.path.join(a.AGENT_HARNESS_DIR, "context_packs")
     a.AGENT_TRACES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "traces.jsonl")
     a.AGENT_EVALS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "evals.jsonl")
+    a.AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(a.AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
     a.AGENT_LOCKS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "locks.json")
     a.AGENT_GATEWAY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway.json")
     a.AGENT_POLICY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "policy.json")
@@ -313,6 +314,38 @@ def assert_progress_ledger_is_persistent_and_hydrated() -> None:
     shared_ledgers = next(item for item in report["items"] if item["id"] == "shared_ledgers")
     descriptions = " ".join(check["description"] for check in shared_ledgers["evidence_checks"])
     assert "progress ledger path is configured" in descriptions, shared_ledgers
+
+
+def assert_runtime_evidence_store_upgrades_baseline() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_runtime_evidence_")
+    retarget_harness(root)
+    state = a.State(agent=FakeAgent())
+    state.running = True
+    row = a.append_runtime_evidence(
+        target_items=["a2a_mcp_gateway", "shared_ledgers"],
+        check_id="policy_gate_runtime_evidence",
+        level="e2e",
+        passed=True,
+        summary="policy gate e2e smoke reached gateway and shared ledgers",
+        source="scripts/check_policy_gates.py",
+        command="python3 scripts/check_policy_gates.py",
+        evidence_refs=["task://policy_gate_runtime_evidence"],
+    )
+    assert row["schema_version"] == "agentruntime.evidence.v1", row
+    assert row["level"] == "e2e", row
+    assert a.runtime_evidence_records("a2a_mcp_gateway", passed=True, min_level="runtime"), a.read_jsonl(a.AGENT_RUNTIME_EVIDENCE_PATH)
+    resources = a.mcp_resource_registry()
+    assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources), resources
+    governance_paths = a.governance_store_paths()
+    assert governance_paths["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, governance_paths
+    report = a.architecture_baseline_report(state)
+    items = {item["id"]: item for item in report["items"]}
+    assert items["a2a_mcp_gateway"]["strongest_evidence_level"] == "e2e", items["a2a_mcp_gateway"]
+    assert any("policy gate e2e smoke" in check["description"] for check in items["a2a_mcp_gateway"]["evidence_checks"]), items["a2a_mcp_gateway"]
+    assert report["runtime_evidence"]["passed"] == 1, report["runtime_evidence"]
+    registry = a.ensure_gateway_registry(state)
+    assert registry["internal_agent_mail"]["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
+    assert registry["runtime_evidence"]["targets"]["a2a_mcp_gateway"]["strongest_level"] == "e2e", registry["runtime_evidence"]
 
 
 def assert_genericagent_provider_module_boundary() -> None:
@@ -3745,6 +3778,9 @@ def assert_recovery_plan_schema(row: dict, *, action: str = "") -> None:
 def assert_gateway_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.v1", registry
     assert registry["internal_agent_mail"]["governance"] == a.AGENT_GOVERNANCE_PATH, registry
+    assert registry["internal_agent_mail"]["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
+    assert registry["runtime_evidence"]["schema_version"] == "agentruntime.evidence_summary.v1", registry
+    assert registry["runtime_evidence"]["path"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
     assert_release_readiness_schema(registry["release_readiness"])
     service = registry["gateway_service"]
     assert service["schema_version"] == "agentgateway.service.v1", service
@@ -3780,6 +3816,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert any(item["uri"] == "resource://agent-mail/checkpoints" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/recovery-plans" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/runtime-providers" for item in mcp["resources"]), mcp
+    assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedules" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedule-runs" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in mcp["resources"]), mcp
@@ -6881,6 +6918,7 @@ def run_checks() -> None:
     assert_shared_user_profile_context_is_global()
     assert_shuheng_bootstraps_legacy_state_without_mutating_source()
     assert_progress_ledger_is_persistent_and_hydrated()
+    assert_runtime_evidence_store_upgrades_baseline()
     assert_ohmypi_runtime_registry()
     assert_ohmypi_memory_prompt_and_command()
     assert_ohmypi_rpc_command_discovers_user_bun_binary()
