@@ -79,7 +79,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - CI workflow: `.github/workflows/ci.yml`.
 - Package metadata source: `pyproject.toml`.
 - Source distribution manifest: `MANIFEST.in`.
-- Ignored private/local paths: `config/*.json`, `references/`,
+- Ignored private/local paths: `config/*.json`, `references/`, `.codex/`,
+  `goal-*`, `memory/`, `temp/`, `tmp/`, local Trellis runtime/cache files,
   `docs/foreign-student-acquisition-research.md`, and
   `docs/homework-pricing-research.md`.
 
@@ -120,6 +121,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   hygiene fails.
 - `config/mcporter.json` or private research docs are tracked or unignored ->
   release hygiene fails.
+- Local runtime state such as `memory/`, `temp/`, `tmp/`, `goal-*`, `.codex/`,
+  or local Trellis runtime/cache files are tracked or unignored -> release
+  hygiene fails.
 - MANIFEST drops release scripts or private-path exclusions -> release hygiene
   fails.
 - CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` or
@@ -146,7 +150,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Good: `scripts/check_release_hygiene.py` passes, wheel smoke installs both
   the latest wheel and sdist, and the sdist contains `README.en.md`,
   `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
-  research docs.
+  research docs or local runtime state.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
   `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
 - Base: Internal schemas and env names keep `ga_tui` / `GA_TUI` identifiers for
@@ -184,6 +188,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - `scripts/check_release_hygiene.py` must assert CI runs `git diff --check`.
 - `scripts/check_release_hygiene.py` must assert `CONTRIBUTING.md` lists the
   current public release-check commands.
+- `scripts/check_release_hygiene.py` must assert runtime state directories such
+  as `memory/`, `temp/`, `tmp/`, `goal-*`, and local Trellis runtime/cache files
+  are not tracked or unignored and stay excluded from the release manifest.
 
 ### 7. Wrong vs Correct
 

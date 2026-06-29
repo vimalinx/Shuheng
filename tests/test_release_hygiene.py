@@ -105,3 +105,28 @@ def test_contributing_release_checks_reject_stale_command_list(monkeypatch) -> N
     hygiene.check_contributing_release_checks(errors)
 
     assert any("CONTRIBUTING.md missing contributor release command" in error and "runtime_smoke.py" in error for error in errors)
+
+
+def test_private_runtime_paths_are_release_blockers(monkeypatch) -> None:
+    def fake_git_lines(*args: str) -> list[str]:
+        if args == ("ls-files",):
+            return [
+                "memory/secret_vault/session.secret",
+                "temp/model_responses/model_responses_1.txt",
+                "goal-6/tasks.md",
+                ".trellis/.runtime/current.json",
+            ]
+        if args == ("ls-files", "-o", "--exclude-standard"):
+            return ["tmp/local-smoke/output.json"]
+        raise AssertionError(args)
+
+    monkeypatch.setattr(hygiene, "git_lines", fake_git_lines)
+
+    errors: list[str] = []
+    hygiene.check_private_files_are_not_tracked(errors)
+
+    assert "private/local path is tracked: memory/secret_vault/session.secret" in errors
+    assert "private/local path is tracked: temp/model_responses/model_responses_1.txt" in errors
+    assert "private/local path is tracked: goal-6/tasks.md" in errors
+    assert "private/local path is tracked: .trellis/.runtime/current.json" in errors
+    assert "private/local path is unignored and could be committed: tmp/local-smoke/output.json" in errors

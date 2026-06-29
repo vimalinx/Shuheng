@@ -19,7 +19,10 @@ prune .codex
 prune .pytest_cache
 prune .trellis
 prune config
+prune memory
 prune references
+prune temp
+prune tmp
 prune goal-*
 global-exclude __pycache__
 global-exclude *.py[cod]

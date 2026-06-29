@@ -29,11 +29,23 @@ REQUIRED_FILES = (
 )
 
 PRIVATE_PATH_PREFIXES = (
+    ".codex/",
+    ".trellis/.backup-",
+    ".trellis/.cache/",
+    ".trellis/.runtime/",
+    ".trellis/worktrees/",
     "config/",
+    "goal-",
+    "memory/",
     "references/",
+    "temp/",
+    "tmp/",
 )
 
 PRIVATE_PATHS = {
+    ".trellis/.current-task",
+    ".trellis/.developer",
+    ".trellis/.template-hashes.json",
     "docs/foreign-student-acquisition-research.md",
     "docs/homework-pricing-research.md",
 }
@@ -93,9 +105,13 @@ REQUIRED_MANIFEST_LINES = (
 REQUIRED_MANIFEST_EXCLUSIONS = (
     "exclude docs/foreign-student-acquisition-research.md",
     "exclude docs/homework-pricing-research.md",
+    "prune .codex",
     "prune .trellis",
     "prune config",
+    "prune memory",
     "prune references",
+    "prune temp",
+    "prune tmp",
     "prune goal-*",
 )
 
