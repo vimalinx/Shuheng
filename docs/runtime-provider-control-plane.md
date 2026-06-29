@@ -41,7 +41,7 @@ By default Shuheng stores its durable control-plane data under `~/.shuheng`:
 
 - `model_responses/`: canonical visible conversation history for main sessions and
   non-secret subagent direct chats, plus metadata, names, token usage, and trash.
-- `memory/agent_harness/`: task ledgers, agent mail, approvals, artifacts, traces, checkpoints, schedules, gateway metadata, runtime provider metadata, and memory candidates.
+- `memory/agent_harness/`: task ledgers (`tasks.jsonl`), progress ledgers (`progress.jsonl`), agent mail, approvals, artifacts, traces, checkpoints, schedules, gateway metadata, runtime provider metadata, and memory candidates.
 - `memory/subagents/`: persistent subagent profiles, memories, events, dashboard/runtime metadata, and refs into canonical history. It must not own non-secret conversation transcripts.
 - `temp/subagents/`: temporary/session-bound subagents.
 - `memory/secret_vault/`: encrypted Secret Vault state, including encrypted Secret subagent chat history that cannot be copied into normal plaintext history.

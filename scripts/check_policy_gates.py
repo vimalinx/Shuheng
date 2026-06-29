@@ -29,6 +29,7 @@ from ga_tui import agent_bridge as bridge  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
+from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
@@ -51,6 +52,7 @@ def retarget_harness(root: str) -> None:
     a.configure_frontend_history_storage()
     a.AGENT_HARNESS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "agent_harness")
     a.AGENT_TASK_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "tasks.jsonl")
+    a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "progress.jsonl")
     a.AGENT_MAIL_PATH = os.path.join(a.AGENT_HARNESS_DIR, "messages.jsonl")
     a.AGENT_APPROVALS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "approvals.jsonl")
     a.AGENT_ARTIFACTS_DIR = os.path.join(a.AGENT_HARNESS_DIR, "artifacts")
@@ -219,6 +221,98 @@ def assert_scheduler_module_boundary() -> None:
         "State",
     ):
         assert forbidden not in source, forbidden
+
+
+def assert_ledger_store_module_boundary() -> None:
+    source = Path(ledgers.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "import curses",
+        "from curses",
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "State",
+        "SubAgentRuntime",
+    ):
+        assert forbidden not in source, forbidden
+
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "def _jsonl_append_lock" not in app_source, "app.py must not own JSONL append locks"
+    assert "_LATEST_RECORDS_CACHE" not in app_source, "app.py must not own latest-record caches"
+    assert "fcntl.flock" not in app_source, "app.py must delegate ledger locking to ledger_store"
+
+    root = tempfile.mkdtemp(prefix="ga_tui_ledger_store_")
+    path = os.path.join(root, "tasks.jsonl")
+    ledgers.clear_jsonl_caches()
+    a.append_jsonl(path, {"task_id": "task_core", "status": "queued"})
+    first = a.latest_records_by_id(path, "task_id")
+    assert first["task_core"]["status"] == "queued", first
+    first["task_core"]["status"] = "mutated"
+    assert a.latest_records_by_id(path, "task_id")["task_core"]["status"] == "queued"
+    a.append_jsonl(path, {"task_id": "task_core", "status": "completed"})
+    assert a.latest_records_by_id(path, "task_id")["task_core"]["status"] == "completed"
+
+
+def assert_progress_ledger_is_persistent_and_hydrated() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_progress_ledger_")
+    retarget_harness(root)
+    state = a.State(agent=FakeAgent())
+    state.running = True
+    sub = a.SubAgentRuntime(
+        agent_id="agent-progress",
+        name="Progress Agent",
+        home=os.path.join(root, "agent-progress"),
+        role="researcher",
+    )
+    a.append_task_ledger(
+        "task_progress_core",
+        status="working",
+        assigned_agent=sub.agent_id,
+        title="Progress core",
+        objective="Persist progress rows",
+        summary="started progress tracking",
+    )
+    a.append_task_ledger(
+        "task_progress_core",
+        status="completed",
+        assigned_agent=sub.agent_id,
+        title="Progress core",
+        objective="Persist progress rows",
+        summary="completed progress tracking",
+    )
+
+    progress_rows = a.progress_history("task_progress_core")
+    assert len(progress_rows) == 2, progress_rows
+    assert progress_rows[-1]["schema_version"] == "agentprogress.v1", progress_rows[-1]
+    assert progress_rows[-1]["status"] == "completed", progress_rows[-1]
+    assert progress_rows[-1]["summary"] == "completed progress tracking", progress_rows[-1]
+    assert a.latest_progress_records()[progress_rows[-1]["progress_id"]]["task_id"] == "task_progress_core"
+
+    layers = a.context_layers_for_task(
+        state,
+        sub,
+        "Use the persistent progress ledger",
+        "task_context_progress",
+        profile="",
+        memory="",
+        recent_mail=[],
+        task_contract=a.task_contract_for_role("researcher", "Use the persistent progress ledger"),
+        memory_pack={"memory_pack_id": "mempack_progress"},
+        layered_memory={"refs": []},
+        workspace_context={},
+        role="researcher",
+    )
+    progress_text = "\n".join(layers["L5_progress_ledger"]["items"])
+    assert "task_progress_core" in progress_text and "completed" in progress_text, layers["L5_progress_ledger"]
+
+    resources = a.mcp_resource_registry()
+    assert any(item["uri"] == "resource://agent-mail/progress" for item in resources), resources
+    governance_paths = a.governance_store_paths()
+    assert governance_paths["progress"] == a.AGENT_PROGRESS_LEDGER_PATH, governance_paths
+    report = a.architecture_baseline_report(state, gateway_data={})
+    shared_ledgers = next(item for item in report["items"] if item["id"] == "shared_ledgers")
+    descriptions = " ".join(check["description"] for check in shared_ledgers["evidence_checks"])
+    assert "progress ledger path is configured" in descriptions, shared_ledgers
 
 
 def assert_genericagent_provider_module_boundary() -> None:
@@ -6777,6 +6871,7 @@ def assert_ohmypi_main_turn_persists_model_response_history() -> None:
 
 def run_checks() -> None:
     assert_scheduler_module_boundary()
+    assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
     assert_shuheng_brand_entrypoints()
@@ -6785,6 +6880,7 @@ def run_checks() -> None:
     assert_shuheng_workspace_memory_context()
     assert_shared_user_profile_context_is_global()
     assert_shuheng_bootstraps_legacy_state_without_mutating_source()
+    assert_progress_ledger_is_persistent_and_hydrated()
     assert_ohmypi_runtime_registry()
     assert_ohmypi_memory_prompt_and_command()
     assert_ohmypi_rpc_command_discovers_user_bun_binary()

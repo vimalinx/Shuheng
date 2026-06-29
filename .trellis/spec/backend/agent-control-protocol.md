@@ -440,6 +440,146 @@ S01 修复左栏历史会话标题
 }
 ```
 
+## Scenario: Shared JSONL Ledger Store
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng reads or writes task ledgers, approvals, artifacts, traces, checkpoints, recovery rows, scheduler rows, gateway rows, or other JSONL governance records.
+- Applies to: `src/ga_tui/ledger_store.py`, compatibility wrappers in `src/ga_tui/app.py`, scheduler runtime callbacks, dashboard home-page registry signatures, task/approval/artifact panels, and policy-gate checks.
+- Non-goal: This does not move domain-specific task, approval, artifact, dashboard, or recovery projection logic out of `app.py` in one large rewrite.
+
+### 2. Signatures
+
+- Shared module: `src/ga_tui/ledger_store.py`.
+- Public helpers:
+  - `append_jsonl(path, payload)`
+  - `read_jsonl(path, limit=0, on_parse_error=None)`
+  - `jsonl_file_signature(path)`
+  - `latest_records_by_id(path, key)`
+  - `rows_matching(path, key, value)`
+  - `clear_jsonl_caches()`
+- Compatibility wrappers in `app.py` may keep the old function names, but should delegate to `ledger_store`.
+
+### 3. Contracts
+
+- JSONL append locking, cross-process `flock`, latest-record cache ownership, cache invalidation, and file signature logic belong to `ledger_store`, not to the curses application module.
+- `app.py` remains allowed to own domain projections such as `latest_task_records()`, `approval_latest_records()`, `artifact_index_latest()`, `task_panel_items()`, and home-page rendering, but those projections must consume the shared ledger helpers.
+- `latest_records_by_id(...)` returns copies of cached rows so callers cannot mutate process-local cache state by editing returned dictionaries.
+- Any successful `append_jsonl(...)` must invalidate latest-record cache entries for that normalized path before later reads can use stale data.
+- `read_jsonl(...)` skips corrupt and non-dict lines. App-level callers may pass a parse-error callback to preserve diagnostics without forcing `ledger_store` to import `app.py`.
+- `ledger_store.py` must not import curses, `ga_tui.app`, `State`, or `SubAgentRuntime`.
+
+### 4. Validation & Error Matrix
+
+- App source reintroduces `_LATEST_RECORDS_CACHE` or `_jsonl_append_lock` -> policy gate fails.
+- App source performs `fcntl.flock` directly for ledger appends -> policy gate fails.
+- Returned latest-record row is mutated by a caller -> subsequent latest-record calls still return the original cached data.
+- Append a newer row for an existing id -> next latest-record call returns the newer row.
+- Corrupt JSONL line -> row is skipped and optional parse diagnostics can be emitted by the caller.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `dashboard home -> latest_task_records() -> latest_records_by_id(...) -> ledger_store cache`.
+- Good: `scheduler.py` receives app-provided `read_jsonl` / `append_jsonl` callbacks that ultimately use `ledger_store`.
+- Base: `app.py` still owns UI-specific panel projection while the storage/cache mechanics live in `ledger_store`.
+- Bad: A future dashboard or approval feature adds a second latest-record cache in `app.py`.
+
+### 6. Tests Required
+
+- `tests/test_jsonl.py` must cover append/read behavior, latest-record cache copy safety, cache invalidation after append, field-history filtering, and file signatures.
+- `scripts/check_policy_gates.py` must assert `ledger_store` has no curses/app dependency and `app.py` no longer owns JSONL append locks or latest-record cache internals.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# app.py
+_LATEST_RECORDS_CACHE = {}
+def latest_records_by_id(...):
+    ...
+```
+
+#### Correct
+
+```python
+# app.py
+def latest_records_by_id(path, key):
+    return ledger_store.latest_records_by_id(path, key)
+```
+
+## Scenario: Persistent Progress Ledger
+
+### 1. Scope / Trigger
+
+- Trigger: A task, plan step, subagent task, scheduler run task, recovery action, or approval-blocked task changes state through `append_task_ledger(...)`.
+- Applies to: `AGENT_PROGRESS_LEDGER_PATH`, `append_progress_ledger(...)`, `progress_history(...)`, `latest_progress_records(...)`, `context_layers_for_task(...)`, dashboard home-page cache signatures, MCP resources, gateway audit metadata, governance store paths, and baseline comparison.
+- Non-goal: This does not replace `tasks.jsonl` as the authoritative task ledger and does not store raw runtime transcripts in progress rows.
+
+### 2. Signatures
+
+- Store path: `~/.shuheng/memory/agent_harness/progress.jsonl`.
+- Schema version: `agentprogress.v1`.
+- Required fields:
+  - `progress_id`
+  - `timestamp`
+  - `task_id`
+  - `parent_task_id`
+  - `status`
+  - `assigned_agent`
+  - `title`
+  - `kind`
+  - `summary`
+  - `error`
+  - `artifact_refs`
+  - `source`
+  - `task_ref`
+
+### 3. Contracts
+
+- Every `append_task_ledger(...)` call appends the original `agenttask.v1` row to `tasks.jsonl` and appends a compact `agentprogress.v1` row to `progress.jsonl`.
+- Progress rows are compact status facts for context hydration and recovery scanning. They must not inline artifact bodies, full transcripts, Secret Vault plaintext, or unbounded raw tool output.
+- `context_layers_for_task(...)` uses `progress.jsonl` for `L5_progress_ledger`, falling back to recent task rows only when no progress rows exist.
+- Home-page cache signatures include `progress.jsonl` so independently appended progress rows can refresh dashboard views.
+- MCP resources expose `resource://agent-mail/progress`, and gateway/governance metadata includes the progress store path.
+- Architecture baseline comparison treats progress ledger availability as part of the shared-ledger evidence.
+
+### 4. Validation & Error Matrix
+
+- Task row appended -> corresponding progress row with same `task_id` and `status` exists.
+- Task status later changes -> progress history has multiple rows and latest-progress lookup includes the newer progress id.
+- Context pack generation after progress rows exist -> `L5_progress_ledger.items` includes progress data, not just task ledger rows.
+- MCP resource registry misses progress -> policy gate fails.
+- Governance store paths miss progress -> policy gate fails.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `append_task_ledger("task_x", status="working", summary="reading files")` writes both `tasks.jsonl` and `progress.jsonl`.
+- Good: `L5_progress_ledger` includes compact rows such as `task_x: working reading files`.
+- Base: Legacy tasks created before progress support may not have matching progress rows; new task updates populate the progress ledger.
+- Bad: `L5_progress_ledger` is only a formatted copy of the last few task rows when `progress.jsonl` already exists.
+- Bad: Progress rows include full subagent chat transcripts or Secret plaintext.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert task ledger writes generate `agentprogress.v1` rows, progress history is readable by task id, latest-progress lookup works, context hydration reads progress rows into L5, and MCP/governance/baseline surfaces expose the progress ledger.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+progress_items = [format_task(row) for row in read_jsonl("tasks.jsonl")]
+```
+
+#### Correct
+
+```python
+progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
+```
+
 ## Scenario: Direct Subagent Chat Visibility
 
 ### 1. Scope / Trigger

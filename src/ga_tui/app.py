@@ -13,7 +13,6 @@ import base64
 import concurrent.futures
 import copy
 import curses
-import fcntl
 import glob
 import hashlib
 import itertools
@@ -84,6 +83,7 @@ try:
         tui_control_parse_errors,
     )
     from . import scheduler as scheduler_runtime
+    from . import ledger_store
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -172,6 +172,7 @@ except Exception:
         tui_control_parse_errors,
     )
     import scheduler as scheduler_runtime  # type: ignore
+    import ledger_store  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -324,6 +325,7 @@ SUBAGENTS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "subagents")
 TEMP_SUBAGENTS_DIR = os.path.join(SHUHENG_TEMP_DIR, "subagents")
 AGENT_HARNESS_DIR = os.path.abspath(os.path.expanduser(os.environ.get("GA_TUI_HARNESS_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "agent_harness")))
 AGENT_TASK_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "tasks.jsonl")
+AGENT_PROGRESS_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "progress.jsonl")
 AGENT_MAIL_PATH = os.path.join(AGENT_HARNESS_DIR, "messages.jsonl")
 AGENT_APPROVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "approvals.jsonl")
 AGENT_ARTIFACTS_DIR = os.path.join(AGENT_HARNESS_DIR, "artifacts")
@@ -2478,6 +2480,7 @@ def build_workspace_index(workspace_id: str) -> dict[str, Any]:
         },
         "harness_refs": {
             "tasks": AGENT_TASK_LEDGER_PATH,
+            "progress": AGENT_PROGRESS_LEDGER_PATH,
             "artifacts": AGENT_ARTIFACT_INDEX_PATH,
             "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
         },
@@ -3007,63 +3010,8 @@ def short_uid(prefix: str) -> str:
     return f"{prefix}_{time.time_ns():x}_{os.getpid():x}"
 
 
-_JSONL_APPEND_LOCKS_GUARD = threading.Lock()
-_JSONL_APPEND_LOCKS: dict[str, threading.Lock] = {}
-_LATEST_RECORDS_CACHE_LOCK = threading.Lock()
-_LATEST_RECORDS_CACHE: dict[tuple[str, str], tuple[tuple[int, int], dict[str, dict[str, Any]]]] = {}
-LATEST_RECORDS_CACHE_LIMIT = 64
-
-
-def _jsonl_append_lock(path: str) -> threading.Lock:
-    """Return a process-internal lock keyed by normalized path.
-
-    The TUI spawns worker threads plus a ThreadingHTTPServer gateway, all of
-    which can append to the same JSONL ledger concurrently. Without this lock
-    two threads could interleave their buffered writes and corrupt a line.
-    """
-    key = os.path.normpath(path)
-    lock = _JSONL_APPEND_LOCKS.get(key)
-    if lock is not None:
-        return lock
-    with _JSONL_APPEND_LOCKS_GUARD:
-        lock = _JSONL_APPEND_LOCKS.setdefault(key, threading.Lock())
-    return lock
-
-
 def append_jsonl(path: str, payload: dict[str, Any]) -> None:
-    """Append one JSONL record under process-internal and cross-process locks.
-
-    A separate in-process lock serializes threads sharing this module; an
-    advisory fcntl.flock on the file serializes separate processes (the gateway
-    daemon is spawned via subprocess.Popen and shares these ledgers). The whole
-    record is built as one string and flushed inside the lock so a partial line
-    is never visible to readers.
-    """
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    line = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
-    with _jsonl_append_lock(path):
-        with open(path, "a", encoding="utf-8") as fh:
-            try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            except (OSError, ValueError):
-                # flock is unsupported on this platform or fd type; the
-                # in-process lock still protects co-located writers.
-                pass
-            try:
-                fh.write(line)
-                fh.flush()
-            finally:
-                try:
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-                except (OSError, ValueError):
-                    pass
-    normalized = os.path.normpath(path)
-    with _LATEST_RECORDS_CACHE_LOCK:
-        stale_keys = [key for key in _LATEST_RECORDS_CACHE if key[0] == normalized]
-        for cache_key in stale_keys:
-            _LATEST_RECORDS_CACHE.pop(cache_key, None)
+    ledger_store.append_jsonl(path, payload)
 
 
 def write_bytes_atomic(path: str, data: bytes) -> None:
@@ -4367,37 +4315,23 @@ def secret_network_status() -> dict[str, Any]:
 
 
 def read_jsonl(path: str, limit: int = 0) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for lineno, line in enumerate(fh, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item = json.loads(line)
-                except (json.JSONDecodeError, ValueError) as exc:
-                    log_diagnostic("read_jsonl.parse", exc, detail=f"{path}:{lineno}")
-                    continue
-                if isinstance(item, dict):
-                    rows.append(item)
-    except OSError:
-        return []
-    if limit and len(rows) > limit:
-        return rows[-limit:]
-    return rows
+    return ledger_store.read_jsonl(
+        path,
+        limit,
+        on_parse_error=lambda exc, detail: log_diagnostic("read_jsonl.parse", exc, detail=detail),
+    )
 
 
 def jsonl_file_signature(path: str) -> tuple[int, int]:
-    try:
-        stat = os.stat(path)
-    except OSError:
-        return (0, 0)
-    return (int(stat.st_mtime_ns), int(stat.st_size))
+    return ledger_store.jsonl_file_signature(path)
 
 
 def task_ledger_signature() -> tuple[int, int]:
     return jsonl_file_signature(AGENT_TASK_LEDGER_PATH)
+
+
+def progress_ledger_signature() -> tuple[int, int]:
+    return jsonl_file_signature(AGENT_PROGRESS_LEDGER_PATH)
 
 
 def harness_artifact_uri(path: str) -> str:
@@ -5707,32 +5641,53 @@ def policy_gate_for_subagent_task(
 
 
 def latest_records_by_id(path: str, key: str) -> dict[str, dict[str, Any]]:
-    normalized = os.path.normpath(path)
-    cache_key = (normalized, key)
-    signature = jsonl_file_signature(normalized)
-    with _LATEST_RECORDS_CACHE_LOCK:
-        cached = _LATEST_RECORDS_CACHE.get(cache_key)
-        if cached is not None and cached[0] == signature:
-            return {row_id: dict(row) for row_id, row in cached[1].items()}
-    latest: dict[str, dict[str, Any]] = {}
-    for row in read_jsonl(normalized):
-        row_id = str(row.get(key) or "")
-        if row_id:
-            latest[row_id] = row
-    with _LATEST_RECORDS_CACHE_LOCK:
-        _LATEST_RECORDS_CACHE[cache_key] = (signature, {row_id: dict(row) for row_id, row in latest.items()})
-        while len(_LATEST_RECORDS_CACHE) > LATEST_RECORDS_CACHE_LIMIT:
-            _LATEST_RECORDS_CACHE.pop(next(iter(_LATEST_RECORDS_CACHE)))
-    return {row_id: dict(row) for row_id, row in latest.items()}
+    return ledger_store.latest_records_by_id(path, key)
 
 
 def latest_task_records() -> dict[str, dict[str, Any]]:
     return latest_records_by_id(AGENT_TASK_LEDGER_PATH, "task_id")
 
 
+def append_progress_ledger(
+    task_row: dict[str, Any],
+    *,
+    source: str = "task_ledger",
+) -> dict[str, Any]:
+    task_id = str(task_row.get("task_id") or "")
+    row = {
+        "schema_version": "agentprogress.v1",
+        "progress_id": short_uid("progress"),
+        "timestamp": str(task_row.get("timestamp") or now_iso()),
+        "task_id": task_id,
+        "parent_task_id": str(task_row.get("parent_task_id") or ""),
+        "status": str(task_row.get("status") or ""),
+        "assigned_agent": str(task_row.get("assigned_agent") or ""),
+        "title": str(task_row.get("title") or ""),
+        "kind": str(task_row.get("kind") or ""),
+        "summary": str(task_row.get("summary") or task_row.get("error") or task_row.get("objective") or ""),
+        "error": str(task_row.get("error") or ""),
+        "artifact_refs": [str(ref) for ref in (task_row.get("artifact_refs") or []) if str(ref)],
+        "source": source,
+        "task_ref": task_id,
+    }
+    append_jsonl(AGENT_PROGRESS_LEDGER_PATH, row)
+    return row
+
+
+def latest_progress_records() -> dict[str, dict[str, Any]]:
+    return latest_records_by_id(AGENT_PROGRESS_LEDGER_PATH, "progress_id")
+
+
+def progress_history(task_id: str) -> list[dict[str, Any]]:
+    return ledger_store.rows_matching(AGENT_PROGRESS_LEDGER_PATH, "task_id", task_id)
+
+
+def recent_progress_records(limit: int = 8) -> list[dict[str, Any]]:
+    return read_jsonl(AGENT_PROGRESS_LEDGER_PATH, limit=limit)
+
+
 def task_history(task_id: str) -> list[dict[str, Any]]:
-    task_id = str(task_id or "")
-    return [row for row in read_jsonl(AGENT_TASK_LEDGER_PATH) if str(row.get("task_id") or "") == task_id]
+    return ledger_store.rows_matching(AGENT_TASK_LEDGER_PATH, "task_id", task_id)
 
 
 def terminal_task_status(status: str) -> bool:
@@ -6610,15 +6565,18 @@ def context_layers_for_task(
     workspace_context = workspace_context or {}
     if sub.security_context == "secret":
         recent_tasks: list[dict[str, Any]] = []
+        recent_progress: list[dict[str, Any]] = []
         recent_traces: list[dict[str, Any]] = []
         recent_artifacts: list[dict[str, Any]] = []
     else:
         recent_tasks = read_jsonl(AGENT_TASK_LEDGER_PATH, limit=8)
+        recent_progress = recent_progress_records(limit=8)
         recent_traces = read_jsonl(AGENT_TRACES_PATH, limit=8)
         recent_artifacts = list(artifact_index_latest().values())[-8:]
+    progress_source = recent_progress or recent_tasks
     progress_items = [
         f"{row.get('task_id', '')}: {row.get('status', '')} {truncate_cells(str(row.get('summary') or row.get('error') or row.get('objective') or ''), 160)}"
-        for row in recent_tasks[-6:]
+        for row in progress_source[-6:]
     ]
     project_items = [
         "Shuheng agent harness implementation follows docs/agent-harness-architecture.md.",
@@ -7581,6 +7539,7 @@ def external_bridge_registry() -> dict[str, Any]:
             "audit": {
                 "messages": AGENT_MAIL_PATH,
                 "tasks": AGENT_TASK_LEDGER_PATH,
+                "progress": AGENT_PROGRESS_LEDGER_PATH,
                 "approvals": AGENT_APPROVALS_PATH,
                 "traces": AGENT_TRACES_PATH,
                 "artifacts": AGENT_ARTIFACT_INDEX_PATH,
@@ -7630,6 +7589,7 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
     return [
         {"uri": "resource://agent-mail/messages", "path": AGENT_MAIL_PATH, "description": "Internal Agent Mail JSONL"},
         {"uri": "resource://agent-mail/tasks", "path": AGENT_TASK_LEDGER_PATH, "description": "Task ledger JSONL"},
+        {"uri": "resource://agent-mail/progress", "path": AGENT_PROGRESS_LEDGER_PATH, "description": "Progress ledger JSONL"},
         {"uri": "resource://agent-mail/artifacts", "path": AGENT_ARTIFACT_INDEX_PATH, "description": "Artifact index JSONL"},
         {"uri": "resource://agent-mail/checkpoints", "path": AGENT_CHECKPOINT_INDEX_PATH, "description": "Checkpoint index JSONL"},
         {"uri": "resource://agent-mail/recovery", "path": AGENT_RECOVERY_PATH, "description": "Recovery records JSONL"},
@@ -9295,7 +9255,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "control",
         "responsibility": "Own final task outcome, delegate bounded work, synthesize results, and keep audit trails.",
         "functions": ["append_orchestrator_plan", "start_subagent_task", "process_ui_queue"],
-        "stores": ["orchestrator_plans", "tasks", "messages", "traces"],
+        "stores": ["orchestrator_plans", "tasks", "progress", "messages", "traces"],
         "write_policy": "delegates_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9304,7 +9264,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "control",
         "responsibility": "Build task plan, budget, stop conditions, context plan, memory plan, and evaluation plan.",
         "functions": ["append_orchestrator_plan", "task_contract_for_role", "default_task_budget"],
-        "stores": ["orchestrator_plans", "tasks"],
+        "stores": ["orchestrator_plans", "tasks", "progress"],
         "write_policy": "none",
         "memory_write_policy": "candidate_only",
     },
@@ -9322,7 +9282,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "control",
         "responsibility": "Assemble L0-L8 context packs, memory hydration, source policy, and raw-log exclusion.",
         "functions": ["build_context_pack", "format_context_pack_for_prompt", "context_policy_for_task"],
-        "stores": ["artifacts", "tasks", "messages", "traces"],
+        "stores": ["artifacts", "tasks", "progress", "messages", "traces"],
         "write_policy": "artifact_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9340,7 +9300,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "governance",
         "responsibility": "Classify risky actions and keep model choices subordinate to program-level policy.",
         "functions": ["evaluate_policy_action", "risks_for_action", "policy_rule_for"],
-        "stores": ["policy", "policy_decisions", "tasks"],
+        "stores": ["policy", "policy_decisions", "tasks", "progress"],
         "write_policy": "none",
         "memory_write_policy": "candidate_only",
     },
@@ -9359,7 +9319,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "governance",
         "responsibility": "Score final state, evidence, citation, source quality, tool efficiency, and policy compliance.",
         "functions": ["append_task_eval", "collect_task_audit_refs", "eval_panel_items"],
-        "stores": ["evals", "traces", "artifacts", "tasks"],
+        "stores": ["evals", "traces", "artifacts", "tasks", "progress"],
         "write_policy": "eval_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9368,7 +9328,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "governance",
         "responsibility": "Checkpoint tasks, inspect stale work, and perform approval-gated recovery actions.",
         "functions": ["append_task_checkpoint", "append_recovery_plan", "append_recovery_record", "recover_task_action"],
-        "stores": ["checkpoints", "checkpoint_store", "recovery_plans", "recovery", "tasks"],
+        "stores": ["checkpoints", "checkpoint_store", "recovery_plans", "recovery", "tasks", "progress"],
         "write_policy": "recovery_state_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9377,7 +9337,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "layer": "protocol",
         "responsibility": "Expose internal Agent Mail as A2A-compatible objects, MCP tool/resource registries, external bridge descriptors, and an optional network gateway.",
         "functions": ["ensure_gateway_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry", "serve_gateway", "start_gateway_daemon", "stop_gateway_daemon", "GatewayRequestHandler"],
-        "stores": ["gateway", "messages", "tasks", "artifacts", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
+        "stores": ["gateway", "messages", "tasks", "progress", "artifacts", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
         "write_policy": "registry_only",
         "memory_write_policy": "candidate_only",
     },
@@ -9388,6 +9348,7 @@ def governance_store_paths() -> dict[str, str]:
     return {
         "messages": AGENT_MAIL_PATH,
         "tasks": AGENT_TASK_LEDGER_PATH,
+        "progress": AGENT_PROGRESS_LEDGER_PATH,
         "approvals": AGENT_APPROVALS_PATH,
         "artifacts": AGENT_ARTIFACT_INDEX_PATH,
         "policy": AGENT_POLICY_PATH,
@@ -9506,6 +9467,7 @@ def baseline_item(
 
 def architecture_baseline_report(state: Optional[State] = None, gateway_data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     tasks = read_jsonl(AGENT_TASK_LEDGER_PATH)
+    progress = read_jsonl(AGENT_PROGRESS_LEDGER_PATH)
     mail = read_jsonl(AGENT_MAIL_PATH)
     artifacts = read_jsonl(AGENT_ARTIFACT_INDEX_PATH)
     approvals = read_jsonl(AGENT_APPROVALS_PATH)
@@ -9575,6 +9537,8 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
             "任务、进度、通信和审批必须可审计、可恢复。",
             [
                 (bool(AGENT_TASK_LEDGER_PATH), "task ledger path is configured"),
+                (bool(AGENT_PROGRESS_LEDGER_PATH), "progress ledger path is configured"),
+                (bool(progress) or not tasks or callable(append_progress_ledger), "progress ledger writer is available for task progress rows"),
                 (bool(AGENT_MAIL_PATH), "agent mail path is configured"),
                 (bool(AGENT_TRACES_PATH), "trace ledger path is configured"),
                 (bool(AGENT_APPROVALS_PATH), "approvals.jsonl path is registered"),
@@ -9816,6 +9780,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "internal_agent_mail": {
             "messages": AGENT_MAIL_PATH,
             "tasks": AGENT_TASK_LEDGER_PATH,
+            "progress": AGENT_PROGRESS_LEDGER_PATH,
             "approvals": AGENT_APPROVALS_PATH,
             "artifacts": AGENT_ARTIFACTS_DIR,
             "artifact_index": AGENT_ARTIFACT_INDEX_PATH,
@@ -10027,6 +9992,7 @@ def append_task_ledger(
         "error": error,
     }
     append_jsonl(AGENT_TASK_LEDGER_PATH, row)
+    append_progress_ledger(row)
     return row
 
 
@@ -18462,6 +18428,7 @@ def dashboard_cache_signature(raw: Any) -> str:
 def home_registry_signature() -> tuple[tuple[int, int], ...]:
     return (
         jsonl_file_signature(AGENT_TASK_LEDGER_PATH),
+        jsonl_file_signature(AGENT_PROGRESS_LEDGER_PATH),
         jsonl_file_signature(AGENT_APPROVALS_PATH),
         jsonl_file_signature(AGENT_ARTIFACT_INDEX_PATH),
         jsonl_file_signature(AGENT_SCHEDULES_PATH),

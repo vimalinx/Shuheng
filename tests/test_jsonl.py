@@ -1,8 +1,8 @@
-"""Tests for JSONL read/append helpers (ga_tui.app).
+"""Tests for JSONL read/append helpers.
 
-The append helper now holds a process-internal lock per path plus an advisory
-fcntl.flock for cross-process safety. These tests cover correctness, not
-concurrency (a dedicated stress test covers that).
+The shared ledger store holds a process-internal lock per path plus an advisory
+fcntl.flock for cross-process safety. These tests cover correctness, caching,
+and app compatibility wrappers, not concurrency.
 """
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ from pathlib import Path
 
 
 from ga_tui.app import append_jsonl, read_jsonl
+from ga_tui.ledger_store import (
+    clear_jsonl_caches,
+    jsonl_file_signature,
+    latest_records_by_id,
+    rows_matching,
+)
 
 
 class TestAppendJsonl:
@@ -86,3 +92,37 @@ class TestReadJsonl:
         rows = read_jsonl(str(path))
         assert len(rows) == 1
         assert rows[0]["ok"] is True
+
+
+class TestLedgerStore:
+    def test_latest_records_cache_returns_copies_and_invalidates_on_append(self, tmp_path: Path) -> None:
+        clear_jsonl_caches()
+        path = tmp_path / "tasks.jsonl"
+        append_jsonl(str(path), {"task_id": "t1", "status": "queued"})
+        append_jsonl(str(path), {"task_id": "t2", "status": "working"})
+
+        first = latest_records_by_id(str(path), "task_id")
+        first["t1"]["status"] = "mutated"
+        assert latest_records_by_id(str(path), "task_id")["t1"]["status"] == "queued"
+
+        append_jsonl(str(path), {"task_id": "t1", "status": "completed"})
+        latest = latest_records_by_id(str(path), "task_id")
+        assert latest["t1"]["status"] == "completed"
+        assert latest["t2"]["status"] == "working"
+
+    def test_rows_matching_reads_exact_field_history(self, tmp_path: Path) -> None:
+        path = tmp_path / "tasks.jsonl"
+        append_jsonl(str(path), {"task_id": "t1", "status": "queued"})
+        append_jsonl(str(path), {"task_id": "t2", "status": "working"})
+        append_jsonl(str(path), {"task_id": "t1", "status": "completed"})
+
+        rows = rows_matching(str(path), "task_id", "t1")
+        assert [row["status"] for row in rows] == ["queued", "completed"]
+
+    def test_file_signature_changes_on_append(self, tmp_path: Path) -> None:
+        path = tmp_path / "tasks.jsonl"
+        assert jsonl_file_signature(str(path)) == (0, 0)
+        append_jsonl(str(path), {"task_id": "t1"})
+        first = jsonl_file_signature(str(path))
+        append_jsonl(str(path), {"task_id": "t2"})
+        assert jsonl_file_signature(str(path))[1] > first[1]

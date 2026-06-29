@@ -61,7 +61,7 @@
 | 长会话容易混乱 | 历史恢复、置顶、分类、过滤、归档和回收站 |
 | 多 Agent 容易失控 | 主控 orchestrator 统一拆解、调度、汇总和验收 |
 | 子 Agent 身份不稳定 | 支持临时/持久子 Agent、profile、role、模型和记忆候选 |
-| 任务进展难追踪 | 任务账本、步骤计划、agent mail、artifact、启发式 eval 和 trace |
+| 任务进展难追踪 | 任务账本、独立 progress ledger、步骤计划、agent mail、artifact、启发式 eval 和 trace |
 | Secret 内容不应混入普通历史 | 本地加密 Secret Vault，锁定后清除明文状态 |
 
 当前实现基于 Python `curses`，刻意选择低依赖、可控、稳定的终端方案，避免复杂 UI 框架在部分终端、Wayland 或鼠标模式组合下引入输入污染。
