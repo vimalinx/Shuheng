@@ -28,15 +28,44 @@ def wheel_entry_points_text(missing_script: str = "") -> str:
     return "\n".join(["[console_scripts]", *[f"{script} = ga_tui.__main__:main" for script in scripts], ""])
 
 
-def write_wheel_fixture(path: Path, members: list[str], *, missing_script: str = "") -> None:
+def wheel_fixture_content(member: str, *, missing_script: str = "") -> bytes:
+    if member.endswith("/METADATA"):
+        return b"Name: shuheng\nVersion: 0.1.0\n"
+    if member.endswith("/entry_points.txt"):
+        return wheel_entry_points_text(missing_script).encode()
+    return b"fixture\n"
+
+
+def write_wheel_fixture(
+    path: Path,
+    members: list[str],
+    *,
+    missing_script: str = "",
+    missing_record_member: str = "",
+    corrupt_record_member: str = "",
+    corrupt_size_member: str = "",
+) -> None:
+    content_by_member = {
+        member: wheel_fixture_content(member, missing_script=missing_script)
+        for member in members
+        if not member.endswith("/RECORD")
+    }
+    record_member = next((member for member in members if member.endswith("/RECORD")), "")
+    if record_member:
+        rows = []
+        for member, data in content_by_member.items():
+            if member == missing_record_member:
+                continue
+            hash_field = "sha256=invalid" if member == corrupt_record_member else wheel_smoke.wheel_record_hash(data)
+            size_field = str(len(data) + 1) if member == corrupt_size_member else str(len(data))
+            rows.append(f"{member},{hash_field},{size_field}")
+        if record_member != missing_record_member:
+            rows.append(f"{record_member},,")
+        content_by_member[record_member] = ("\n".join(rows) + "\n").encode()
+
     with zipfile.ZipFile(path, "w") as archive:
         for member in members:
-            if member.endswith("/METADATA"):
-                archive.writestr(member, "Name: shuheng\nVersion: 0.1.0\n")
-            elif member.endswith("/entry_points.txt"):
-                archive.writestr(member, wheel_entry_points_text(missing_script))
-            else:
-                archive.writestr(member, "fixture\n")
+            archive.writestr(member, content_by_member.get(member, b"fixture\n"))
 
 
 def expected_wheel_members() -> list[str]:
@@ -202,3 +231,38 @@ def test_wheel_archive_contract_rejects_missing_console_script_metadata(tmp_path
         assert "entry_points.txt missing console scripts: shuheng-check" in str(exc)
     else:
         raise AssertionError("missing wheel console script metadata should fail")
+
+
+def test_wheel_record_integrity_accepts_hashes_and_sizes(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, expected_wheel_members())
+
+    check = wheel_smoke.wheel_record_integrity_check(wheel)
+
+    assert check["command"] == "wheel RECORD hash/size integrity"
+    assert check["returncode"] == 0
+    assert check["verified_members"] == len(expected_wheel_members()) - 1
+
+
+def test_wheel_record_integrity_rejects_hash_mismatch(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, expected_wheel_members(), corrupt_record_member="ga_tui/app.py")
+
+    try:
+        wheel_smoke.wheel_record_integrity_check(wheel)
+    except ValueError as exc:
+        assert "RECORD hash mismatch: ga_tui/app.py" in str(exc)
+    else:
+        raise AssertionError("wheel RECORD hash mismatch should fail")
+
+
+def test_wheel_record_integrity_rejects_missing_member_row(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, expected_wheel_members(), missing_record_member="ga_tui/app.py")
+
+    try:
+        wheel_smoke.wheel_record_integrity_check(wheel)
+    except ValueError as exc:
+        assert "RECORD missing rows: ga_tui/app.py" in str(exc)
+    else:
+        raise AssertionError("wheel RECORD missing row should fail")

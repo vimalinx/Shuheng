@@ -192,6 +192,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
         ],
         "checks": [
             "wheel archive metadata/private member contract",
+            "wheel RECORD hash/size integrity",
             "wheel artifact content leak scan",
             "sdist archive public/private member contract",
             "sdist artifact content leak scan",

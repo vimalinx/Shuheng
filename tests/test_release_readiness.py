@@ -15,6 +15,7 @@ def test_release_readiness_exposes_distribution_smoke_contract() -> None:
     assert distribution_smoke["command"] == "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
     assert "shuheng-check" in distribution_smoke["public_console_scripts"]
     assert "wheel archive metadata/private member contract" in distribution_smoke["checks"]
+    assert "wheel RECORD hash/size integrity" in distribution_smoke["checks"]
     assert "wheel artifact content leak scan" in distribution_smoke["checks"]
     assert "sdist archive public/private member contract" in distribution_smoke["checks"]
     assert "sdist artifact content leak scan" in distribution_smoke["checks"]

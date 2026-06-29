@@ -116,6 +116,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Wheel smoke must inspect the built wheel archive contents directly so the
   release gate proves wheel metadata, license, entry points, package modules,
   and private/local path exclusions before install.
+- Wheel smoke must verify built wheel `RECORD` entries so every non-`RECORD`
+  member has a matching `sha256=` hash and byte size before install.
 - Wheel smoke must inspect the built sdist archive contents directly so the
   release gate proves the actual tarball, not only `MANIFEST.in` intent.
 - Wheel smoke must scan built wheel and sdist artifact member contents for
@@ -142,6 +144,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Built wheel archive omits required `ga_tui` package modules, dist-info
   metadata, license, or public console-script entry point metadata, or contains
   private/local paths -> wheel smoke fails.
+- Built wheel `RECORD` omits an archive member, contains rows for missing
+  members, uses a non-sha256 hash, or has a hash/size mismatch -> wheel smoke
+  fails.
 - Built wheel or sdist artifact member content contains realistic API
   key/private-key material or local absolute user paths -> wheel smoke fails.
 - CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` or
@@ -200,14 +205,15 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Wheel smoke must assert all public console scripts are installed from both
   the latest wheel and latest sdist. It must inspect the wheel archive member
   list for required modules, dist-info metadata, license, entry points, and
-  forbidden private/local paths before installing the wheel. It must inspect the
-  sdist archive member list for required public files and forbidden
-  private/local paths before installing the sdist. It must scan both artifact
-  contents for realistic secret-like literals and local absolute user paths
-  before installing either artifact. It may run `--help` for helper scripts
-  that do not import the full TUI runtime, must run `shuheng --help` after each
-  dependency-resolving install, and must run installed `shuheng-check` against
-  an isolated GenericAgent stub.
+  forbidden private/local paths before installing the wheel. It must verify
+  wheel `RECORD` sha256 hashes and byte sizes before installing the wheel. It
+  must inspect the sdist archive member list for required public files and
+  forbidden private/local paths before installing the sdist. It must scan both
+  artifact contents for realistic secret-like literals and local absolute user
+  paths before installing either artifact. It may run `--help` for helper
+  scripts that do not import the full TUI runtime, must run `shuheng --help`
+  after each dependency-resolving install, and must run installed
+  `shuheng-check` against an isolated GenericAgent stub.
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
   use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
   `--no-deps` or `--wheel-only`.

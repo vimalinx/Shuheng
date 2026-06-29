@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -294,6 +298,89 @@ def wheel_dist_info_dir(members: set[str]) -> str:
     return dist_info_dirs[0]
 
 
+def wheel_record_hash(data: bytes) -> str:
+    digest = hashlib.sha256(data).digest()
+    return "sha256=" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def wheel_record_integrity_check(wheel: Path) -> dict[str, object]:
+    members = normalized_wheel_members(wheel)
+    dist_info_dir = wheel_dist_info_dir(members)
+    record_path = f"{dist_info_dir}/RECORD"
+    if record_path not in members:
+        raise ValueError(f"wheel RECORD integrity failed: missing {record_path}")
+
+    with zipfile.ZipFile(wheel) as archive:
+        archive_names = [
+            "/".join(normalized_archive_parts(raw_name))
+            for raw_name in archive.namelist()
+            if not raw_name.endswith("/")
+        ]
+        archive_member_set = set(archive_names)
+        record_text = archive.read(record_path).decode("utf-8", errors="replace")
+        record_rows = list(csv.reader(io.StringIO(record_text)))
+        row_by_path: dict[str, list[str]] = {}
+        duplicates: list[str] = []
+        for row in record_rows:
+            if not row:
+                continue
+            path = row[0]
+            if path in row_by_path:
+                duplicates.append(path)
+            row_by_path[path] = row
+
+        errors: list[str] = []
+        if duplicates:
+            errors.append("duplicate RECORD rows: " + ", ".join(sorted(duplicates)))
+        missing_rows = sorted(member for member in archive_member_set if member not in row_by_path)
+        if missing_rows:
+            errors.append("RECORD missing rows: " + ", ".join(missing_rows))
+        extra_rows = sorted(path for path in row_by_path if path not in archive_member_set)
+        if extra_rows:
+            errors.append("RECORD rows for missing members: " + ", ".join(extra_rows))
+
+        verified = 0
+        for member in sorted(archive_member_set):
+            row = row_by_path.get(member)
+            if not row:
+                continue
+            hash_field = row[1] if len(row) > 1 else ""
+            size_field = row[2] if len(row) > 2 else ""
+            if member == record_path:
+                if hash_field or size_field:
+                    errors.append(f"RECORD self row must not carry hash/size: {member}")
+                continue
+            data = archive.read(member)
+            expected_hash = wheel_record_hash(data)
+            if not hash_field:
+                errors.append(f"RECORD missing hash: {member}")
+            elif not hash_field.startswith("sha256="):
+                errors.append(f"RECORD must use sha256 hash: {member}")
+            elif hash_field != expected_hash:
+                errors.append(f"RECORD hash mismatch: {member}")
+            if not size_field:
+                errors.append(f"RECORD missing size: {member}")
+            else:
+                try:
+                    size = int(size_field)
+                except ValueError:
+                    errors.append(f"RECORD invalid size: {member}")
+                else:
+                    if size != len(data):
+                        errors.append(f"RECORD size mismatch: {member}")
+            if hash_field == expected_hash and size_field == str(len(data)):
+                verified += 1
+
+    if errors:
+        raise ValueError("wheel RECORD integrity failed: " + "; ".join(errors))
+    return {
+        "command": "wheel RECORD hash/size integrity",
+        "returncode": 0,
+        "verified_members": verified,
+        "record_rows": len(record_rows),
+    }
+
+
 def wheel_archive_contract_check(wheel: Path) -> dict[str, object]:
     members = normalized_wheel_members(wheel)
     dist_info_dir = wheel_dist_info_dir(members)
@@ -380,9 +467,10 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
 
 def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = wheel_archive_contract_check(wheel)
+    record_check = wheel_record_integrity_check(wheel)
     content_check = check_archive_text_has_no_release_leaks(wheel_text_rows(wheel), artifact_kind="wheel")
     report = run_artifact_smoke(wheel, artifact_kind="wheel", no_deps=no_deps)
-    report["checks"] = [archive_check, content_check, *list(report["checks"])]
+    report["checks"] = [archive_check, record_check, content_check, *list(report["checks"])]
     return report
 
 

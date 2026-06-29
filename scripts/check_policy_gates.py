@@ -3926,6 +3926,7 @@ def assert_release_readiness_schema(report: dict) -> None:
         "shuheng-integration",
     } <= set(distribution_smoke["public_console_scripts"]), report
     assert "wheel archive metadata/private member contract" in distribution_smoke["checks"], report
+    assert "wheel RECORD hash/size integrity" in distribution_smoke["checks"], report
     assert "wheel artifact content leak scan" in distribution_smoke["checks"], report
     assert "sdist archive public/private member contract" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
