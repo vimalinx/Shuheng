@@ -191,6 +191,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "shuheng-integration",
         ],
         "checks": [
+            "sdist archive public/private member contract",
             "public console scripts exist",
             "shuheng --help",
             "helper --help entrypoints",

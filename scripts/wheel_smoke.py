@@ -7,8 +7,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import subprocess
 import sys
+import tarfile
 import tempfile
 import venv
 
@@ -36,6 +38,46 @@ HELP_SAFE_CONSOLE_SCRIPTS = (
     "shuheng-agent-bridge",
     "shuheng-install-core-shim",
     "shuheng-integration",
+)
+
+SDIST_REQUIRED_MEMBERS = (
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "MANIFEST.in",
+    "README.en.md",
+    "README.md",
+    "SECURITY.md",
+    "docs/agent-harness-architecture.md",
+    "docs/runtime-provider-control-plane.md",
+    "integrations/omp-ga-tui-plugin/README.md",
+    "integrations/omp-ga-tui-plugin/package.json",
+    "integrations/omp-ga-tui-plugin/tools/index.ts",
+    "pyproject.toml",
+    "scripts/check_policy_gates.py",
+    "scripts/check_release_hygiene.py",
+    "scripts/runtime_smoke.py",
+    "scripts/wheel_smoke.py",
+    "src/ga_tui/app.py",
+    "tests/test_release_hygiene.py",
+    "tests/test_wheel_smoke.py",
+)
+
+SDIST_FORBIDDEN_MEMBERS = (
+    "docs/foreign-student-acquisition-research.md",
+    "docs/homework-pricing-research.md",
+)
+
+SDIST_FORBIDDEN_PREFIXES = (
+    ".codex/",
+    ".trellis/",
+    "config/",
+    "goal-",
+    "memory/",
+    "references/",
+    "temp/",
+    "tmp/",
 )
 
 
@@ -101,6 +143,51 @@ def write_fake_genericagent_root(root: Path) -> Path:
     return ga_root
 
 
+def normalized_sdist_members(sdist: Path) -> set[str]:
+    with tarfile.open(sdist, "r:gz") as archive:
+        names = [member.name for member in archive.getmembers()]
+
+    top_levels: set[str] = set()
+    normalized: set[str] = set()
+    for raw_name in names:
+        posix = PurePosixPath(raw_name)
+        if posix.is_absolute() or ".." in posix.parts:
+            raise ValueError(f"unsafe sdist archive member path: {raw_name}")
+        parts = tuple(part for part in posix.parts if part not in {"", "."})
+        if not parts:
+            continue
+        top_levels.add(parts[0])
+        if len(parts) > 1:
+            normalized.add("/".join(parts[1:]))
+
+    if len(top_levels) != 1:
+        raise ValueError(f"sdist archive must have one top-level directory, found: {sorted(top_levels)}")
+    return normalized
+
+
+def sdist_archive_contract_check(sdist: Path) -> dict[str, object]:
+    members = normalized_sdist_members(sdist)
+    missing = sorted(member for member in SDIST_REQUIRED_MEMBERS if member not in members)
+    forbidden = sorted(
+        member
+        for member in members
+        if member in SDIST_FORBIDDEN_MEMBERS or member.startswith(SDIST_FORBIDDEN_PREFIXES)
+    )
+    if missing or forbidden:
+        details = []
+        if missing:
+            details.append("missing required members: " + ", ".join(missing))
+        if forbidden:
+            details.append("forbidden members present: " + ", ".join(forbidden))
+        raise ValueError("sdist archive contract failed: " + "; ".join(details))
+    return {
+        "command": "sdist archive public/private member contract",
+        "returncode": 0,
+        "required_members": len(SDIST_REQUIRED_MEMBERS),
+        "forbidden_members": 0,
+    }
+
+
 def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = False) -> dict[str, object]:
     artifact = artifact.resolve()
     if not artifact.is_file():
@@ -145,7 +232,10 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
 
 
 def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
-    return run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
+    archive_check = sdist_archive_contract_check(sdist)
+    report = run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
+    report["checks"] = [archive_check, *list(report["checks"])]
+    return report
 
 
 def run_distribution_smoke(wheel: Path, sdist: Path | None, *, no_deps: bool = False) -> dict[str, object]:

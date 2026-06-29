@@ -460,7 +460,7 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-
 git diff --check
 ```
 
-`scripts/wheel_smoke.py --dist-dir` 默认会分别安装最新 wheel 和 sdist，并运行公开入口点检查；`--no-deps` 和 `--wheel-only` 仅用于本地调试，不属于发布门禁。
+`scripts/wheel_smoke.py --dist-dir` 默认会分别安装最新 wheel 和 sdist，检查 sdist archive 的公开/私有文件边界，并运行公开入口点检查；`--no-deps` 和 `--wheel-only` 仅用于本地调试，不属于发布门禁。
 
 发布前确认不要把本地绝对路径、密钥、模型配置、普通会话日志或 Secret Vault 内容写进仓库。`scripts/check_release_hygiene.py` 会检查治理文件、包元数据、私有路径、真实密钥形态和公开 alpha 口径。
 

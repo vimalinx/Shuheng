@@ -113,6 +113,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   behaviors, and debug-only options that are not release gates.
 - The sdist must include intended public docs and integration plugin files while
   excluding private research/config/reference paths.
+- Wheel smoke must inspect the built sdist archive contents directly so the
+  release gate proves the actual tarball, not only `MANIFEST.in` intent.
 - OMP plugin user-facing labels and docs should say Shuheng. Compatibility tool
   ids may remain `ga_tui_*`.
 
@@ -128,6 +130,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   hygiene fails.
 - MANIFEST drops release scripts or private-path exclusions -> release hygiene
   fails.
+- Built sdist archive omits required public docs/scripts/tests or contains
+  private/local paths such as `config/`, `.trellis/`, `memory/`, `temp/`,
+  `tmp/`, `goal-*`, or private research docs -> wheel smoke fails.
 - CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` or
   `--wheel-only` -> release hygiene fails because the public gate no longer
   matches real wheel+sdist installation.
@@ -182,8 +187,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
   `shuheng-check`, and `git diff --check`.
 - Wheel smoke must assert all public console scripts are installed from both
-  the latest wheel and latest sdist. It may run `--help` for helper scripts
-  that do not import the full TUI runtime, must run `shuheng --help` after each
+  the latest wheel and latest sdist. It must inspect the sdist archive member
+  list for required public files and forbidden private/local paths before
+  installing the artifact. It may run `--help` for helper scripts that do not
+  import the full TUI runtime, must run `shuheng --help` after each
   dependency-resolving install, and must run installed `shuheng-check` against
   an isolated GenericAgent stub.
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
