@@ -24,12 +24,14 @@ PYTHONPATH=src python -m ga_tui
 Run these before opening a pull request:
 
 ```bash
-python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
+PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
 git diff --check
 ```
 

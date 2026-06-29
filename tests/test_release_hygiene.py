@@ -9,6 +9,7 @@ def test_wheel_smoke_release_mode_rejects_no_deps(monkeypatch) -> None:
     texts = {
         "README.md": command,
         "README.en.md": f"{command} --no-deps",
+        "CONTRIBUTING.md": command,
         ".github/workflows/ci.yml": command,
     }
 
@@ -25,6 +26,7 @@ def test_wheel_smoke_release_mode_rejects_wheel_only(monkeypatch) -> None:
     texts = {
         "README.md": command,
         "README.en.md": command,
+        "CONTRIBUTING.md": command,
         ".github/workflows/ci.yml": f"{command} --wheel-only",
     }
 
@@ -89,3 +91,17 @@ def test_ci_workflow_requires_diff_cleanliness(monkeypatch) -> None:
     hygiene.check_ci_workflow(errors)
 
     assert "CI workflow missing release command: git diff --check" in errors
+
+
+def test_contributing_release_checks_reject_stale_command_list(monkeypatch) -> None:
+    command_text = "\n".join(
+        fragment
+        for fragment in hygiene.PUBLIC_RELEASE_COMMAND_FRAGMENTS
+        if "runtime_smoke.py" not in fragment
+    )
+    monkeypatch.setattr(hygiene, "read_text", lambda path: command_text if path == "CONTRIBUTING.md" else "")
+
+    errors: list[str] = []
+    hygiene.check_contributing_release_checks(errors)
+
+    assert any("CONTRIBUTING.md missing contributor release command" in error and "runtime_smoke.py" in error for error in errors)

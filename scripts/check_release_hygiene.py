@@ -101,6 +101,17 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
 
 RELEASE_WHEEL_SMOKE_FRAGMENT = "scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
 PYTHON_VERSION_PATTERN = re.compile(r"(?<!\d)(\d+\.\d+)(?!\d)")
+PUBLIC_RELEASE_COMMAND_FRAGMENTS = (
+    "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
+    "python scripts/check_release_hygiene.py",
+    "python scripts/check_policy_gates.py",
+    "python scripts/runtime_smoke.py",
+    "python -m pytest -q -p no:cacheprovider",
+    "python -m compileall -q src scripts",
+    "python -m build --sdist --wheel --outdir /tmp/shuheng-dist",
+    "python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
+    "git diff --check",
+)
 
 
 def git_lines(*args: str) -> list[str]:
@@ -264,6 +275,7 @@ def check_wheel_smoke_release_mode(errors: list[str]) -> None:
     surfaces = {
         "README.md": read_text("README.md"),
         "README.en.md": read_text("README.en.md"),
+        "CONTRIBUTING.md": read_text("CONTRIBUTING.md"),
         ".github/workflows/ci.yml": read_text(".github/workflows/ci.yml"),
     }
     for path, text in surfaces.items():
@@ -280,20 +292,16 @@ def check_wheel_smoke_release_mode(errors: list[str]) -> None:
 
 def check_ci_workflow(errors: list[str]) -> None:
     workflow = read_text(".github/workflows/ci.yml")
-    required_fragments = (
-        "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
-        "python scripts/check_release_hygiene.py",
-        "python scripts/check_policy_gates.py",
-        "python scripts/runtime_smoke.py",
-        "python -m pytest -q -p no:cacheprovider",
-        "python -m compileall -q src scripts",
-        "python -m build --sdist --wheel --outdir /tmp/shuheng-dist",
-        "python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
-        "git diff --check",
-    )
-    for fragment in required_fragments:
+    for fragment in PUBLIC_RELEASE_COMMAND_FRAGMENTS:
         if fragment not in workflow:
             errors.append(f"CI workflow missing release command: {fragment}")
+
+
+def check_contributing_release_checks(errors: list[str]) -> None:
+    contributing = read_text("CONTRIBUTING.md")
+    for fragment in PUBLIC_RELEASE_COMMAND_FRAGMENTS:
+        if fragment not in contributing:
+            errors.append(f"CONTRIBUTING.md missing contributor release command: {fragment}")
 
 
 def main() -> int:
@@ -307,6 +315,7 @@ def main() -> int:
     check_public_positioning(errors)
     check_wheel_smoke_release_mode(errors)
     check_ci_workflow(errors)
+    check_contributing_release_checks(errors)
 
     if errors:
         print("release hygiene checks failed:", file=sys.stderr)

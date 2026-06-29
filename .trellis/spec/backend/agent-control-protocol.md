@@ -63,8 +63,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - Trigger: Shuheng is prepared for a public open-source alpha release.
 - Applies to: root governance files, package metadata, README release commands,
-  GitHub Actions CI, source distribution contents, release-readiness metadata,
-  ignored local/private paths, and OMP plugin public wording.
+  CONTRIBUTING local-check commands, GitHub Actions CI, source distribution
+  contents, release-readiness metadata, ignored local/private paths, and OMP
+  plugin public wording.
 - Non-goal: This does not publish the repository, change the remote URL, certify
   A2A/MCP protocol compliance, add production remote gateway auth, or rename
   internal compatibility identifiers such as `src/ga_tui`, `GA_TUI_*`,
@@ -92,6 +93,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   inclusions/private exclusions, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, wheel smoke, and `git diff --check`.
+- `CONTRIBUTING.md` must list the same reproducible local release checks so
+  contributor guidance cannot drift behind CI.
 - CI Python matrix must cover the package's minimum `requires-python` version
   and the highest `Programming Language :: Python :: X.Y` classifier advertised
   in `pyproject.toml`.
@@ -130,6 +133,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   Python classifier -> release hygiene fails.
 - CI omits `git diff --check` -> release hygiene fails because whitespace and
   generated-diff cleanliness are no longer enforced in the public gate.
+- `CONTRIBUTING.md` omits runtime smoke, wheel smoke, package build, or another
+  public release command -> release hygiene fails.
 - OMP plugin package name is not Shuheng-branded -> release hygiene fails.
 - `release_readiness_report(...)` is called with all hygiene booleans true ->
   known gaps do not include repository-level hygiene.
@@ -177,6 +182,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
   `--no-deps` or `--wheel-only`.
 - `scripts/check_release_hygiene.py` must assert CI runs `git diff --check`.
+- `scripts/check_release_hygiene.py` must assert `CONTRIBUTING.md` lists the
+  current public release-check commands.
 
 ### 7. Wrong vs Correct
 
