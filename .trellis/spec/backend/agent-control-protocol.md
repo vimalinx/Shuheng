@@ -602,7 +602,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - A queued direct-chat input must be stored in `sub.chat_queue`, increment `chat_queued` in metadata, and add a readable system notice to the chat session without displacing the trailing unfinished assistant stream row.
 - A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
 - A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
-- Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts.
+- Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts. Subagent runtime agents must use a non-persistent transcript sink such as `os.devnull`, not `sub.home/model_responses.txt`, so agent-local state stays metadata/refs/runtime only.
 - Secret subagent direct-chat transcripts must stay encrypted in Secret Vault storage and must not be copied into normal plaintext history.
 - Successful direct-chat replies continue to save chat session messages in canonical history, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
 - Direct chat must keep using role permissions, runtime context packs, and memory-candidate approval flow. It must not write task-result artifacts or task-ledger completion rows unless dispatched as `start_subagent_task(...)`.
@@ -616,6 +616,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Runtime stream emits partial text -> update the pending assistant row without losing follow-bottom behavior.
 - Runtime stream emits empty final text -> visible `[ERROR] runtime completed without a visible reply.` and user-visible failure status.
 - Runtime stream emits OMP/RPC terminal error -> release `active_task_id`, keep queued-chat progression, and surface failure in `state.last_error`.
+- Non-secret subagent runtime created for direct chat -> runtime `log_path` is `os.devnull`; canonical chat history row exists under `MODEL_RESPONSES_DIR`; no `sub.home/model_responses.txt` transcript file is created.
 
 ### 5. Good/Base/Bad Cases
 

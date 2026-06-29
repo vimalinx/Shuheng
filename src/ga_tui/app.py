@@ -12142,18 +12142,15 @@ def install_subagent_prompt(agent: Any, sub: SubAgentRuntime) -> None:
 
 def ensure_subagent_agent(state: State, sub: SubAgentRuntime) -> Any:
     if sub.agent is None:
-        if sub.security_context == "secret":
-            target_log_path = os.devnull
-        else:
-            os.makedirs(sub.home, exist_ok=True)
-            target_log_path = os.path.join(sub.home, "model_responses.txt")
+        os.makedirs(sub.home, exist_ok=True)
+        target_log_path = os.devnull
         sub.agent = new_agent(log_path=target_log_path)
         install_interaction_hook(state, sub.agent)
         set_agent_log_path(sub.agent, target_log_path)
         if sub.messages:
             restore_backend_from_secret_messages(sub.agent, sub.messages)
         bind_agent_token_session(state, sub.agent)
-    elif sub.security_context == "secret":
+    else:
         set_agent_log_path(sub.agent, os.devnull)
     install_subagent_prompt(sub.agent, sub)
     return sub.agent

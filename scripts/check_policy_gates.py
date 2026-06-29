@@ -3463,6 +3463,7 @@ def install_fake_agent_runtime() -> None:
         del state
         if sub.agent is None:
             sub.agent = FakeAgent()
+        a.set_agent_log_path(sub.agent, os.devnull)
         return sub.agent
 
     a.ensure_subagent_agent = fake_ensure
@@ -4845,6 +4846,8 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert "context_pack_ref:" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "do not introduce yourself as the main GenericAgent" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "persist before first token" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
+    assert a.agent_log_path(blocking_sub.agent) == os.devnull, a.agent_log_path(blocking_sub.agent)
+    assert not (Path(blocking_sub.home) / "model_responses.txt").exists(), "subagent runtime must not keep a private transcript log"
     blocking_entries = a.subagent_chat_session_entries(state, blocking_sub)
     assert blocking_entries and blocking_entries[0]["message_count"] == 2, blocking_entries
     assert a.path_is_within(blocking_entries[0]["history_path"], a.MODEL_RESPONSES_DIR), blocking_entries[0]
@@ -4870,6 +4873,8 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
 
     assert len(chat_agent.prompts) == 1, chat_agent.prompts
     assert chat_agent.prompts[0][1] == f"subagent-chat:{sub.agent_id}", chat_agent.prompts
+    assert a.agent_log_path(sub.agent) == os.devnull, a.agent_log_path(sub.agent)
+    assert not (Path(sub.home) / "model_responses.txt").exists(), "subagent runtime must not keep a private transcript log"
     assert "[GA TUI Context Pack]" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "Memory hydration pack:" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "Chat Agent memory marker" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
