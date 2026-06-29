@@ -55,3 +55,6 @@ jobs:
 
       - name: Wheel smoke
         run: PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
+
+      - name: Diff cleanliness
+        run: git diff --check

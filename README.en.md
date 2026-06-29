@@ -470,7 +470,7 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 - Security reporting and boundaries: see `SECURITY.md`. Gateway/Web Console has no built-in auth and should bind to loopback by default.
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
-- CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, and wheel smoke.
+- CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, wheel smoke, and `git diff --check`.
 
 ## Community
 

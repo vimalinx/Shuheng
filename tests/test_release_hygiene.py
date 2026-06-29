@@ -80,3 +80,12 @@ classifiers = [
     hygiene.check_python_support_ci_coverage(errors)
 
     assert "CI matrix must include highest declared Python classifier 3.13" in errors
+
+
+def test_ci_workflow_requires_diff_cleanliness(monkeypatch) -> None:
+    monkeypatch.setattr(hygiene, "read_text", lambda path: "" if path == ".github/workflows/ci.yml" else "")
+
+    errors: list[str] = []
+    hygiene.check_ci_workflow(errors)
+
+    assert "CI workflow missing release command: git diff --check" in errors

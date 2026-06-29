@@ -289,6 +289,7 @@ def check_ci_workflow(errors: list[str]) -> None:
         "python -m compileall -q src scripts",
         "python -m build --sdist --wheel --outdir /tmp/shuheng-dist",
         "python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
+        "git diff --check",
     )
     for fragment in required_fragments:
         if fragment not in workflow:

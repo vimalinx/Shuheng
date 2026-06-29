@@ -470,7 +470,7 @@ git diff --check
 - 安全报告与边界：见 `SECURITY.md`。Gateway/Web Console 无内建认证，默认只应绑定 loopback。
 - 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
 - 发布记录：见 `CHANGELOG.md`。
-- CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build 和 wheel smoke。
+- CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build、wheel smoke 和 `git diff --check`。
 
 ## Community
 

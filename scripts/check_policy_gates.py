@@ -3933,6 +3933,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert any("build --sdist --wheel" in command for command in report["verification_commands"]), report
     assert any("wheel_smoke.py" in command for command in report["verification_commands"]), report
     assert any("shuheng-check" in command for command in report["verification_commands"]), report
+    assert any(command == "git diff --check" for command in report["verification_commands"]), report
 
 
 def assert_governance_schema(registry: dict) -> None:

@@ -91,7 +91,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   local absolute user paths in public files, missing MANIFEST public
   inclusions/private exclusions, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
-  compileall, package build, and wheel smoke.
+  compileall, package build, wheel smoke, and `git diff --check`.
 - CI Python matrix must cover the package's minimum `requires-python` version
   and the highest `Programming Language :: Python :: X.Y` classifier advertised
   in `pyproject.toml`.
@@ -128,6 +128,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - `pyproject.toml` exports public `ga-tui*` scripts -> release hygiene fails.
 - CI matrix omits the minimum supported Python version or highest advertised
   Python classifier -> release hygiene fails.
+- CI omits `git diff --check` -> release hygiene fails because whitespace and
+  generated-diff cleanliness are no longer enforced in the public gate.
 - OMP plugin package name is not Shuheng-branded -> release hygiene fails.
 - `release_readiness_report(...)` is called with all hygiene booleans true ->
   known gaps do not include repository-level hygiene.
@@ -153,7 +155,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - `scripts/check_policy_gates.py` must assert release-readiness metadata reports
   true license/CI/security booleans and lists release hygiene, Ruff, runtime
-  smoke, package build, wheel smoke, and `shuheng-check` commands.
+  smoke, package build, wheel smoke, `shuheng-check`, and `git diff --check`
+  commands.
 - `scripts/check_policy_gates.py` must assert release-readiness metadata exposes
   structured wheel+sdist distribution-smoke evidence, dependency-resolving
   install mode, public console script names, isolated `shuheng-check`, and
@@ -173,6 +176,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
   use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
   `--no-deps` or `--wheel-only`.
+- `scripts/check_release_hygiene.py` must assert CI runs `git diff --check`.
 
 ### 7. Wrong vs Correct
 
