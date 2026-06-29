@@ -18,6 +18,7 @@ def test_release_readiness_exposes_distribution_smoke_contract() -> None:
     assert "wheel RECORD hash/size integrity" in distribution_smoke["checks"]
     assert "wheel artifact content leak scan" in distribution_smoke["checks"]
     assert "sdist archive public/private member contract" in distribution_smoke["checks"]
+    assert "sdist metadata/entry points contract" in distribution_smoke["checks"]
     assert "sdist artifact content leak scan" in distribution_smoke["checks"]
     assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"]
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"])

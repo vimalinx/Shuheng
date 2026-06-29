@@ -195,6 +195,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "wheel RECORD hash/size integrity",
             "wheel artifact content leak scan",
             "sdist archive public/private member contract",
+            "sdist metadata/entry points contract",
             "sdist artifact content leak scan",
             "public console scripts exist",
             "shuheng --help",

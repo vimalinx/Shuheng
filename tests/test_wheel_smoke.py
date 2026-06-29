@@ -10,22 +10,36 @@ import zipfile
 from scripts import wheel_smoke
 
 
-def write_sdist_fixture(path: Path, members: list[str]) -> None:
-    with tarfile.open(path, "w:gz") as archive:
-        for member in members:
-            data = b"fixture\n"
-            info = tarfile.TarInfo(f"shuheng-0.1.0/{member}")
-            info.size = len(data)
-            archive.addfile(info, io.BytesIO(data))
-
-
-def wheel_entry_points_text(missing_script: str = "") -> str:
+def console_scripts_text(missing_script: str = "") -> str:
     scripts = [
         script
         for script in wheel_smoke.PUBLIC_CONSOLE_SCRIPTS
         if script != missing_script
     ]
     return "\n".join(["[console_scripts]", *[f"{script} = ga_tui.__main__:main" for script in scripts], ""])
+
+
+def sdist_fixture_content(member: str, *, missing_script: str = "") -> bytes:
+    if member in {"PKG-INFO", "src/shuheng.egg-info/PKG-INFO"}:
+        return b"Metadata-Version: 2.4\nName: shuheng\nVersion: 0.1.0\n"
+    if member == "src/shuheng.egg-info/entry_points.txt":
+        return console_scripts_text(missing_script).encode()
+    if member == "src/shuheng.egg-info/top_level.txt":
+        return b"ga_tui\n"
+    return b"fixture\n"
+
+
+def write_sdist_fixture(path: Path, members: list[str], *, missing_script: str = "") -> None:
+    with tarfile.open(path, "w:gz") as archive:
+        for member in members:
+            data = sdist_fixture_content(member, missing_script=missing_script)
+            info = tarfile.TarInfo(f"shuheng-0.1.0/{member}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+
+def wheel_entry_points_text(missing_script: str = "") -> str:
+    return console_scripts_text(missing_script)
 
 
 def wheel_fixture_content(member: str, *, missing_script: str = "") -> bytes:
@@ -156,6 +170,42 @@ def test_sdist_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         assert "forbidden members present: config/mcporter.json" in str(exc)
     else:
         raise AssertionError("private sdist member should fail")
+
+
+def test_sdist_metadata_contract_accepts_package_metadata(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    write_sdist_fixture(sdist, list(wheel_smoke.SDIST_REQUIRED_MEMBERS))
+
+    check = wheel_smoke.sdist_metadata_contract_check(sdist)
+
+    assert check["command"] == "sdist metadata/entry points contract"
+    assert check["returncode"] == 0
+    assert check["console_scripts"] == len(wheel_smoke.PUBLIC_CONSOLE_SCRIPTS)
+
+
+def test_sdist_metadata_contract_rejects_missing_pkg_info(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    members = [member for member in wheel_smoke.SDIST_REQUIRED_MEMBERS if member != "PKG-INFO"]
+    write_sdist_fixture(sdist, members)
+
+    try:
+        wheel_smoke.sdist_metadata_contract_check(sdist)
+    except ValueError as exc:
+        assert "missing required members: PKG-INFO" in str(exc)
+    else:
+        raise AssertionError("missing sdist PKG-INFO should fail")
+
+
+def test_sdist_metadata_contract_rejects_missing_console_script_metadata(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    write_sdist_fixture(sdist, list(wheel_smoke.SDIST_REQUIRED_MEMBERS), missing_script="shuheng-check")
+
+    try:
+        wheel_smoke.sdist_metadata_contract_check(sdist)
+    except ValueError as exc:
+        assert "entry_points.txt missing console scripts: shuheng-check" in str(exc)
+    else:
+        raise AssertionError("missing sdist console script metadata should fail")
 
 
 def test_artifact_content_leak_scan_rejects_secret_like_literal() -> None:

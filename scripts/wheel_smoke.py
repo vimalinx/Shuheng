@@ -52,6 +52,7 @@ SDIST_REQUIRED_MEMBERS = (
     "CONTRIBUTING.md",
     "LICENSE",
     "MANIFEST.in",
+    "PKG-INFO",
     "README.en.md",
     "README.md",
     "SECURITY.md",
@@ -66,8 +67,18 @@ SDIST_REQUIRED_MEMBERS = (
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
     "src/ga_tui/app.py",
+    "src/shuheng.egg-info/PKG-INFO",
+    "src/shuheng.egg-info/entry_points.txt",
+    "src/shuheng.egg-info/top_level.txt",
     "tests/test_release_hygiene.py",
     "tests/test_wheel_smoke.py",
+)
+
+SDIST_METADATA_MEMBERS = (
+    "PKG-INFO",
+    "src/shuheng.egg-info/PKG-INFO",
+    "src/shuheng.egg-info/entry_points.txt",
+    "src/shuheng.egg-info/top_level.txt",
 )
 
 SDIST_FORBIDDEN_MEMBERS = (
@@ -226,6 +237,25 @@ def sdist_text_rows(sdist: Path) -> list[tuple[str, bytes]]:
     return rows
 
 
+def sdist_text_by_member(sdist: Path, wanted: tuple[str, ...]) -> dict[str, str]:
+    wanted_set = set(wanted)
+    texts: dict[str, str] = {}
+    with tarfile.open(sdist, "r:gz") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            parts = normalized_archive_parts(member.name)
+            if len(parts) < 2:
+                continue
+            display_path = "/".join(parts[1:])
+            if display_path not in wanted_set:
+                continue
+            file_obj = archive.extractfile(member)
+            if file_obj is not None:
+                texts[display_path] = file_obj.read().decode("utf-8", errors="replace")
+    return texts
+
+
 def wheel_text_rows(wheel: Path) -> list[tuple[str, bytes]]:
     rows: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(wheel) as archive:
@@ -276,6 +306,40 @@ def sdist_archive_contract_check(sdist: Path) -> dict[str, object]:
         "returncode": 0,
         "required_members": len(SDIST_REQUIRED_MEMBERS),
         "forbidden_members": 0,
+    }
+
+
+def sdist_metadata_contract_check(sdist: Path) -> dict[str, object]:
+    members = normalized_sdist_members(sdist)
+    missing = sorted(member for member in SDIST_METADATA_MEMBERS if member not in members)
+    texts = sdist_text_by_member(sdist, SDIST_METADATA_MEMBERS)
+    errors: list[str] = []
+    for path in ("PKG-INFO", "src/shuheng.egg-info/PKG-INFO"):
+        text = texts.get(path, "")
+        if path in missing:
+            continue
+        if "Name: shuheng" not in text:
+            errors.append(f"{path} missing Name: shuheng")
+        if "Version:" not in text:
+            errors.append(f"{path} missing Version")
+    entry_points_text = texts.get("src/shuheng.egg-info/entry_points.txt", "")
+    missing_console_scripts = sorted(script for script in PUBLIC_CONSOLE_SCRIPTS if f"{script} =" not in entry_points_text)
+    if "src/shuheng.egg-info/entry_points.txt" not in missing and missing_console_scripts:
+        errors.append("entry_points.txt missing console scripts: " + ", ".join(missing_console_scripts))
+    top_level_text = texts.get("src/shuheng.egg-info/top_level.txt", "")
+    if "src/shuheng.egg-info/top_level.txt" not in missing and "ga_tui" not in {line.strip() for line in top_level_text.splitlines()}:
+        errors.append("top_level.txt missing ga_tui")
+    if missing or errors:
+        details = []
+        if missing:
+            details.append("missing required members: " + ", ".join(missing))
+        details.extend(errors)
+        raise ValueError("sdist metadata contract failed: " + "; ".join(details))
+    return {
+        "command": "sdist metadata/entry points contract",
+        "returncode": 0,
+        "required_members": len(SDIST_METADATA_MEMBERS),
+        "console_scripts": len(PUBLIC_CONSOLE_SCRIPTS),
     }
 
 
@@ -476,9 +540,10 @@ def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
 
 def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = sdist_archive_contract_check(sdist)
+    metadata_check = sdist_metadata_contract_check(sdist)
     content_check = check_archive_text_has_no_release_leaks(sdist_text_rows(sdist), artifact_kind="sdist")
     report = run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
-    report["checks"] = [archive_check, content_check, *list(report["checks"])]
+    report["checks"] = [archive_check, metadata_check, content_check, *list(report["checks"])]
     return report
 
 

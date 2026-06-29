@@ -120,6 +120,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   member has a matching `sha256=` hash and byte size before install.
 - Wheel smoke must inspect the built sdist archive contents directly so the
   release gate proves the actual tarball, not only `MANIFEST.in` intent.
+- Wheel smoke must verify built sdist metadata directly so top-level
+  `PKG-INFO`, `src/shuheng.egg-info/PKG-INFO`, `entry_points.txt`, and
+  `top_level.txt` prove package name/version and public console scripts before
+  install.
 - Wheel smoke must scan built wheel and sdist artifact member contents for
   realistic secret-like literals and local absolute paths, not only source
   checkout files.
@@ -141,6 +145,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Built sdist archive omits required public docs/scripts/tests or contains
   private/local paths such as `config/`, `.trellis/`, `memory/`, `temp/`,
   `tmp/`, `goal-*`, or private research docs -> wheel smoke fails.
+- Built sdist metadata omits `Name: shuheng`, `Version`, `ga_tui` top-level
+  package, or any public console-script entry point -> wheel smoke fails.
 - Built wheel archive omits required `ga_tui` package modules, dist-info
   metadata, license, or public console-script entry point metadata, or contains
   private/local paths -> wheel smoke fails.
@@ -208,12 +214,15 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   forbidden private/local paths before installing the wheel. It must verify
   wheel `RECORD` sha256 hashes and byte sizes before installing the wheel. It
   must inspect the sdist archive member list for required public files and
-  forbidden private/local paths before installing the sdist. It must scan both
-  artifact contents for realistic secret-like literals and local absolute user
-  paths before installing either artifact. It may run `--help` for helper
-  scripts that do not import the full TUI runtime, must run `shuheng --help`
-  after each dependency-resolving install, and must run installed
-  `shuheng-check` against an isolated GenericAgent stub.
+  forbidden private/local paths before installing the sdist. It must verify
+  sdist `PKG-INFO`, `src/shuheng.egg-info/PKG-INFO`,
+  `src/shuheng.egg-info/entry_points.txt`, and
+  `src/shuheng.egg-info/top_level.txt` before installing the sdist. It must
+  scan both artifact contents for realistic secret-like literals and local
+  absolute user paths before installing either artifact. It may run `--help`
+  for helper scripts that do not import the full TUI runtime, must run
+  `shuheng --help` after each dependency-resolving install, and must run
+  installed `shuheng-check` against an isolated GenericAgent stub.
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
   use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
   `--no-deps` or `--wheel-only`.
