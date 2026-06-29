@@ -128,8 +128,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert release-readiness metadata reports
-  true license/CI/security booleans and lists release hygiene, Ruff, and package
-  build commands.
+  true license/CI/security booleans and lists release hygiene, Ruff, runtime
+  smoke, package build, and `shuheng-check` commands.
 - CI must run `scripts/check_release_hygiene.py`.
 - Manual release verification must run: Ruff check, release hygiene, policy
   gates, runtime smoke, pytest, compileall, build, isolated wheel

@@ -3915,7 +3915,9 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert hygiene["security_policy"] is True, report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
     assert any("ruff check" in command for command in report["verification_commands"]), report
+    assert any("runtime_smoke.py" in command for command in report["verification_commands"]), report
     assert any("build --sdist --wheel" in command for command in report["verification_commands"]), report
+    assert any("shuheng-check" in command for command in report["verification_commands"]), report
 
 
 def assert_governance_schema(registry: dict) -> None:

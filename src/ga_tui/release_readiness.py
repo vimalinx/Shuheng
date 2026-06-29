@@ -240,6 +240,7 @@ def release_readiness_report(
             "python3 scripts/runtime_smoke.py",
             "python3 -m compileall -q src scripts",
             "python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist",
+            "shuheng-check",
             "git diff --check",
         ],
     }
