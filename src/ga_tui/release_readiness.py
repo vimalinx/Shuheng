@@ -192,7 +192,9 @@ def distribution_smoke_contract() -> dict[str, Any]:
         ],
         "checks": [
             "wheel archive metadata/private member contract",
+            "wheel artifact content leak scan",
             "sdist archive public/private member contract",
+            "sdist artifact content leak scan",
             "public console scripts exist",
             "shuheng --help",
             "helper --help entrypoints",

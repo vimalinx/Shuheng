@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from pathlib import PurePosixPath
+import re
 import subprocess
 import sys
 import tarfile
@@ -98,6 +99,20 @@ WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
     "licenses/LICENSE",
 )
 
+SECRET_PATTERNS = (
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"AIza[0-9A-Za-z_-]{35}"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+)
+
+LOCAL_PATH_PATTERNS = (
+    re.compile(r"/home/[A-Za-z0-9._-]+/"),
+    re.compile(r"/Users/[A-Za-z0-9._-]+/"),
+)
+
 
 def latest_artifact(dist_dir: Path, pattern: str, label: str) -> Path:
     artifacts = sorted(dist_dir.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
@@ -161,6 +176,63 @@ def write_fake_genericagent_root(root: Path) -> Path:
     return ga_root
 
 
+def normalized_archive_parts(raw_name: str) -> tuple[str, ...]:
+    posix = PurePosixPath(raw_name)
+    if posix.is_absolute() or ".." in posix.parts:
+        raise ValueError(f"unsafe archive member path: {raw_name}")
+    return tuple(part for part in posix.parts if part not in {"", "."})
+
+
+def text_release_leak_errors(text: str, path: str) -> list[str]:
+    errors: list[str] = []
+    if any(pattern.search(text) for pattern in SECRET_PATTERNS):
+        errors.append(f"secret-like literal found in artifact member: {path}")
+    if any(pattern.search(text) for pattern in LOCAL_PATH_PATTERNS):
+        errors.append(f"local absolute path found in artifact member: {path}")
+    return errors
+
+
+def check_archive_text_has_no_release_leaks(rows: list[tuple[str, bytes]], *, artifact_kind: str) -> dict[str, object]:
+    errors: list[str] = []
+    for path, data in rows:
+        text = data.decode("utf-8", errors="replace")
+        errors.extend(text_release_leak_errors(text, path))
+    if errors:
+        raise ValueError(f"{artifact_kind} artifact content leak scan failed: " + "; ".join(errors))
+    return {
+        "command": f"{artifact_kind} artifact content leak scan",
+        "returncode": 0,
+        "scanned_members": len(rows),
+    }
+
+
+def sdist_text_rows(sdist: Path) -> list[tuple[str, bytes]]:
+    rows: list[tuple[str, bytes]] = []
+    with tarfile.open(sdist, "r:gz") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            parts = normalized_archive_parts(member.name)
+            if len(parts) < 2:
+                continue
+            display_path = "/".join(parts[1:])
+            file_obj = archive.extractfile(member)
+            if file_obj is not None:
+                rows.append((display_path, file_obj.read()))
+    return rows
+
+
+def wheel_text_rows(wheel: Path) -> list[tuple[str, bytes]]:
+    rows: list[tuple[str, bytes]] = []
+    with zipfile.ZipFile(wheel) as archive:
+        for raw_name in archive.namelist():
+            parts = normalized_archive_parts(raw_name)
+            if not parts or raw_name.endswith("/"):
+                continue
+            rows.append(("/".join(parts), archive.read(raw_name)))
+    return rows
+
+
 def normalized_sdist_members(sdist: Path) -> set[str]:
     with tarfile.open(sdist, "r:gz") as archive:
         names = [member.name for member in archive.getmembers()]
@@ -168,10 +240,7 @@ def normalized_sdist_members(sdist: Path) -> set[str]:
     top_levels: set[str] = set()
     normalized: set[str] = set()
     for raw_name in names:
-        posix = PurePosixPath(raw_name)
-        if posix.is_absolute() or ".." in posix.parts:
-            raise ValueError(f"unsafe sdist archive member path: {raw_name}")
-        parts = tuple(part for part in posix.parts if part not in {"", "."})
+        parts = normalized_archive_parts(raw_name)
         if not parts:
             continue
         top_levels.add(parts[0])
@@ -212,10 +281,7 @@ def normalized_wheel_members(wheel: Path) -> set[str]:
 
     normalized: set[str] = set()
     for raw_name in names:
-        posix = PurePosixPath(raw_name)
-        if posix.is_absolute() or ".." in posix.parts:
-            raise ValueError(f"unsafe wheel archive member path: {raw_name}")
-        parts = tuple(part for part in posix.parts if part not in {"", "."})
+        parts = normalized_archive_parts(raw_name)
         if parts:
             normalized.add("/".join(parts))
     return normalized
@@ -314,15 +380,17 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
 
 def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = wheel_archive_contract_check(wheel)
+    content_check = check_archive_text_has_no_release_leaks(wheel_text_rows(wheel), artifact_kind="wheel")
     report = run_artifact_smoke(wheel, artifact_kind="wheel", no_deps=no_deps)
-    report["checks"] = [archive_check, *list(report["checks"])]
+    report["checks"] = [archive_check, content_check, *list(report["checks"])]
     return report
 
 
 def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = sdist_archive_contract_check(sdist)
+    content_check = check_archive_text_has_no_release_leaks(sdist_text_rows(sdist), artifact_kind="sdist")
     report = run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
-    report["checks"] = [archive_check, *list(report["checks"])]
+    report["checks"] = [archive_check, content_check, *list(report["checks"])]
     return report
 
 

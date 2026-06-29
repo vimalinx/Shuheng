@@ -129,6 +129,33 @@ def test_sdist_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         raise AssertionError("private sdist member should fail")
 
 
+def test_artifact_content_leak_scan_rejects_secret_like_literal() -> None:
+    secret_like = "sk-" + "artifactleak12345678901234567890"
+
+    try:
+        wheel_smoke.check_archive_text_has_no_release_leaks(
+            [("tests/test_leaky_fixture.py", f'TOKEN = "{secret_like}"\n'.encode())],
+            artifact_kind="sdist",
+        )
+    except ValueError as exc:
+        assert "secret-like literal found in artifact member: tests/test_leaky_fixture.py" in str(exc)
+    else:
+        raise AssertionError("secret-like artifact content should fail")
+
+
+def test_artifact_content_leak_scan_rejects_local_absolute_path() -> None:
+    local_path = "/home/" + "tester/shuheng"
+    try:
+        wheel_smoke.check_archive_text_has_no_release_leaks(
+            [("ga_tui/generated.py", f'HOME = "{local_path}"\n'.encode())],
+            artifact_kind="wheel",
+        )
+    except ValueError as exc:
+        assert "local absolute path found in artifact member: ga_tui/generated.py" in str(exc)
+    else:
+        raise AssertionError("local absolute artifact content should fail")
+
+
 def test_wheel_archive_contract_accepts_metadata_and_public_members(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
     write_wheel_fixture(wheel, expected_wheel_members())

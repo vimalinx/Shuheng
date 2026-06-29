@@ -3926,7 +3926,9 @@ def assert_release_readiness_schema(report: dict) -> None:
         "shuheng-integration",
     } <= set(distribution_smoke["public_console_scripts"]), report
     assert "wheel archive metadata/private member contract" in distribution_smoke["checks"], report
+    assert "wheel artifact content leak scan" in distribution_smoke["checks"], report
     assert "sdist archive public/private member contract" in distribution_smoke["checks"], report
+    assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
     assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"], report
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report

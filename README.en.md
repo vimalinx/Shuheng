@@ -460,7 +460,7 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-
 git diff --check
 ```
 
-`scripts/wheel_smoke.py --dist-dir` installs both the latest wheel and sdist, checks the wheel metadata/private file boundary and the sdist archive public/private file boundary, and runs public entrypoint checks. `--no-deps` and `--wheel-only` are local debugging options, not release gates.
+`scripts/wheel_smoke.py --dist-dir` installs both the latest wheel and sdist, checks the wheel metadata/private file boundary, checks the sdist archive public/private file boundary, scans both artifact contents for secret-like literals and local absolute paths, and runs public entrypoint checks. `--no-deps` and `--wheel-only` are local debugging options, not release gates.
 
 Before publishing, verify that no local absolute paths, secrets, model credentials, normal session logs, or Secret Vault content are added. `scripts/check_release_hygiene.py` checks governance files, package metadata, private paths, realistic secret patterns, and public alpha wording.
 

@@ -15,7 +15,9 @@ def test_release_readiness_exposes_distribution_smoke_contract() -> None:
     assert distribution_smoke["command"] == "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
     assert "shuheng-check" in distribution_smoke["public_console_scripts"]
     assert "wheel archive metadata/private member contract" in distribution_smoke["checks"]
+    assert "wheel artifact content leak scan" in distribution_smoke["checks"]
     assert "sdist archive public/private member contract" in distribution_smoke["checks"]
+    assert "sdist artifact content leak scan" in distribution_smoke["checks"]
     assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"]
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"])
     assert "git diff --check" in report["verification_commands"]
