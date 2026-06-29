@@ -34,3 +34,49 @@ def test_wheel_smoke_release_mode_rejects_wheel_only(monkeypatch) -> None:
     hygiene.check_wheel_smoke_release_mode(errors)
 
     assert any("release wheel smoke must include sdist" in error for error in errors)
+
+
+def test_python_support_ci_coverage_rejects_missing_minimum(monkeypatch) -> None:
+    pyproject = """
+[project]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.13",
+]
+"""
+    workflow = 'python-version: ["3.13"]'
+
+    monkeypatch.setattr(
+        hygiene,
+        "read_text",
+        lambda path: pyproject if path == "pyproject.toml" else workflow,
+    )
+
+    errors: list[str] = []
+    hygiene.check_python_support_ci_coverage(errors)
+
+    assert "CI matrix must include minimum supported Python 3.10" in errors
+
+
+def test_python_support_ci_coverage_rejects_missing_highest_classifier(monkeypatch) -> None:
+    pyproject = """
+[project]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.13",
+]
+"""
+    workflow = 'python-version: ["3.10"]'
+
+    monkeypatch.setattr(
+        hygiene,
+        "read_text",
+        lambda path: pyproject if path == "pyproject.toml" else workflow,
+    )
+
+    errors: list[str] = []
+    hygiene.check_python_support_ci_coverage(errors)
+
+    assert "CI matrix must include highest declared Python classifier 3.13" in errors

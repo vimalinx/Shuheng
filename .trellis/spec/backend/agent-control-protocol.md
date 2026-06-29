@@ -92,6 +92,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   inclusions/private exclusions, or missing public alpha/security wording.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, and wheel smoke.
+- CI Python matrix must cover the package's minimum `requires-python` version
+  and the highest `Programming Language :: Python :: X.Y` classifier advertised
+  in `pyproject.toml`.
 - CI and README release-command examples must run wheel smoke in its default
   dependency-resolving mode for both the built wheel and the built sdist;
   `--no-deps` and `--wheel-only` are explicit local debugging options and must
@@ -123,6 +126,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.
 - `pyproject.toml` exports public `ga-tui*` scripts -> release hygiene fails.
+- CI matrix omits the minimum supported Python version or highest advertised
+  Python classifier -> release hygiene fails.
 - OMP plugin package name is not Shuheng-branded -> release hygiene fails.
 - `release_readiness_report(...)` is called with all hygiene booleans true ->
   known gaps do not include repository-level hygiene.
@@ -154,6 +159,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   install mode, public console script names, isolated `shuheng-check`, and
   debug-only options such as `--no-deps` / `--wheel-only`.
 - CI must run `scripts/check_release_hygiene.py`.
+- `scripts/check_release_hygiene.py` must assert the GitHub Actions Python
+  matrix includes the `requires-python` lower bound and the highest declared
+  Python version classifier.
 - Manual release verification must run: Ruff check, release hygiene, policy
   gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
   `shuheng-check`, and `git diff --check`.

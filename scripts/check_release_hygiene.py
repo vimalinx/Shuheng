@@ -100,6 +100,7 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
 )
 
 RELEASE_WHEEL_SMOKE_FRAGMENT = "scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
+PYTHON_VERSION_PATTERN = re.compile(r"(?<!\d)(\d+\.\d+)(?!\d)")
 
 
 def git_lines(*args: str) -> list[str]:
@@ -158,7 +159,7 @@ def check_secret_and_local_literals(errors: list[str]) -> None:
 
 
 def check_pyproject_metadata(errors: list[str]) -> None:
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads(read_text("pyproject.toml"))
     project = data.get("project") or {}
     for key in ("name", "version", "description", "readme", "requires-python", "license", "authors", "classifiers", "urls"):
         if not project.get(key):
@@ -179,6 +180,42 @@ def check_pyproject_metadata(errors: list[str]) -> None:
     public_legacy = sorted(script for script in scripts if script.startswith("ga-tui"))
     if public_legacy:
         errors.append(f"legacy ga-tui console scripts are public: {', '.join(public_legacy)}")
+
+
+def python_version_key(version: str) -> tuple[int, int]:
+    major, minor = version.split(".", 1)
+    return (int(major), int(minor))
+
+
+def minimum_requires_python_version(requires_python: str) -> str:
+    match = re.search(r">=\s*(\d+\.\d+)", str(requires_python or ""))
+    return match.group(1) if match else ""
+
+
+def classifier_python_versions(classifiers: list[str]) -> list[str]:
+    versions: set[str] = set()
+    for classifier in classifiers:
+        tail = str(classifier).rsplit("::", 1)[-1].strip()
+        if PYTHON_VERSION_PATTERN.fullmatch(tail):
+            versions.add(tail)
+    return sorted(versions, key=python_version_key)
+
+
+def ci_python_versions(workflow_text: str) -> list[str]:
+    return sorted(set(PYTHON_VERSION_PATTERN.findall(workflow_text)), key=python_version_key)
+
+
+def check_python_support_ci_coverage(errors: list[str]) -> None:
+    project = (tomllib.loads(read_text("pyproject.toml")).get("project") or {})
+    ci_versions = set(ci_python_versions(read_text(".github/workflows/ci.yml")))
+    min_version = minimum_requires_python_version(str(project.get("requires-python") or ""))
+    if min_version and min_version not in ci_versions:
+        errors.append(f"CI matrix must include minimum supported Python {min_version}")
+    declared_versions = classifier_python_versions(list(project.get("classifiers") or []))
+    if declared_versions:
+        highest = declared_versions[-1]
+        if highest not in ci_versions:
+            errors.append(f"CI matrix must include highest declared Python classifier {highest}")
 
 
 def check_manifest_contract(errors: list[str]) -> None:
@@ -264,6 +301,7 @@ def main() -> int:
     check_private_files_are_not_tracked(errors)
     check_secret_and_local_literals(errors)
     check_pyproject_metadata(errors)
+    check_python_support_ci_coverage(errors)
     check_manifest_contract(errors)
     check_public_positioning(errors)
     check_wheel_smoke_release_mode(errors)
