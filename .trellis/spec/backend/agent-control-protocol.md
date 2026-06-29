@@ -98,6 +98,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   not appear in public release gates.
 - `release_readiness_report(...)` must expose repository hygiene booleans and
   include repository-hygiene gaps only when required files are missing.
+- `release_readiness_report(...)` must expose a structured
+  `distribution_smoke` contract with wheel+sdist artifacts,
+  dependency-resolving install mode, public console scripts, checked entrypoint
+  behaviors, and debug-only options that are not release gates.
 - The sdist must include intended public docs and integration plugin files while
   excluding private research/config/reference paths.
 - OMP plugin user-facing labels and docs should say Shuheng. Compatibility tool
@@ -122,6 +126,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - OMP plugin package name is not Shuheng-branded -> release hygiene fails.
 - `release_readiness_report(...)` is called with all hygiene booleans true ->
   known gaps do not include repository-level hygiene.
+- `release_readiness_report(...)` lacks `distribution_smoke.artifacts:["wheel",
+  "sdist"]` or says `install_mode:"no_deps"` -> release posture regression.
 
 ### 5. Good/Base/Bad Cases
 
@@ -143,6 +149,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - `scripts/check_policy_gates.py` must assert release-readiness metadata reports
   true license/CI/security booleans and lists release hygiene, Ruff, runtime
   smoke, package build, wheel smoke, and `shuheng-check` commands.
+- `scripts/check_policy_gates.py` must assert release-readiness metadata exposes
+  structured wheel+sdist distribution-smoke evidence, dependency-resolving
+  install mode, public console script names, isolated `shuheng-check`, and
+  debug-only options such as `--no-deps` / `--wheel-only`.
 - CI must run `scripts/check_release_hygiene.py`.
 - Manual release verification must run: Ruff check, release hygiene, policy
   gates, runtime smoke, pytest, compileall, build, wheel smoke, isolated wheel
@@ -2653,6 +2663,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
   - `support_level.known_gaps`
   - `monolith_risk`
   - `repository_hygiene`
+  - `distribution_smoke`
   - `verification_commands`
 - Gateway service descriptor:
   - `schema_version:"agentgateway.service.v1"`
@@ -2702,6 +2713,10 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
 - Runtime/e2e checks must be persisted in `runtime_evidence.jsonl` under the Shuheng-owned `AGENT_HARNESS_DIR`; baseline reports may upgrade an item's strongest evidence level only from passed runtime evidence whose `target_items` match that baseline item.
 - Runtime evidence from local smoke tests is behavioral evidence for Shuheng's local harness path. It must not be described as A2A/MCP protocol certification or third-party client conformance.
+- Release-readiness distribution-smoke metadata must be structured rather than
+  only implied by command strings: it lists wheel and sdist artifacts,
+  dependency-resolving install mode, public console scripts, checked entrypoint
+  behaviors, and debug-only options that are not release gates.
 - `architecture_baseline_report(...)` must be self-contained: when `gateway_data` is omitted, it must build a no-write `gateway_baseline_evidence(...)` snapshot instead of reporting existing A2A/MCP/gateway evidence as missing due to caller ordering.
 - No-write evidence construction may read ledgers and daemon status, but must not rewrite `gateway.json`, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
 - `ensure_gateway_registry(...)` remains the write path for refreshing the durable gateway registry file; direct baseline reporting is only a report/evidence path.
@@ -2722,6 +2737,9 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `ga_tui.app` -> monolith backslide regression.
 - Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
 - Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
+- Release readiness omits `distribution_smoke`, lists only wheel, or marks
+  `--no-deps` / `--wheel-only` as a release gate -> distribution evidence
+  regression.
 
 ### 5. Good/Base/Bad Cases
 
@@ -2739,6 +2757,9 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `/gateway` contains `release_readiness` with stable, experimental, and known-gap lists.
+- Tests must assert `/gateway` release readiness exposes structured
+  distribution-smoke metadata for wheel+sdist, dependency-resolving install
+  mode, public console scripts, and debug-only non-gate options.
 - Tests must assert gateway service descriptors use `local_no_auth_compatibility_surface`, `security.auth:"none"`, and loopback safety by default.
 - Tests must assert non-loopback gateway daemon start fails unless `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
 - Tests must assert A2A/MCP metadata carries `certification:"not_protocol_certified"`.

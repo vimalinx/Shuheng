@@ -177,6 +177,30 @@ def scheduler_runtime_ownership() -> dict[str, Any]:
     }
 
 
+def distribution_smoke_contract() -> dict[str, Any]:
+    return {
+        "schema_version": "shuheng.distribution_smoke.v1",
+        "command": "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
+        "artifacts": ["wheel", "sdist"],
+        "install_mode": "with_dependencies",
+        "public_console_scripts": [
+            "shuheng",
+            "shuheng-agent-bridge",
+            "shuheng-check",
+            "shuheng-install-core-shim",
+            "shuheng-integration",
+        ],
+        "checks": [
+            "public console scripts exist",
+            "shuheng --help",
+            "helper --help entrypoints",
+            "python -m ga_tui.integration doctor",
+            "shuheng-check against isolated GenericAgent stub",
+        ],
+        "debug_options_not_release_gates": ["--no-deps", "--wheel-only"],
+    }
+
+
 def release_readiness_report(
     *,
     app_py_lines: int = 0,
@@ -232,6 +256,7 @@ def release_readiness_report(
             "ci": bool(has_ci),
             "security_policy": bool(has_security_policy),
         },
+        "distribution_smoke": distribution_smoke_contract(),
         "verification_commands": [
             "python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
             "python3 scripts/check_release_hygiene.py",

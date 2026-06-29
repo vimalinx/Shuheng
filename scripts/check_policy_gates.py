@@ -3913,6 +3913,20 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert hygiene["license"] is True, report
     assert hygiene["ci"] is True, report
     assert hygiene["security_policy"] is True, report
+    distribution_smoke = report["distribution_smoke"]
+    assert distribution_smoke["schema_version"] == "shuheng.distribution_smoke.v1", report
+    assert distribution_smoke["artifacts"] == ["wheel", "sdist"], report
+    assert distribution_smoke["install_mode"] == "with_dependencies", report
+    assert distribution_smoke["command"] == "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist", report
+    assert {
+        "shuheng",
+        "shuheng-agent-bridge",
+        "shuheng-check",
+        "shuheng-install-core-shim",
+        "shuheng-integration",
+    } <= set(distribution_smoke["public_console_scripts"]), report
+    assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"], report
+    assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
     assert any("ruff check" in command for command in report["verification_commands"]), report
     assert any("runtime_smoke.py" in command for command in report["verification_commands"]), report
