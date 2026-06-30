@@ -1,4 +1,4 @@
-"""Tests for Secret Vault crypto primitives (ga_tui.app).
+"""Tests for Secret Vault crypto primitives.
 
 Verifies the argon2id key derivation + xchacha20-poly1305 AEAD round-trip,
 error handling, and nonce/aad properties. Requires PyNaCl (a project dep).
@@ -6,21 +6,33 @@ error handling, and nonce/aad properties. Requires PyNaCl (a project dep).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
-from ga_tui.app import (
+from ga_tui import app as app_module
+from ga_tui.secret_vault import (
     NACL_XCHACHA_ABYTES,
     NACL_XCHACHA_KEYBYTES,
     NACL_XCHACHA_NPUBBYTES,
+    SecretVaultPaths,
     SecretVaultError,
+    ensure_secret_vault_dirs,
+    load_secret_vault_meta,
     secret_b64,
+    secret_create_vault,
     secret_crypto_available,
     secret_decrypt_bytes,
     secret_derive_key,
     secret_encrypt_bytes,
     secret_import_key_id,
+    secret_read_json_from_path,
+    secret_session_id_from_path,
+    secret_storage_path_for_session,
     secret_unb64,
+    secret_unlock_vault,
+    secret_write_json_for_session,
+    write_secret_vault_meta,
 )
 
 
@@ -135,3 +147,83 @@ class TestImportKeyId:
     def test_truncated_to_24(self) -> None:
         pk = os.urandom(32)
         assert len(secret_import_key_id(pk)) == 24
+
+
+class TestAppCompatibility:
+    def test_app_reexports_crypto_helpers(self) -> None:
+        assert app_module.SecretVaultError is SecretVaultError
+        assert app_module.secret_crypto_available is secret_crypto_available
+        assert app_module.secret_encrypt_bytes is secret_encrypt_bytes
+        assert app_module.secret_decrypt_bytes is secret_decrypt_bytes
+        assert app_module.NACL_XCHACHA_KEYBYTES == NACL_XCHACHA_KEYBYTES
+
+
+class TestSecretVaultStorage:
+    def paths(self, tmp_path: Path) -> SecretVaultPaths:
+        root = tmp_path / "secret_vault"
+        return SecretVaultPaths(
+            vault_dir=str(root),
+            meta_path=str(root / "vault.json"),
+            data_dir=str(root / "data"),
+            sessions_dir=str(root / "data" / "sessions"),
+        )
+
+    def test_meta_round_trip_uses_explicit_paths(self, tmp_path: Path) -> None:
+        paths = self.paths(tmp_path)
+
+        ensure_secret_vault_dirs(paths)
+        write_secret_vault_meta(paths, {"schema_version": "secretvault.test", "value": 1})
+
+        assert load_secret_vault_meta(paths)["value"] == 1
+        assert (tmp_path / "secret_vault" / "vault.json").exists()
+
+    def test_encrypted_json_round_trip(self, tmp_path: Path) -> None:
+        paths = self.paths(tmp_path)
+        ok, key, created = secret_create_vault(paths, "Aa1!aaaa")
+        assert ok and key, created
+
+        wrote, path, warning = secret_write_json_for_session(
+            paths,
+            unlocked=True,
+            key=key,
+            current_session_id="secret_session",
+            session_id="secret_session",
+            kind="checks",
+            name="payload",
+            payload={"secret": "plaintext-marker"},
+        )
+
+        assert wrote, path
+        assert warning == ""
+        raw = Path(path).read_bytes()
+        assert b"plaintext-marker" not in raw
+        ok, payload, detail = secret_read_json_from_path(
+            paths,
+            unlocked=True,
+            key=key,
+            import_private_key=None,
+            kind="checks",
+            path=path,
+            session_id="secret_session",
+        )
+        assert ok, detail
+        assert payload == {"secret": "plaintext-marker"}
+        assert secret_session_id_from_path(paths, path) == "secret_session"
+
+    def test_create_then_unlock_vault(self, tmp_path: Path) -> None:
+        paths = self.paths(tmp_path)
+        created, key, message = secret_create_vault(paths, "Aa1!aaaa")
+        assert created and key, message
+
+        unlocked, unlocked_key, unlocked_message = secret_unlock_vault(paths, "Aa1!aaaa")
+
+        assert unlocked, unlocked_message
+        assert unlocked_key == key
+
+    def test_storage_path_sanitizes_components(self, tmp_path: Path) -> None:
+        paths = self.paths(tmp_path)
+
+        path = secret_storage_path_for_session(paths, "../session", "../kind", "../name")
+
+        assert str(tmp_path / "secret_vault" / "data" / "sessions") in path
+        assert path.endswith("..-name.secret")

@@ -37,6 +37,7 @@ from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
+from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
 from ga_tui import text_utils as text_utils_mod  # noqa: E402
 from ga_tui import ui_types as ui_types_mod  # noqa: E402
 
@@ -274,6 +275,28 @@ def assert_history_store_module_boundary() -> None:
     meta_path = os.path.join(root, "session_meta.json")
     history_store_mod.save_session_meta_registry(meta_path, {"model_responses_a.txt": {"rounds": 1}})
     assert history_store_mod.load_session_meta_registry(meta_path)["model_responses_a.txt"]["rounds"] == 1
+
+
+def assert_secret_vault_module_boundary() -> None:
+    assert a.SecretVaultError is secret_vault_mod.SecretVaultError
+    assert a.secret_crypto_available is secret_vault_mod.secret_crypto_available
+    assert a.secret_encrypt_bytes is secret_vault_mod.secret_encrypt_bytes
+    assert a.secret_decrypt_bytes is secret_vault_mod.secret_decrypt_bytes
+    assert a.secret_safe_session_id("../x") == secret_vault_mod.secret_safe_session_id("../x")
+    assert a.secret_session_sidebar_key("abc") == secret_vault_mod.secret_session_sidebar_key("abc")
+    assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
+    source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
+        assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"
+    root = tempfile.mkdtemp(prefix="ga_tui_secret_vault_")
+    paths = secret_vault_mod.SecretVaultPaths(
+        vault_dir=os.path.join(root, "secret_vault"),
+        meta_path=os.path.join(root, "secret_vault", "vault.json"),
+        data_dir=os.path.join(root, "secret_vault", "data"),
+        sessions_dir=os.path.join(root, "secret_vault", "data", "sessions"),
+    )
+    secret_vault_mod.write_secret_vault_meta(paths, {"schema_version": "secretvault.boundary", "ok": True})
+    assert secret_vault_mod.load_secret_vault_meta(paths)["ok"] is True
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7057,6 +7080,7 @@ def run_checks() -> None:
     assert_release_gateway_module_boundaries()
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
+    assert_secret_vault_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
