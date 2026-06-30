@@ -88,6 +88,7 @@ try:
     from . import gateway_registry as gateway_registry_helpers
     from . import history_store
     from . import secret_vault as secret_vault_store
+    from . import governance as governance_store
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -127,9 +128,7 @@ try:
     from .runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec
     from .release_readiness import (
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        HeuristicEvalInput,
         gateway_bind_safety,
-        heuristic_eval_assessment,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -198,6 +197,7 @@ except Exception:
     import gateway_registry as gateway_registry_helpers  # type: ignore
     import history_store  # type: ignore
     import secret_vault as secret_vault_store  # type: ignore
+    import governance as governance_store  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -237,9 +237,7 @@ except Exception:
     from runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec  # type: ignore
     from release_readiness import (  # type: ignore
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        HeuristicEvalInput,
         gateway_bind_safety,
-        heuristic_eval_assessment,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -3566,22 +3564,11 @@ def progress_ledger_signature() -> tuple[int, int]:
 
 
 def harness_artifact_uri(path: str) -> str:
-    try:
-        rel = os.path.relpath(path, AGENT_HARNESS_DIR)
-    except (ValueError, TypeError):
-        rel = os.path.basename(path)
-    return "artifact://" + rel.replace(os.sep, "/")
+    return governance_store.harness_artifact_uri(AGENT_HARNESS_DIR, path)
 
 
 def artifact_sha256(path: str) -> str:
-    digest = hashlib.sha256()
-    try:
-        with open(path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return ""
-    return "sha256:" + digest.hexdigest()
+    return governance_store.artifact_sha256(path)
 
 
 def append_artifact_index(
@@ -3593,33 +3580,16 @@ def append_artifact_index(
     preview_path: str = "",
     content_type: str = "text/markdown",
 ) -> dict[str, Any]:
-    path = os.path.abspath(path)
-    try:
-        st = os.stat(path)
-    except OSError:
-        size = 0
-        mtime = time.time()
-    else:
-        size = int(st.st_size)
-        mtime = float(st.st_mtime)
-    uri = harness_artifact_uri(path)
-    row = {
-        "schema_version": "agentartifact.v1",
-        "artifact_id": short_uid("art"),
-        "timestamp": now_iso(),
-        "type": artifact_type or "artifact",
-        "uri": uri,
-        "path": path,
-        "preview_path": preview_path or path,
-        "hash": artifact_sha256(path),
-        "size_bytes": size,
-        "mtime": mtime,
-        "source_task_id": source_task_id,
-        "provenance": provenance or {},
-        "content_type": content_type,
-    }
-    append_jsonl(AGENT_ARTIFACT_INDEX_PATH, row)
-    return row
+    return governance_store.append_artifact_index(
+        AGENT_ARTIFACT_INDEX_PATH,
+        AGENT_HARNESS_DIR,
+        path,
+        artifact_type=artifact_type,
+        source_task_id=source_task_id,
+        provenance=provenance,
+        preview_path=preview_path,
+        content_type=content_type,
+    )
 
 
 def artifact_index_latest() -> dict[str, dict[str, Any]]:
@@ -3635,20 +3605,17 @@ def write_harness_artifact(
     provenance: Optional[dict[str, Any]] = None,
     content_type: str = "text/markdown",
 ) -> str:
-    safe_kind = clean_subagent_id(kind or "artifact")
-    safe_name = clean_subagent_id(name or "artifact")
-    directory = os.path.join(AGENT_ARTIFACTS_DIR, safe_kind)
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, f"{time.strftime('%Y%m%d-%H%M%S')}-{safe_name}-{time.time_ns() % 1_000_000:06d}.md")
-    write_text_atomic(path, content.rstrip() + "\n")
-    append_artifact_index(
-        path,
-        artifact_type=safe_kind,
+    return governance_store.write_harness_artifact(
+        AGENT_ARTIFACTS_DIR,
+        AGENT_HARNESS_DIR,
+        AGENT_ARTIFACT_INDEX_PATH,
+        kind,
+        name,
+        content,
         source_task_id=source_task_id,
         provenance=provenance,
         content_type=content_type,
     )
-    return harness_artifact_uri(path)
 
 
 def artifact_path_from_uri(uri: str) -> str:
@@ -4098,30 +4065,11 @@ def policy_rule_for(action: str, config: Optional[dict[str, Any]] = None) -> tup
 
 
 def policy_decision_to_dict(decision: PolicyDecision) -> dict[str, Any]:
-    return {
-        "schema_version": "agentpolicy.decision.v1",
-        "decision_id": decision.decision_id,
-        "timestamp": now_iso(),
-        "action": decision.action,
-        "subject": decision.subject,
-        "role": decision.role,
-        "source": decision.source,
-        "target": decision.target,
-        "status": decision.status,
-        "allowed": decision.allowed,
-        "approval_required": decision.approval_required,
-        "approval_required_for": decision.approval_required_for,
-        "approval_id": decision.approval_id,
-        "risk": decision.risk,
-        "reason": decision.reason,
-        "payload": decision.payload,
-    }
+    return governance_store.policy_decision_to_dict(decision)
 
 
 def record_policy_decision(decision: PolicyDecision) -> dict[str, Any]:
-    row = policy_decision_to_dict(decision)
-    append_jsonl(AGENT_POLICY_DECISIONS_PATH, row)
-    return row
+    return governance_store.record_policy_decision(AGENT_POLICY_DECISIONS_PATH, decision)
 
 
 def evaluate_policy_action(
@@ -4514,22 +4462,7 @@ def secret_blocks_normal_command(state: State, text: str) -> bool:
     return bool(state.secret_vault.unlocked and command and command[0] in SECRET_BLOCKED_NORMAL_COMMANDS)
 
 
-APPROVAL_REQUIRED_FOR = [
-    "external_send",
-    "publish",
-    "delete_file",
-    "delete_memory",
-    "write_long_term_memory",
-    "deploy",
-    "spend_money",
-    "external_commitment",
-    "high_risk_batch_change",
-    "modify_permission_policy",
-    "access_secret",
-    "secret_export",
-    "secret_downgrade",
-    "long_running_privilege_escalation",
-]
+APPROVAL_REQUIRED_FOR = governance_store.APPROVAL_REQUIRED_FOR
 
 
 def default_task_budget(role: str = "") -> dict[str, Any]:
@@ -4705,21 +4638,13 @@ def approval_metadata(
     approval_id: str = "",
     decision: Optional[PolicyDecision] = None,
 ) -> dict[str, Any]:
-    if decision is not None:
-        return {
-            "approval_required_for": [decision.approval_required_for] if decision.approval_required_for else APPROVAL_REQUIRED_FOR,
-            "approval_status": decision.status if decision.approval_required else ("not_required" if decision.allowed else "rejected"),
-            "approval_id": decision.approval_id,
-            "policy_decision_id": decision.decision_id,
-            "policy_action": decision.action,
-        }
-    return {
-        "approval_required_for": approval_required_for or APPROVAL_REQUIRED_FOR,
-        "approval_status": status,
-        "approval_id": approval_id,
-        "policy_decision_id": "",
-        "policy_action": "",
-    }
+    return governance_store.approval_metadata(
+        status=status,
+        approval_required_for=approval_required_for,
+        approval_id=approval_id,
+        decision=decision,
+        default_required_for=APPROVAL_REQUIRED_FOR,
+    )
 
 
 def subagent_task_schema_kwargs(
@@ -4884,25 +4809,7 @@ def append_progress_ledger(
     *,
     source: str = "task_ledger",
 ) -> dict[str, Any]:
-    task_id = str(task_row.get("task_id") or "")
-    row = {
-        "schema_version": "agentprogress.v1",
-        "progress_id": short_uid("progress"),
-        "timestamp": str(task_row.get("timestamp") or now_iso()),
-        "task_id": task_id,
-        "parent_task_id": str(task_row.get("parent_task_id") or ""),
-        "status": str(task_row.get("status") or ""),
-        "assigned_agent": str(task_row.get("assigned_agent") or ""),
-        "title": str(task_row.get("title") or ""),
-        "kind": str(task_row.get("kind") or ""),
-        "summary": str(task_row.get("summary") or task_row.get("error") or task_row.get("objective") or ""),
-        "error": str(task_row.get("error") or ""),
-        "artifact_refs": [str(ref) for ref in (task_row.get("artifact_refs") or []) if str(ref)],
-        "source": source,
-        "task_ref": task_id,
-    }
-    append_jsonl(AGENT_PROGRESS_LEDGER_PATH, row)
-    return row
+    return governance_store.append_progress_ledger(AGENT_PROGRESS_LEDGER_PATH, task_row, source=source)
 
 
 def latest_progress_records() -> dict[str, dict[str, Any]]:
@@ -4977,7 +4884,7 @@ def task_history(task_id: str) -> list[dict[str, Any]]:
 
 
 def terminal_task_status(status: str) -> bool:
-    return (status or "").lower() in {"completed", "failed", "cancelled", "canceled", "rejected", "aborted"}
+    return governance_store.terminal_task_status(status)
 
 
 def unfinished_task_records() -> list[dict[str, Any]]:
@@ -4985,19 +4892,11 @@ def unfinished_task_records() -> list[dict[str, Any]]:
 
 
 def parse_iso_timestamp(value: str) -> float:
-    value = (value or "").strip()
-    if not value:
-        return 0.0
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            return time.mktime(time.strptime(value, fmt))
-        except Exception:
-            continue
-    return 0.0
+    return governance_store.parse_iso_timestamp(value)
 
 
 def row_timestamp(row: dict[str, Any]) -> float:
-    return parse_iso_timestamp(str(row.get("timestamp") or "")) or float(row.get("ts") or 0.0)
+    return governance_store.row_timestamp(row)
 
 
 def artifact_preview(uri_or_path: str, max_bytes: int = 24000) -> list[str]:
@@ -5065,63 +4964,32 @@ def artifact_inventory() -> list[PanelItem]:
 
 
 def load_agent_locks() -> dict[str, Any]:
-    try:
-        with open(AGENT_LOCKS_PATH, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return governance_store.load_agent_locks(AGENT_LOCKS_PATH)
 
 
 def save_agent_locks(data: dict[str, Any]) -> None:
-    ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, lambda _current: (dict(data), None))
+    governance_store.save_agent_locks(AGENT_LOCKS_PATH, data)
 
 
 def current_writer_lock() -> Optional[dict[str, Any]]:
-    data = load_agent_locks()
-    lock = data.get("single_writer")
-    return lock if isinstance(lock, dict) and lock.get("task_id") else None
+    return governance_store.current_writer_lock(AGENT_LOCKS_PATH)
 
 
 def acquire_single_writer_lock(sub: SubAgentRuntime, task_id: str, objective: str = "") -> tuple[bool, str]:
-    if not is_write_role(sub.role):
-        return True, ""
-    task_id = str(task_id or "")
-
-    def update(data: dict[str, Any]) -> tuple[dict[str, Any], tuple[bool, str]]:
-        lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
-        if lock:
-            locked_task = str(lock.get("task_id") or "")
-            locked_status = str(latest_task_records().get(locked_task, {}).get("status") or "")
-            if locked_task == task_id:
-                return data, (True, "")
-            if not terminal_task_status(locked_status):
-                owner = str(lock.get("agent_id") or "-")
-                return data, (False, f"single-writer 已被 {owner} 持有，任务 {locked_task} 尚未结束。")
-        data["single_writer"] = {
-            "task_id": task_id,
-            "agent_id": sub.agent_id,
-            "agent_name": sub.name,
-            "role": normalized_subagent_role(sub.role),
-            "objective": truncate_cells(objective, 240),
-            "acquired_at": now_iso(),
-        }
-        return data, (True, "")
-
-    return ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, update)
+    return governance_store.acquire_single_writer_lock(
+        AGENT_LOCKS_PATH,
+        task_id=task_id,
+        agent_id=sub.agent_id,
+        agent_name=sub.name,
+        role=normalized_subagent_role(sub.role),
+        objective=objective,
+        is_write_role=is_write_role(sub.role),
+        latest_tasks=latest_task_records(),
+    )
 
 
 def release_single_writer_lock(task_id: str) -> bool:
-    task_id = str(task_id or "")
-
-    def update(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-        lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
-        if not lock or str(lock.get("task_id") or "") != task_id:
-            return data, False
-        data.pop("single_writer", None)
-        return data, True
-
-    return ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, update)
+    return governance_store.release_single_writer_lock(AGENT_LOCKS_PATH, task_id)
 
 
 def bounded_score(value: float) -> float:
@@ -5129,77 +4997,21 @@ def bounded_score(value: float) -> float:
 
 
 def refs_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
-    refs = {
-        "artifacts": [],
-        "approvals": [],
-        "memory_candidates": [],
-        "messages": [],
-        "tool_calls": [],
-        "checkpoints": [],
-    }
-    for key in ("artifact_ref", "context_pack", "context_pack_ref"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.startswith("artifact://"):
-            refs["artifacts"].append(value)
-    for value in payload.get("artifact_refs") or []:
-        if isinstance(value, str) and value.startswith("artifact://"):
-            refs["artifacts"].append(value)
-    approval_id = payload.get("approval_id")
-    if approval_id:
-        refs["approvals"].append(str(approval_id))
-    memory_candidate_id = payload.get("memory_candidate_id")
-    if memory_candidate_id:
-        refs["memory_candidates"].append(str(memory_candidate_id))
-    message_id = payload.get("message_id")
-    if message_id:
-        refs["messages"].append(str(message_id))
-    tool_call_id = payload.get("tool_call_id") or payload.get("tool")
-    if tool_call_id:
-        refs["tool_calls"].append(str(tool_call_id))
-    checkpoint_id = payload.get("checkpoint_id")
-    if checkpoint_id:
-        refs["checkpoints"].append(str(checkpoint_id))
-    return {key: sorted(set(values)) for key, values in refs.items()}
+    return governance_store.refs_from_payload(payload)
 
 
 def collect_task_audit_refs(task_id: str) -> dict[str, list[str]]:
-    task_id = str(task_id or "")
-    traces = [row for row in read_jsonl(AGENT_TRACES_PATH) if str(row.get("task_id") or "") == task_id]
-    artifacts = [row for row in read_jsonl(AGENT_ARTIFACT_INDEX_PATH) if str(row.get("source_task_id") or "") == task_id]
-    messages = [row for row in read_jsonl(AGENT_MAIL_PATH) if str(row.get("task_id") or "") == task_id]
-    approvals = [
-        row for row in read_jsonl(AGENT_APPROVALS_PATH)
-        if str((row.get("payload") or {}).get("task_id") or "") == task_id
-    ]
-    memory_candidates = [
-        row for row in read_jsonl(AGENT_MEMORY_CANDIDATES_PATH)
-        if str((row.get("memory_candidate") or {}).get("task_id") or row.get("task_id") or "") == task_id
-    ]
-    plans = [row for row in read_jsonl(AGENT_ORCHESTRATOR_PLANS_PATH) if str(row.get("task_id") or "") == task_id]
-    tool_trace_refs = [
-        str(row.get("trace_id") or "")
-        for row in traces
-        if "tool" in str(row.get("event") or "").lower() or (row.get("audit_refs") or {}).get("tool_calls")
-    ]
-    checkpoint_refs = [
-        ref
-        for row in traces
-        for ref in ((row.get("audit_refs") or {}).get("checkpoints") or [])
-    ]
-    return {
-        "plan_versions": [str(row.get("plan_id") or "") for row in plans if row.get("plan_id")],
-        "messages": [str(row.get("message_id") or "") for row in messages if row.get("message_id")],
-        "tool_calls": [ref for ref in tool_trace_refs if ref],
-        "artifacts": [str(row.get("uri") or "") for row in artifacts if row.get("uri")],
-        "checkpoints": sorted(set(str(ref) for ref in checkpoint_refs if ref)),
-        "approvals": [str(row.get("approval_id") or "") for row in approvals if row.get("approval_id")],
-        "memory_candidates": [
-            str((row.get("memory_candidate") or {}).get("candidate_id") or row.get("candidate_id") or "")
-            for row in memory_candidates
-            if (row.get("memory_candidate") or {}).get("candidate_id") or row.get("candidate_id")
-        ],
-        "traces": [str(row.get("trace_id") or "") for row in traces if row.get("trace_id")],
-    }
+    return governance_store.collect_task_audit_refs(
+        {
+            "traces": AGENT_TRACES_PATH,
+            "artifacts": AGENT_ARTIFACT_INDEX_PATH,
+            "messages": AGENT_MAIL_PATH,
+            "approvals": AGENT_APPROVALS_PATH,
+            "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
+            "orchestrator_plans": AGENT_ORCHESTRATOR_PLANS_PATH,
+        },
+        task_id,
+    )
 
 
 def checkpoint_history(task_id: str) -> list[dict[str, Any]]:
@@ -5482,105 +5294,30 @@ def append_recovery_record(
 
 
 def append_trace(task_id: str, event: str, *, agent_id: str = "", status: str = "", payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    payload = payload or {}
-    audit_refs = refs_from_payload(payload)
-    lower_event = str(event or "").lower()
-    lower_status = str(status or "").lower()
-    row = {
-        "schema_version": "agenttrace.v2",
-        "trace_id": short_uid("trace"),
-        "task_id": task_id,
-        "context_id": "ga-tui",
-        "timestamp": now_iso(),
-        "event": event,
-        "phase": lower_event.split("_", 1)[0] if lower_event else "",
-        "agent_id": agent_id,
-        "actor": {"agent_id": agent_id or "orchestrator.main"},
-        "status": status,
-        "severity": "error" if lower_status in {"failed", "rejected", "denied"} else ("warning" if lower_status in {"approval_required", "pending"} else "info"),
-        "audit_refs": audit_refs,
-        "metrics": {
-            "tool_calls_delta": len(audit_refs["tool_calls"]),
-            "artifact_refs_delta": len(audit_refs["artifacts"]),
-            "approval_refs_delta": len(audit_refs["approvals"]),
-            "memory_candidate_refs_delta": len(audit_refs["memory_candidates"]),
-        },
-        "policy": {
-            "approval_related": bool(audit_refs["approvals"] or "approval" in lower_event or lower_status == "approval_required"),
-            "policy_compliance": lower_status not in {"bypassed", "violation"},
-        },
-        "payload": payload,
-    }
-    append_jsonl(AGENT_TRACES_PATH, row)
-    return row
+    return governance_store.append_trace(
+        AGENT_TRACES_PATH,
+        task_id,
+        event,
+        agent_id=agent_id,
+        status=status,
+        payload=payload,
+    )
 
 
 def append_task_eval(task_id: str, sub: SubAgentRuntime, display_text: str, artifact_ref: str = "") -> dict[str, Any]:
     role = normalized_subagent_role(sub.role)
-    clean = clean_text(display_text)
-    audit_refs = collect_task_audit_refs(task_id)
-    if artifact_ref and artifact_ref not in audit_refs["artifacts"]:
-        audit_refs["artifacts"].append(artifact_ref)
     task_row = latest_task_records().get(task_id, {})
-    budget = task_row.get("budget") if isinstance(task_row.get("budget"), dict) else default_task_budget(role)
-    max_tools = max(1, int(budget.get("max_tool_calls") or 1))
-    tool_calls = len(audit_refs["tool_calls"])
-    approval_count = len(audit_refs["approvals"])
-    artifact_count = len(audit_refs["artifacts"])
-    assessment = heuristic_eval_assessment(HeuristicEvalInput(
-        has_text=bool(clean.strip()),
+    return governance_store.append_task_eval(
+        AGENT_EVALS_PATH,
+        task_id=task_id,
+        agent_id=sub.agent_id,
         role=role,
-        max_tools=max_tools,
-        tool_calls=tool_calls,
-        approval_count=approval_count,
-        artifact_count=artifact_count,
-        artifact_recorded=bool(artifact_ref),
-    ))
-    scores = dict(assessment.get("scores") or {})
-    policy_compliance = float(assessment.get("policy_compliance") or scores.get("policy_compliance") or 0.0)
-    human_takeover_cost = float(assessment.get("human_takeover_cost") or scores.get("human_takeover_cost") or 0.0)
-    row = {
-        "schema_version": "agenteval.v2",
-        "eval_id": short_uid("eval"),
-        "task_id": task_id,
-        "context_id": "ga-tui",
-        "timestamp": now_iso(),
-        "agent_id": sub.agent_id,
-        "role": role,
-        "scores": scores,
-        "score_method": {
-            "schema_version": assessment.get("schema_version"),
-            "method": assessment.get("method"),
-            "basis": assessment.get("basis") or {},
-            "limitations": assessment.get("limitations") or [],
-        },
-        "audit_refs": audit_refs,
-        "coverage": {
-            "trace_count": len(audit_refs["traces"]),
-            "message_count": len(audit_refs["messages"]),
-            "artifact_count": artifact_count,
-            "approval_count": approval_count,
-            "memory_candidate_count": len(audit_refs["memory_candidates"]),
-            "tool_call_count": tool_calls,
-        },
-        "final_state": {
-            "status": "completed" if clean.strip() else "empty_result",
-            "has_result": bool(clean.strip()),
-            "has_evidence": bool(artifact_count),
-            "has_citation": bool(artifact_count),
-            "has_risk_signal": bool(approval_count),
-            "requires_review": bool(approval_count or role in {"coder", "ops"}),
-        },
-        "policy": {
-            "approval_count": approval_count,
-            "policy_compliance": policy_compliance,
-            "human_takeover_cost": human_takeover_cost,
-        },
-        "summary": truncate_cells(clean, 240),
-        "artifact_refs": [artifact_ref] if artifact_ref else [],
-    }
-    append_jsonl(AGENT_EVALS_PATH, row)
-    return row
+        display_text=display_text,
+        artifact_ref=artifact_ref,
+        task_row=task_row,
+        audit_refs=collect_task_audit_refs(task_id),
+        default_budget=default_task_budget(role),
+    )
 
 
 def compact_nonempty_lines(text: str, *, limit: int = 12, width: int = 220) -> list[str]:
@@ -8613,31 +8350,31 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
 
 
 def governance_store_paths() -> dict[str, str]:
-    return {
-        "messages": AGENT_MAIL_PATH,
-        "tasks": AGENT_TASK_LEDGER_PATH,
-        "progress": AGENT_PROGRESS_LEDGER_PATH,
-        "approvals": AGENT_APPROVALS_PATH,
-        "artifacts": AGENT_ARTIFACT_INDEX_PATH,
-        "policy": AGENT_POLICY_PATH,
-        "policy_decisions": AGENT_POLICY_DECISIONS_PATH,
-        "orchestrator_plans": AGENT_ORCHESTRATOR_PLANS_PATH,
-        "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
-        "traces": AGENT_TRACES_PATH,
-        "evals": AGENT_EVALS_PATH,
-        "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
-        "checkpoints": AGENT_CHECKPOINT_INDEX_PATH,
-        "checkpoint_store": AGENT_CHECKPOINTS_DIR,
-        "recovery": AGENT_RECOVERY_PATH,
-        "recovery_plans": AGENT_RECOVERY_PLANS_PATH,
-        "gateway": AGENT_GATEWAY_PATH,
-        "governance": AGENT_GOVERNANCE_PATH,
-        "gateway_push_subscriptions": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-        "gateway_push_deliveries": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
-        "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        "gateway_daemon_pid": AGENT_GATEWAY_DAEMON_PID_PATH,
-        "bridges": AGENT_BRIDGE_REGISTRY_PATH,
-    }
+    return governance_store.governance_store_paths(
+        messages=AGENT_MAIL_PATH,
+        tasks=AGENT_TASK_LEDGER_PATH,
+        progress=AGENT_PROGRESS_LEDGER_PATH,
+        approvals=AGENT_APPROVALS_PATH,
+        artifacts=AGENT_ARTIFACT_INDEX_PATH,
+        policy=AGENT_POLICY_PATH,
+        policy_decisions=AGENT_POLICY_DECISIONS_PATH,
+        orchestrator_plans=AGENT_ORCHESTRATOR_PLANS_PATH,
+        memory_candidates=AGENT_MEMORY_CANDIDATES_PATH,
+        traces=AGENT_TRACES_PATH,
+        evals=AGENT_EVALS_PATH,
+        runtime_evidence=AGENT_RUNTIME_EVIDENCE_PATH,
+        checkpoints=AGENT_CHECKPOINT_INDEX_PATH,
+        checkpoint_store=AGENT_CHECKPOINTS_DIR,
+        recovery=AGENT_RECOVERY_PATH,
+        recovery_plans=AGENT_RECOVERY_PLANS_PATH,
+        gateway=AGENT_GATEWAY_PATH,
+        governance=AGENT_GOVERNANCE_PATH,
+        gateway_push_subscriptions=AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
+        gateway_push_deliveries=AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
+        gateway_daemon_status=AGENT_GATEWAY_DAEMON_STATUS_PATH,
+        gateway_daemon_pid=AGENT_GATEWAY_DAEMON_PID_PATH,
+        bridges=AGENT_BRIDGE_REGISTRY_PATH,
+    )
 
 
 def governance_component_registry(state: Optional[State] = None, *, write_registry: bool = True) -> dict[str, Any]:
@@ -9906,39 +9643,37 @@ def queue_approval(
     target: str = "",
     approval_required_for: str = "",
 ) -> str:
-    approval_id = short_uid("appr")
-    row = {
-        "schema_version": "agentapproval.v1",
-        "approval_id": approval_id,
-        "timestamp": now_iso(),
-        "status": "pending",
-        "type": approval_type,
-        "source": source,
-        "target": target,
-        "summary": summary,
-        "approval_required_for": approval_required_for or approval_type,
-        "payload": payload,
-    }
-    append_jsonl(AGENT_APPROVALS_PATH, row)
-    append_agent_mail(
-        from_agent=source,
-        to_type="human",
-        target="approval_inbox",
-        intent="approval_request",
-        status="pending",
-        payload={"approval_id": approval_id, "summary": summary, "type": approval_type},
-        approval=approval_metadata(
+    def append_mail(row: dict[str, Any]) -> None:
+        approval_id = str(row.get("approval_id") or "")
+        append_agent_mail(
+            from_agent=source,
+            to_type="human",
+            target="approval_inbox",
+            intent="approval_request",
             status="pending",
-            approval_required_for=[approval_required_for or approval_type],
-            approval_id=approval_id,
-        ),
-        requires_human_approval=True,
+            payload={"approval_id": approval_id, "summary": summary, "type": approval_type},
+            approval=approval_metadata(
+                status="pending",
+                approval_required_for=[approval_required_for or approval_type],
+                approval_id=approval_id,
+            ),
+            requires_human_approval=True,
+        )
+
+    return governance_store.queue_approval(
+        AGENT_APPROVALS_PATH,
+        approval_type=approval_type,
+        summary=summary,
+        payload=payload,
+        source=source,
+        target=target,
+        approval_required_for=approval_required_for,
+        mail_callback=append_mail,
     )
-    return approval_id
 
 
 def approval_latest_records() -> dict[str, dict[str, Any]]:
-    return latest_records_by_id(AGENT_APPROVALS_PATH, "approval_id")
+    return governance_store.approval_latest_records(AGENT_APPROVALS_PATH)
 
 
 def secret_memory_candidate_approval_id(candidate_id: str) -> str:
@@ -22382,36 +22117,11 @@ def open_memory_viewer(stdscr, state: State) -> None:
 
 
 def approval_artifact_refs(row: dict[str, Any]) -> list[str]:
-    refs: list[str] = []
-    for value in row.get("artifact_refs") or []:
-        if isinstance(value, str) and value:
-            refs.append(value)
-    payload = row.get("payload") or {}
-    if isinstance(payload, dict):
-        for value in payload.get("artifact_refs") or []:
-            if isinstance(value, str) and value:
-                refs.append(value)
-        evidence = str(payload.get("evidence_ref") or "")
-        if evidence.startswith("artifact://"):
-            refs.append(evidence)
-    return list(dict.fromkeys(refs))
+    return governance_store.approval_artifact_refs(row)
 
 
 def approval_status_for_task(task_id: str) -> str:
-    task_id = str(task_id or "")
-    statuses: list[str] = []
-    for row in approval_latest_records().values():
-        payload = row.get("payload") or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        refs = approval_artifact_refs(row)
-        if str(payload.get("task_id") or "") == task_id or any(task_id and task_id in ref for ref in refs):
-            statuses.append(str(row.get("status") or "pending"))
-    if not statuses:
-        return "-"
-    if "pending" in statuses:
-        return "pending"
-    return ",".join(sorted(set(statuses)))
+    return governance_store.approval_status_for_task(list(approval_latest_records().values()), task_id)
 
 
 def task_panel_items() -> list[PanelItem]:

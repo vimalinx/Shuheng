@@ -30,6 +30,7 @@ from ga_tui import baseline as baseline_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
+from ga_tui import governance as governance_mod  # noqa: E402
 from ga_tui import history_store as history_store_mod  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
@@ -297,6 +298,75 @@ def assert_secret_vault_module_boundary() -> None:
     )
     secret_vault_mod.write_secret_vault_meta(paths, {"schema_version": "secretvault.boundary", "ok": True})
     assert secret_vault_mod.load_secret_vault_meta(paths)["ok"] is True
+
+
+def assert_governance_module_boundary() -> None:
+    assert a.APPROVAL_REQUIRED_FOR is governance_mod.APPROVAL_REQUIRED_FOR
+    decision = a.PolicyDecision(
+        decision_id="policy_boundary",
+        action="deploy",
+        subject="orchestrator.main",
+        role="ops",
+        status="approval_required",
+        allowed=False,
+        approval_required=True,
+        approval_required_for="deploy",
+        risk="high",
+        reason="boundary",
+        approval_id="appr_boundary",
+        payload={"task_id": "task_boundary"},
+    )
+    app_decision = a.policy_decision_to_dict(decision)
+    module_decision = governance_mod.policy_decision_to_dict(decision, timestamp=app_decision["timestamp"])
+    assert app_decision == module_decision
+    assert a.approval_metadata(decision=decision) == governance_mod.approval_metadata(decision=decision)
+
+    source = Path(governance_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "PanelItem",
+        "RenderLine",
+        "draw_",
+        "format_approvals",
+    ):
+        assert forbidden not in source, f"{governance_mod.__file__}: {forbidden}"
+
+    root = tempfile.mkdtemp(prefix="ga_tui_governance_")
+    harness = os.path.join(root, "agent_harness")
+    old_harness = a.AGENT_HARNESS_DIR
+    old_artifacts_dir = a.AGENT_ARTIFACTS_DIR
+    old_artifact_index = a.AGENT_ARTIFACT_INDEX_PATH
+    old_progress = a.AGENT_PROGRESS_LEDGER_PATH
+    old_locks = a.AGENT_LOCKS_PATH
+    old_tasks = a.AGENT_TASK_LEDGER_PATH
+    try:
+        a.AGENT_HARNESS_DIR = harness
+        a.AGENT_ARTIFACTS_DIR = os.path.join(harness, "artifacts")
+        a.AGENT_ARTIFACT_INDEX_PATH = os.path.join(harness, "artifacts.jsonl")
+        a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(harness, "progress.jsonl")
+        a.AGENT_LOCKS_PATH = os.path.join(harness, "locks.json")
+        a.AGENT_TASK_LEDGER_PATH = os.path.join(harness, "tasks.jsonl")
+        artifact_ref = a.write_harness_artifact("boundary", "result", "body", source_task_id="task_boundary")
+        assert artifact_ref.startswith("artifact://artifacts/boundary/"), artifact_ref
+        assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)[-1]["uri"] == artifact_ref
+        progress = a.append_progress_ledger({"task_id": "task_boundary", "status": "working"})
+        assert progress["schema_version"] == "agentprogress.v1", progress
+        sub = a.SubAgentRuntime(agent_id="coder-boundary", name="Coder Boundary", home=root, role="coder")
+        assert a.acquire_single_writer_lock(sub, "task_boundary", "write")[0]
+        assert a.current_writer_lock()["agent_id"] == "coder-boundary"
+        assert a.release_single_writer_lock("task_boundary")
+    finally:
+        a.AGENT_HARNESS_DIR = old_harness
+        a.AGENT_ARTIFACTS_DIR = old_artifacts_dir
+        a.AGENT_ARTIFACT_INDEX_PATH = old_artifact_index
+        a.AGENT_PROGRESS_LEDGER_PATH = old_progress
+        a.AGENT_LOCKS_PATH = old_locks
+        a.AGENT_TASK_LEDGER_PATH = old_tasks
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7081,6 +7151,7 @@ def run_checks() -> None:
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
     assert_secret_vault_module_boundary()
+    assert_governance_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
