@@ -9,6 +9,11 @@ import sys
 import tomllib
 from pathlib import Path
 
+try:
+    from .release_scan_rules import text_release_leak_errors
+except ImportError:
+    from release_scan_rules import text_release_leak_errors
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,6 +29,7 @@ REQUIRED_FILES = (
     ".github/workflows/ci.yml",
     "scripts/check_policy_gates.py",
     "scripts/check_release_hygiene.py",
+    "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
 )
@@ -72,20 +78,6 @@ PUBLIC_SCAN_FILES = {
     "pyproject.toml",
 }
 
-SECRET_PATTERNS = (
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
-    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
-    re.compile(r"AIza[0-9A-Za-z_-]{35}"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-)
-
-LOCAL_PATH_PATTERNS = (
-    re.compile(r"/home/[A-Za-z0-9._-]+/"),
-    re.compile(r"/Users/[A-Za-z0-9._-]+/"),
-)
-
 REQUIRED_MANIFEST_LINES = (
     "include README.md",
     "include README.en.md",
@@ -99,6 +91,7 @@ REQUIRED_MANIFEST_LINES = (
     "recursive-include tests *.py",
     "include scripts/check_policy_gates.py",
     "include scripts/check_release_hygiene.py",
+    "include scripts/release_scan_rules.py",
     "include scripts/runtime_smoke.py",
     "include scripts/wheel_smoke.py",
 )
@@ -119,7 +112,7 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
 RELEASE_WHEEL_SMOKE_FRAGMENT = "scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
 PYTHON_VERSION_PATTERN = re.compile(r"(?<!\d)(\d+\.\d+)(?!\d)")
 PUBLIC_RELEASE_COMMAND_FRAGMENTS = (
-    "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
+    "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
     "python scripts/check_release_hygiene.py",
     "python scripts/check_policy_gates.py",
     "python scripts/runtime_smoke.py",
@@ -176,14 +169,7 @@ def check_secret_and_local_literals(errors: list[str]) -> None:
         if not full_path.is_file() or full_path.suffix in {".pyc", ".pyo"}:
             continue
         text = read_text(path)
-        for pattern in SECRET_PATTERNS:
-            if pattern.search(text):
-                errors.append(f"secret-like literal found in public file: {path}")
-                break
-        for pattern in LOCAL_PATH_PATTERNS:
-            if pattern.search(text):
-                errors.append(f"local absolute path found in public file: {path}")
-                break
+        errors.extend(text_release_leak_errors(text, path, location="public file"))
 
 
 def check_pyproject_metadata(errors: list[str]) -> None:

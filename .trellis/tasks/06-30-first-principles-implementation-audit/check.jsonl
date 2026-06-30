@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verified the updated contracts with policy gates, release hygiene, Ruff, pytest, runtime smoke, build, wheel/sdist smoke, and shuheng-check."}

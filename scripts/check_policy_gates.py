@@ -250,6 +250,8 @@ def assert_ledger_store_module_boundary() -> None:
         "SubAgentRuntime",
     ):
         assert forbidden not in source, forbidden
+    assert "def update_json_dict_file" in source, "ledger_store must own JSON dict read-modify-write locking"
+    assert "fcntl.flock" in source, "ledger_store must keep cross-process advisory locks"
 
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "def _jsonl_append_lock" not in app_source, "app.py must not own JSONL append locks"
@@ -4978,7 +4980,19 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert chat_meta["conversation_scope"] == a.SUBAGENT_CHAT_HISTORY_SCOPE, chat_meta
     assert chat_meta["agent_id"] == sub.agent_id, chat_meta
     assert chat_meta["subagent_chat_session_id"] == sub.chat_session_id, chat_meta
-    assert chat_meta[a.SUBAGENT_CHAT_MESSAGES_META_KEY][0]["content"] == "hello direct", chat_meta
+    assert not chat_meta.get(a.SUBAGENT_CHAT_MESSAGES_META_KEY), chat_meta
+    registry = a.load_session_meta_registry()
+    registry[os.path.basename(session_entries[0]["history_path"])][a.SUBAGENT_CHAT_MESSAGES_META_KEY] = [
+        a.secret_message_record(a.Message("user", "stale history meta user")),
+        a.secret_message_record(a.Message("assistant", "stale history meta assistant")),
+    ]
+    a.save_session_meta_registry(registry)
+    stale_registry_reload = a.State(agent=ContextFakeAgent())
+    stale_registry_reload.running = True
+    assert a.load_subagents(stale_registry_reload) is True
+    stale_registry_sub = stale_registry_reload.subagents.get(sub.agent_id)
+    assert stale_registry_sub is not None
+    assert [msg.content for msg in stale_registry_sub.messages[:2]] == ["hello direct", "direct reply"], stale_registry_sub.messages
     stale_meta = a.load_subagent_meta_file(a.subagent_meta_file(sub))
     stale_meta.update({
         "messages": [{"role": "user", "content": "stale private transcript"}],

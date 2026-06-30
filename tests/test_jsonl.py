@@ -2,11 +2,12 @@
 
 The shared ledger store holds a process-internal lock per path plus an advisory
 fcntl.flock for cross-process safety. These tests cover correctness, caching,
-and app compatibility wrappers, not concurrency.
+app compatibility wrappers, and JSON object read-modify-write concurrency.
 """
 from __future__ import annotations
 
 import json
+import multiprocessing
 from pathlib import Path
 
 
@@ -16,7 +17,17 @@ from ga_tui.ledger_store import (
     jsonl_file_signature,
     latest_records_by_id,
     rows_matching,
+    update_json_dict_file,
 )
+
+
+def increment_json_counter(path: str, iterations: int) -> None:
+    for _ in range(iterations):
+        def update(data: dict[str, object]) -> tuple[dict[str, object], None]:
+            data["count"] = int(data.get("count") or 0) + 1
+            return data, None
+
+        update_json_dict_file(path, update)
 
 
 class TestAppendJsonl:
@@ -126,3 +137,34 @@ class TestLedgerStore:
         first = jsonl_file_signature(str(path))
         append_jsonl(str(path), {"task_id": "t2"})
         assert jsonl_file_signature(str(path))[1] > first[1]
+
+    def test_update_json_dict_file_returns_result_and_preserves_existing(self, tmp_path: Path) -> None:
+        path = tmp_path / "locks.json"
+        path.write_text('{"single_writer": {"task_id": "old"}}\n', encoding="utf-8")
+
+        def update(data: dict[str, object]) -> tuple[dict[str, object], str]:
+            assert data["single_writer"] == {"task_id": "old"}
+            data["single_writer"] = {"task_id": "new"}
+            return data, "updated"
+
+        assert update_json_dict_file(str(path), update) == "updated"
+        assert json.loads(path.read_text(encoding="utf-8")) == {"single_writer": {"task_id": "new"}}
+
+    def test_update_json_dict_file_serializes_cross_process_updates(self, tmp_path: Path) -> None:
+        path = tmp_path / "locks.json"
+        process_count = 4
+        iterations = 25
+        processes = [
+            multiprocessing.Process(target=increment_json_counter, args=(str(path), iterations))
+            for _ in range(process_count)
+        ]
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=10)
+            if process.exitcode is None:
+                process.terminate()
+                process.join()
+            assert process.exitcode == 0
+
+        assert json.loads(path.read_text(encoding="utf-8"))["count"] == process_count * iterations

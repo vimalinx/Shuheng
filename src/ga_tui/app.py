@@ -5844,7 +5844,7 @@ def load_agent_locks() -> dict[str, Any]:
 
 
 def save_agent_locks(data: dict[str, Any]) -> None:
-    write_text_atomic(AGENT_LOCKS_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, lambda _current: (dict(data), None))
 
 
 def current_writer_lock() -> Optional[dict[str, Any]]:
@@ -5856,37 +5856,42 @@ def current_writer_lock() -> Optional[dict[str, Any]]:
 def acquire_single_writer_lock(sub: SubAgentRuntime, task_id: str, objective: str = "") -> tuple[bool, str]:
     if not is_write_role(sub.role):
         return True, ""
-    data = load_agent_locks()
-    lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
-    if lock:
-        locked_task = str(lock.get("task_id") or "")
-        locked_status = str(latest_task_records().get(locked_task, {}).get("status") or "")
-        if locked_task == task_id:
-            return True, ""
-        if not terminal_task_status(locked_status):
-            owner = str(lock.get("agent_id") or "-")
-            return False, f"single-writer 已被 {owner} 持有，任务 {locked_task} 尚未结束。"
-    data["single_writer"] = {
-        "task_id": task_id,
-        "agent_id": sub.agent_id,
-        "agent_name": sub.name,
-        "role": normalized_subagent_role(sub.role),
-        "objective": truncate_cells(objective, 240),
-        "acquired_at": now_iso(),
-    }
-    save_agent_locks(data)
-    return True, ""
+    task_id = str(task_id or "")
+
+    def update(data: dict[str, Any]) -> tuple[dict[str, Any], tuple[bool, str]]:
+        lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
+        if lock:
+            locked_task = str(lock.get("task_id") or "")
+            locked_status = str(latest_task_records().get(locked_task, {}).get("status") or "")
+            if locked_task == task_id:
+                return data, (True, "")
+            if not terminal_task_status(locked_status):
+                owner = str(lock.get("agent_id") or "-")
+                return data, (False, f"single-writer 已被 {owner} 持有，任务 {locked_task} 尚未结束。")
+        data["single_writer"] = {
+            "task_id": task_id,
+            "agent_id": sub.agent_id,
+            "agent_name": sub.name,
+            "role": normalized_subagent_role(sub.role),
+            "objective": truncate_cells(objective, 240),
+            "acquired_at": now_iso(),
+        }
+        return data, (True, "")
+
+    return ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, update)
 
 
 def release_single_writer_lock(task_id: str) -> bool:
     task_id = str(task_id or "")
-    data = load_agent_locks()
-    lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
-    if not lock or str(lock.get("task_id") or "") != task_id:
-        return False
-    data.pop("single_writer", None)
-    save_agent_locks(data)
-    return True
+
+    def update(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        lock = data.get("single_writer") if isinstance(data.get("single_writer"), dict) else None
+        if not lock or str(lock.get("task_id") or "") != task_id:
+            return data, False
+        data.pop("single_writer", None)
+        return data, True
+
+    return ledger_store.update_json_dict_file(AGENT_LOCKS_PATH, update)
 
 
 def bounded_score(value: float) -> float:
@@ -11102,7 +11107,6 @@ def subagent_chat_history_path_for_session(
         "ui_preview_loaded_rounds": 0,
         "ui_preview_total_rounds": 0,
         "ui_preview_message_count": 0,
-        SUBAGENT_CHAT_MESSAGES_META_KEY: [],
     }
     save_session_meta_registry(registry)
     if state is not None:
@@ -11141,6 +11145,7 @@ def save_subagent_chat_messages_to_history(
     registry = load_session_meta_registry()
     key = session_key(path)
     entry = dict(registry.get(key, {}))
+    entry.pop(SUBAGENT_CHAT_MESSAGES_META_KEY, None)
     entry.update({
         "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
         "agent_id": sub.agent_id,
@@ -11159,7 +11164,6 @@ def save_subagent_chat_messages_to_history(
         "ui_preview_loaded_rounds": rounds,
         "ui_preview_total_rounds": rounds,
         "ui_preview_message_count": len(preview_messages),
-        SUBAGENT_CHAT_MESSAGES_META_KEY: [secret_message_record(msg) for msg in persisted_messages],
     })
     if stat is not None:
         entry["cache_mtime"] = stat.st_mtime
@@ -11186,15 +11190,20 @@ def messages_from_history_transcript(path: str) -> list[Message]:
         assistant = assistant_text_from_response_body(response)
         if assistant:
             messages.append(Message("assistant", assistant))
+        elif user:
+            messages.append(Message("assistant", "", done=False))
     return normalize_loaded_subagent_chat_messages(messages)
 
 
 def messages_from_subagent_history_meta(path: str, meta: dict[str, Any]) -> list[Message]:
+    transcript_messages = messages_from_history_transcript(path)
+    if transcript_messages:
+        return transcript_messages
     raw_messages = meta.get(SUBAGENT_CHAT_MESSAGES_META_KEY)
     if isinstance(raw_messages, list):
         messages = [msg for msg in (secret_message_from_record(item) for item in raw_messages) if msg is not None]
         return normalize_loaded_subagent_chat_messages(messages)
-    return messages_from_history_transcript(path)
+    return []
 
 
 def legacy_subagent_chat_session_entries(sub: SubAgentRuntime) -> list[dict[str, Any]]:
@@ -11260,7 +11269,9 @@ def subagent_history_chat_session_entries(state: Optional[State], sub: SubAgentR
         if not session_id:
             continue
         raw_messages = meta.get(SUBAGENT_CHAT_MESSAGES_META_KEY)
-        message_count = len(raw_messages) if isinstance(raw_messages, list) else int(meta.get("message_count") or 0)
+        message_count = int(meta.get("message_count") or meta.get("ui_preview_message_count") or 0)
+        if not message_count and isinstance(raw_messages, list):
+            message_count = len(raw_messages)
         entries.append({
             "path": path,
             "history_path": path,

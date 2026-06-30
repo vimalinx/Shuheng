@@ -12,13 +12,17 @@ import json
 import os
 from pathlib import Path
 from pathlib import PurePosixPath
-import re
 import subprocess
 import sys
 import tarfile
 import tempfile
 import venv
 import zipfile
+
+try:
+    from .release_scan_rules import text_release_leak_errors as shared_text_release_leak_errors
+except ImportError:
+    from release_scan_rules import text_release_leak_errors as shared_text_release_leak_errors
 
 
 REQUIRED_CONTINUE_FUNCS = (
@@ -67,6 +71,7 @@ SDIST_REQUIRED_MEMBERS = (
     "pyproject.toml",
     "scripts/check_policy_gates.py",
     "scripts/check_release_hygiene.py",
+    "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
     "src/ga_tui/app.py",
@@ -116,20 +121,6 @@ WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
     "top_level.txt",
     "RECORD",
     "licenses/LICENSE",
-)
-
-SECRET_PATTERNS = (
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"xox[baprs]-[A-Za-z0-9-]{20,}"),
-    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
-    re.compile(r"AIza[0-9A-Za-z_-]{35}"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-)
-
-LOCAL_PATH_PATTERNS = (
-    re.compile(r"/home/[A-Za-z0-9._-]+/"),
-    re.compile(r"/Users/[A-Za-z0-9._-]+/"),
 )
 
 
@@ -203,12 +194,7 @@ def normalized_archive_parts(raw_name: str) -> tuple[str, ...]:
 
 
 def text_release_leak_errors(text: str, path: str) -> list[str]:
-    errors: list[str] = []
-    if any(pattern.search(text) for pattern in SECRET_PATTERNS):
-        errors.append(f"secret-like literal found in artifact member: {path}")
-    if any(pattern.search(text) for pattern in LOCAL_PATH_PATTERNS):
-        errors.append(f"local absolute path found in artifact member: {path}")
-    return errors
+    return shared_text_release_leak_errors(text, path, location="artifact member")
 
 
 def check_archive_text_has_no_release_leaks(rows: list[tuple[str, bytes]], *, artifact_kind: str) -> dict[str, object]:

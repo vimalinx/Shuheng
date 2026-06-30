@@ -265,7 +265,7 @@ def release_readiness_report(
         },
         "distribution_smoke": distribution_smoke_contract(),
         "verification_commands": [
-            "python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
+            "python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
             "python3 scripts/check_release_hygiene.py",
             "python3 -m pytest -q -p no:cacheprovider",
             "python3 scripts/check_policy_gates.py",

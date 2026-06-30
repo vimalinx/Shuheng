@@ -130,6 +130,10 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Wheel smoke must scan built wheel and sdist artifact member contents for
   realistic secret-like literals and local absolute paths, not only source
   checkout files.
+- Realistic secret/local path scan regexes must live in
+  `scripts/release_scan_rules.py`; repository hygiene and wheel/sdist smoke
+  checks must import that shared source instead of carrying duplicate regex
+  tuples.
 - OMP plugin user-facing labels and docs should say Shuheng. Compatibility tool
   ids may remain `ga_tui_*`.
 
@@ -161,6 +165,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   fails.
 - Built wheel or sdist artifact member content contains realistic API
   key/private-key material or local absolute user paths -> wheel smoke fails.
+- `scripts/check_release_hygiene.py` and `scripts/wheel_smoke.py` define their
+  own secret/local regex tuples instead of importing `release_scan_rules.py` ->
+  release-rule drift risk.
 - CI or README release smoke uses `scripts/wheel_smoke.py --no-deps` or
   `--wheel-only` -> release hygiene fails because the public gate no longer
   matches real wheel+sdist installation.
@@ -232,6 +239,9 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   for helper scripts that do not import the full TUI runtime, must run
   `shuheng --help` after each dependency-resolving install, and must run
   installed `shuheng-check` against an isolated GenericAgent stub.
+- Release hygiene and wheel smoke tests must keep realistic secret/local path
+  scanning sourced from `scripts/release_scan_rules.py`, and the shared helper
+  must be included in MANIFEST/sdist and public Ruff command lists.
 - `scripts/check_release_hygiene.py` must assert README and CI release commands
   use `scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist` without
   `--no-deps` or `--wheel-only`.
@@ -567,6 +577,7 @@ S01 修复左栏历史会话标题
   - `latest_records_by_id(path, key)`
   - `rows_matching(path, key, value)`
   - `clear_jsonl_caches()`
+  - `update_json_dict_file(path, updater)`
 - Compatibility wrappers in `app.py` may keep the old function names, but should delegate to `ledger_store`.
 
 ### 3. Contracts
@@ -575,6 +586,10 @@ S01 修复左栏历史会话标题
 - `app.py` remains allowed to own domain projections such as `latest_task_records()`, `approval_latest_records()`, `artifact_index_latest()`, `task_panel_items()`, and home-page rendering, but those projections must consume the shared ledger helpers.
 - `latest_records_by_id(...)` returns copies of cached rows so callers cannot mutate process-local cache state by editing returned dictionaries.
 - Any successful `append_jsonl(...)` must invalidate latest-record cache entries for that normalized path before later reads can use stale data.
+- JSON object files used as governance locks, including `locks.json`, must use
+  `ledger_store.update_json_dict_file(...)` so read-modify-write cycles are
+  protected by process-local and cross-process locks. Do not split lock acquire
+  into independent `load -> mutate -> write_text_atomic` operations.
 - `read_jsonl(...)` skips corrupt and non-dict lines. App-level callers may pass a parse-error callback to preserve diagnostics without forcing `ledger_store` to import `app.py`.
 - `ledger_store.py` must not import curses, `ga_tui.app`, `State`, or `SubAgentRuntime`.
 
@@ -582,6 +597,9 @@ S01 修复左栏历史会话标题
 
 - App source reintroduces `_LATEST_RECORDS_CACHE` or `_jsonl_append_lock` -> policy gate fails.
 - App source performs `fcntl.flock` directly for ledger appends -> policy gate fails.
+- `single_writer` acquire/release reads `locks.json`, decides ownership, and
+  writes with a separate unguarded call -> two writer processes can acquire at
+  once and the policy gate/unit tests must fail.
 - Returned latest-record row is mutated by a caller -> subsequent latest-record calls still return the original cached data.
 - Append a newer row for an existing id -> next latest-record call returns the newer row.
 - Corrupt JSONL line -> row is skipped and optional parse diagnostics can be emitted by the caller.
@@ -595,7 +613,7 @@ S01 修复左栏历史会话标题
 
 ### 6. Tests Required
 
-- `tests/test_jsonl.py` must cover append/read behavior, latest-record cache copy safety, cache invalidation after append, field-history filtering, and file signatures.
+- `tests/test_jsonl.py` must cover append/read behavior, latest-record cache copy safety, cache invalidation after append, field-history filtering, file signatures, JSON dict update return values, and cross-process serialized read-modify-write updates.
 - `scripts/check_policy_gates.py` must assert `ledger_store` has no curses/app dependency and `app.py` no longer owns JSONL append locks or latest-record cache internals.
 - `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
@@ -712,6 +730,11 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
 - A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
 - Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts. Subagent runtime agents must use a non-persistent transcript sink such as `os.devnull`, not `sub.home/model_responses.txt`, so agent-local state stays metadata/refs/runtime only.
+- Restoring a non-secret persistent direct-chat session must parse the
+  canonical Shuheng history transcript first. `session_meta.json` may cache
+  title, preview, counts, and routing refs, but it must not be the
+  authoritative full transcript source; legacy full-message meta is only a
+  fallback when the transcript is missing or empty.
 - Subagent metadata must be written from a positive runtime/navigation schema. Saving `meta.json` or encrypted meta must not carry forward stale transcript fields such as `messages`, `subagent_chat_messages`, or embedded session payloads from older metadata files.
 - Secret subagent direct-chat transcripts must stay encrypted in Secret Vault storage and must not be copied into normal plaintext history.
 - Successful direct-chat replies continue to save chat session messages in canonical history, subagent events, token usage, context-pack artifact refs, and memory-candidate approval notices.
@@ -727,6 +750,9 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Runtime stream emits empty final text -> visible `[ERROR] runtime completed without a visible reply.` and user-visible failure status.
 - Runtime stream emits OMP/RPC terminal error -> release `active_task_id`, keep queued-chat progression, and surface failure in `state.last_error`.
 - Non-secret subagent runtime created for direct chat -> runtime `log_path` is `os.devnull`; canonical chat history row exists under `MODEL_RESPONSES_DIR`; no `sub.home/model_responses.txt` transcript file is created.
+- `session_meta.json` contains stale legacy `subagent_chat_messages` while the
+  canonical history transcript exists -> reload must restore messages from the
+  transcript, not the stale meta list.
 
 ### 5. Good/Base/Bad Cases
 
@@ -745,6 +771,9 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Tests must keep direct-chat memory-candidate approvals visible and ensure direct chat does not write `subagent-results` artifacts or task-ledger rows.
 - Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher, and assert Web agent conversation can hydrate from canonical history-backed subagent chat state instead of relying only on process-local `sub.messages`.
 - Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files or `sub.home/model_responses.txt` runtime transcript files; legacy per-agent JSON files remain non-destructively importable.
+- Tests must assert new non-secret history meta does not store a full
+  `subagent_chat_messages` copy, and a seeded stale legacy meta copy cannot
+  override the canonical transcript on reload.
 - Tests must seed stale transcript-like fields in subagent `meta.json`, save metadata again, and assert the saved metadata only keeps runtime/navigation/lifecycle fields.
 
 ### 7. Wrong vs Correct

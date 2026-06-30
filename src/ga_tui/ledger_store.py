@@ -10,10 +10,11 @@ import fcntl
 import json
 import os
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 
 ParseErrorHandler = Callable[[Exception, str], None]
+T = TypeVar("T")
 
 LATEST_RECORDS_CACHE_LIMIT = 64
 
@@ -76,6 +77,61 @@ def append_jsonl(path: str, payload: dict[str, Any]) -> None:
                 except (OSError, ValueError):
                     pass
     invalidate_jsonl_cache(path)
+
+
+def update_json_dict_file(
+    path: str,
+    updater: Callable[[dict[str, Any]], tuple[dict[str, Any], T]],
+) -> T:
+    """Atomically update a JSON object file under process and flock locks."""
+
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    lock_path = f"{path}.lock"
+    lock_parent = os.path.dirname(lock_path)
+    if lock_parent:
+        os.makedirs(lock_parent, exist_ok=True)
+
+    temp_path = ""
+    with _jsonl_append_lock(lock_path):
+        with open(lock_path, "a+", encoding="utf-8") as lock_fh:
+            try:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            except (OSError, ValueError):
+                pass
+            try:
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        raw = json.load(fh)
+                except Exception:
+                    raw = {}
+                current = dict(raw) if isinstance(raw, dict) else {}
+                next_data, result = updater(current)
+                if not isinstance(next_data, dict):
+                    raise TypeError("JSON dict updater must return a dict payload")
+                temp_path = f"{path}.tmp.{os.getpid()}.{threading.get_ident()}"
+                with open(temp_path, "w", encoding="utf-8") as out:
+                    json.dump(next_data, out, ensure_ascii=False, indent=2, sort_keys=True)
+                    out.write("\n")
+                    out.flush()
+                    try:
+                        os.fsync(out.fileno())
+                    except OSError:
+                        pass
+                os.replace(temp_path, path)
+                temp_path = ""
+                return result
+            finally:
+                if temp_path:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+                try:
+                    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+                except (OSError, ValueError):
+                    pass
 
 
 def read_jsonl(path: str, limit: int = 0, *, on_parse_error: ParseErrorHandler | None = None) -> list[dict[str, Any]]:
