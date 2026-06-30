@@ -36,6 +36,8 @@ from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
+from ga_tui import text_utils as text_utils_mod  # noqa: E402
+from ga_tui import ui_types as ui_types_mod  # noqa: E402
 
 
 def retarget_harness(root: str) -> None:
@@ -236,6 +238,25 @@ def assert_release_gateway_module_boundaries() -> None:
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "ga_tui.app" not in source, module.__file__
         assert "from .app" not in source, module.__file__
+
+
+def assert_leaf_module_boundaries() -> None:
+    assert a.ANSI_RE is text_utils_mod.ANSI_RE
+    assert a.cell_width is text_utils_mod.cell_width
+    assert a.truncate_cells is text_utils_mod.truncate_cells
+    assert a.pad_cells is text_utils_mod.pad_cells
+    assert a.clean_text is text_utils_mod.clean_text
+    assert a.wrap_cells is text_utils_mod.wrap_cells
+    assert a.Message is ui_types_mod.Message
+    assert a.RenderLine is ui_types_mod.RenderLine
+    assert a.State is ui_types_mod.State
+    assert a.SubAgentRuntime is ui_types_mod.SubAgentRuntime
+    assert a.MAIN_HOME_SESSION_KEY == ui_types_mod.MAIN_HOME_SESSION_KEY
+    assert a.SCHEDULED_REPORTS_SESSION_KEY == ui_types_mod.SCHEDULED_REPORTS_SESSION_KEY
+    for module in (text_utils_mod, ui_types_mod):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for forbidden in ("ga_tui.app", "from .app", "import app"):
+            assert forbidden not in source, f"{module.__file__}: {forbidden}"
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7017,6 +7038,7 @@ def assert_ohmypi_main_turn_persists_model_response_history() -> None:
 def run_checks() -> None:
     assert_scheduler_module_boundary()
     assert_release_gateway_module_boundaries()
+    assert_leaf_module_boundaries()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()

@@ -1,11 +1,13 @@
-"""Tests for terminal cell-width / wrapping utilities (ga_tui.app).
+"""Tests for terminal cell-width / wrapping utilities.
 
 These functions compute display widths for East-Asian-Wide characters and wrap
 text to a terminal cell budget. They are pure: no IO, no curses.
 """
 from __future__ import annotations
 
-from ga_tui.app import (
+from ga_tui import app as app_module
+from ga_tui import text_utils, ui_types
+from ga_tui.text_utils import (
     ANSI_RE,
     cell_width,
     clean_text,
@@ -13,6 +15,25 @@ from ga_tui.app import (
     truncate_cells,
     wrap_cells,
 )
+
+
+class TestAppCompatibilityAliases:
+    def test_text_utils_reexported_from_app(self) -> None:
+        assert app_module.ANSI_RE is text_utils.ANSI_RE
+        assert app_module.cell_width is text_utils.cell_width
+        assert app_module.truncate_cells is text_utils.truncate_cells
+        assert app_module.pad_cells is text_utils.pad_cells
+        assert app_module.clean_text is text_utils.clean_text
+        assert app_module.wrap_cells is text_utils.wrap_cells
+
+    def test_ui_types_reexported_from_app(self) -> None:
+        assert app_module.Message is ui_types.Message
+        assert app_module.RenderLine is ui_types.RenderLine
+        assert app_module.State is ui_types.State
+        assert app_module.SubAgentRuntime is ui_types.SubAgentRuntime
+        assert app_module.MAIN_HOME_SESSION_KEY == ui_types.MAIN_HOME_SESSION_KEY
+        assert app_module.SCHEDULED_REPORTS_SESSION_KEY == ui_types.SCHEDULED_REPORTS_SESSION_KEY
+        assert app_module.SUBAGENT_HOME_SESSION_PREFIX == ui_types.SUBAGENT_HOME_SESSION_PREFIX
 
 
 class TestCellWidth:
