@@ -30,6 +30,7 @@ from ga_tui import baseline as baseline_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
+from ga_tui import history_store as history_store_mod  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
@@ -257,6 +258,22 @@ def assert_leaf_module_boundaries() -> None:
         source = Path(module.__file__).read_text(encoding="utf-8")
         for forbidden in ("ga_tui.app", "from .app", "import app"):
             assert forbidden not in source, f"{module.__file__}: {forbidden}"
+
+
+def assert_history_store_module_boundary() -> None:
+    assert a.session_key("/tmp/model_responses_a.txt") == history_store_mod.session_key("/tmp/model_responses_a.txt")
+    assert a.parse_log_time("2026-06-30 12:34:56") == history_store_mod.parse_log_time("2026-06-30 12:34:56")
+    assert a.is_model_response_basename("model_responses_a.txt") is history_store_mod.is_model_response_basename("model_responses_a.txt")
+    assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
+    assert a.clear_missing_source_session_meta({"source_missing": True}) == history_store_mod.clear_missing_source_session_meta({"source_missing": True})
+    assert a.is_subagent_session_log_sample("[GA TUI SubAgent Profile]") is history_store_mod.is_subagent_session_log_sample("[GA TUI SubAgent Profile]")
+    source = Path(history_store_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
+        assert forbidden not in source, f"{history_store_mod.__file__}: {forbidden}"
+    root = tempfile.mkdtemp(prefix="ga_tui_history_store_")
+    meta_path = os.path.join(root, "session_meta.json")
+    history_store_mod.save_session_meta_registry(meta_path, {"model_responses_a.txt": {"rounds": 1}})
+    assert history_store_mod.load_session_meta_registry(meta_path)["model_responses_a.txt"]["rounds"] == 1
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7039,6 +7056,7 @@ def run_checks() -> None:
     assert_scheduler_module_boundary()
     assert_release_gateway_module_boundaries()
     assert_leaf_module_boundaries()
+    assert_history_store_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()

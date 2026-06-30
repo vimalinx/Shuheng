@@ -86,6 +86,7 @@ try:
     from . import runtime_evidence as runtime_evidence_store
     from . import baseline as baseline_report
     from . import gateway_registry as gateway_registry_helpers
+    from . import history_store
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -194,6 +195,7 @@ except Exception:
     import runtime_evidence as runtime_evidence_store  # type: ignore
     import baseline as baseline_report  # type: ignore
     import gateway_registry as gateway_registry_helpers  # type: ignore
+    import history_store  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -879,30 +881,15 @@ def is_normal_session_log_path(path: str) -> bool:
 
 
 def session_key(path: str) -> str:
-    return os.path.basename(path or "")
+    return history_store.session_key(path)
 
 
 def load_session_meta_registry() -> dict[str, dict[str, Any]]:
-    try:
-        with open(SESSION_META_PATH, encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except Exception:
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    meta: dict[str, dict[str, Any]] = {}
-    for key, value in raw.items():
-        if isinstance(key, str) and isinstance(value, dict):
-            meta[key] = dict(value)
-    return meta
+    return history_store.load_session_meta_registry(SESSION_META_PATH)
 
 
 def save_session_meta_registry(meta: dict[str, dict[str, Any]]) -> None:
-    os.makedirs(os.path.dirname(SESSION_META_PATH), exist_ok=True)
-    tmp = SESSION_META_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=2, sort_keys=True)
-    os.replace(tmp, SESSION_META_PATH)
+    history_store.save_session_meta_registry(SESSION_META_PATH, meta)
 
 
 def session_meta_for(state: State, path: str) -> dict[str, Any]:
@@ -1228,32 +1215,15 @@ def mark_session_opened(state: State, path: str) -> None:
 
 
 def parse_log_time(text: str) -> float:
-    text = (text or "").strip()
-    if not text:
-        return 0.0
-    stamp = text[:19]
-    try:
-        return time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S"))
-    except Exception:
-        return 0.0
+    return history_store.parse_log_time(text)
 
 
 def session_last_user_time(path: str, fallback: float = 0.0) -> float:
-    last = 0.0
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
-    except Exception:
-        return fallback
-    return session_last_user_time_from_content(content, fallback)
+    return history_store.session_last_user_time(path, fallback, PROMPT_BLOCK_WITH_TIME_RE, _user_text)
 
 
 def session_last_user_time_from_content(content: str, fallback: float = 0.0) -> float:
-    last = 0.0
-    for timestamp, prompt_body in PROMPT_BLOCK_WITH_TIME_RE.findall(content):
-        if _user_text(prompt_body):
-            last = parse_log_time(timestamp) or last
-    return last or fallback
+    return history_store.session_last_user_time_from_content(content, fallback, PROMPT_BLOCK_WITH_TIME_RE, _user_text)
 
 
 def compact_ui_preview_messages_from_pairs(
@@ -1284,63 +1254,27 @@ def compact_ui_preview_messages_from_pairs(
 
 
 def messages_from_preview_dicts(raw: Any) -> list[Message]:
-    if not isinstance(raw, list):
-        return []
-    messages: list[Message] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").strip()
-        content = str(item.get("content") or "")
-        if role in {"user", "assistant", "system"} and content.strip():
-            messages.append(Message(role, content))
-    return messages
+    return history_store.messages_from_preview_dicts(raw)
 
 
 def sample_file_text(path: str, limit: int = 65536) -> str:
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            return fh.read(limit)
-    except Exception:
-        return ""
+    return history_store.sample_file_text(path, limit)
 
 
 def is_subagent_session_log_sample(text: str) -> bool:
-    if not text:
-        return False
-    if "[GA TUI SubAgent Profile]" in text:
-        return True
-    if "[GA TUI Context Pack]" not in text or "[/GA TUI Context Pack]" not in text:
-        return False
-    return "\nagent:" in text or "\\nagent:" in text
+    return history_store.is_subagent_session_log_sample(text)
 
 
 def is_model_response_basename(key: str) -> bool:
-    base = os.path.basename(key or "")
-    return base.startswith("model_responses") and base.endswith(".txt")
+    return history_store.is_model_response_basename(key)
 
 
 def session_meta_epoch(value: Any) -> float:
-    if value in (None, ""):
-        return 0.0
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        pass
-    try:
-        parsed = parse_schedule_timestamp(value)
-    except Exception:
-        parsed = None
-    return float(parsed or 0.0)
+    return history_store.session_meta_epoch(value)
 
 
 def clear_missing_source_session_meta(meta: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    if not any(key in meta for key in ("source_missing", "archive_backed", "source_state")):
-        return meta, False
-    entry = dict(meta)
-    for key in ("source_missing", "archive_backed", "source_state"):
-        entry.pop(key, None)
-    return entry, entry != meta
+    return history_store.clear_missing_source_session_meta(meta)
 
 
 def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[list[tuple[str, float, str, int, str]], bool]:
@@ -1652,25 +1586,12 @@ def latest_user_message_text(messages: list[Message]) -> str:
 
 
 def append_model_response_transcript_turn(path: str, user_text: str, assistant_text: str) -> bool:
-    user_text = clean_text(user_text).strip()
-    if not user_text or not is_normal_session_log_path(path):
-        return False
-    response_text = clean_text(assistant_text)
-    prompt = {"role": "user", "content": [{"type": "text", "text": user_text}]}
-    response = [{"type": "text", "text": response_text}]
-    now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8", errors="replace") as fh:
-        fh.write(f"=== Prompt === {now}\n")
-        fh.write(json.dumps(prompt, ensure_ascii=False, indent=2))
-        fh.write(f"\n\n=== Response === {now}\n")
-        fh.write(repr(response))
-        fh.write("\n\n")
-    try:
-        os.utime(path, None)
-    except OSError:
-        pass
-    return True
+    return history_store.append_model_response_transcript_turn(
+        path,
+        user_text,
+        assistant_text,
+        normal_session_log_path=is_normal_session_log_path(path),
+    )
 
 
 def persist_transcript_bridge_turn(
@@ -10679,39 +10600,11 @@ def subagent_chat_history_meta_matches(meta: dict[str, Any], sub: SubAgentRuntim
 
 
 def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
-    pending_user: Optional[str] = None
-    for msg in messages:
-        role = str(msg.role or "")
-        content = clean_text(msg.content or "")
-        if role == "user":
-            if pending_user is not None:
-                pairs.append((pending_user, ""))
-            pending_user = content
-        elif role == "assistant" and pending_user is not None:
-            pairs.append((pending_user, content))
-            pending_user = None
-    if pending_user is not None:
-        pairs.append((pending_user, ""))
-    return pairs
+    return history_store.subagent_chat_message_pairs(messages)
 
 
 def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -> None:
-    lines: list[str] = []
-    now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    for user_text, assistant_text in subagent_chat_message_pairs(messages):
-        if not clean_text(user_text).strip():
-            continue
-        prompt = {"role": "user", "content": [{"type": "text", "text": clean_text(user_text)}]}
-        response = [{"type": "text", "text": clean_text(assistant_text)}]
-        lines.append(f"=== Prompt === {now}\n{json.dumps(prompt, ensure_ascii=False, indent=2)}")
-        lines.append(f"=== Response === {now}\n{repr(response)}")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    write_text_atomic(path, "\n\n".join(lines).rstrip() + ("\n\n" if lines else ""))
-    try:
-        os.utime(path, None)
-    except OSError:
-        pass
+    history_store.write_subagent_chat_history_transcript(path, messages)
 
 
 def subagent_chat_history_preview_messages(messages: list[Message], limit: int = 20) -> list[dict[str, str]]:
