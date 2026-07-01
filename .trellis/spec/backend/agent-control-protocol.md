@@ -1843,7 +1843,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 /agent skill add agent-research custom-sop -> only agent-research context_pack.skill_pack includes custom-sop
 ```
 
-## Scenario: Running Indicator, Process Summary, Turn Marker Splitting, And Selection Geometry Rendering
+## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger
 
@@ -1858,6 +1858,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - Process text helper ownership: `rendering.strip_meta_blocks(text)`, `rendering.process_preview(text)`, and `rendering.process_summary_text(text)`, re-exported by `app.py` for compatibility.
 - Process turn-marker splitter ownership: `rendering.next_nonblank_line(lines, start)`, `rendering.line_numbered_file_line(line)`, `rendering.stray_line_numbered_fence_close(line, previous_nonblank, next_nonblank)`, and `rendering.split_top_level_turn_markers(text)`, re-exported by `app.py` for compatibility.
 - Markdown fence balancing ownership: `rendering.close_unbalanced_markdown_fence(text)`, re-exported by `app.py` for compatibility.
+- Visible reply cleanup ownership: `rendering.strip_tool_output_blocks(text)`, `rendering.strip_standalone_dot_lines(text)`, and `rendering.visible_reply_text(body, hide_detail_fences=False)`, with `TOOL_CALL_BLOCK_RE`, `TOOL_RESULT_FENCE_RE`, and `FINAL_RESPONSE_INFO_RE` owned by `rendering.py` and re-exported by `app.py` for compatibility.
 - Message cache helper ownership: `rendering.scoped_subagent_meta_keys(process_scope, expanded_subagent_meta)` and `rendering.message_render_cache_key(...)`, re-exported by `app.py` for compatibility.
 - Selection geometry helpers: `rendering.char_index_for_cell(text, target_x)`, `rendering.ordered_selection_points(selection_start, selection_end)`, and `rendering.selection_span_for_line_points(points, line_idx, text)`, with `app.py` retaining the legacy `ordered_selection_points(state)` and `selection_span_for_line(state, line_idx, text)` wrappers.
 - Cached line marker: `RenderLine.kind == "running_indicator"`.
@@ -1876,6 +1877,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `split_top_level_turn_markers(...)` is a deterministic text parser over already-loaded assistant text. It splits only top-level `LLM Running (Turn N) ...` markers, treats fenced content as opaque data, and preserves the legacy line-numbered file-output guard so a stray closing fence after `N|...` does not swallow the next top-level turn marker.
 - `split_top_level_turn_markers(...)` may reuse `history_titles.TURN_MARKER_RE`, but must not parse tools/interactions, inspect `State`, read history stores, mutate caches, allocate `RenderLine`, or call curses.
 - `close_unbalanced_markdown_fence(...)` is a deterministic text transform over already-cleaned visible assistant text. It appends the original opening fence tick sequence only when a markdown fence remains open, treats suffix-bearing close lines as content, and must not parse tools/interactions, inspect `State`, read history stores, mutate caches, allocate `RenderLine`, or call curses.
+- `visible_reply_text(...)` is a deterministic text transform over already-loaded assistant text. It removes hidden meta blocks, standalone progress-dot lines, `tool_use` blocks, tool headers, and final-response info; it keeps detail/result fences in default mode and removes tool-call/detail/result blocks only when `hide_detail_fences=True`.
+- `visible_reply_text(...)` may reuse process-safe history-title regexes but must not call `process_tools(...)`, parse JSON-ish tool payloads, inspect interaction state, read history stores, mutate caches, allocate `RenderLine`, or call curses.
 - `app.py` remains the owner of visible row state, `record_running_indicator_rect(...)`, `draw_running_indicator_frame(...)`, full `draw_main(...)`, and event-loop frame advancement.
 - `char_index_for_cell(...)` maps terminal-cell x coordinates to Python character indices with the same East Asian wide-character and zero-width combining-mark behavior as the existing text helpers.
 - `ordered_selection_points(...)` is pure over explicit `(line, column)` points and returns `None` for missing or zero-length selections. App wrappers inject `State.selection_start` and `State.selection_end`.
@@ -1899,6 +1902,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - Top-level `LLM Running (Turn N) ...` markers -> splitter returns alternating preamble/marker/body parts compatible with `render_assistant_text(...)` and `latest_visible_reply_text(...)`.
 - `LLM Running (Turn N) ...` inside a fenced block -> splitter leaves it inside the surrounding content rather than treating it as a process turn.
 - Stray ````` fence close after line-numbered file output and immediately before a top-level marker -> splitter keeps the marker visible for splitting instead of entering an opaque fence block.
+- Visible reply cleanup in default mode -> strips hidden meta, `tool_use`, tool headers, final-response info, standalone dot lines, and collapsed extra blank lines while preserving five-backtick result fences.
+- Visible reply cleanup with `hide_detail_fences=True` -> strips tool-call blocks, `tool_use` blocks, result fences, tool headers, final-response info, standalone dot lines, and collapsed extra blank lines.
 - Wide or combining characters in text hit testing -> cell coordinate maps to the same character index as the legacy app helper.
 - Terminal resize or full redraw -> `draw_main()` recomputes `State.running_indicator_rect` from currently visible lines.
 
@@ -1908,6 +1913,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - Base: A normal dirty redraw caused by input, scroll, history refresh, or clock refresh still redraws the whole TUI.
 - Base: `draw_main()` still calls `selection_span_for_line(state, idx, text)` through the app facade, while the pure span computation lives in `rendering.py`.
 - Base: `render_assistant_text(...)` and `latest_visible_reply_text(...)` still call `split_top_level_turn_markers(...)` through the app facade while the splitter implementation lives in `rendering.py`.
+- Base: `latest_visible_reply_text(...)` still decides which process turn/body should supply final visible prose in `app.py`; it calls `visible_reply_text(...)` through the app facade while the cleanup implementation lives in `rendering.py`.
 - Base: `process_title_text(...)`, `process_tools(...)`, process grouping/folding, `message_block_lines(...)`, and `message_lines_from_cache(...)` stay in `app.py` until their JSON-ish parsing, search-noise detection, mutable cache, and curses/render-line dependencies have clean boundaries.
 - Bad: Adding `run_frame` to the message cache key or setting `state.dirty = True` every 120ms.
 - Bad: Moving `selected_text(...)`, clipboard behavior, mouse drag mutation, or curses selection drawing into `rendering.py`.
@@ -1917,7 +1923,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert run-frame changes do not invalidate message block cache keys.
-- Unit tests and `scripts/check_policy_gates.py` must assert running-indicator helpers are owned by `rendering.py`, app compatibility aliases match, helper output wraps by modulo, cached non-indicator lines pass through unchanged, indicator lines use `prefix_cells`, process preview/summary helpers preserve legacy summary, fallback, and metadata-stripping behavior, turn-marker splitter helpers preserve top-level splitting, fenced-marker opacity, line-numbered stray-fence handling, and app alias parity, selection geometry helpers preserve app wrapper behavior, and `rendering.py` has no reverse dependency into app/curses/state/runtime/command/Web/dashboard/input owners.
+- Unit tests and `scripts/check_policy_gates.py` must assert running-indicator helpers are owned by `rendering.py`, app compatibility aliases match, helper output wraps by modulo, cached non-indicator lines pass through unchanged, indicator lines use `prefix_cells`, process preview/summary helpers preserve legacy summary, fallback, and metadata-stripping behavior, visible-reply cleanup preserves default-vs-hide-detail fence behavior, strips standalone dot lines, collapses extra blank lines, and keeps app alias parity, turn-marker splitter helpers preserve top-level splitting, fenced-marker opacity, line-numbered stray-fence handling, and app alias parity, selection geometry helpers preserve app wrapper behavior, and `rendering.py` has no reverse dependency into app/curses/state/runtime/command/Web/dashboard/input owners.
 - Unit tests must assert `char_index_for_cell(...)` handles negative targets, ASCII boundaries, wide CJK characters, and combining marks; pure selection helpers handle missing/equal/reversed points, same-line and multiline spans, out-of-range lines, clamped columns, empty spans, and app wrapper parity.
 - Tests must assert a visible running indicator can be refreshed with a single row update and one curses refresh while preserving the cache and input cursor.
 

@@ -26,10 +26,45 @@ DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
 TOOL_CALL_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`")
 TOOL_USE_NAME_RE = re.compile(r"<tool_use>\s*\{[\s\S]*?\"name\"\s*:\s*\"([^\"]+)\"[\s\S]*?</tool_use>")
+TOOL_USE_BLOCK_RE = history_title_policy.TOOL_USE_BLOCK_RE
+TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
+TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
+TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
+FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def strip_meta_blocks(text: str) -> str:
     return META_BLOCK_RE.sub("", text or "").strip()
+
+
+def strip_tool_output_blocks(text: str) -> str:
+    text = TOOL_CALL_BLOCK_RE.sub("", text or "")
+    text = TOOL_USE_BLOCK_RE.sub("", text)
+    text = TOOL_RESULT_FENCE_RE.sub("", text)
+    text = TOOL_HEADER_RE.sub("", text)
+    text = FINAL_RESPONSE_INFO_RE.sub("", text)
+    return text
+
+
+def strip_standalone_dot_lines(text: str) -> str:
+    lines = [
+        line
+        for line in (text or "").splitlines()
+        if line.strip() != "."
+    ]
+    return "\n".join(lines).strip()
+
+
+def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
+    text = strip_meta_blocks(body)
+    if hide_detail_fences:
+        text = strip_tool_output_blocks(text)
+    else:
+        text = TOOL_USE_BLOCK_RE.sub("", text)
+        text = TOOL_HEADER_RE.sub("", text)
+        text = FINAL_RESPONSE_INFO_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return strip_standalone_dot_lines(text)
 
 
 def process_preview(text: str) -> str:

@@ -347,6 +347,12 @@ def assert_rendering_module_boundary() -> None:
         "stray_line_numbered_fence_close",
         "split_top_level_turn_markers",
         "close_unbalanced_markdown_fence",
+        "TOOL_CALL_BLOCK_RE",
+        "TOOL_RESULT_FENCE_RE",
+        "FINAL_RESPONSE_INFO_RE",
+        "strip_tool_output_blocks",
+        "strip_standalone_dot_lines",
+        "visible_reply_text",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -454,6 +460,38 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.close_unbalanced_markdown_fence("intro\n````python\nbody\n```") == (
         "intro\n````python\nbody\n```\n````"
     )
+    visible_body = (
+        "<summary>hidden</summary>\n"
+        "Final answer\n"
+        "<tool_use>{\"name\":\"web.search\"}</tool_use>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "[Info] Final response to user.\n"
+        "`````\n"
+        "result visible by default\n"
+        "`````\n"
+        ".\n"
+        "\n\n"
+        "After"
+    )
+    assert rendering_mod.visible_reply_text(visible_body) == (
+        "Final answer\n\n`````\nresult visible by default\n`````\n\nAfter"
+    )
+    hidden_detail_body = (
+        "Final answer\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n"
+        "{\"q\":\"needle\"}\n"
+        "````\n"
+        "<tool_use>{\"name\":\"web.search\"}</tool_use>\n"
+        "`````\n"
+        "result hidden\n"
+        "`````\n"
+        "[Info] Final response to user.\n"
+        ".\n"
+    )
+    assert rendering_mod.visible_reply_text(hidden_detail_body, hide_detail_fences=True) == "Final answer"
+    assert rendering_mod.strip_standalone_dot_lines("A\n.\n3.14\n . \nB") == "A\n3.14\nB"
+    assert rendering_mod.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(

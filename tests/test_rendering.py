@@ -228,6 +228,57 @@ def test_close_unbalanced_markdown_fence_requires_suffixless_sufficient_close() 
     assert rendering.close_unbalanced_markdown_fence(short_close) == short_close + "\n````"
 
 
+def test_visible_reply_text_default_keeps_result_fences_but_hides_meta_and_headers() -> None:
+    body = (
+        "<summary>hidden process</summary>\n"
+        "Visible answer\n"
+        "<tool_use>{\"name\":\"web.search\"}</tool_use>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "[Info] Final response to user.\n"
+        "`````\n"
+        "raw result stays by default\n"
+        "`````\n"
+        ".\n"
+        "\n\n"
+        "Next line"
+    )
+
+    visible = rendering.visible_reply_text(body)
+
+    assert "hidden process" not in visible
+    assert "<tool_use>" not in visible
+    assert "Tool:" not in visible
+    assert "[Info]" not in visible
+    assert "." not in visible.splitlines()
+    assert visible == "Visible answer\n\n`````\nraw result stays by default\n`````\n\nNext line"
+
+
+def test_visible_reply_text_hide_detail_fences_removes_tool_blocks_and_result_fences() -> None:
+    body = (
+        "Visible answer\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n"
+        "{\"q\":\"needle\"}\n"
+        "````\n"
+        "<tool_use>{\"name\":\"web.search\"}</tool_use>\n"
+        "`````\n"
+        "raw result hidden\n"
+        "`````\n"
+        "[Info] Final response to user.\n"
+        ".\n"
+    )
+
+    assert rendering.visible_reply_text(body, hide_detail_fences=True) == "Visible answer"
+
+
+def test_strip_standalone_dot_lines_keeps_decimal_and_sentence_punctuation() -> None:
+    assert rendering.strip_standalone_dot_lines("A\n.\n3.14\nend.\n . \nB") == "A\n3.14\nend.\nB"
+
+
+def test_visible_reply_text_collapses_three_or_more_newlines() -> None:
+    assert rendering.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -257,6 +308,12 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.stray_line_numbered_fence_close is rendering.stray_line_numbered_fence_close
     assert app_module.split_top_level_turn_markers is rendering.split_top_level_turn_markers
     assert app_module.close_unbalanced_markdown_fence is rendering.close_unbalanced_markdown_fence
+    assert app_module.TOOL_CALL_BLOCK_RE is rendering.TOOL_CALL_BLOCK_RE
+    assert app_module.TOOL_RESULT_FENCE_RE is rendering.TOOL_RESULT_FENCE_RE
+    assert app_module.FINAL_RESPONSE_INFO_RE is rendering.FINAL_RESPONSE_INFO_RE
+    assert app_module.strip_tool_output_blocks is rendering.strip_tool_output_blocks
+    assert app_module.strip_standalone_dot_lines is rendering.strip_standalone_dot_lines
+    assert app_module.visible_reply_text is rendering.visible_reply_text
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line

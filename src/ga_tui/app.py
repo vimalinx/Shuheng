@@ -540,9 +540,9 @@ TOOL_USE_BLOCK_RE = history_title_policy.TOOL_USE_BLOCK_RE
 TOOL_USE_PAYLOAD_RE = re.compile(r"<tool_use>\s*([\s\S]*?)\s*</tool_use>", re.IGNORECASE)
 TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
 TOOL_ARGS_PAYLOAD_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`\s*📥\s*args:\s*\n`{4}text\n([\s\S]*?)^`{4}\s*", re.IGNORECASE | re.MULTILINE)
-TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
-TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
-FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*$", re.IGNORECASE | re.MULTILINE)
+TOOL_CALL_BLOCK_RE = rendering_helpers.TOOL_CALL_BLOCK_RE
+TOOL_RESULT_FENCE_RE = rendering_helpers.TOOL_RESULT_FENCE_RE
+FINAL_RESPONSE_INFO_RE = rendering_helpers.FINAL_RESPONSE_INFO_RE
 PROCESS_GROUP_TOGGLE_RE = re.compile(r"过程组\s+(G\d+)")
 PROCESS_TURN_TOGGLE_RE = re.compile(r"过程\s+(G\d+T\d+)")
 SUBAGENT_META_TOGGLE_RE = re.compile(r"元信息\s+(S[0-9a-f]{8})")
@@ -575,6 +575,9 @@ char_index_for_cell = rendering_helpers.char_index_for_cell
 scoped_subagent_meta_keys = rendering_helpers.scoped_subagent_meta_keys
 message_render_cache_key = rendering_helpers.message_render_cache_key
 strip_meta_blocks = rendering_helpers.strip_meta_blocks
+strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
+strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
+visible_reply_text = rendering_helpers.visible_reply_text
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
 next_nonblank_line = rendering_helpers.next_nonblank_line
@@ -18576,37 +18579,6 @@ def process_has_search_noise(body: str) -> bool:
         "queryselectorall",
     )
     return any(marker in lowered for marker in search_markers)
-
-
-def strip_tool_output_blocks(text: str) -> str:
-    text = TOOL_CALL_BLOCK_RE.sub("", text or "")
-    text = TOOL_USE_BLOCK_RE.sub("", text)
-    text = TOOL_RESULT_FENCE_RE.sub("", text)
-    text = TOOL_HEADER_RE.sub("", text)
-    text = FINAL_RESPONSE_INFO_RE.sub("", text)
-    return text
-
-
-def strip_standalone_dot_lines(text: str) -> str:
-    lines = [
-        line
-        for line in (text or "").splitlines()
-        if line.strip() != "."
-    ]
-    return "\n".join(lines).strip()
-
-
-def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
-    """Keep user-facing prose while dropping tool-call/result noise."""
-    text = strip_meta_blocks(body)
-    if hide_detail_fences:
-        text = strip_tool_output_blocks(text)
-    else:
-        text = TOOL_USE_BLOCK_RE.sub("", text)
-        text = TOOL_HEADER_RE.sub("", text)
-        text = FINAL_RESPONSE_INFO_RE.sub("", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return strip_standalone_dot_lines(text)
 
 
 def visible_reply_is_substantive(text: str) -> bool:
