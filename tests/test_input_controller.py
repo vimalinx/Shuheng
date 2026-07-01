@@ -1,0 +1,117 @@
+"""Tests for pure input cursor/display geometry helpers."""
+from __future__ import annotations
+
+from ga_tui import app as app_module
+from ga_tui import input_controller
+
+
+class TestAppCompatibilityAliases:
+    def test_input_helpers_reexported_from_app(self) -> None:
+        assert app_module.raw_cursor_to_display is input_controller.raw_cursor_to_display
+        assert app_module.display_cursor_to_raw is input_controller.display_cursor_to_raw
+        assert app_module.input_segments is input_controller.input_segments
+        assert app_module.display_index_for_cell is input_controller.display_index_for_cell
+        assert app_module.input_cursor_info is input_controller.input_cursor_info
+
+
+class TestCursorMapping:
+    def test_raw_newline_displays_as_two_cells(self) -> None:
+        text = "a\nb"
+
+        assert input_controller.raw_cursor_to_display(text, -1) == 0
+        assert input_controller.raw_cursor_to_display(text, 0) == 0
+        assert input_controller.raw_cursor_to_display(text, 1) == 1
+        assert input_controller.raw_cursor_to_display(text, 2) == 3
+        assert input_controller.raw_cursor_to_display(text, 3) == 4
+        assert input_controller.raw_cursor_to_display(text, 99) == 4
+
+    def test_display_cursor_maps_back_through_newline_escape(self) -> None:
+        text = "a\nb"
+
+        assert input_controller.display_cursor_to_raw(text, -1) == 0
+        assert input_controller.display_cursor_to_raw(text, 0) == 0
+        assert input_controller.display_cursor_to_raw(text, 1) == 1
+        assert input_controller.display_cursor_to_raw(text, 2) == 2
+        assert input_controller.display_cursor_to_raw(text, 3) == 2
+        assert input_controller.display_cursor_to_raw(text, 4) == 3
+        assert input_controller.display_cursor_to_raw(text, 99) == 3
+
+    def test_raw_display_round_trip_clamps_source_cursor(self) -> None:
+        text = "a\nb枢"
+
+        for raw_cursor in range(-2, len(text) + 3):
+            clamped = max(0, min(raw_cursor, len(text)))
+            display_cursor = input_controller.raw_cursor_to_display(text, raw_cursor)
+            assert input_controller.display_cursor_to_raw(text, display_cursor) == clamped
+
+
+class TestInputSegments:
+    def test_wraps_escaped_newline_by_display_cells(self) -> None:
+        assert input_controller.input_segments("a\nb", 4) == (
+            "a\\nb",
+            [("a\\", 0, 2), ("nb", 2, 4)],
+        )
+
+    def test_wraps_east_asian_wide_characters(self) -> None:
+        assert input_controller.input_segments("ab枢衡", 4) == (
+            "ab枢衡",
+            [("ab", 0, 2), ("枢", 2, 3), ("衡", 3, 4)],
+        )
+
+    def test_combining_marks_do_not_consume_cells(self) -> None:
+        assert input_controller.input_segments("e\u0301f", 4) == (
+            "e\u0301f",
+            [("e\u0301f", 0, 3)],
+        )
+
+    def test_empty_input_keeps_one_empty_segment(self) -> None:
+        assert input_controller.input_segments("", 0) == ("", [("", 0, 0)])
+
+
+class TestDisplayIndexForCell:
+    def test_ascii_cell_lookup(self) -> None:
+        display = "abcd"
+
+        assert input_controller.display_index_for_cell(display, 1, 4, -1) == 1
+        assert input_controller.display_index_for_cell(display, 1, 4, 0) == 1
+        assert input_controller.display_index_for_cell(display, 1, 4, 1) == 2
+        assert input_controller.display_index_for_cell(display, 1, 4, 3) == 4
+        assert input_controller.display_index_for_cell(display, 1, 4, 9) == 4
+
+    def test_wide_character_cell_lookup(self) -> None:
+        display = "a枢b"
+
+        assert input_controller.display_index_for_cell(display, 0, len(display), 0) == 0
+        assert input_controller.display_index_for_cell(display, 0, len(display), 1) == 1
+        assert input_controller.display_index_for_cell(display, 0, len(display), 2) == 1
+        assert input_controller.display_index_for_cell(display, 0, len(display), 3) == 2
+        assert input_controller.display_index_for_cell(display, 0, len(display), 4) == 3
+
+
+class TestInputCursorInfo:
+    def test_cursor_info_for_wrapped_newline_display(self) -> None:
+        assert input_controller.input_cursor_info("a\nb", 4, 3) == (
+            "a\\nb",
+            [("a\\", 0, 2), ("nb", 2, 4)],
+            4,
+            1,
+            2,
+        )
+
+    def test_cursor_info_for_wide_and_combining_text(self) -> None:
+        assert input_controller.input_cursor_info("e\u0301枢", 4, 3) == (
+            "e\u0301枢",
+            [("e\u0301", 0, 2), ("枢", 2, 3)],
+            3,
+            1,
+            2,
+        )
+
+    def test_cursor_info_clamps_raw_cursor(self) -> None:
+        assert input_controller.input_cursor_info("abc", 10, 99) == (
+            "abc",
+            [("abc", 0, 3)],
+            3,
+            0,
+            3,
+        )

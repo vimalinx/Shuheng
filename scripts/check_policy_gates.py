@@ -35,6 +35,7 @@ from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import governance as governance_mod  # noqa: E402
 from ga_tui import history_store as history_store_mod  # noqa: E402
 from ga_tui import history_titles as history_titles_mod  # noqa: E402
+from ga_tui import input_controller as input_controller_mod  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
@@ -274,6 +275,57 @@ def assert_leaf_module_boundaries() -> None:
     text_source = Path(text_utils_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("import curses", "from curses", "State", "SubAgentRuntime", "RenderLine"):
         assert forbidden not in text_source, f"{text_utils_mod.__file__}: {forbidden}"
+
+
+def assert_input_controller_module_boundary() -> None:
+    for name in (
+        "raw_cursor_to_display",
+        "display_cursor_to_raw",
+        "input_segments",
+        "display_index_for_cell",
+        "input_cursor_info",
+    ):
+        assert getattr(a, name) is getattr(input_controller_mod, name), name
+    assert input_controller_mod.raw_cursor_to_display("a\nb", 2) == 3
+    assert input_controller_mod.display_cursor_to_raw("a\nb", 2) == 2
+    assert input_controller_mod.display_cursor_to_raw("a\nb", 3) == 2
+    assert input_controller_mod.input_segments("ab枢衡", 4) == (
+        "ab枢衡",
+        [("ab", 0, 2), ("枢", 2, 3), ("衡", 3, 4)],
+    )
+    assert input_controller_mod.input_segments("e\u0301f", 4) == (
+        "e\u0301f",
+        [("e\u0301f", 0, 3)],
+    )
+    assert input_controller_mod.display_index_for_cell("a枢b", 0, 3, 2) == 1
+    assert input_controller_mod.input_cursor_info("a\nb", 4, 3) == (
+        "a\\nb",
+        [("a\\", 0, 2), ("nb", 2, 4)],
+        4,
+        1,
+        2,
+    )
+    source = Path(input_controller_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "PanelItem",
+        "GatewayRequestHandler",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+        "draw_",
+        "handle_key",
+        "handle_mouse",
+        "COMMANDS",
+    ):
+        assert forbidden not in source, f"{input_controller_mod.__file__}: {forbidden}"
 
 
 def assert_history_store_module_boundary() -> None:
@@ -8129,6 +8181,7 @@ def run_checks() -> None:
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
     assert_history_title_policy_module_boundary()
+    assert_input_controller_module_boundary()
     assert_path_utils_module_boundary()
     assert_subagent_store_module_boundary()
     assert_secret_vault_module_boundary()
