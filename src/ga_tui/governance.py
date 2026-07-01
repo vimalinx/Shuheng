@@ -448,6 +448,31 @@ def task_display_title(row: dict[str, Any], *, owner_name: str = "") -> str:
     return objective or "任务"
 
 
+def selected_plan_id_from_rows(
+    rows: list[tuple[str, dict[str, Any]]],
+    preferred_plan_id: str = "",
+    require_active: bool = False,
+) -> str:
+    plans = [
+        item for item in rows
+        if str(item[1].get("kind") or "") == "plan"
+    ]
+    if not plans:
+        return ""
+    preferred_plan_id = str(preferred_plan_id or "")
+    if preferred_plan_id and any(task_id == preferred_plan_id for task_id, _row in plans):
+        return preferred_plan_id
+    active_plans = [
+        item for item in plans
+        if not terminal_task_status(str(item[1].get("status") or ""))
+    ]
+    if require_active and not active_plans:
+        return ""
+    candidates = active_plans or plans
+    candidates.sort(key=lambda item: row_timestamp(item[1]), reverse=True)
+    return candidates[0][0] if candidates else ""
+
+
 def load_agent_locks(locks_path: str) -> dict[str, Any]:
     try:
         with open(locks_path, encoding="utf-8") as fh:

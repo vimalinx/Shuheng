@@ -1179,6 +1179,69 @@ def task_display_title(row, state=None):
     return governance.task_display_title(row, owner_name=task_owner_display_name(state, row))
 ```
 
+## Scenario: Governance Plan Selection Helper Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition moves pure active-plan selection over already-loaded task rows into `governance.py`.
+- Applies to: selecting a plan id from `(task_id, row)` pairs using row kind, preferred id, terminal status, active-only requirements, and timestamp ordering.
+- Non-goal: This does not move rightbar selected-plan state, active plan hydration, plan-step resolution, task-plan creation, task ledger writes, command handlers, panel rendering, Web Console payloads, or storage-root behavior.
+
+### 2. Signatures
+
+- `governance.selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False) -> str`
+- `app.py` keeps the compatibility wrapper with the old name and signature.
+
+### 3. Contracts
+
+- `governance.py` may interpret already-loaded task ledger row values, row kind, status strings, and timestamps.
+- `governance.py` must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or ledger write helpers for plan selection.
+- Only rows with `kind == "plan"` are plan candidates.
+- A non-empty preferred plan id wins when it exists among plan candidates, even before active filtering.
+- Active plans are plan rows whose status is not terminal according to the existing terminal task status predicate.
+- `require_active=True` returns `""` when no active plan candidate exists.
+- Without active candidates and without `require_active`, the fallback returns the newest plan candidate by existing row timestamp ordering.
+- `app.py` remains the owner of resolving the current UI session, mutating active plan state, hydrating plan steps, rightbar/panel rendering, task ledger writes, command routing, and mutable storage roots.
+
+### 4. Validation & Error Matrix
+
+- Preferred id points to a plan row -> returns that id.
+- Non-plan rows are newer than plan rows -> ignored.
+- Active plan exists and terminal plan is newer -> active plan wins unless the terminal plan is the preferred id.
+- `require_active=True` with only terminal plan rows -> `""`.
+- Only terminal plan rows with `require_active=False` -> newest terminal plan id.
+- No plan rows -> `""`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `rightbar_selected_plan_id(...)` stays in `app.py` and delegates the row-selection rule through the compatibility wrapper.
+- Base: `hydrate_active_plan_from_ledger(...)` stays in `app.py` because it reads latest task records, filters by active UI session, mutates active plan state, and resolves plan steps.
+- Bad: `governance.py` imports `State` or reads task ledgers to discover the current plan.
+- Bad: plan selection changes task ledger schema, terminal status semantics, active-plan hydration side effects, or auto-continue reset behavior.
+
+### 6. Tests Required
+
+- Unit tests must assert preferred id, active-vs-terminal selection, active-required empty fallback, newest fallback, non-plan filtering, and app wrapper parity.
+- `scripts/check_policy_gates.py` must assert the expanded governance boundary and wrapper parity.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# governance.py
+from ga_tui.app import State, latest_task_records
+```
+
+#### Correct
+
+```python
+# app.py
+def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False):
+    return governance.selected_plan_id_from_rows(rows, preferred_plan_id, require_active=require_active)
+```
+
 ## Scenario: Secret Vault Value Helper Boundary
 
 ### 1. Scope / Trigger

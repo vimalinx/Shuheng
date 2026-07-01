@@ -200,6 +200,35 @@ def test_task_display_helpers_and_app_wrappers() -> None:
     ) == "子 agent 任务: Reader Runtime"
 
 
+def test_selected_plan_id_from_rows_and_app_wrapper() -> None:
+    rows = [
+        ("note_latest", {"kind": "task", "status": "working", "ts": 999.0}),
+        ("plan_done_newest", {"kind": "plan", "status": "completed", "ts": 30.0}),
+        ("plan_active_old", {"kind": "plan", "status": "working", "ts": 10.0}),
+        ("plan_active_new", {"kind": "plan", "status": "pending", "ts": 20.0}),
+    ]
+
+    assert governance.selected_plan_id_from_rows(rows, "plan_done_newest") == "plan_done_newest"
+    assert governance.selected_plan_id_from_rows(rows) == "plan_active_new"
+    assert governance.selected_plan_id_from_rows(rows, require_active=True) == "plan_active_new"
+    assert governance.selected_plan_id_from_rows([
+        ("task_only", {"kind": "task", "status": "working", "ts": 100.0}),
+    ]) == ""
+
+    terminal_rows = [
+        ("not_plan", {"kind": "task", "status": "working", "ts": 100.0}),
+        ("plan_done_old", {"kind": "plan", "status": "completed", "ts": 5.0}),
+        ("plan_failed_new", {"kind": "plan", "status": "failed", "ts": 15.0}),
+    ]
+    assert governance.selected_plan_id_from_rows(terminal_rows, require_active=True) == ""
+    assert governance.selected_plan_id_from_rows(terminal_rows) == "plan_failed_new"
+
+    assert app_module.selected_plan_id_from_rows(rows, "plan_active_old") == (
+        governance.selected_plan_id_from_rows(rows, "plan_active_old")
+    )
+    assert app_module.selected_plan_id_from_rows(terminal_rows, require_active=True) == ""
+
+
 def test_progress_approval_artifact_and_trace_round_trip(tmp_path: Path) -> None:
     harness = tmp_path / "agent_harness"
     artifacts_dir = harness / "artifacts"

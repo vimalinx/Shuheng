@@ -19824,24 +19824,11 @@ def selected_plan_id_from_rows(
     preferred_plan_id: str = "",
     require_active: bool = False,
 ) -> str:
-    plans = [
-        item for item in rows
-        if str(item[1].get("kind") or "") == "plan"
-    ]
-    if not plans:
-        return ""
-    preferred_plan_id = str(preferred_plan_id or "")
-    if preferred_plan_id and any(task_id == preferred_plan_id for task_id, _row in plans):
-        return preferred_plan_id
-    active_plans = [
-        item for item in plans
-        if not terminal_task_status(str(item[1].get("status") or ""))
-    ]
-    if require_active and not active_plans:
-        return ""
-    candidates = active_plans or plans
-    candidates.sort(key=lambda item: row_timestamp(item[1]), reverse=True)
-    return candidates[0][0] if candidates else ""
+    return governance_store.selected_plan_id_from_rows(
+        rows,
+        preferred_plan_id,
+        require_active=require_active,
+    )
 
 
 def rightbar_selected_plan_id(state: State, rows: list[tuple[str, dict[str, Any]]]) -> str:

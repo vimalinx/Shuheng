@@ -809,6 +809,20 @@ def assert_governance_module_boundary() -> None:
         owner_name="Boundary Agent",
     ) == "子 agent 任务: Boundary Agent"
     assert governance_mod.task_display_title({"objective": "Boundary objective"}) == "Boundary objective"
+    plan_rows = [
+        ("not_plan", {"kind": "task", "status": "working", "ts": 99.0}),
+        ("plan_done_new", {"kind": "plan", "status": "completed", "ts": 30.0}),
+        ("plan_active_old", {"kind": "plan", "status": "working", "ts": 10.0}),
+        ("plan_active_new", {"kind": "plan", "status": "pending", "ts": 20.0}),
+    ]
+    assert governance_mod.selected_plan_id_from_rows(plan_rows, "plan_done_new") == "plan_done_new"
+    assert governance_mod.selected_plan_id_from_rows(plan_rows) == "plan_active_new"
+    terminal_plan_rows = [
+        ("plan_done_old", {"kind": "plan", "status": "completed", "ts": 1.0}),
+        ("plan_failed_new", {"kind": "plan", "status": "failed", "ts": 2.0}),
+    ]
+    assert governance_mod.selected_plan_id_from_rows(terminal_plan_rows, require_active=True) == ""
+    assert governance_mod.selected_plan_id_from_rows(terminal_plan_rows) == "plan_failed_new"
 
     source = Path(governance_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -895,6 +909,8 @@ def assert_governance_module_boundary() -> None:
             {"kind": "subagent_task", "assigned_agent": "agent-boundary"},
             panel_state,
         ) == "子 agent 任务: Boundary Runtime"
+        assert a.selected_plan_id_from_rows(plan_rows) == "plan_active_new"
+        assert a.selected_plan_id_from_rows(terminal_plan_rows, require_active=True) == ""
     finally:
         a.AGENT_HARNESS_DIR = old_harness
         a.AGENT_ARTIFACTS_DIR = old_artifacts_dir
