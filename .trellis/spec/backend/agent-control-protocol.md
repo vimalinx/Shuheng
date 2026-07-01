@@ -288,7 +288,7 @@ and app.py monolith risk.
 - Restore preview compaction: `history_store.compact_ui_preview_messages_from_pairs(...)`, wrapped by `app.compact_ui_preview_messages_from_pairs(...)` to inject app-owned prompt parsing, assistant preview shaping, and default loaded-round count.
 - Restore message shaping: `history_store.history_round_count(...)`, `history_store.extract_recent_ui_messages_from_pairs(...)`, and `history_store.history_messages_from_pairs(...)`, wrapped by `app.py` to inject app-owned prompt parsing, tool-result extraction, response-segment formatting, and default loaded-round count.
 - Transcript message selector: `history_store.latest_user_message_text(messages)`, re-exported from `app.py` for compatibility.
-- Process filtering helpers: `session_preview_from_pairs()`, `session_response_preview_text()`, `session_summary_titles_from_text()`, and `history_cache_has_process_only_preview()`.
+- Process filtering/title helpers: `history_titles.session_preview_from_pairs()`, `history_titles.session_response_preview_text()`, `history_titles.session_summary_titles_from_text()`, `history_titles.history_cache_has_process_only_preview()`, `history_titles.message_text_for_metadata_context()`, and `history_titles.suggested_session_title()`, wrapped by `app.py` where app-owned prompt parsing or visible-reply extraction is still required.
 - Low-level response-body parser: `history_store.assistant_text_from_response_body(response_body)`, re-exported from `app.py` for compatibility.
 
 ### 3. Contracts
@@ -312,7 +312,9 @@ and app.py monolith risk.
 - `compact_ui_preview_messages_from_pairs(...)` belongs to `history_store.py` because it is pure restore-preview message shaping over already-parsed transcript pairs. It accepts prompt-text and assistant-preview callables from the app facade and must not parse/write transcript files, inspect `State`, or own process-summary title policy.
 - `history_round_count(...)`, `extract_recent_ui_messages_from_pairs(...)`, and `history_messages_from_pairs(...)` belong to `history_store.py` because they shape already-parsed transcript pairs into recent restore message records. They accept app-provided prompt/tool/response-format callables and must not parse transcript files, switch providers, reset runtime backends, inspect UI state, write metadata, or own process-summary title policy.
 - `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
+- `short_session_title(...)`, `compact_description(...)`, `text_has_process_markers(...)`, `session_summary_titles_from_text(...)`, `session_response_preview_text(...)`, `session_preview_from_pairs(...)`, `is_process_only_session_title(...)`, `history_cache_has_process_only_preview(...)`, `message_text_for_metadata_context(...)`, `session_description_from_pairs(...)`, and `suggested_session_title(...)` belong to `history_titles.py` because they are process-summary-safe title/preview/description policy over already-parsed text, response bodies, message rows, or transcript pairs. App wrappers inject `_user_text(...)`, `latest_visible_reply_text(...)`, and current display limits where those dependencies remain app/rendering-owned.
 - `history_store.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `history_titles.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
 ### 4. Validation & Error Matrix
 
@@ -362,6 +364,7 @@ and app.py monolith risk.
 - `scripts/check_policy_gates.py` must assert `compact_ui_preview_messages_from_pairs` is owned by `history_store.py`, app wrapper parity holds, recent-round selection works, blank user prompts are skipped, and `执行中` assistant previews are excluded.
 - `scripts/check_policy_gates.py` must assert restore message shaping helpers are owned by `history_store.py`, app wrapper parity holds, user-round fallback works, promptless follow-up turns are grouped into assistant process markers, and loaded/total restore counts are preserved.
 - `scripts/check_policy_gates.py` must assert `latest_user_message_text` is owned by `history_store.py`, app alias parity holds, blank user rows are skipped, and the newest non-empty user content wins.
+- `scripts/check_policy_gates.py` must assert history title policy helpers are owned by `history_titles.py`, app wrapper parity holds, process-only summaries are excluded, normal non-process summaries remain valid title candidates, metadata-context text strips hidden process/control blocks, and `history_titles.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard/runtime dependencies.
 - Unit tests must assert response-body parser behavior for list bodies, dict `content` lists, dict fallback fields, and malformed raw bodies.
 - Unit tests must assert recent-history sorting, limit behavior, zero-timestamp exclusion, used-path de-duplication, and app wrapper parity.
 - Unit tests must assert transcript helper newest-user selection, blank-user skipping, no-user fallback, and app alias parity.
@@ -739,7 +742,7 @@ def normalize_dashboard_sections(raw_sections):
 
 - Good: `session_title_for_path(...)` continues calling `app.compact_title(...)`, while the implementation lives in `ga_tui.text_utils`.
 - Good: `dashboard.py` and `web_console.py` import lower-level text helpers without depending on `app.py`.
-- Base: `compact_description(...)` stays in `app.py` for now because it still depends on control/procedure/detail regexes not yet separated into a lower-level boundary.
+- Base: `app.compact_description(...)` remains the compatibility wrapper; the process-summary-safe implementation lives in `history_titles.py` alongside the process marker regexes it needs.
 - Bad: `text_utils.py` imports `TUI_CONTROL_RE` from `app.py`.
 - Bad: Moving sidebar row rendering into `text_utils.py` because it would couple text helpers to `State` and curses rendering.
 

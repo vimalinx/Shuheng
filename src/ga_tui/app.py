@@ -87,6 +87,7 @@ try:
     from . import baseline as baseline_report
     from . import gateway_registry as gateway_registry_helpers
     from . import history_store
+    from . import history_titles as history_title_policy
     from . import secret_vault as secret_vault_store
     from . import governance as governance_store
     from . import context_packs as context_pack_store
@@ -202,6 +203,7 @@ except Exception:
     import baseline as baseline_report  # type: ignore
     import gateway_registry as gateway_registry_helpers  # type: ignore
     import history_store  # type: ignore
+    import history_titles as history_title_policy  # type: ignore
     import secret_vault as secret_vault_store  # type: ignore
     import governance as governance_store  # type: ignore
     import context_packs as context_pack_store  # type: ignore
@@ -512,7 +514,7 @@ NACL_XCHACHA_NPUBBYTES = secret_vault_store.NACL_XCHACHA_NPUBBYTES
 SECRET_CRYPTO_IMPORT_ERROR = secret_vault_store.SECRET_CRYPTO_IMPORT_ERROR
 
 
-SUMMARY_RE = re.compile(r"<summary>\s*(.*?)\s*</summary>", re.DOTALL)
+SUMMARY_RE = history_title_policy.SUMMARY_RE
 SUBAGENT_RESULT_HEADER_RE = re.compile(r"^子\s*agent\s*回复\s*·\s*(?P<name>.*?)\s*\((?P<agent_id>[^)]+)\)\s*$")
 SUBAGENT_RESULT_META_LABEL_RE = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?"
@@ -522,16 +524,16 @@ SUBAGENT_RESULT_META_LABEL_RE = re.compile(
     r"(?:\*\*)?\s*[:：]",
     re.IGNORECASE,
 )
-TURN_MARKER_RE = re.compile(r"(?m)(^[ \t]*\**LLM Running \(Turn \d+\) \.\.\.\**[ \t\r]*$)")
+TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
 TURN_NO_RE = re.compile(r"Turn\s+(\d+)")
 LINE_NUMBERED_FILE_RE = re.compile(r"^[ \t]*\d+\|")
-META_BLOCK_RE = re.compile(r"<(?:summary|thinking|think)>[\s\S]*?</(?:summary|thinking|think)>", re.IGNORECASE)
+META_BLOCK_RE = history_title_policy.META_BLOCK_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
 TOOL_CALL_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`")
 TOOL_USE_NAME_RE = re.compile(r"<tool_use>\s*\{[\s\S]*?\"name\"\s*:\s*\"([^\"]+)\"[\s\S]*?</tool_use>")
-TOOL_USE_BLOCK_RE = re.compile(r"<tool_use>[\s\S]*?</tool_use>", re.IGNORECASE)
+TOOL_USE_BLOCK_RE = history_title_policy.TOOL_USE_BLOCK_RE
 TOOL_USE_PAYLOAD_RE = re.compile(r"<tool_use>\s*([\s\S]*?)\s*</tool_use>", re.IGNORECASE)
-TOOL_HEADER_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*", re.IGNORECASE)
+TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
 TOOL_ARGS_PAYLOAD_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`\s*📥\s*args:\s*\n`{4}text\n([\s\S]*?)^`{4}\s*", re.IGNORECASE | re.MULTILINE)
 TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
 TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
@@ -540,7 +542,7 @@ PROCESS_GROUP_TOGGLE_RE = re.compile(r"过程组\s+(G\d+)")
 PROCESS_TURN_TOGGLE_RE = re.compile(r"过程\s+(G\d+T\d+)")
 SUBAGENT_META_TOGGLE_RE = re.compile(r"元信息\s+(S[0-9a-f]{8})")
 LONG_FENCE_RE = re.compile(r"`{4,5}[^\n]*\n[\s\S]*?\n`{4,5}", re.MULTILINE)
-DETAIL_FENCE_RE = re.compile(r"`{3,}[^\n]*\n[\s\S]*?\n`{3,}", re.MULTILINE)
+DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
 FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
 PROMPT_BLOCK_WITH_TIME_RE = re.compile(r"^=== Prompt ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
 RESPONSE_BLOCK_WITH_TIME_RE = re.compile(r"^=== Response ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
@@ -16912,124 +16914,60 @@ def message_lines_cached(state: State, width: int) -> list[RenderLine]:
 
 
 def short_session_title(text: str, fallback: str = "历史会话") -> str:
-    title = compact_title(text, SESSION_TITLE_WIDTH)
-    return title or fallback
+    return history_title_policy.short_session_title(text, fallback, title_width=SESSION_TITLE_WIDTH)
 
 
 def compact_description(text: str, max_chars: int = SESSION_DESCRIPTION_LIMIT) -> str:
-    text = clean_text(text)
-    text = TUI_CONTROL_RE.sub(" ", text)
-    text = TUI_CONTROL_FENCE_RE.sub(" ", text)
-    text = TOOL_USE_BLOCK_RE.sub(" ", text)
-    text = DETAIL_FENCE_RE.sub(" ", text)
-    text = META_BLOCK_RE.sub(" ", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"[*_`#>\[\]{}]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip(" -:：。,.，")
-    if len(text) > max_chars:
-        text = text[: max(0, max_chars - 3)].rstrip(" -:：。,.，") + "..."
-    return text
+    return history_title_policy.compact_description(text, max_chars)
 
 
 def text_has_process_markers(text: str) -> bool:
-    lowered = (text or "").lower()
-    return (
-        bool(TURN_MARKER_RE.search(text or ""))
-        or "<thinking>" in lowered
-        or "<think>" in lowered
-        or bool(TOOL_USE_BLOCK_RE.search(text or ""))
-        or bool(TOOL_HEADER_RE.search(text or ""))
-    )
+    return history_title_policy.text_has_process_markers(text)
 
 
 def session_summary_titles_from_text(text: str) -> list[str]:
-    if text_has_process_markers(text):
-        return []
-    titles: list[str] = []
-    for summary in SUMMARY_RE.findall(text or ""):
-        title = short_session_title(summary, "")
-        if title:
-            titles.append(title)
-    return titles
+    return history_title_policy.session_summary_titles_from_text(text)
 
 
 def session_response_preview_text(response_body: str, max_chars: int = 110) -> str:
-    text = assistant_text_from_response_body(response_body)
-    titles = session_summary_titles_from_text(text)
-    if titles:
-        return titles[-1]
-    return compact_description(latest_visible_reply_text(text), max_chars)
+    return history_title_policy.session_response_preview_text(
+        response_body,
+        max_chars,
+        latest_visible_reply_text=latest_visible_reply_text,
+    )
 
 
 def session_preview_from_pairs(pairs: list[tuple[str, str]]) -> str:
-    for _prompt, response in reversed(pairs):
-        titles = session_summary_titles_from_text(assistant_text_from_response_body(response))
-        if titles:
-            return titles[-1]
-    for prompt, _response in pairs:
-        user = compact_description(_user_text(prompt), 90)
-        if user:
-            return user
-    for _prompt, response in reversed(pairs):
-        preview = session_response_preview_text(response, 90)
-        if preview:
-            return preview
-    return ""
+    return history_title_policy.session_preview_from_pairs(
+        pairs,
+        user_text_from_prompt=_user_text,
+        response_preview_text=session_response_preview_text,
+    )
 
 
 def is_process_only_session_title(text: str) -> bool:
-    title = compact_title(re.sub(r"^（预览）", "", str(text or "")), 80).casefold()
-    if not title:
-        return False
-    if title in {"omp 思考", "思考", "thinking", "执行中", "搜索/浏览输出已折叠"}:
-        return True
-    return title.startswith(("omp 工具", "调用 omp 工具", "调用工具", "tool "))
+    return history_title_policy.is_process_only_session_title(text)
 
 
 def history_cache_has_process_only_preview(meta: dict[str, Any]) -> bool:
-    if is_process_only_session_title(str(meta.get("preview") or "")):
-        return True
-    description = str(meta.get("description") or "")
-    if "OMP 思考" in description:
-        return True
-    raw_preview_messages = meta.get("ui_preview_messages")
-    if isinstance(raw_preview_messages, list):
-        for item in raw_preview_messages:
-            if isinstance(item, dict) and is_process_only_session_title(str(item.get("content") or "")):
-                return True
-    return False
+    return history_title_policy.history_cache_has_process_only_preview(meta)
 
 
 def message_text_for_metadata_context(msg: Message) -> str:
-    if msg.role == "assistant":
-        return latest_visible_reply_text(msg.content or "")
-    text = clean_text(strip_tui_controls(msg.content or ""))
-    text = META_BLOCK_RE.sub(" ", text)
-    text = TOOL_USE_BLOCK_RE.sub(" ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return history_title_policy.message_text_for_metadata_context(
+        msg,
+        latest_visible_reply_text=latest_visible_reply_text,
+    )
 
 
 def session_description_from_pairs(pairs: list[tuple[str, str]], preview: str = "") -> str:
-    snippets: list[str] = []
-    if pairs:
-        users: list[str] = []
-        summaries: list[str] = []
-        for prompt, response in pairs:
-            user = compact_description(_user_text(prompt), 90)
-            if user:
-                users.append(user)
-            summary_text = session_response_preview_text(response, 110)
-            if summary_text:
-                summaries.append(summary_text)
-        if users:
-            snippets.append(f"开始：{users[0]}")
-            if users[-1] != users[0]:
-                snippets.append(f"最近：{users[-1]}")
-        if summaries:
-            snippets.append(f"摘要：{summaries[-1]}")
-    if not snippets and preview:
-        snippets.append(compact_description(preview, SESSION_DESCRIPTION_LIMIT))
-    return compact_description("；".join(snippets), SESSION_DESCRIPTION_LIMIT)
+    return history_title_policy.session_description_from_pairs(
+        pairs,
+        preview,
+        user_text_from_prompt=_user_text,
+        response_preview_text=session_response_preview_text,
+        description_limit=SESSION_DESCRIPTION_LIMIT,
+    )
 
 
 def session_description_from_path(path: str, preview: str = "") -> str:
@@ -17046,18 +16984,7 @@ def session_description_from_path(path: str, preview: str = "") -> str:
 
 
 def suggested_session_title(messages: list[Message]) -> str:
-    for msg in reversed(messages):
-        if msg.role != "assistant":
-            continue
-        for title in reversed(session_summary_titles_from_text(msg.content or "")):
-            if title:
-                return title
-    for msg in messages:
-        if msg.role == "user":
-            title = short_session_title(msg.content, "")
-            if title:
-                return title
-    return ""
+    return history_title_policy.suggested_session_title(messages)
 
 
 def ai_metadata_context(messages: list[Message], max_chars: int = 3600) -> str:

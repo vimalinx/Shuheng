@@ -34,6 +34,7 @@ from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import governance as governance_mod  # noqa: E402
 from ga_tui import history_store as history_store_mod  # noqa: E402
+from ga_tui import history_titles as history_titles_mod  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
@@ -374,6 +375,71 @@ def assert_history_store_module_boundary() -> None:
     meta_path = os.path.join(root, "session_meta.json")
     history_store_mod.save_session_meta_registry(meta_path, {"model_responses_a.txt": {"rounds": 1}})
     assert history_store_mod.load_session_meta_registry(meta_path)["model_responses_a.txt"]["rounds"] == 1
+
+
+def assert_history_title_policy_module_boundary() -> None:
+    process_text = (
+        "**LLM Running (Turn 1) ...**\n\n"
+        "<summary>OMP 思考</summary>\n"
+        "<thinking>Hidden OMP reasoning</thinking>\n"
+        "最终可见答复"
+    )
+    normal_text = "最终响应\n<summary>有效历史标题</summary>"
+    process_body = repr([{"type": "text", "text": process_text}])
+    normal_body = repr([{"type": "text", "text": normal_text}])
+    assert a.SUMMARY_RE is history_titles_mod.SUMMARY_RE
+    assert a.TURN_MARKER_RE is history_titles_mod.TURN_MARKER_RE
+    assert a.META_BLOCK_RE is history_titles_mod.META_BLOCK_RE
+    assert a.TOOL_USE_BLOCK_RE is history_titles_mod.TOOL_USE_BLOCK_RE
+    assert a.TOOL_HEADER_RE is history_titles_mod.TOOL_HEADER_RE
+    assert a.DETAIL_FENCE_RE is history_titles_mod.DETAIL_FENCE_RE
+    assert a.session_summary_titles_from_text(process_text) == history_titles_mod.session_summary_titles_from_text(process_text) == []
+    assert a.session_summary_titles_from_text(normal_text) == history_titles_mod.session_summary_titles_from_text(normal_text) == [
+        "有效历史标题"
+    ]
+    assert a.session_response_preview_text(normal_body) == history_titles_mod.session_response_preview_text(
+        normal_body,
+        latest_visible_reply_text=a.latest_visible_reply_text,
+    )
+    assert history_titles_mod.session_response_preview_text(
+        process_body,
+        latest_visible_reply_text=lambda _text: "最终可见答复",
+    ) == "最终可见答复"
+    pairs = [(" 修复左栏历史标题 ", process_body), (" 最近问题 ", normal_body)]
+    assert a.session_preview_from_pairs(pairs) == history_titles_mod.session_preview_from_pairs(
+        pairs,
+        user_text_from_prompt=a._user_text,
+        response_preview_text=a.session_response_preview_text,
+    )
+    assert a.session_description_from_pairs(pairs) == history_titles_mod.session_description_from_pairs(
+        pairs,
+        user_text_from_prompt=a._user_text,
+        response_preview_text=a.session_response_preview_text,
+        description_limit=a.SESSION_DESCRIPTION_LIMIT,
+    )
+    assert a.history_cache_has_process_only_preview({
+        "preview": "正常",
+        "description": "摘要：OMP 思考",
+        "ui_preview_messages": [{"role": "assistant", "content": "（预览）执行中"}],
+    })
+    assert a.message_text_for_metadata_context(a.Message("user", "公开 <thinking>Hidden</thinking>")) == "公开"
+    messages = [a.Message("user", "用户问题"), a.Message("assistant", normal_text)]
+    assert a.suggested_session_title(messages) == history_titles_mod.suggested_session_title(messages) == "有效历史标题"
+    source = Path(history_titles_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+    ):
+        assert forbidden not in source, f"{history_titles_mod.__file__}: {forbidden}"
 
 
 def assert_path_utils_module_boundary() -> None:
@@ -7799,6 +7865,7 @@ def run_checks() -> None:
     assert_release_gateway_module_boundaries()
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
+    assert_history_title_policy_module_boundary()
     assert_path_utils_module_boundary()
     assert_subagent_store_module_boundary()
     assert_secret_vault_module_boundary()
