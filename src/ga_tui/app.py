@@ -19582,6 +19582,7 @@ input_segments = input_controller_helpers.input_segments
 display_index_for_cell = input_controller_helpers.display_index_for_cell
 input_cursor_info = input_controller_helpers.input_cursor_info
 input_layout = input_controller_helpers.input_layout
+input_vertical_cursor_target = input_controller_helpers.input_vertical_cursor_target
 normalize_pasted_text = input_controller_helpers.normalize_pasted_text
 MOUSE_BUTTON_STATES = input_controller_helpers.MOUSE_BUTTON_STATES
 mouse_button_mask_from_constants = input_controller_helpers.mouse_button_mask_from_constants
@@ -19592,17 +19593,12 @@ clean_button1_action_from_constants = input_controller_helpers.clean_button1_act
 
 
 def move_input_cursor_vertical(state: State, width: int, direction: int) -> bool:
-    if not state.input_text:
+    consumed, target_cursor = input_vertical_cursor_target(state.input_text, width, state.input_cursor, direction)
+    if not consumed:
         return False
-    display, segments, _display_cursor, cursor_line, cursor_x = input_cursor_info(state.input_text, width, state.input_cursor)
-    if len(segments) <= 1:
-        return False
-    target_line = cursor_line + direction
-    if target_line < 0 or target_line >= len(segments):
+    if target_cursor is None:
         return True
-    _segment, seg_start, seg_end = segments[target_line]
-    target_display = display_index_for_cell(display, seg_start, seg_end, cursor_x)
-    state.input_cursor = display_cursor_to_raw(state.input_text, target_display)
+    state.input_cursor = target_cursor
     clamp_input_cursor(state)
     mark_dirty(state)
     return True

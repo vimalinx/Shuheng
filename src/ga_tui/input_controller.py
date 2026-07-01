@@ -111,6 +111,21 @@ def input_layout(text: str, width: int, max_lines: int, cursor: int, prompt: str
     return lines or [prompt], cursor_y, cursor_x
 
 
+def input_vertical_cursor_target(text: str, width: int, cursor: int, direction: int) -> tuple[bool, int | None]:
+    raw = text or ""
+    if not raw:
+        return False, None
+    display, segments, _display_cursor, cursor_line, cursor_x = input_cursor_info(raw, width, cursor)
+    if len(segments) <= 1:
+        return False, None
+    target_line = cursor_line + int(direction or 0)
+    if target_line < 0 or target_line >= len(segments):
+        return True, None
+    _segment, seg_start, seg_end = segments[target_line]
+    target_display = display_index_for_cell(display, seg_start, seg_end, cursor_x)
+    return True, display_cursor_to_raw(raw, target_display)
+
+
 def normalize_pasted_text(text: str) -> str:
     return re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text).replace("\t", "    ")
 

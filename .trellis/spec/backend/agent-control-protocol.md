@@ -774,9 +774,9 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Pure terminal input cursor/display conversion and prompt-layout helpers are moved out of `src/ga_tui/app.py`.
+- Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, mouse-mask classification, and vertical cursor target helpers are moved out of `src/ga_tui/app.py`.
 - Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, policy gates, and input-controller unit tests.
-- Non-goal: This does not move `move_input_cursor_vertical(...)`, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
+- Non-goal: This does not move the app-owned `move_input_cursor_vertical(...)` state mutation wrapper, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
 
 ### 2. Signatures
 
@@ -788,6 +788,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
   - `display_index_for_cell(display, start, end, target_x)`.
   - `input_cursor_info(text, width, cursor)`.
   - `input_layout(text, width, max_lines, cursor, prompt="> ")`.
+  - `input_vertical_cursor_target(text, width, cursor, direction)`.
   - `normalize_pasted_text(text)`.
   - `mouse_button_mask_from_constants(button_no, constants)`.
   - `mouse_modifier_mask_from_constants(constants)`.
@@ -811,6 +812,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Segment wrapping uses the same terminal-cell semantics as `text_utils.cell_width(...)`, including East Asian wide characters and zero-width combining marks.
 - `input_cursor_info(...)` returns `(display, segments, display_cursor, cursor_line, cursor_x)` and preserves the existing segment/cursor-line selection behavior.
 - `input_layout(...)` returns `(lines, cursor_y, cursor_x)`, clamps `max_lines` to at least one visible line, uses escaped-newline display text from `input_cursor_info(...)`, keeps the cursor segment visible when scrolled, prefixes the first hidden visible line with `"… "`, and computes cursor x with `cell_width(...)`.
+- `input_vertical_cursor_target(...)` returns `(consumed, target_cursor)`. Empty or single-line display input returns `(False, None)`. Moving beyond the first or last wrapped display line returns `(True, None)` so callers can consume the key without mutation. Moving to an available wrapped line returns `(True, <raw cursor>)`, preserving the source display cell x as closely as possible over the same terminal-cell semantics as `input_cursor_info(...)`.
 - `normalize_pasted_text(...)` collapses one or more CR/LF runs plus surrounding spaces/tabs into one literal space, replaces remaining tabs with four spaces, and must not inspect terminal, curses, or mutable paste state.
 - Mouse bitmask helpers in `input_controller.py` are deterministic over explicit integer constants. They must not read curses globals directly.
 - `mouse_button_mask_from_constants(...)` ORs the supported button state constants (`PRESSED`, `RELEASED`, `CLICKED`, `DOUBLE_CLICKED`, `TRIPLE_CLICKED`) for the requested button.
@@ -828,6 +830,8 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Combining marks add no cell width when wrapping or computing cursor x.
 - Empty input still produces one empty segment.
 - `input_layout("abcdef", 4, 2, 5)` -> `(["… cd", "  ef"], 1, 3)`.
+- `input_vertical_cursor_target("abcdef", 4, 5, -1)` -> `(True, 3)`.
+- `input_vertical_cursor_target("abcdef", 4, 5, 1)` -> `(True, None)`.
 - `normalize_pasted_text(" alpha \n\t beta\r\n gamma\t")` -> `" alpha beta gamma    "`.
 - `mouse_auxiliary_or_unknown_event_from_constants(primary_button_1 | modifier, constants)` -> `False`.
 - `mouse_auxiliary_or_unknown_event_from_constants(button_2, constants)` -> `True`.
@@ -836,7 +840,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `move_input_cursor_vertical(...)` stays in `app.py` and delegates display/raw conversion to `input_controller.py`.
+- Good: `move_input_cursor_vertical(...)` stays in `app.py` as the mutable wrapper and delegates target calculation to `input_controller.py`.
 - Good: `input_layout(...)` lives in `input_controller.py` because it is pure text geometry and prompt layout, while `draw_main(...)` remains in `app.py` and calls the compatibility alias.
 - Good: `normalize_pasted_text(...)` lives in `input_controller.py`, while bracketed paste mode, paste buffer mutation, and `handle_key(...)` stay in `app.py`.
 - Good: mouse bitmask classification helpers live in `input_controller.py` over explicit constants, while `app.py` keeps curses constant lookup and `handle_mouse(...)`.
@@ -847,7 +851,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 6. Tests Required
 
-- Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, input layout line/cursor behavior, and `app.py` alias parity.
+- Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, input layout line/cursor behavior, vertical cursor target behavior, and `app.py` alias/wrapper parity.
 - Unit tests must assert paste normalization preserves collapsed newline and tab-replacement behavior plus app alias parity.
 - Unit tests must assert direct mouse mask helper behavior over fake constants and `app.py` wrapper parity over curses constants.
 - `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.

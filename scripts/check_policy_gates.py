@@ -286,6 +286,7 @@ def assert_input_controller_module_boundary() -> None:
         "display_index_for_cell",
         "input_cursor_info",
         "input_layout",
+        "input_vertical_cursor_target",
         "normalize_pasted_text",
         "mouse_button_mask_from_constants",
         "mouse_modifier_mask_from_constants",
@@ -315,6 +316,8 @@ def assert_input_controller_module_boundary() -> None:
         2,
     )
     assert input_controller_mod.input_layout("abcdef", 4, 2, 5) == (["… cd", "  ef"], 1, 3)
+    assert input_controller_mod.input_vertical_cursor_target("abcdef", 4, 5, -1) == (True, 3)
+    assert input_controller_mod.input_vertical_cursor_target("abcdef", 4, 5, 1) == (True, None)
     assert input_controller_mod.normalize_pasted_text(" alpha \n\t beta\r\n gamma\t") == " alpha beta gamma    "
     mouse_constants = {
         "BUTTON1_PRESSED": 1 << 0,

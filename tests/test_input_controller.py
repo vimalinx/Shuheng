@@ -1,6 +1,8 @@
 """Tests for pure input cursor/display geometry helpers."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from ga_tui import app as app_module
 from ga_tui import input_controller
 
@@ -13,6 +15,7 @@ class TestAppCompatibilityAliases:
         assert app_module.display_index_for_cell is input_controller.display_index_for_cell
         assert app_module.input_cursor_info is input_controller.input_cursor_info
         assert app_module.input_layout is input_controller.input_layout
+        assert app_module.input_vertical_cursor_target is input_controller.input_vertical_cursor_target
         assert app_module.normalize_pasted_text is input_controller.normalize_pasted_text
         assert app_module.MOUSE_BUTTON_STATES is input_controller.MOUSE_BUTTON_STATES
         assert app_module.mouse_button_mask_from_constants is input_controller.mouse_button_mask_from_constants
@@ -167,6 +170,47 @@ class TestInputLayout:
 
     def test_max_lines_is_at_least_one(self) -> None:
         assert input_controller.input_layout("abcd", 4, 0, 3) == (["… cd"], 0, 3)
+
+
+class TestVerticalCursorTarget:
+    def test_empty_or_single_line_input_does_not_consume(self) -> None:
+        assert input_controller.input_vertical_cursor_target("", 4, 0, 1) == (False, None)
+        assert input_controller.input_vertical_cursor_target("abc", 10, 1, 1) == (False, None)
+
+    def test_out_of_range_line_consumes_without_target(self) -> None:
+        assert input_controller.input_vertical_cursor_target("abcdef", 4, 5, 1) == (True, None)
+        assert input_controller.input_vertical_cursor_target("abcdef", 4, 1, -1) == (True, None)
+
+    def test_moves_between_wrapped_lines_preserving_display_cell(self) -> None:
+        assert input_controller.input_vertical_cursor_target("abcdef", 4, 5, -1) == (True, 3)
+        assert input_controller.input_vertical_cursor_target("abcdef", 4, 1, 1) == (True, 3)
+
+    def test_wide_and_combining_text_preserves_existing_geometry(self) -> None:
+        text = "e\u0301枢ab"
+
+        assert input_controller.input_vertical_cursor_target(text, 4, len(text), -1) == (True, 3)
+        assert input_controller.input_vertical_cursor_target(text, 4, 1, 1) == (True, 2)
+
+    def test_app_wrapper_mutates_only_when_target_exists(self) -> None:
+        state = SimpleNamespace(input_text="abcdef", input_cursor=5, dirty=False)
+
+        assert app_module.move_input_cursor_vertical(state, 4, -1)
+        assert state.input_cursor == 3
+        assert state.dirty
+
+    def test_app_wrapper_keeps_out_of_range_consumption_without_dirtying(self) -> None:
+        state = SimpleNamespace(input_text="abcdef", input_cursor=5, dirty=False)
+
+        assert app_module.move_input_cursor_vertical(state, 4, 1)
+        assert state.input_cursor == 5
+        assert not state.dirty
+
+    def test_app_wrapper_marks_dirty_for_in_range_same_target(self) -> None:
+        state = SimpleNamespace(input_text="abcdef", input_cursor=5, dirty=False)
+
+        assert app_module.move_input_cursor_vertical(state, 4, 0)
+        assert state.input_cursor == 5
+        assert state.dirty
 
 
 class TestPasteNormalization:
