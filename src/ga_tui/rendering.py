@@ -125,6 +125,18 @@ def render_interaction_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def visible_ask_user_card_text(payload: dict[str, Any] | None) -> str:
+    return render_interaction_card(
+        payload
+        or {
+            "tool": "interactive",
+            "question": "工具正在等待你的输入。",
+            "candidates": [],
+            "questions": [],
+        }
+    )
+
+
 def interaction_answer_from_text(text: str, candidates: Any, selected: int = 0) -> str:
     stripped = str(text or "").strip()
     cleaned_candidates = sanitize_interaction_candidates(candidates)

@@ -574,6 +574,7 @@ strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 strip_inline_markdown = rendering_helpers.strip_inline_markdown
 sanitize_interaction_candidates = rendering_helpers.sanitize_interaction_candidates
 render_interaction_card = rendering_helpers.render_interaction_card
+visible_ask_user_card_text = rendering_helpers.visible_ask_user_card_text
 interaction_answer_from_text = rendering_helpers.interaction_answer_from_text
 compose_request_user_input_answer = rendering_helpers.compose_request_user_input_answer
 interaction_input_prompt_text = rendering_helpers.interaction_input_prompt_text
@@ -18551,9 +18552,7 @@ def append_process_turn(
 
 def visible_ask_user_text(body: str) -> str:
     payload = extract_interaction_request(body)
-    if payload:
-        return render_interaction_card(payload)
-    return render_interaction_card({"tool": "interactive", "question": "工具正在等待你的输入。", "candidates": [], "questions": []})
+    return visible_ask_user_card_text(payload)
 
 
 def render_assistant_text(

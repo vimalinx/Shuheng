@@ -400,6 +400,7 @@ def assert_rendering_module_boundary() -> None:
         "visible_reply_text",
         "sanitize_interaction_candidates",
         "render_interaction_card",
+        "visible_ask_user_card_text",
         "interaction_answer_from_text",
         "compose_request_user_input_answer",
         "interaction_input_prompt_text",
@@ -904,6 +905,17 @@ def assert_rendering_module_boundary() -> None:
         "│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。\n"
         "╰─"
     )
+    default_interaction_card = (
+        "╭─ 需要你输入 · interactive\n"
+        "│ 问题：\n"
+        "│   工具正在等待你的输入。\n"
+        "│\n"
+        "│ 在底部回答框直接输入答案，Enter 发送。\n"
+        "╰─"
+    )
+    assert rendering_mod.visible_ask_user_card_text(None) == default_interaction_card
+    ask_payload = {"tool": "ask_user", "question": "选择下一步", "candidates": ["继续"]}
+    assert rendering_mod.visible_ask_user_card_text(ask_payload) == rendering_mod.render_interaction_card(ask_payload)
     answer_candidates = ["1) 批准并执行", "2) 拒绝", "3) 稍后处理"]
     assert rendering_mod.interaction_answer_from_text("2", answer_candidates, selected=0) == "拒绝"
     assert rendering_mod.interaction_answer_from_text("手动回答", answer_candidates, selected=0) == "手动回答"
@@ -940,6 +952,10 @@ def assert_rendering_module_boundary() -> None:
     )
     assert rendering_mod.interaction_footer_text(True) == "等待你的输入：直接在下面回答；Enter 发送。"
     assert a.render_interaction_card({}) == rendering_mod.render_interaction_card({})
+    assert a.visible_ask_user_card_text is rendering_mod.visible_ask_user_card_text
+    tool_use = '<tool_use>{"name":"ask_user","arguments":{"question":"选择下一步","candidates":["继续"]}}</tool_use>'
+    assert a.visible_ask_user_text(tool_use) == rendering_mod.visible_ask_user_card_text(ask_payload)
+    assert a.visible_ask_user_text("ask_user") == rendering_mod.visible_ask_user_card_text(None)
     assert a.compose_request_user_input_answer is rendering_mod.compose_request_user_input_answer
     payload = {"candidates": answer_candidates, "_selection": 2}
     assert a.interaction_answer_from_input(payload, "") == rendering_mod.interaction_answer_from_text(
@@ -1241,6 +1257,7 @@ def assert_rendering_module_boundary() -> None:
         "def preferred_group_visible_reply_text",
         "def sanitize_interaction_candidates",
         "def render_interaction_card",
+        "def visible_ask_user_card_text",
         "def interaction_answer_from_text",
         "def compose_request_user_input_answer",
         "def interaction_input_prompt_text",

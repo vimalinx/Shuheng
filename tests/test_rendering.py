@@ -96,6 +96,14 @@ def test_interaction_card_formats_candidate_and_approval_prompts() -> None:
 
 
 def test_interaction_card_formats_request_user_input_and_fallback() -> None:
+    default_card = (
+        "╭─ 需要你输入 · interactive\n"
+        "│ 问题：\n"
+        "│   工具正在等待你的输入。\n"
+        "│\n"
+        "│ 在底部回答框直接输入答案，Enter 发送。\n"
+        "╰─"
+    )
     assert rendering.render_interaction_card(
         {
             "tool": "request_user_input",
@@ -116,14 +124,13 @@ def test_interaction_card_formats_request_user_input_and_fallback() -> None:
         "│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。\n"
         "╰─"
     )
-    assert rendering.render_interaction_card({}) == (
-        "╭─ 需要你输入 · interactive\n"
-        "│ 问题：\n"
-        "│   工具正在等待你的输入。\n"
-        "│\n"
-        "│ 在底部回答框直接输入答案，Enter 发送。\n"
-        "╰─"
-    )
+    assert rendering.render_interaction_card({}) == default_card
+    assert rendering.visible_ask_user_card_text(None) == default_card
+    payload = {"tool": "ask_user", "question": "选择下一步", "candidates": ["继续"]}
+    assert rendering.visible_ask_user_card_text(payload) == rendering.render_interaction_card(payload)
+    tool_use = '<tool_use>{"name":"ask_user","arguments":{"question":"选择下一步","candidates":["继续"]}}</tool_use>'
+    assert app_module.visible_ask_user_text(tool_use) == rendering.render_interaction_card(payload)
+    assert app_module.visible_ask_user_text("ask_user") == default_card
 
 
 def test_interaction_answer_helpers_preserve_candidate_and_prompt_behavior() -> None:
@@ -1510,6 +1517,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_text is rendering.visible_reply_text
     assert app_module.sanitize_interaction_candidates is rendering.sanitize_interaction_candidates
     assert app_module.render_interaction_card is rendering.render_interaction_card
+    assert app_module.visible_ask_user_card_text is rendering.visible_ask_user_card_text
     assert app_module.interaction_answer_from_text is rendering.interaction_answer_from_text
     assert app_module.compose_request_user_input_answer is rendering.compose_request_user_input_answer
     assert app_module.interaction_input_prompt_text is rendering.interaction_input_prompt_text
