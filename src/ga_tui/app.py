@@ -578,6 +578,9 @@ strip_meta_blocks = rendering_helpers.strip_meta_blocks
 strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
 strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 visible_reply_text = rendering_helpers.visible_reply_text
+visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
+visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
+visible_reply_has_section_shape = rendering_helpers.visible_reply_has_section_shape
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
 next_nonblank_line = rendering_helpers.next_nonblank_line
@@ -18579,29 +18582,6 @@ def process_has_search_noise(body: str) -> bool:
         "queryselectorall",
     )
     return any(marker in lowered for marker in search_markers)
-
-
-def visible_reply_is_substantive(text: str) -> bool:
-    clean = strip_inline_markdown(clean_text(text or "")).strip()
-    if len(clean) >= 180:
-        return True
-    markers = ("# ", "## ", "### ", "|", "- ", "1.", "1. ", "✅", "结论", "报告")
-    return len(clean) >= 80 and any(marker in (text or "") for marker in markers)
-
-
-def visible_reply_is_housekeeping_summary(text: str) -> bool:
-    clean = strip_inline_markdown(clean_text(text or "")).strip()
-    if not clean:
-        return False
-    first_line = clean.splitlines()[0].strip()
-    starts_with_summary = bool(re.match(r"(?i)^(summary|摘要|总结)\s*[\|:：-]", first_line))
-    has_confidence = bool(re.search(r"(?im)^\s*(confidence|置信度)\s*[:：]", clean))
-    has_completion = any(marker in clean for marker in ("任务完成", "已完成", "complete"))
-    return starts_with_summary and (has_confidence or has_completion)
-
-
-def visible_reply_has_section_shape(text: str) -> bool:
-    return bool(re.search(r"(?m)^#{1,3}\s+\S+", text or "")) or "结论" in (text or "")
 
 
 def irc_reply_snippets_from_process_body(body: str) -> list[str]:

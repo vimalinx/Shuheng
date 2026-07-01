@@ -279,6 +279,28 @@ def test_visible_reply_text_collapses_three_or_more_newlines() -> None:
     assert rendering.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
 
 
+def test_visible_reply_policy_identifies_substantive_content() -> None:
+    long_plain = "这是一段完整可见答复。" * 20
+    structured = "# 结论\n" + ("这是结构化报告内容。" * 10)
+
+    assert rendering.visible_reply_is_substantive(long_plain)
+    assert rendering.visible_reply_is_substantive(structured)
+    assert not rendering.visible_reply_is_substantive("短答复")
+
+
+def test_visible_reply_policy_identifies_housekeeping_summary() -> None:
+    assert rendering.visible_reply_is_housekeeping_summary("Summary: task complete\nConfidence: high")
+    assert rendering.visible_reply_is_housekeeping_summary("摘要：任务完成\n置信度：高")
+    assert not rendering.visible_reply_is_housekeeping_summary("Summary: useful answer without completion marker")
+    assert not rendering.visible_reply_is_housekeeping_summary("")
+
+
+def test_visible_reply_policy_identifies_section_shape() -> None:
+    assert rendering.visible_reply_has_section_shape("## 方案\n正文")
+    assert rendering.visible_reply_has_section_shape("最终结论：可以继续")
+    assert not rendering.visible_reply_has_section_shape("plain paragraph")
+
+
 def test_latest_visible_reply_text_prefers_latest_nonempty_turn_body() -> None:
     text = (
         "LLM Running (Turn 1) ...\n"
@@ -364,6 +386,9 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_tool_output_blocks is rendering.strip_tool_output_blocks
     assert app_module.strip_standalone_dot_lines is rendering.strip_standalone_dot_lines
     assert app_module.visible_reply_text is rendering.visible_reply_text
+    assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
+    assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
+    assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape
     assert app_module.latest_visible_reply_text("plain") == rendering.latest_visible_reply_text(
         "plain",
         has_tool_noise=app_module.process_has_tool_noise,

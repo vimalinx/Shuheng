@@ -353,6 +353,9 @@ def assert_rendering_module_boundary() -> None:
         "strip_tool_output_blocks",
         "strip_standalone_dot_lines",
         "visible_reply_text",
+        "visible_reply_is_substantive",
+        "visible_reply_is_housekeeping_summary",
+        "visible_reply_has_section_shape",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -492,6 +495,15 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.visible_reply_text(hidden_detail_body, hide_detail_fences=True) == "Final answer"
     assert rendering_mod.strip_standalone_dot_lines("A\n.\n3.14\n . \nB") == "A\n3.14\nB"
     assert rendering_mod.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
+    assert rendering_mod.visible_reply_is_substantive("完整答复。" * 40)
+    assert rendering_mod.visible_reply_is_substantive("# 结论\n" + ("结构化内容。" * 14))
+    assert not rendering_mod.visible_reply_is_substantive("短答复")
+    assert rendering_mod.visible_reply_is_housekeeping_summary("Summary: task complete\nConfidence: high")
+    assert rendering_mod.visible_reply_is_housekeeping_summary("摘要：任务完成\n置信度：高")
+    assert not rendering_mod.visible_reply_is_housekeeping_summary("Summary: useful answer")
+    assert rendering_mod.visible_reply_has_section_shape("## 方案\n正文")
+    assert rendering_mod.visible_reply_has_section_shape("最终结论：继续")
+    assert not rendering_mod.visible_reply_has_section_shape("plain paragraph")
     latest_turn_text = (
         "LLM Running (Turn 1) ...\n"
         "Earlier answer\n"
@@ -540,6 +552,13 @@ def assert_rendering_module_boundary() -> None:
         ui_types_mod.RenderLine("cached", kind="running_indicator", prefix_cells=2),
         1,
     ) == "  [==    ] running..."
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    for moved_def in (
+        "def visible_reply_is_substantive",
+        "def visible_reply_is_housekeeping_summary",
+        "def visible_reply_has_section_shape",
+    ):
+        assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
     source = Path(rendering_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "ga_tui.app",

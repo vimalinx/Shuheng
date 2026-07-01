@@ -6,11 +6,11 @@ import re
 
 try:
     from . import history_titles as history_title_policy
-    from .text_utils import cell_width, compact_title
+    from .text_utils import cell_width, clean_text, compact_title
     from .ui_types import RenderLine
 except Exception:
     import history_titles as history_title_policy  # type: ignore
-    from text_utils import cell_width, compact_title  # type: ignore
+    from text_utils import cell_width, clean_text, compact_title  # type: ignore
     from ui_types import RenderLine  # type: ignore
 
 
@@ -66,6 +66,39 @@ def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
         text = FINAL_RESPONSE_INFO_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return strip_standalone_dot_lines(text)
+
+
+def _strip_inline_markdown(text: str) -> str:
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"[\1]", text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
+    text = re.sub(r"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)", r"\1", text)
+    text = re.sub(r"(?<!_)_(?!_)(.*?)(?<!_)_(?!_)", r"\1", text)
+    return text
+
+
+def visible_reply_is_substantive(text: str) -> bool:
+    clean = _strip_inline_markdown(clean_text(text or "")).strip()
+    if len(clean) >= 180:
+        return True
+    markers = ("# ", "## ", "### ", "|", "- ", "1.", "1. ", "✅", "结论", "报告")
+    return len(clean) >= 80 and any(marker in (text or "") for marker in markers)
+
+
+def visible_reply_is_housekeeping_summary(text: str) -> bool:
+    clean = _strip_inline_markdown(clean_text(text or "")).strip()
+    if not clean:
+        return False
+    first_line = clean.splitlines()[0].strip()
+    starts_with_summary = bool(re.match(r"(?i)^(summary|摘要|总结)\s*[\|:：-]", first_line))
+    has_confidence = bool(re.search(r"(?im)^\s*(confidence|置信度)\s*[:：]", clean))
+    has_completion = any(marker in clean for marker in ("任务完成", "已完成", "complete"))
+    return starts_with_summary and (has_confidence or has_completion)
+
+
+def visible_reply_has_section_shape(text: str) -> bool:
+    return bool(re.search(r"(?m)^#{1,3}\s+\S+", text or "")) or "结论" in (text or "")
 
 
 def latest_visible_reply_text(text: str, has_tool_noise: Callable[[str], bool] | None = None) -> str:
