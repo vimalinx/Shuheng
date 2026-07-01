@@ -176,6 +176,94 @@ def test_interaction_answer_helpers_preserve_candidate_and_prompt_behavior() -> 
     )
 
 
+def test_interaction_hint_layout_lines_preserve_prompt_candidates_and_footer() -> None:
+    assert rendering.interaction_hint_layout_lines(False, width=60) == []
+    assert rendering.interaction_hint_layout_lines(
+        True,
+        width=60,
+        tool="ask_user",
+        title_source="选择下一步",
+        candidates=["继续", "稍后"],
+        selected=1,
+        footer="footer text",
+    ) == [
+        ("header", "? ask_user: 选择下一步"),
+        ("candidate", "  1) 继续"),
+        ("candidate_selected", "> 2) 稍后"),
+        ("footer", "footer text"),
+    ]
+    assert rendering.interaction_hint_layout_lines(
+        True,
+        width=60,
+        title_source="请填写",
+        questions_count=2,
+        current_question_index=1,
+        current_question_text="第二题问题",
+        footer="question footer",
+    ) == [
+        ("header", "? request_user_input 2/2: 请填写"),
+        ("body", "  第二题问题"),
+        ("footer", "question footer"),
+    ]
+
+
+def test_interaction_hint_layout_lines_preserve_approval_preview_and_candidate_window() -> None:
+    lines = rendering.interaction_hint_layout_lines(
+        True,
+        width=48,
+        tool="approval",
+        title_source="审批 appr_test",
+        approval_preview_text="\n".join(f"预览 {idx}" for idx in range(1, 9)),
+        is_approval=True,
+        candidates=[f"选项 {idx}" for idx in range(1, 9)],
+        selected=7,
+        footer="approval footer",
+    )
+
+    assert lines[:2] == [
+        ("header", "? approval: 审批 appr test"),
+        ("body", "  预览 1"),
+    ]
+    assert ("muted", "  ... /approvals 可查看完整候选记忆") in lines
+    assert ("candidate", "  3) 选项 3") in lines
+    assert ("candidate_selected", "> 8) 选项 8") in lines
+    assert ("muted", "  ... 8 个选项，当前 8/8") in lines
+    assert lines[-1] == ("footer", "approval footer")
+
+
+def test_app_interaction_hint_wrapper_injects_payload_facts_and_attrs() -> None:
+    payload = {
+        "tool": "approval",
+        "approval_id": "appr_test",
+        "question": "审批 appr_test\n第一行\n第二行",
+        "candidates": ["批准并执行", "拒绝", "稍后处理"],
+        "_selection": 1,
+    }
+    expected_layout = rendering.interaction_hint_layout_lines(
+        True,
+        width=60,
+        tool="approval",
+        title_source="审批 appr_test",
+        approval_preview_text="第一行\n第二行",
+        is_approval=True,
+        candidates=rendering.sanitize_interaction_candidates(payload["candidates"]),
+        selected=1,
+        footer=rendering.interaction_footer_text(True, has_candidates=True, is_approval=True),
+    )
+    attr_by_kind = {
+        "header": app_module.cp(7) | app_module.curses.A_BOLD,
+        "body": app_module.cp(2),
+        "candidate": app_module.cp(2),
+        "candidate_selected": app_module.cp(11) | app_module.curses.A_BOLD,
+        "muted": app_module.cp(1),
+        "footer": app_module.cp(1),
+    }
+
+    assert app_module.interaction_hint_lines(payload, 60) == [
+        (text, attr_by_kind[kind]) for kind, text in expected_layout
+    ]
+
+
 def test_compose_request_user_input_answer_formats_questions() -> None:
     payload = {
         "questions": [
@@ -1604,6 +1692,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.compose_request_user_input_answer is rendering.compose_request_user_input_answer
     assert app_module.interaction_input_prompt_text is rendering.interaction_input_prompt_text
     assert app_module.interaction_footer_text is rendering.interaction_footer_text
+    assert app_module.interaction_hint_layout_lines is rendering.interaction_hint_layout_lines
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape

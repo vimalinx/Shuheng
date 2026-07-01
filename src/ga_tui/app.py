@@ -582,6 +582,7 @@ interaction_answer_from_text = rendering_helpers.interaction_answer_from_text
 compose_request_user_input_answer = rendering_helpers.compose_request_user_input_answer
 interaction_input_prompt_text = rendering_helpers.interaction_input_prompt_text
 interaction_footer_text = rendering_helpers.interaction_footer_text
+interaction_hint_layout_lines = rendering_helpers.interaction_hint_layout_lines
 parse_subagent_result_notice = rendering_helpers.parse_subagent_result_notice
 subagent_result_metadata_separator = rendering_helpers.subagent_result_metadata_separator
 subagent_result_metadata_label = rendering_helpers.subagent_result_metadata_label
@@ -18178,40 +18179,34 @@ def interaction_hint_lines(payload: Optional[dict[str, Any]], width: int) -> lis
         header = str(question_obj.get("header") or f"问题 {current_idx + 1}").strip()
         question = str(question_obj.get("question") or "").strip()
         title_src = question or header
-        prefix = f"? request_user_input {current_idx + 1}/{len(questions)}"
     else:
         title_src = str(payload.get("question") or "工具正在等待你的输入。").splitlines()[0].strip()
-        prefix = f"? {payload.get('tool') or 'ask_user'}"
-    title = compact_title(title_src, max(18, min(70, width - len(prefix) - 4))) or "等待回答"
-    lines: list[tuple[str, int]] = [(f"{prefix}: {title}", cp(7) | curses.A_BOLD)]
-    if questions and question_obj.get("question"):
-        for wrapped in wrap_cells(str(question_obj.get("question") or ""), max(8, width - 2))[:2]:
-            lines.append((f"  {wrapped}", cp(2)))
-    elif is_approval_interaction(payload):
-        preview_parts: list[str] = []
-        for raw in str(payload.get("question") or "").splitlines()[1:]:
-            if not raw.strip():
-                continue
-            preview_parts.extend(wrap_cells(raw, max(8, width - 2)) or [""])
-            if len(preview_parts) >= 7:
-                break
-        for part in preview_parts[:7]:
-            lines.append((f"  {part}", cp(2)))
-        if len(preview_parts) >= 7:
-            lines.append(("  ... /approvals 可查看完整候选记忆", cp(1)))
     candidates = interaction_current_candidates(payload)
-    if candidates:
-        selected = interaction_selection(payload)
-        limit = min(6, len(candidates))
-        start = max(0, min(selected - limit + 1, len(candidates) - limit))
-        for idx in range(start, start + limit):
-            marker = ">" if idx == selected else " "
-            attr = cp(11) | curses.A_BOLD if idx == selected else cp(2)
-            lines.append((f"{marker} {idx + 1}) {truncate_cells(candidates[idx], max(8, width - 6))}", attr))
-        if len(candidates) > limit:
-            lines.append((f"  ... {len(candidates)} 个选项，当前 {selected + 1}/{len(candidates)}", cp(1)))
-    lines.append((interaction_footer(payload), cp(1)))
-    return lines
+    selected = interaction_selection(payload) if candidates else 0
+    approval_preview = "\n".join(str(payload.get("question") or "").splitlines()[1:])
+    layout = interaction_hint_layout_lines(
+        bool(payload),
+        width=width,
+        tool=str(payload.get("tool") or "ask_user"),
+        title_source=title_src,
+        questions_count=len(questions),
+        current_question_index=current_idx,
+        current_question_text=str(question_obj.get("question") or "") if questions else "",
+        approval_preview_text=approval_preview,
+        is_approval=is_approval_interaction(payload),
+        candidates=candidates,
+        selected=selected,
+        footer=interaction_footer(payload),
+    )
+    attr_by_kind = {
+        "header": cp(7) | curses.A_BOLD,
+        "body": cp(2),
+        "candidate": cp(2),
+        "candidate_selected": cp(11) | curses.A_BOLD,
+        "muted": cp(1),
+        "footer": cp(1),
+    }
+    return [(text, attr_by_kind.get(kind, cp(1))) for kind, text in layout]
 
 
 def normalize_interaction_payload(payload: dict[str, Any]) -> dict[str, Any]:

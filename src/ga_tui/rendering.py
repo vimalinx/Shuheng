@@ -21,6 +21,7 @@ SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 TableLayoutLine = tuple[str, str]
 MarkdownLayoutLine = tuple[str, str]
 SubagentResultCardLayoutLine = tuple[str, str]
+InteractionHintLayoutLine = tuple[str, str]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
@@ -200,6 +201,62 @@ def interaction_footer_text(
     if has_questions:
         return "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
     return "等待你的输入：直接在下面回答；Enter 发送。"
+
+
+def interaction_hint_layout_lines(
+    has_payload: bool,
+    *,
+    width: int,
+    tool: str = "",
+    title_source: str = "",
+    questions_count: int = 0,
+    current_question_index: int = 0,
+    current_question_text: str = "",
+    approval_preview_text: str = "",
+    is_approval: bool = False,
+    candidates: list[str] | None = None,
+    selected: int = 0,
+    footer: str = "",
+) -> list[InteractionHintLayoutLine]:
+    if not has_payload:
+        return []
+    question_count = max(0, int(questions_count or 0))
+    if question_count:
+        current_idx = max(0, min(int(current_question_index or 0), question_count - 1))
+        prefix = f"? request_user_input {current_idx + 1}/{question_count}"
+    else:
+        current_idx = 0
+        prefix = f"? {tool or 'ask_user'}"
+    title = compact_title(title_source, max(18, min(70, width - len(prefix) - 4))) or "等待回答"
+    lines: list[InteractionHintLayoutLine] = [("header", f"{prefix}: {title}")]
+    if question_count and current_question_text:
+        for wrapped in wrap_cells(str(current_question_text or ""), max(8, width - 2))[:2]:
+            lines.append(("body", f"  {wrapped}"))
+    elif is_approval:
+        preview_parts: list[str] = []
+        for raw in str(approval_preview_text or "").splitlines():
+            if not raw.strip():
+                continue
+            preview_parts.extend(wrap_cells(raw, max(8, width - 2)) or [""])
+            if len(preview_parts) >= 7:
+                break
+        for part in preview_parts[:7]:
+            lines.append(("body", f"  {part}"))
+        if len(preview_parts) >= 7:
+            lines.append(("muted", "  ... /approvals 可查看完整候选记忆"))
+    candidate_items = list(candidates or [])
+    if candidate_items:
+        selected = max(0, min(int(selected or 0), len(candidate_items) - 1))
+        limit = min(6, len(candidate_items))
+        start = max(0, min(selected - limit + 1, len(candidate_items) - limit))
+        for idx in range(start, start + limit):
+            marker = ">" if idx == selected else " "
+            kind = "candidate_selected" if idx == selected else "candidate"
+            lines.append((kind, f"{marker} {idx + 1}) {truncate_cells(candidate_items[idx], max(8, width - 6))}"))
+        if len(candidate_items) > limit:
+            lines.append(("muted", f"  ... {len(candidate_items)} 个选项，当前 {selected + 1}/{len(candidate_items)}"))
+    lines.append(("footer", footer))
+    return lines
 
 
 def process_turn_label(marker: str) -> str:

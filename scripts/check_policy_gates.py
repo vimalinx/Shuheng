@@ -411,6 +411,7 @@ def assert_rendering_module_boundary() -> None:
         "compose_request_user_input_answer",
         "interaction_input_prompt_text",
         "interaction_footer_text",
+        "interaction_hint_layout_lines",
         "visible_reply_is_substantive",
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
@@ -1005,6 +1006,50 @@ def assert_rendering_module_boundary() -> None:
         "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
     )
     assert rendering_mod.interaction_footer_text(True) == "等待你的输入：直接在下面回答；Enter 发送。"
+    assert rendering_mod.interaction_hint_layout_lines(False, width=60) == []
+    assert rendering_mod.interaction_hint_layout_lines(
+        True,
+        width=60,
+        tool="ask_user",
+        title_source="选择下一步",
+        candidates=["继续", "稍后"],
+        selected=1,
+        footer="footer text",
+    ) == [
+        ("header", "? ask_user: 选择下一步"),
+        ("candidate", "  1) 继续"),
+        ("candidate_selected", "> 2) 稍后"),
+        ("footer", "footer text"),
+    ]
+    hint_payload = {
+        "tool": "approval",
+        "approval_id": "appr_policy",
+        "question": "审批 appr_policy\n第一行\n第二行",
+        "candidates": ["批准并执行", "拒绝", "稍后处理"],
+        "_selection": 1,
+    }
+    expected_hint_layout = rendering_mod.interaction_hint_layout_lines(
+        True,
+        width=60,
+        tool="approval",
+        title_source="审批 appr_policy",
+        approval_preview_text="第一行\n第二行",
+        is_approval=True,
+        candidates=rendering_mod.sanitize_interaction_candidates(hint_payload["candidates"]),
+        selected=1,
+        footer=rendering_mod.interaction_footer_text(True, has_candidates=True, is_approval=True),
+    )
+    hint_attr_by_kind = {
+        "header": a.cp(7) | a.curses.A_BOLD,
+        "body": a.cp(2),
+        "candidate": a.cp(2),
+        "candidate_selected": a.cp(11) | a.curses.A_BOLD,
+        "muted": a.cp(1),
+        "footer": a.cp(1),
+    }
+    assert a.interaction_hint_lines(hint_payload, 60) == [
+        (text, hint_attr_by_kind[kind]) for kind, text in expected_hint_layout
+    ]
     assert a.render_interaction_card({}) == rendering_mod.render_interaction_card({})
     assert a.visible_ask_user_card_text is rendering_mod.visible_ask_user_card_text
     tool_use = '<tool_use>{"name":"ask_user","arguments":{"question":"选择下一步","candidates":["继续"]}}</tool_use>'
@@ -1318,6 +1363,7 @@ def assert_rendering_module_boundary() -> None:
         "def compose_request_user_input_answer",
         "def interaction_input_prompt_text",
         "def interaction_footer_text",
+        "def interaction_hint_layout_lines",
         "def process_group_scope_key",
         "def process_turn_scope_key",
         "def subagent_meta_scope_key",
