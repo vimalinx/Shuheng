@@ -496,6 +496,9 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.subagent_session_from_sidebar_key is subagent_store_mod.subagent_session_from_sidebar_key
     assert a.normalize_loaded_subagent_chat_messages is subagent_store_mod.normalize_loaded_subagent_chat_messages
     assert a.subagent_chat_history_preview_messages is subagent_store_mod.subagent_chat_history_preview_messages
+    assert subagent_store_mod.subagent_chat_title_for_messages.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.subagent_chat_history_preview.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.subagent_chat_history_description.__module__ == "ga_tui.subagent_store"
     assert a.subagent_chat_history_rounds is subagent_store_mod.subagent_chat_history_rounds
     assert a.subagent_chat_history_last_user_at is subagent_store_mod.subagent_chat_history_last_user_at
     original_root = a.SUBAGENTS_DIR
@@ -548,6 +551,24 @@ def assert_subagent_store_module_boundary() -> None:
         {"role": "system", "content": "notice"},
         {"role": "assistant", "content": "new reply"},
     ]
+    title_messages = [
+        a.Message("user", "first task"),
+        a.Message("assistant", "<summary>有效子会话标题</summary>\nvisible"),
+        a.Message("user", "latest task"),
+        a.Message("assistant", "**LLM Running (Turn 1) ...**\n<summary>OMP 思考</summary>\n最终回复"),
+    ]
+    assert subagent_store_mod.subagent_chat_title_for_messages(title_messages, "", "Ops Agent") == "有效子会话标题"
+    assert a.subagent_chat_title_for_messages(sub, title_messages) == "有效子会话标题"
+    assert subagent_store_mod.subagent_chat_history_preview(title_messages, "", "Ops Agent") == "有效子会话标题"
+    assert a.subagent_chat_history_preview(title_messages, sub) == "有效子会话标题"
+    assert subagent_store_mod.subagent_chat_history_description(
+        title_messages,
+        "fallback",
+        latest_visible_reply_text=a.latest_visible_reply_text,
+    ) == "开始：first task；最近：latest task；摘要：最终回复"
+    assert a.subagent_chat_history_description(title_messages, "fallback") == "开始：first task；最近：latest task；摘要：最终回复"
+    process_messages = [a.Message("user", "修复标题"), a.Message("assistant", "**LLM Running (Turn 1) ...**\n<summary>OMP 思考</summary>")]
+    assert subagent_store_mod.subagent_chat_title_for_messages(process_messages, "", "Ops Agent") == "修复标题"
     assert subagent_store_mod.subagent_chat_history_rounds([a.Message("user", "one"), a.Message("user", " ")]) == 1
     assert subagent_store_mod.subagent_chat_history_last_user_at([], 42.0) == 42.0
     assert not hasattr(subagent_store_mod, "write_subagent_chat_history_transcript")

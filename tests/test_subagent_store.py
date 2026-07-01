@@ -111,6 +111,46 @@ def test_subagent_chat_history_preview_messages_filters_and_limits() -> None:
     assert app_module.subagent_chat_history_preview_messages is subagent_store.subagent_chat_history_preview_messages
 
 
+def test_subagent_chat_title_preview_and_description_helpers() -> None:
+    messages = [
+        app_module.Message("user", "first task"),
+        app_module.Message("assistant", "<summary>有效子会话标题</summary>\nvisible"),
+        app_module.Message("user", "latest task"),
+        app_module.Message("assistant", "**LLM Running (Turn 1) ...**\n<summary>OMP 思考</summary>\n最终回复"),
+    ]
+    sub = app_module.SubAgentRuntime(agent_id="researcher", name="Researcher", home="/tmp/researcher")
+
+    assert subagent_store.subagent_chat_title_for_messages(messages, "", "Researcher") == "有效子会话标题"
+    assert app_module.subagent_chat_title_for_messages(sub, messages) == "有效子会话标题"
+    assert subagent_store.subagent_chat_history_preview(messages, "", "Researcher") == "有效子会话标题"
+    assert app_module.subagent_chat_history_preview(messages, sub) == "有效子会话标题"
+
+    description = subagent_store.subagent_chat_history_description(
+        messages,
+        "fallback preview",
+        latest_visible_reply_text=lambda text: app_module.latest_visible_reply_text(text),
+    )
+
+    assert description == "开始：first task；最近：latest task；摘要：最终回复"
+    assert app_module.subagent_chat_history_description(messages, "fallback preview") == description
+
+
+def test_subagent_chat_title_helpers_ignore_process_only_summary_and_fallback() -> None:
+    process_messages = [
+        app_module.Message("user", "修复子 agent 会话标题"),
+        app_module.Message("assistant", "**LLM Running (Turn 1) ...**\n<summary>OMP 思考</summary>"),
+    ]
+    empty_messages: list[app_module.Message] = []
+    sub = app_module.SubAgentRuntime(agent_id="ops", name="Ops Agent", home="/tmp/ops", chat_title="既有标题")
+
+    assert subagent_store.subagent_chat_title_for_messages(process_messages, "", "Ops Agent") == "修复子 agent 会话标题"
+    assert app_module.subagent_chat_title_for_messages(sub, process_messages) == "修复子 agent 会话标题"
+    assert subagent_store.subagent_chat_history_preview(process_messages, "", "Ops Agent") == "修复子 agent 会话标题"
+    assert subagent_store.subagent_chat_title_for_messages(empty_messages, "既有标题", "Ops Agent") == "既有标题"
+    assert subagent_store.subagent_chat_history_preview(empty_messages, "", "Ops Agent") == "Ops Agent 会话"
+    assert app_module.subagent_chat_history_preview(empty_messages, sub) == "既有标题"
+
+
 def test_subagent_chat_history_rounds_and_last_user_at() -> None:
     messages = [
         app_module.Message("user", "first"),

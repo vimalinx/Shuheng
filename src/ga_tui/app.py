@@ -9424,7 +9424,12 @@ def subagent_chat_session_file(sub: SubAgentRuntime, session_id: str) -> str:
 
 def subagent_chat_title_for_messages(sub: SubAgentRuntime, messages: Optional[list[Message]] = None) -> str:
     source = messages if messages is not None else sub.messages
-    return compact_title(suggested_session_title(source) or sub.chat_title or f"{sub.name} 会话", 80)
+    return subagent_store_helpers.subagent_chat_title_for_messages(
+        source,
+        sub.chat_title,
+        sub.name,
+        title_width=80,
+    )
 
 
 def subagent_chat_session_payload(sub: SubAgentRuntime, *, source: str = "") -> dict[str, Any]:
@@ -9468,34 +9473,21 @@ subagent_chat_history_preview_messages = subagent_store_helpers.subagent_chat_hi
 
 
 def subagent_chat_history_preview(messages: list[Message], sub: SubAgentRuntime) -> str:
-    title = suggested_session_title(messages)
-    if title:
-        return compact_title(title, 90)
-    for msg in messages:
-        if msg.role == "user":
-            preview = compact_description(msg.content or "", 90)
-            if preview:
-                return preview
-    return compact_title(sub.chat_title or f"{sub.name} 会话", 90)
+    return subagent_store_helpers.subagent_chat_history_preview(
+        messages,
+        sub.chat_title,
+        sub.name,
+        preview_width=90,
+    )
 
 
 def subagent_chat_history_description(messages: list[Message], preview: str = "") -> str:
-    users = [compact_description(msg.content or "", 90) for msg in messages if msg.role == "user" and (msg.content or "").strip()]
-    assistants = [
-        compact_description(latest_visible_reply_text(msg.content or ""), 110)
-        for msg in messages
-        if msg.role == "assistant" and (msg.content or "").strip()
-    ]
-    snippets: list[str] = []
-    if users:
-        snippets.append(f"开始：{users[0]}")
-        if users[-1] != users[0]:
-            snippets.append(f"最近：{users[-1]}")
-    if assistants:
-        snippets.append(f"摘要：{assistants[-1]}")
-    if not snippets and preview:
-        snippets.append(preview)
-    return compact_description("；".join(snippets), SESSION_DESCRIPTION_LIMIT)
+    return subagent_store_helpers.subagent_chat_history_description(
+        messages,
+        preview,
+        latest_visible_reply_text=latest_visible_reply_text,
+        description_limit=SESSION_DESCRIPTION_LIMIT,
+    )
 
 
 subagent_chat_history_rounds = subagent_store_helpers.subagent_chat_history_rounds

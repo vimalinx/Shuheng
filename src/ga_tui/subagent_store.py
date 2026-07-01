@@ -4,9 +4,10 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 
-from .text_utils import clean_text
+from .history_titles import compact_description, suggested_session_title
+from .text_utils import clean_text, compact_title
 from .ui_types import MAIN_HOME_SESSION_KEY, SCHEDULED_REPORTS_SESSION_KEY, SUBAGENT_HOME_SESSION_PREFIX, Message
 
 SUBAGENT_SESSION_PREFIX = "subagent_session:"
@@ -120,6 +121,59 @@ def subagent_chat_history_preview_messages(messages: list[Message], limit: int =
             continue
         records.append({"role": role, "content": content})
     return records
+
+
+def subagent_chat_title_for_messages(
+    messages: list[Message],
+    chat_title: str,
+    agent_name: str,
+    *,
+    title_width: int = 80,
+) -> str:
+    return compact_title(suggested_session_title(messages) or chat_title or f"{agent_name} 会话", title_width)
+
+
+def subagent_chat_history_preview(
+    messages: list[Message],
+    chat_title: str,
+    agent_name: str,
+    *,
+    preview_width: int = 90,
+) -> str:
+    title = suggested_session_title(messages)
+    if title:
+        return compact_title(title, preview_width)
+    for msg in messages:
+        if msg.role == "user":
+            preview = compact_description(msg.content or "", preview_width)
+            if preview:
+                return preview
+    return compact_title(chat_title or f"{agent_name} 会话", preview_width)
+
+
+def subagent_chat_history_description(
+    messages: list[Message],
+    preview: str = "",
+    *,
+    latest_visible_reply_text: Callable[[str], str],
+    description_limit: int = 200,
+) -> str:
+    users = [compact_description(msg.content or "", 90) for msg in messages if msg.role == "user" and (msg.content or "").strip()]
+    assistants = [
+        compact_description(latest_visible_reply_text(msg.content or ""), 110)
+        for msg in messages
+        if msg.role == "assistant" and (msg.content or "").strip()
+    ]
+    snippets: list[str] = []
+    if users:
+        snippets.append(f"开始：{users[0]}")
+        if users[-1] != users[0]:
+            snippets.append(f"最近：{users[-1]}")
+    if assistants:
+        snippets.append(f"摘要：{assistants[-1]}")
+    if not snippets and preview:
+        snippets.append(preview)
+    return compact_description("；".join(snippets), description_limit)
 
 
 def subagent_chat_history_rounds(messages: list[Message]) -> int:
