@@ -334,11 +334,34 @@ def assert_input_controller_module_boundary() -> None:
 def assert_rendering_module_boundary() -> None:
     for name in (
         "RUN_FRAMES",
+        "char_index_for_cell",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
     ):
         assert getattr(a, name) is getattr(rendering_mod, name), name
+    assert rendering_mod.char_index_for_cell("abc", -1) == 0
+    assert rendering_mod.char_index_for_cell("abc", 2) == 2
+    assert rendering_mod.char_index_for_cell("a中b", 2) == 1
+    assert rendering_mod.char_index_for_cell("a中b", 3) == 2
+    assert rendering_mod.char_index_for_cell("a\u0301b", 2) == 3
+    assert rendering_mod.ordered_selection_points(None, (1, 2)) is None
+    assert rendering_mod.ordered_selection_points((2, 3), (1, 4)) == ((1, 4), (2, 3))
+    assert rendering_mod.ordered_selection_points((1, 4), (1, 4)) is None
+    selection_state = a.State(agent=None)
+    selection_state.selection_start = (3, 4)
+    selection_state.selection_end = (1, 2)
+    assert a.ordered_selection_points(selection_state) == rendering_mod.ordered_selection_points((3, 4), (1, 2))
+    assert rendering_mod.selection_span_for_line_points(((1, 2), (3, 4)), 0, "zero") is None
+    assert rendering_mod.selection_span_for_line_points(((1, 2), (3, 4)), 1, "abcdef") == (2, 6)
+    assert rendering_mod.selection_span_for_line_points(((1, 2), (3, 4)), 2, "middle") == (0, 6)
+    assert rendering_mod.selection_span_for_line_points(((1, 2), (3, 4)), 3, "abcdef") == (0, 4)
+    assert rendering_mod.selection_span_for_line_points(((1, -5), (1, 99)), 1, "abc") == (0, 3)
+    assert a.selection_span_for_line(selection_state, 1, "abcdef") == rendering_mod.selection_span_for_line_points(
+        rendering_mod.ordered_selection_points((3, 4), (1, 2)),
+        1,
+        "abcdef",
+    )
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(

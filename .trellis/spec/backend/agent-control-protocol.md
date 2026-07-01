@@ -1843,18 +1843,19 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 /agent skill add agent-research custom-sop -> only agent-research context_pack.skill_pack includes custom-sop
 ```
 
-## Scenario: Running Indicator Rendering
+## Scenario: Running Indicator And Selection Geometry Rendering
 
 ### 1. Scope / Trigger
 
 - Trigger: The visible main or subagent transcript contains an unfinished assistant message while `display_status(state)` is `running` or `aborting`.
-- Applies to: `State.run_frame`, `RenderLine` metadata, `message_lines_cached()`, `draw_main()`, and the main curses event loop.
+- Applies to: `State.run_frame`, `RenderLine` metadata, `message_lines_cached()`, rendered-line selection geometry, `draw_main()`, and the main curses event loop.
 - Non-goal: This does not change runtime provider streaming, transcript persistence, token accounting, process folding, or session history naming.
 
 ### 2. Signatures
 
 - Frame source: `RUN_FRAMES` and `running_indicator(frame)`, implemented in `src/ga_tui/rendering.py` and re-exported from `src/ga_tui/app.py`.
 - Curses-free helper module: `src/ga_tui/rendering.py` owns `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)`.
+- Selection geometry helpers: `rendering.char_index_for_cell(text, target_x)`, `rendering.ordered_selection_points(selection_start, selection_end)`, and `rendering.selection_span_for_line_points(points, line_idx, text)`, with `app.py` retaining the legacy `ordered_selection_points(state)` and `selection_span_for_line(state, line_idx, text)` wrappers.
 - Cached line marker: `RenderLine.kind == "running_indicator"`.
 - Visible row state: `State.running_indicator_rect`.
 - Lightweight redraw helper: `draw_running_indicator_frame(stdscr, state)`.
@@ -1864,6 +1865,10 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `run_frame` must not be part of `message_render_cache_key()` or the `message_lines_cached()` key.
 - `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
 - `app.py` remains the owner of visible row state, `record_running_indicator_rect(...)`, `draw_running_indicator_frame(...)`, full `draw_main(...)`, and event-loop frame advancement.
+- `char_index_for_cell(...)` maps terminal-cell x coordinates to Python character indices with the same East Asian wide-character and zero-width combining-mark behavior as the existing text helpers.
+- `ordered_selection_points(...)` is pure over explicit `(line, column)` points and returns `None` for missing or zero-length selections. App wrappers inject `State.selection_start` and `State.selection_end`.
+- `selection_span_for_line_points(...)` is pure over already-ordered explicit points, clamps character columns to the current rendered text length, returns `None` for empty spans, and does not read `State`, line caches, mouse position, or clipboard state.
+- `clear_selection(...)`, `selected_text(...)`, `shift_selection_lines(...)`, mouse hit testing, auto-scroll, clipboard copy, Secret copy gates, and curses drawing stay in `app.py`.
 - Long assistant messages must not run through markdown/process rendering on every animation tick.
 - Full `draw_main()` may render the current spinner frame from cached `RenderLine` metadata without mutating the cache.
 - The main event loop must not set `state.dirty` solely because `run_frame` advanced.
@@ -1875,18 +1880,24 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `run_frame` changes from 0 to 1 -> message block cache keys and cached block object identities remain stable.
 - Visible unfinished assistant message + clean screen + frame tick -> one row is updated and curses refreshes once.
 - Hidden spinner row, active selection, popup, idle status, or aborted/finished message -> no lightweight row update.
+- Reversed selection points -> pure helper sorts them before span calculation.
+- Same start/end selection points or columns clamped to the same value -> no selection span.
+- Wide or combining characters in text hit testing -> cell coordinate maps to the same character index as the legacy app helper.
 - Terminal resize or full redraw -> `draw_main()` recomputes `State.running_indicator_rect` from currently visible lines.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: A long streaming OMP reply keeps the transcript cache stable while `[=     ] running...` animates smoothly.
 - Base: A normal dirty redraw caused by input, scroll, history refresh, or clock refresh still redraws the whole TUI.
+- Base: `draw_main()` still calls `selection_span_for_line(state, idx, text)` through the app facade, while the pure span computation lives in `rendering.py`.
 - Bad: Adding `run_frame` to the message cache key or setting `state.dirty = True` every 120ms.
+- Bad: Moving `selected_text(...)`, clipboard behavior, mouse drag mutation, or curses selection drawing into `rendering.py`.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert run-frame changes do not invalidate message block cache keys.
-- Unit tests and `scripts/check_policy_gates.py` must assert running-indicator helpers are owned by `rendering.py`, app compatibility aliases match, helper output wraps by modulo, cached non-indicator lines pass through unchanged, indicator lines use `prefix_cells`, and `rendering.py` has no reverse dependency into app/curses/state/runtime/command/Web/dashboard/input owners.
+- Unit tests and `scripts/check_policy_gates.py` must assert running-indicator helpers are owned by `rendering.py`, app compatibility aliases match, helper output wraps by modulo, cached non-indicator lines pass through unchanged, indicator lines use `prefix_cells`, selection geometry helpers preserve app wrapper behavior, and `rendering.py` has no reverse dependency into app/curses/state/runtime/command/Web/dashboard/input owners.
+- Unit tests must assert `char_index_for_cell(...)` handles negative targets, ASCII boundaries, wide CJK characters, and combining marks; pure selection helpers handle missing/equal/reversed points, same-line and multiline spans, out-of-range lines, clamped columns, empty spans, and app wrapper parity.
 - Tests must assert a visible running indicator can be refreshed with a single row update and one curses refresh while preserving the cache and input cursor.
 
 ### 7. Wrong vs Correct

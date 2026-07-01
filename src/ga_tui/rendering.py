@@ -9,7 +9,61 @@ except Exception:
     from ui_types import RenderLine  # type: ignore
 
 
+SelectionPoint = tuple[int, int]
+SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
+
+
+def char_index_for_cell(text: str, target_x: int) -> int:
+    target_x = max(0, target_x)
+    used = 0
+    for idx, ch in enumerate(text):
+        width = cell_width(ch)
+        if target_x <= used:
+            return idx
+        if used + width > target_x:
+            return idx
+        used += width
+        if used >= target_x:
+            return idx + 1
+    return len(text)
+
+
+def ordered_selection_points(
+    selection_start: SelectionPoint | None,
+    selection_end: SelectionPoint | None,
+) -> SelectionPoints | None:
+    if selection_start is None or selection_end is None:
+        return None
+    start, end = sorted((selection_start, selection_end))
+    if start == end:
+        return None
+    return start, end
+
+
+def selection_span_for_line_points(
+    points: SelectionPoints | None,
+    line_idx: int,
+    text: str,
+) -> tuple[int, int] | None:
+    if points is None:
+        return None
+    (start_line, start_col), (end_line, end_col) = points
+    if line_idx < start_line or line_idx > end_line:
+        return None
+    if start_line == end_line:
+        start, end = start_col, end_col
+    elif line_idx == start_line:
+        start, end = start_col, len(text)
+    elif line_idx == end_line:
+        start, end = 0, end_col
+    else:
+        start, end = 0, len(text)
+    start = max(0, min(start, len(text)))
+    end = max(0, min(end, len(text)))
+    if start == end:
+        return None
+    return min(start, end), max(start, end)
 
 
 def running_indicator(frame: int) -> str:
