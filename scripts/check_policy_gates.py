@@ -1018,6 +1018,7 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.normalize_subagent_identity_text is subagent_store_mod.normalize_subagent_identity_text
     assert a.compact_identity_text is subagent_store_mod.compact_identity_text
     assert a.normalize_subagent_skill_refs is subagent_store_mod.normalize_subagent_skill_refs
+    assert subagent_store_mod.parse_subagent_new_body.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_subagent_id.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_secret_subagent_id.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_runtime_subagent_id.__module__ == "ga_tui.subagent_store"
@@ -1062,6 +1063,36 @@ def assert_subagent_store_module_boundary() -> None:
         limit=3,
     ) == ["alpha", "beta", "gamma"]
     assert subagent_store_mod.normalize_subagent_skill_refs({"enabled": True, "disabled": False}) == ["enabled"]
+    assert subagent_store_mod.parse_subagent_new_body("--persistent Ops Agent | durable") == (
+        "Ops Agent",
+        "durable",
+        "specialist",
+        True,
+        "",
+    )
+    assert subagent_store_mod.parse_subagent_new_body(
+        "code-reader:Repo Audit | inspect",
+        supported_roles={"code_reader"},
+        normalize_role=lambda role: (subagent_store_mod.clean_subagent_id(role).replace("-", "_"), "role-note"),
+    ) == ("Repo Audit", "inspect", "code_reader", False, "role-note")
+    assert subagent_store_mod.parse_subagent_new_body(
+        "unknown:Keep Whole Name | profile",
+        supported_roles={"researcher"},
+    ) == ("unknown:Keep Whole Name", "profile", "specialist", False, "")
+    assert subagent_store_mod.parse_subagent_new_body(
+        "researcher：资料整理 | 只读",
+        supported_roles={"researcher"},
+    ) == ("资料整理", "只读", "researcher", False, "")
+    for sample in (
+        "--persist researcher:Evidence Scout | gather links",
+        "persistent:main_orchestrator:Chief Planner | coordinate work",
+        "temp:unknown:Keep Whole Name | profile",
+    ):
+        assert a.parse_subagent_new_body(sample) == subagent_store_mod.parse_subagent_new_body(
+            sample,
+            supported_roles=a.ROLE_TEMPLATES,
+            normalize_role=a.subagent_role_request,
+        )
     meta = {
         "conversation_scope": subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE,
         "agent_id": "ops-agent",
@@ -1148,6 +1179,7 @@ def assert_subagent_store_module_boundary() -> None:
         "from curses",
         "State",
         "SubAgentRuntime",
+        "ROLE_TEMPLATES",
         "RenderLine",
         "history_store",
         "secret_vault",

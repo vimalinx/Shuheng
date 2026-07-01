@@ -104,6 +104,70 @@ def test_subagent_skill_ref_normalization_and_app_alias() -> None:
     assert subagent_store.normalize_subagent_skill_refs("one two", limit=0) == ["one", "two"]
 
 
+def test_parse_subagent_new_body_flags_prefixes_and_profile() -> None:
+    assert subagent_store.parse_subagent_new_body(
+        "--persistent Research Agent | collect sources",
+    ) == ("Research Agent", "collect sources", "specialist", True, "")
+    assert subagent_store.parse_subagent_new_body(
+        "--persist --temp persistent:Daily Bot | report every morning",
+    ) == ("Daily Bot", "report every morning", "specialist", True, "")
+    assert subagent_store.parse_subagent_new_body(
+        "--durable temporary:Scratch Bot | one shot",
+    ) == ("Scratch Bot", "one shot", "specialist", False, "")
+    assert subagent_store.parse_subagent_new_body(
+        "长期：归档员 | 整理旧记录",
+    ) == ("归档员", "整理旧记录", "specialist", True, "")
+    assert subagent_store.parse_subagent_new_body(
+        "临时：冒烟测试 | 不落长期",
+    ) == ("冒烟测试", "不落长期", "specialist", False, "")
+
+
+def test_parse_subagent_new_body_role_injection_and_unsupported_fallback() -> None:
+    calls: list[str] = []
+
+    def normalize(role: str) -> tuple[str, str]:
+        calls.append(role)
+        key = subagent_store.clean_subagent_id(role).replace("-", "_")
+        return key, f"normalized:{key}"
+
+    assert subagent_store.parse_subagent_new_body(
+        "code-reader: Repo Audit | inspect boundaries",
+        supported_roles={"researcher", "code_reader"},
+        normalize_role=normalize,
+    ) == ("Repo Audit", "inspect boundaries", "code_reader", False, "normalized:code_reader")
+    assert calls == ["code-reader"]
+    assert subagent_store.parse_subagent_new_body(
+        "unknown-role: Keep Whole Name | profile",
+        supported_roles={"researcher", "code_reader"},
+        normalize_role=normalize,
+    ) == ("unknown-role: Keep Whole Name", "profile", "specialist", False, "")
+    assert calls == ["code-reader"]
+
+
+def test_parse_subagent_new_body_fullwidth_role_separator() -> None:
+    assert subagent_store.parse_subagent_new_body(
+        "researcher：资料整理 | 只读",
+        supported_roles={"researcher"},
+    ) == ("资料整理", "只读", "researcher", False, "")
+
+
+def test_app_parse_subagent_new_body_wrapper_injects_role_policy() -> None:
+    sample = "persistent:main_orchestrator:Chief Planner | coordinate work"
+
+    assert app_module.parse_subagent_new_body(sample) == (
+        "Chief Planner",
+        "coordinate work",
+        "specialist",
+        True,
+        "main_orchestrator 是主 agent 专属角色，子 agent 已使用 specialist。",
+    )
+    assert app_module.parse_subagent_new_body(sample) == subagent_store.parse_subagent_new_body(
+        sample,
+        supported_roles=app_module.ROLE_TEMPLATES,
+        normalize_role=app_module.subagent_role_request,
+    )
+
+
 def test_subagent_new_chat_session_id_shape() -> None:
     session_id = subagent_store.subagent_new_chat_session_id()
 

@@ -22164,51 +22164,11 @@ def subagent_settings_target_from_command(text: str) -> str:
 
 
 def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool, str]:
-    body = (body or "").strip()
-    persistent = False
-    for flag in ("--persistent", "--persist", "--long-term", "--long_term", "--permanent", "--durable"):
-        if re.search(rf"(^|\s){re.escape(flag)}(\s|$)", body, flags=re.IGNORECASE):
-            persistent = True
-            body = re.sub(rf"(^|\s){re.escape(flag)}(\s|$)", " ", body, flags=re.IGNORECASE).strip()
-    for flag in ("--temp", "--temporary", "--ephemeral"):
-        if re.search(rf"(^|\s){re.escape(flag)}(\s|$)", body, flags=re.IGNORECASE):
-            persistent = False
-            body = re.sub(rf"(^|\s){re.escape(flag)}(\s|$)", " ", body, flags=re.IGNORECASE).strip()
-    if "|" in body:
-        name, profile = [part.strip() for part in body.split("|", 1)]
-    else:
-        name, profile = body, ""
-    for prefix in ("persistent", "persist", "permanent", "durable", "long_term", "long-term", "长期", "持久", "永久"):
-        for sep in (":", "："):
-            marker = prefix + sep
-            if name.lower().startswith(marker):
-                persistent = True
-                name = name[len(marker):].strip()
-                break
-        else:
-            continue
-        break
-    for prefix in ("temp", "temporary", "ephemeral", "临时", "暂时"):
-        for sep in (":", "："):
-            marker = prefix + sep
-            if name.lower().startswith(marker):
-                persistent = False
-                name = name[len(marker):].strip()
-                break
-        else:
-            continue
-        break
-    role = "specialist"
-    role_note = ""
-    for sep in (":", "："):
-        if sep in name:
-            maybe_role, maybe_name = [part.strip() for part in name.split(sep, 1)]
-            role_key = clean_subagent_id(maybe_role).replace("-", "_")
-            if role_key in ROLE_TEMPLATES:
-                role, role_note = subagent_role_request(maybe_role)
-                name = maybe_name
-                break
-    return name.strip(), profile.strip(), role, persistent, role_note
+    return subagent_store_helpers.parse_subagent_new_body(
+        body,
+        supported_roles=ROLE_TEMPLATES,
+        normalize_role=subagent_role_request,
+    )
 
 
 def format_subagent_skill_detail(sub: SubAgentRuntime) -> str:
