@@ -182,6 +182,18 @@ def test_process_line_format_helpers_render_expected_strings() -> None:
     )
 
 
+def test_process_child_detail_text_formats_fallback_truncation_and_indent() -> None:
+    assert rendering.process_child_detail_text(
+        "<summary>hidden</summary>\nVisible line\nSecond line",
+        "fallback",
+    ) == "    Visible line\n    Second line"
+    assert rendering.process_child_detail_text("<summary>hidden</summary>", "fallback") == "    fallback"
+    assert rendering.process_child_detail_text("", "") == ""
+    assert rendering.process_child_detail_text("abcdef", "fallback", limit=3) == (
+        "    abc\n    ...（详情过长，已截断；需要原文请打开对应 artifact/trace）"
+    )
+
+
 def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
     marker = "**LLM Running (Turn 7) ...**"
     body = (
@@ -225,6 +237,27 @@ def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
         "G2T7",
         app_module.expanded_process_header(marker, body, False),
     )
+    assert app_module.process_child_detail(body) == rendering.process_child_detail_text(
+        app_module.strip_tui_controls(body),
+        app_module.process_preview(body),
+    )
+
+
+def test_app_process_child_detail_wrapper_keeps_control_stripping_app_owned() -> None:
+    body = (
+        "Visible detail\n"
+        "<ga-control>{\"action\":\"agent.create\",\"params\":{\"name\":\"Hidden\"}}</ga-control>\n"
+        "<summary>hidden summary</summary>"
+    )
+
+    detail = app_module.process_child_detail(body)
+
+    assert detail == rendering.process_child_detail_text(
+        app_module.strip_tui_controls(body),
+        app_module.process_preview(body),
+    )
+    assert "ga-control" not in detail
+    assert "Hidden" not in detail
 
 
 def test_app_process_group_header_wrapper_preserves_summary_and_tool_selection() -> None:
@@ -496,6 +529,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.process_group_header_text is rendering.process_group_header_text
     assert app_module.collapsed_process_child_line_text is rendering.collapsed_process_child_line_text
     assert app_module.expanded_process_child_header_text is rendering.expanded_process_child_header_text
+    assert app_module.process_child_detail_text is rendering.process_child_detail_text
     assert app_module.latest_visible_reply_text("plain") == rendering.latest_visible_reply_text(
         "plain",
         has_tool_noise=app_module.process_has_tool_noise,

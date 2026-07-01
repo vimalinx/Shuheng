@@ -100,6 +100,15 @@ def expanded_process_child_header_text(label: str, raw_line: str) -> str:
     return "  " + raw_line.replace("▾ 过程 ", f"▾ 过程 {label} ", 1)
 
 
+def process_child_detail_text(cleaned_body: str, preview: str, limit: int = 12000) -> str:
+    detail = strip_meta_blocks(clean_text(cleaned_body or "")).strip()
+    if not detail:
+        detail = preview
+    if len(detail) > limit:
+        detail = detail[:limit].rstrip() + "\n...（详情过长，已截断；需要原文请打开对应 artifact/trace）"
+    return "\n".join("    " + line for line in detail.splitlines())
+
+
 def strip_meta_blocks(text: str) -> str:
     return META_BLOCK_RE.sub("", text or "").strip()
 

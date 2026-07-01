@@ -594,6 +594,7 @@ expanded_process_header_text = rendering_helpers.expanded_process_header_text
 process_group_header_text = rendering_helpers.process_group_header_text
 collapsed_process_child_line_text = rendering_helpers.collapsed_process_child_line_text
 expanded_process_child_header_text = rendering_helpers.expanded_process_child_header_text
+process_child_detail_text = rendering_helpers.process_child_detail_text
 next_nonblank_line = rendering_helpers.next_nonblank_line
 line_numbered_file_line = rendering_helpers.line_numbered_file_line
 stray_line_numbered_fence_close = rendering_helpers.stray_line_numbered_fence_close
@@ -18512,12 +18513,11 @@ def expanded_process_child_header(label: str, marker: str, body: str, current: b
 
 
 def process_child_detail(body: str, limit: int = 12000) -> str:
-    detail = strip_meta_blocks(clean_text(strip_tui_controls(body or ""))).strip()
-    if not detail:
-        detail = process_preview(body)
-    if len(detail) > limit:
-        detail = detail[:limit].rstrip() + "\n...（详情过长，已截断；需要原文请打开对应 artifact/trace）"
-    return "\n".join("    " + line for line in detail.splitlines())
+    return rendering_helpers.process_child_detail_text(
+        strip_tui_controls(body or ""),
+        process_preview(body),
+        limit,
+    )
 
 
 def process_has_tool_call_noise(body: str) -> bool:

@@ -352,6 +352,7 @@ def assert_rendering_module_boundary() -> None:
         "process_group_header_text",
         "collapsed_process_child_line_text",
         "expanded_process_child_header_text",
+        "process_child_detail_text",
         "LINE_NUMBERED_FILE_RE",
         "FENCE_BOUNDARY_RE",
         "next_nonblank_line",
@@ -503,6 +504,18 @@ def assert_rendering_module_boundary() -> None:
             a.expanded_process_header(process_marker, process_body, False),
         )
     )
+    assert rendering_mod.process_child_detail_text(
+        "<summary>hidden</summary>\nVisible detail",
+        "fallback",
+    ) == "    Visible detail"
+    assert rendering_mod.process_child_detail_text("<summary>hidden</summary>", "fallback") == "    fallback"
+    assert rendering_mod.process_child_detail_text("abcdef", "fallback", limit=3) == (
+        "    abc\n    ...（详情过长，已截断；需要原文请打开对应 artifact/trace）"
+    )
+    assert a.process_child_detail(process_body) == rendering_mod.process_child_detail_text(
+        a.strip_tui_controls(process_body),
+        a.process_preview(process_body),
+    )
     assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
@@ -623,8 +636,10 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
         "def process_turn_no",
+        "def process_child_detail_text",
     ):
         assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
+    assert "strip_meta_blocks(clean_text(strip_tui_controls" not in app_source, a.__file__
     source = Path(rendering_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "ga_tui.app",
