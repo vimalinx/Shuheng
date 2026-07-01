@@ -352,6 +352,9 @@ def assert_rendering_module_boundary() -> None:
         "subagent_result_metadata_entries",
         "subagent_result_metadata_summary",
         "subagent_meta_label",
+        "subagent_result_metadata_detail_lines",
+        "subagent_result_notice_body_text",
+        "format_subagent_result_notice_text",
         "is_table_separator",
         "split_table_row",
         "table_layout_lines",
@@ -625,6 +628,58 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.count_list_like_metadata_value("a, b, c") == 3
     assert rendering_mod.count_list_like_metadata_value("无") == 0
     assert rendering_mod.subagent_meta_label(notice).startswith("S")
+    assert rendering_mod.subagent_result_metadata_detail_lines(notice, ["Confidence: 高"], 80) == [
+        "│   Task: task_123",
+        "│   Artifact: artifact://subagent-results/report.md",
+        "│   Confidence: 高",
+    ]
+    detail_blocks = a.subagent_result_metadata_detail_blocks(notice, ["Confidence: 高"], 80)
+    assert [line.text for line in detail_blocks] == rendering_mod.subagent_result_metadata_detail_lines(
+        notice,
+        ["Confidence: 高"],
+        80,
+    )
+    assert all(line.attr == a.cp(9) for line in detail_blocks)
+    assert rendering_mod.subagent_result_notice_body_text(
+        "raw result",
+        "rendered result",
+        "",
+        False,
+        6000,
+    ) == "rendered result"
+    assert rendering_mod.subagent_result_notice_body_text(
+        "raw result",
+        "rendered result too long",
+        "final answer",
+        True,
+        5,
+    ) == "▸ 工具/过程输出已折叠，完整过程见 artifact。\n\nfinal answer"
+    assert rendering_mod.format_subagent_result_notice_text(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        "body text",
+    ) == (
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n\n"
+        "body text"
+    )
+    notice_body = a.subagent_result_notice_body("plain subagent result", 6000)
+    assert a.format_subagent_result_notice_parts(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        "plain subagent result",
+    ) == rendering_mod.format_subagent_result_notice_text(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        notice_body,
+    )
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
         "intro\n",
@@ -975,6 +1030,9 @@ def assert_rendering_module_boundary() -> None:
         "def subagent_result_metadata_entries",
         "def subagent_result_metadata_summary",
         "def subagent_meta_label",
+        "def subagent_result_metadata_detail_lines",
+        "def subagent_result_notice_body_text",
+        "def format_subagent_result_notice_text",
         "def is_table_separator",
         "def split_table_row",
         "def table_layout_lines",

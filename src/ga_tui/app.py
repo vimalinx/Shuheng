@@ -582,6 +582,9 @@ count_list_like_metadata_value = rendering_helpers.count_list_like_metadata_valu
 subagent_result_metadata_entries = rendering_helpers.subagent_result_metadata_entries
 subagent_result_metadata_summary = rendering_helpers.subagent_result_metadata_summary
 subagent_meta_label = rendering_helpers.subagent_meta_label
+subagent_result_metadata_detail_lines = rendering_helpers.subagent_result_metadata_detail_lines
+subagent_result_notice_body_text = rendering_helpers.subagent_result_notice_body_text
+format_subagent_result_notice_text = rendering_helpers.format_subagent_result_notice_text
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
@@ -18916,17 +18919,7 @@ def subagent_context_updates_from_messages(messages: list[Message], path: str = 
 
 
 def subagent_result_metadata_detail_blocks(notice: dict[str, str], metadata_lines: list[str], width: int) -> list[RenderLine]:
-    detail_lines: list[str] = []
-    if notice.get("task_id"):
-        detail_lines.append(f"Task: {notice['task_id']}")
-    if notice.get("artifact_ref"):
-        detail_lines.append(f"Artifact: {notice['artifact_ref']}")
-    detail_lines.extend(metadata_lines)
-    blocks: list[RenderLine] = []
-    for line in detail_lines:
-        for wrapped in wrap_cells(line, width):
-            blocks.append(RenderLine("│   " + wrapped, cp(9)))
-    return blocks
+    return [RenderLine(line, cp(9)) for line in subagent_result_metadata_detail_lines(notice, metadata_lines, width)]
 
 
 def subagent_result_card_blocks(
@@ -23971,20 +23964,9 @@ def latest_visible_reply_text(text: str) -> str:
 def subagent_result_notice_body(text: str, limit: int) -> str:
     raw = clean_text(text).strip() or "(empty result)"
     rendered = render_assistant_text(raw, True, True).strip()
-    if rendered and len(rendered) <= limit:
-        return rendered
-    final_reply = latest_visible_reply_text(raw)
-    if final_reply:
-        prefix = "▸ 工具/过程输出已折叠，完整过程见 artifact。\n\n" if process_has_tool_noise(raw) else ""
-        suffix = "\n...（结果过长，完整内容见 artifact）"
-        available = max(800, limit - len(prefix) - len(suffix) - 1)
-        if len(final_reply) > available:
-            final_reply = final_reply[:available].rstrip() + suffix
-        return prefix + final_reply
-    body = rendered or raw
-    if len(body) > limit:
-        body = body[:limit].rstrip() + "\n...（结果过长，完整内容见 artifact）"
-    return body
+    final_reply = "" if rendered and len(rendered) <= limit else latest_visible_reply_text(raw)
+    has_tool_noise = process_has_tool_noise(raw) if final_reply else False
+    return subagent_result_notice_body_text(raw, rendered, final_reply, has_tool_noise, limit)
 
 
 def format_subagent_result_notice(
@@ -24006,12 +23988,7 @@ def format_subagent_result_notice_parts(
     limit: int = 6000,
 ) -> str:
     body = subagent_result_notice_body(text, limit)
-    return (
-        f"子 agent 回复 · {name or agent_id or 'subagent'} ({agent_id or '-'})\n"
-        f"Task: {bus_task_id}\n"
-        f"Artifact: {artifact_ref}\n\n"
-        f"{body}"
-    )
+    return format_subagent_result_notice_text(name, agent_id, bus_task_id, artifact_ref, body)
 
 
 def process_ui_queue(state: State) -> bool:

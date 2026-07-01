@@ -350,6 +350,64 @@ def subagent_meta_label(notice: dict[str, str]) -> str:
     return f"S{digest}"
 
 
+def subagent_result_metadata_detail_lines(
+    notice: dict[str, str],
+    metadata_lines: list[str],
+    width: int,
+) -> list[str]:
+    detail_lines: list[str] = []
+    if notice.get("task_id"):
+        detail_lines.append(f"Task: {notice['task_id']}")
+    if notice.get("artifact_ref"):
+        detail_lines.append(f"Artifact: {notice['artifact_ref']}")
+    detail_lines.extend(metadata_lines)
+
+    wrapped_lines: list[str] = []
+    for line in detail_lines:
+        wrapped_lines.extend("│   " + wrapped for wrapped in wrap_cells(line, width))
+    return wrapped_lines
+
+
+def subagent_result_notice_body_text(
+    raw: str,
+    rendered: str,
+    final_reply: str,
+    has_tool_noise: bool,
+    limit: int,
+) -> str:
+    raw = clean_text(raw).strip() or "(empty result)"
+    rendered = (rendered or "").strip()
+    final_reply = final_reply or ""
+    if rendered and len(rendered) <= limit:
+        return rendered
+    if final_reply:
+        prefix = "▸ 工具/过程输出已折叠，完整过程见 artifact。\n\n" if has_tool_noise else ""
+        suffix = "\n...（结果过长，完整内容见 artifact）"
+        available = max(800, limit - len(prefix) - len(suffix) - 1)
+        if len(final_reply) > available:
+            final_reply = final_reply[:available].rstrip() + suffix
+        return prefix + final_reply
+    body = rendered or raw
+    if len(body) > limit:
+        body = body[:limit].rstrip() + "\n...（结果过长，完整内容见 artifact）"
+    return body
+
+
+def format_subagent_result_notice_text(
+    name: str,
+    agent_id: str,
+    bus_task_id: str,
+    artifact_ref: str,
+    body: str,
+) -> str:
+    return (
+        f"子 agent 回复 · {name or agent_id or 'subagent'} ({agent_id or '-'})\n"
+        f"Task: {bus_task_id}\n"
+        f"Artifact: {artifact_ref}\n\n"
+        f"{body}"
+    )
+
+
 def is_table_separator(cells: list[str]) -> bool:
     return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
 

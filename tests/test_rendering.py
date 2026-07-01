@@ -303,6 +303,97 @@ def test_subagent_result_metadata_helpers_split_entries_and_summary() -> None:
     assert len(rendering.subagent_meta_label(notice)) == 9
 
 
+def test_subagent_result_notice_format_helpers_shape_body_notice_and_detail_lines() -> None:
+    notice = {
+        "name": "研究员",
+        "agent_id": "agent-research",
+        "task_id": "task_123",
+        "artifact_ref": "artifact://subagent-results/report.md",
+        "body": "",
+    }
+
+    assert rendering.subagent_result_notice_body_text(
+        "raw result",
+        "rendered result",
+        "",
+        False,
+        6000,
+    ) == "rendered result"
+    assert rendering.subagent_result_notice_body_text(
+        "raw result",
+        "rendered result too long",
+        "final visible answer",
+        True,
+        5,
+    ) == "▸ 工具/过程输出已折叠，完整过程见 artifact。\n\nfinal visible answer"
+    assert rendering.subagent_result_notice_body_text(
+        "raw result is too long",
+        "",
+        "",
+        False,
+        10,
+    ) == "raw result\n...（结果过长，完整内容见 artifact）"
+    assert rendering.format_subagent_result_notice_text(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        "body text",
+    ) == (
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n\n"
+        "body text"
+    )
+    assert rendering.subagent_result_metadata_detail_lines(notice, ["Confidence: 高"], 80) == [
+        "│   Task: task_123",
+        "│   Artifact: artifact://subagent-results/report.md",
+        "│   Confidence: 高",
+    ]
+
+
+def test_app_subagent_result_notice_format_wrappers_delegate_to_rendering_helpers() -> None:
+    notice = {
+        "name": "研究员",
+        "agent_id": "agent-research",
+        "task_id": "task_123",
+        "artifact_ref": "artifact://subagent-results/report.md",
+        "body": "",
+    }
+    metadata_lines = ["Confidence: 高"]
+    blocks = app_module.subagent_result_metadata_detail_blocks(notice, metadata_lines, 80)
+
+    assert [line.text for line in blocks] == rendering.subagent_result_metadata_detail_lines(
+        notice,
+        metadata_lines,
+        80,
+    )
+    assert [line.attr for line in blocks] == [app_module.cp(9), app_module.cp(9), app_module.cp(9)]
+
+    raw = app_module.clean_text("plain subagent result").strip() or "(empty result)"
+    rendered = app_module.render_assistant_text(raw, True, True).strip()
+    final_reply = "" if rendered and len(rendered) <= 6000 else app_module.latest_visible_reply_text(raw)
+    has_tool_noise = app_module.process_has_tool_noise(raw) if final_reply else False
+    assert app_module.subagent_result_notice_body("plain subagent result", 6000) == (
+        rendering.subagent_result_notice_body_text(raw, rendered, final_reply, has_tool_noise, 6000)
+    )
+
+    body = app_module.subagent_result_notice_body("plain subagent result", 6000)
+    assert app_module.format_subagent_result_notice_parts(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        "plain subagent result",
+    ) == rendering.format_subagent_result_notice_text(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        body,
+    )
+
+
 def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
     for name in (
         "SUBAGENT_RESULT_HEADER_RE",
@@ -317,6 +408,9 @@ def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
         "subagent_result_metadata_entries",
         "subagent_result_metadata_summary",
         "subagent_meta_label",
+        "subagent_result_metadata_detail_lines",
+        "subagent_result_notice_body_text",
+        "format_subagent_result_notice_text",
     ):
         assert getattr(app_module, name) is getattr(rendering, name), name
 
