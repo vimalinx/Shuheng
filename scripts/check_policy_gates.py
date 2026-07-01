@@ -29,6 +29,7 @@ from ga_tui import agent_bridge as bridge  # noqa: E402
 from ga_tui import baseline as baseline_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import context_packs as context_pack_mod  # noqa: E402
+from ga_tui import dashboard as dashboard_mod  # noqa: E402
 from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import governance as governance_mod  # noqa: E402
@@ -708,6 +709,71 @@ def assert_web_console_module_boundary() -> None:
         "decide_approval",
     ):
         assert forbidden not in source, f"{web_console_mod.__file__}: {forbidden}"
+
+
+def assert_dashboard_module_boundary() -> None:
+    for name in (
+        "SUPPORTED_DASHBOARD_SECTIONS",
+        "DEFAULT_DASHBOARD_SECTIONS",
+        "DEFAULT_SUBAGENT_DASHBOARD_SECTIONS",
+        "bounded_dashboard_text",
+        "normalize_dashboard_sections",
+        "normalize_dashboard_spec_payload",
+        "dashboard_cache_signature",
+    ):
+        assert getattr(a, name) is getattr(dashboard_mod, name), name
+
+    sections = dashboard_mod.normalize_dashboard_sections([
+        "function",
+        {"section": "markdown", "body": "body"},
+        {"type": "unsupported"},
+    ])
+    assert sections == [
+        {"type": "function", "title": "function"},
+        {"type": "markdown", "title": "markdown", "markdown": "body"},
+    ], sections
+    payload = dashboard_mod.normalize_dashboard_spec_payload(
+        {
+            "task_id": "task_dashboard_boundary",
+            "artifact_refs": ["artifact://one", "", "artifact://two"],
+            "dashboard": {
+                "sections": ["function"],
+                "status": "ready",
+                "todos": [{"title": "check boundary"}, "ship"],
+                "markdown": "body",
+            },
+        },
+        source="policy_gate",
+        target="orchestrator.main",
+    )
+    assert payload["schema_version"] == "dashboard.v1", payload
+    assert payload["source"] == "policy_gate", payload
+    assert payload["target"] == "orchestrator.main", payload
+    assert payload["provenance"] == {
+        "task_id": "task_dashboard_boundary",
+        "artifact_refs": ["artifact://one", "artifact://two"],
+    }, payload
+    assert payload["todos"] == ["check boundary", "ship"], payload
+    assert dashboard_mod.dashboard_cache_signature({"b": 2, "a": 1}) == '{"a":1,"b":2}'
+
+    source = Path(dashboard_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "PanelItem",
+        "RenderLine",
+        "draw_",
+        "GatewayRequestHandler",
+        "process_ui_queue",
+        "start_subagent_task",
+        "decide_approval",
+    ):
+        assert forbidden not in source, f"{dashboard_mod.__file__}: {forbidden}"
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7496,6 +7562,7 @@ def run_checks() -> None:
     assert_context_pack_module_boundary()
     assert_runtime_dispatch_module_boundary()
     assert_web_console_module_boundary()
+    assert_dashboard_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()

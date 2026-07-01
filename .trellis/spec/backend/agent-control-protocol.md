@@ -559,6 +559,78 @@ S01 修复左栏历史会话标题
 }
 ```
 
+## Scenario: Dashboard Helper Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, or dashboard cache-signature helpers are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/dashboard.py`, compatibility aliases in `src/ga_tui/app.py`, `dashboard.update` normalization, main/persistent-agent home rendering inputs, policy gates, and dashboard helper unit tests.
+- Non-goal: This does not move `State` or `SubAgentRuntime` projections, curses `RenderLine` home rendering, status-card drawing, session/history restore, ledger reads, scheduler reads, approval/action dispatch, or Web Console payloads.
+
+### 2. Signatures
+
+- Lower-level helper module: `src/ga_tui/dashboard.py`.
+- Compatibility aliases in `app.py`:
+  - `SUPPORTED_DASHBOARD_SECTIONS`.
+  - `DEFAULT_DASHBOARD_SECTIONS`.
+  - `DEFAULT_SUBAGENT_DASHBOARD_SECTIONS`.
+  - `bounded_dashboard_text(value, limit=2000)`.
+  - `normalize_dashboard_sections(raw_sections)`.
+  - `normalize_dashboard_spec_payload(control, source, target)`.
+  - `dashboard_cache_signature(raw)`.
+
+### 3. Contracts
+
+- `dashboard.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw/home rendering functions.
+- `app.py` remains the compatibility facade and exposes the moved names as direct aliases or behavior-identical wrappers.
+- Supported section types remain `function`, `status_narrative`, `todos`, `sessions`, `schedules`, `scheduled_reports`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
+- `normalize_dashboard_sections(...)` accepts string or dict section entries, drops unsupported/non-dict entries, bounds titles to 80 characters, bounds markdown/body to 3000 characters, and keeps at most 12 sections.
+- `normalize_dashboard_spec_payload(...)` returns `dashboard.v1` with `updated_at`, `source`, `target`, `provenance.task_id`, `provenance.artifact_refs`, `sections`, and optional `status_narrative`, `todos`, and `markdown`.
+- `normalize_dashboard_spec_payload(...)` keeps at most 20 todo items, bounds todo text to 180 characters, and keeps at most 12 non-empty artifact refs in provenance.
+- `dashboard_cache_signature(...)` returns stable sorted compact JSON for serializable values, `""` for falsey values, and a safe string fallback for non-serializable values.
+
+### 4. Validation & Error Matrix
+
+- `dashboard.py` imports `ga_tui.app`, curses, TUI state, render types, or home-line functions -> policy gate fails.
+- App alias differs from module helper for the same input -> unit test or policy gate fails.
+- Unknown dashboard section type -> dropped from normalized sections.
+- Section title, markdown, status, todos, or payload markdown exceed bounds -> normalized output is truncated.
+- Non-dict nested payload -> helper treats the top-level control as the dashboard payload.
+- Non-serializable dashboard cache input -> returns `str(raw)` instead of raising.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `apply_dashboard_control(...)` keeps calling `app.normalize_dashboard_spec_payload(...)`, while the implementation lives in `ga_tui.dashboard`.
+- Good: Home rendering keeps using `dashboard_sections_for_main(...)` and `dashboard_sections_for_subagent(...)` from `app.py`, with default sections imported from `ga_tui.dashboard`.
+- Base: `dashboard_status_for_subagent(...)` stays in `app.py` because it reads `SubAgentRuntime` fields.
+- Base: `main_home_lines_uncached(...)` and `subagent_home_lines_uncached(...)` stay in `app.py` because they construct `RenderLine` values and read ledgers/live state.
+- Bad: `dashboard.py` imports `State` so it can decide default status text.
+- Bad: `dashboard.py` calls `latest_task_records(...)`, `pending_approvals(...)`, or curses draw helpers.
+
+### 6. Tests Required
+
+- Unit tests must assert section normalization, payload normalization, cache signature behavior, and `app.py` wrapper parity.
+- `scripts/check_policy_gates.py` must assert `dashboard.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway, runtime-dispatch, or home-rendering dependencies.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/dashboard.py scripts/check_policy_gates.py tests/test_dashboard.py` must pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_dashboard.py -p no:cacheprovider` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# dashboard.py
+from ga_tui.app import State, RenderLine, latest_task_records
+```
+
+#### Correct
+
+```python
+# dashboard.py
+def normalize_dashboard_sections(raw_sections):
+    ...
+```
+
 ## Scenario: Shared JSONL Ledger Store
 
 ### 1. Scope / Trigger
