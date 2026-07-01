@@ -33,6 +33,19 @@ TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
 TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
 TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
 FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*$", re.IGNORECASE | re.MULTILINE)
+SEARCH_NOISE_MARKERS = (
+    "google.com/search",
+    "duckduckgo",
+    "searching:",
+    "search results",
+    "google 搜索",
+    "[textarea #apjfqb",
+    "dom变化量",
+    "最显著变化",
+    "\"diff\":",
+    "result__snippet",
+    "queryselectorall",
+)
 
 
 def process_turn_label(marker: str) -> str:
@@ -107,6 +120,34 @@ def process_child_detail_text(cleaned_body: str, preview: str, limit: int = 1200
     if len(detail) > limit:
         detail = detail[:limit].rstrip() + "\n...（详情过长，已截断；需要原文请打开对应 artifact/trace）"
     return "\n".join("    " + line for line in detail.splitlines())
+
+
+def process_has_tool_call_noise_text(body: str, tools: list[str]) -> bool:
+    body = body or ""
+    return bool(tools) or "<tool_use>" in body or bool(TOOL_HEADER_RE.search(body))
+
+
+def process_has_tool_result_noise_text(body: str) -> bool:
+    body = body or ""
+    return bool(TOOL_RESULT_FENCE_RE.search(body)) or bool(FINAL_RESPONSE_INFO_RE.search(body))
+
+
+def process_has_tool_noise_text(body: str, tools: list[str]) -> bool:
+    return process_has_tool_call_noise_text(body, tools) or process_has_tool_result_noise_text(body)
+
+
+def process_has_search_noise_text(body: str, tools: list[str]) -> bool:
+    body = body or ""
+    lowered = body.lower()
+    lowered_tools = [tool.lower() for tool in tools]
+    if any(
+        tool.startswith(("web_", "browser_", "bb_browser"))
+        or "search" in tool
+        or "query" in tool
+        for tool in lowered_tools
+    ):
+        return True
+    return any(marker in lowered for marker in SEARCH_NOISE_MARKERS)
 
 
 def strip_meta_blocks(text: str) -> str:

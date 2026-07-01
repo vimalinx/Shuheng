@@ -595,6 +595,10 @@ process_group_header_text = rendering_helpers.process_group_header_text
 collapsed_process_child_line_text = rendering_helpers.collapsed_process_child_line_text
 expanded_process_child_header_text = rendering_helpers.expanded_process_child_header_text
 process_child_detail_text = rendering_helpers.process_child_detail_text
+process_has_tool_call_noise_text = rendering_helpers.process_has_tool_call_noise_text
+process_has_tool_result_noise_text = rendering_helpers.process_has_tool_result_noise_text
+process_has_tool_noise_text = rendering_helpers.process_has_tool_noise_text
+process_has_search_noise_text = rendering_helpers.process_has_search_noise_text
 next_nonblank_line = rendering_helpers.next_nonblank_line
 line_numbered_file_line = rendering_helpers.line_numbered_file_line
 stray_line_numbered_fence_close = rendering_helpers.stray_line_numbered_fence_close
@@ -18521,44 +18525,19 @@ def process_child_detail(body: str, limit: int = 12000) -> str:
 
 
 def process_has_tool_call_noise(body: str) -> bool:
-    body = body or ""
-    return bool(process_tools(body)) or "<tool_use>" in body or bool(TOOL_HEADER_RE.search(body))
+    return rendering_helpers.process_has_tool_call_noise_text(body, process_tools(body))
 
 
 def process_has_tool_result_noise(body: str) -> bool:
-    body = body or ""
-    return bool(TOOL_RESULT_FENCE_RE.search(body)) or bool(FINAL_RESPONSE_INFO_RE.search(body))
+    return rendering_helpers.process_has_tool_result_noise_text(body)
 
 
 def process_has_tool_noise(body: str) -> bool:
-    return process_has_tool_call_noise(body) or process_has_tool_result_noise(body)
+    return rendering_helpers.process_has_tool_noise_text(body, process_tools(body))
 
 
 def process_has_search_noise(body: str) -> bool:
-    body = body or ""
-    lowered = body.lower()
-    tools = [tool.lower() for tool in process_tools(body)]
-    if any(
-        tool.startswith(("web_", "browser_", "bb_browser"))
-        or "search" in tool
-        or "query" in tool
-        for tool in tools
-    ):
-        return True
-    search_markers = (
-        "google.com/search",
-        "duckduckgo",
-        "searching:",
-        "search results",
-        "google 搜索",
-        "[textarea #apjfqb",
-        "dom变化量",
-        "最显著变化",
-        "\"diff\":",
-        "result__snippet",
-        "queryselectorall",
-    )
-    return any(marker in lowered for marker in search_markers)
+    return rendering_helpers.process_has_search_noise_text(body, process_tools(body))
 
 
 def irc_reply_snippets_from_process_body(body: str) -> list[str]:

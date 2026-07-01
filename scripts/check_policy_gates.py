@@ -353,6 +353,10 @@ def assert_rendering_module_boundary() -> None:
         "collapsed_process_child_line_text",
         "expanded_process_child_header_text",
         "process_child_detail_text",
+        "process_has_tool_call_noise_text",
+        "process_has_tool_result_noise_text",
+        "process_has_tool_noise_text",
+        "process_has_search_noise_text",
         "LINE_NUMBERED_FILE_RE",
         "FENCE_BOUNDARY_RE",
         "next_nonblank_line",
@@ -516,6 +520,32 @@ def assert_rendering_module_boundary() -> None:
         a.strip_tui_controls(process_body),
         a.process_preview(process_body),
     )
+    assert rendering_mod.process_has_tool_call_noise_text("plain", ["web.search"])
+    assert rendering_mod.process_has_tool_call_noise_text("<tool_use>{}</tool_use>", [])
+    assert rendering_mod.process_has_tool_call_noise_text("🛠️ Tool: `web.search` 📥 args:\n", [])
+    assert not rendering_mod.process_has_tool_call_noise_text("plain", [])
+    assert rendering_mod.process_has_tool_result_noise_text("`````\nraw result\n`````\n[Info] Final response to user.")
+    assert not rendering_mod.process_has_tool_result_noise_text("visible answer")
+    assert rendering_mod.process_has_tool_noise_text(process_body, process_tools)
+    assert rendering_mod.process_has_search_noise_text("plain", ["web_search"])
+    assert rendering_mod.process_has_search_noise_text("DOM变化量 很大", [])
+    assert not rendering_mod.process_has_search_noise_text("visible answer", ["irc"])
+    assert a.process_has_tool_call_noise(process_body) == rendering_mod.process_has_tool_call_noise_text(
+        process_body,
+        process_tools,
+    )
+    assert a.process_has_tool_result_noise(process_body) == rendering_mod.process_has_tool_result_noise_text(
+        process_body
+    )
+    assert a.process_has_tool_noise(process_body) == rendering_mod.process_has_tool_noise_text(
+        process_body,
+        process_tools,
+    )
+    assert a.process_has_search_noise(process_body) == rendering_mod.process_has_search_noise_text(
+        process_body,
+        process_tools,
+    )
+    assert a.process_has_search_noise("google.com/search?q=needle")
     assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
@@ -637,9 +667,14 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_has_section_shape",
         "def process_turn_no",
         "def process_child_detail_text",
+        "def process_has_tool_call_noise_text",
+        "def process_has_tool_result_noise_text",
+        "def process_has_tool_noise_text",
+        "def process_has_search_noise_text",
     ):
         assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
     assert "strip_meta_blocks(clean_text(strip_tui_controls" not in app_source, a.__file__
+    assert "search_markers =" not in app_source, a.__file__
     source = Path(rendering_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "ga_tui.app",

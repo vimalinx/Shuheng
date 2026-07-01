@@ -194,6 +194,32 @@ def test_process_child_detail_text_formats_fallback_truncation_and_indent() -> N
     )
 
 
+def test_process_noise_helpers_use_explicit_tool_names_and_markers() -> None:
+    tool_call_body = "plain body"
+    tool_header_body = "🛠️ Tool: `web.search` 📥 args:\n"
+    tool_result_body = "`````\nraw result\n`````\n[Info] Final response to user."
+
+    assert rendering.process_has_tool_call_noise_text(tool_call_body, ["web.search"])
+    assert rendering.process_has_tool_call_noise_text("<tool_use>{}</tool_use>", [])
+    assert rendering.process_has_tool_call_noise_text(tool_header_body, [])
+    assert not rendering.process_has_tool_call_noise_text(tool_call_body, [])
+    assert rendering.process_has_tool_result_noise_text(tool_result_body)
+    assert not rendering.process_has_tool_result_noise_text("visible answer")
+    assert rendering.process_has_tool_noise_text(tool_result_body, [])
+    assert rendering.process_has_tool_noise_text(tool_call_body, ["query"])
+    assert not rendering.process_has_tool_noise_text("visible answer", [])
+
+
+def test_process_search_noise_helper_uses_tools_and_body_markers() -> None:
+    assert rendering.process_has_search_noise_text("plain", ["web_search"])
+    assert rendering.process_has_search_noise_text("plain", ["browser_open"])
+    assert rendering.process_has_search_noise_text("plain", ["bb_browser"])
+    assert rendering.process_has_search_noise_text("plain", ["vector_query"])
+    assert rendering.process_has_search_noise_text("Search results\nitem", [])
+    assert rendering.process_has_search_noise_text("DOM变化量 很大", [])
+    assert not rendering.process_has_search_noise_text("visible answer", ["irc"])
+
+
 def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
     marker = "**LLM Running (Turn 7) ...**"
     body = (
@@ -258,6 +284,22 @@ def test_app_process_child_detail_wrapper_keeps_control_stripping_app_owned() ->
     )
     assert "ga-control" not in detail
     assert "Hidden" not in detail
+
+
+def test_app_process_noise_wrappers_inject_process_tools() -> None:
+    body = (
+        "<summary>查询资料</summary>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n{\"q\":\"needle\"}\n````\n"
+        "`````\nraw result\n`````\n"
+    )
+    tools = app_module.process_tools(body)
+
+    assert app_module.process_has_tool_call_noise(body) == rendering.process_has_tool_call_noise_text(body, tools)
+    assert app_module.process_has_tool_result_noise(body) == rendering.process_has_tool_result_noise_text(body)
+    assert app_module.process_has_tool_noise(body) == rendering.process_has_tool_noise_text(body, tools)
+    assert app_module.process_has_search_noise(body) == rendering.process_has_search_noise_text(body, tools)
+    assert app_module.process_has_search_noise("google.com/search?q=needle")
 
 
 def test_app_process_group_header_wrapper_preserves_summary_and_tool_selection() -> None:
@@ -530,6 +572,10 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.collapsed_process_child_line_text is rendering.collapsed_process_child_line_text
     assert app_module.expanded_process_child_header_text is rendering.expanded_process_child_header_text
     assert app_module.process_child_detail_text is rendering.process_child_detail_text
+    assert app_module.process_has_tool_call_noise_text is rendering.process_has_tool_call_noise_text
+    assert app_module.process_has_tool_result_noise_text is rendering.process_has_tool_result_noise_text
+    assert app_module.process_has_tool_noise_text is rendering.process_has_tool_noise_text
+    assert app_module.process_has_search_noise_text is rendering.process_has_search_noise_text
     assert app_module.latest_visible_reply_text("plain") == rendering.latest_visible_reply_text(
         "plain",
         has_tool_noise=app_module.process_has_tool_noise,
