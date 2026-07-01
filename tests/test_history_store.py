@@ -90,6 +90,29 @@ class TestRecentHistoryItems:
 
 
 class TestTranscriptStorage:
+    def test_latest_user_message_text_selects_newest_non_blank_user(self) -> None:
+        messages = [
+            Message("user", "first"),
+            Message("assistant", "reply"),
+            Message("user", "  "),
+            Message("system", "ignored"),
+            Message("user", "  newest  "),
+        ]
+
+        assert history_store.latest_user_message_text(messages) == "newest"
+
+    def test_latest_user_message_text_returns_empty_without_user(self) -> None:
+        messages = [
+            Message("assistant", "reply"),
+            Message("system", "notice"),
+            Message("user", "  "),
+        ]
+
+        assert history_store.latest_user_message_text(messages) == ""
+
+    def test_app_latest_user_message_text_alias_matches_module(self) -> None:
+        assert app_module.latest_user_message_text is history_store.latest_user_message_text
+
     def test_append_model_response_transcript_turn(self, tmp_path: Path) -> None:
         path = tmp_path / "model_responses_a.txt"
 

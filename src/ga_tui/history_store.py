@@ -167,6 +167,13 @@ def append_model_response_transcript_turn(
     return True
 
 
+def latest_user_message_text(messages: list[Message]) -> str:
+    for msg in reversed(messages or []):
+        if msg.role == "user" and str(msg.content or "").strip():
+            return str(msg.content or "").strip()
+    return ""
+
+
 def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     pending_user: str | None = None

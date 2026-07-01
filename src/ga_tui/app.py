@@ -1552,11 +1552,7 @@ def agent_requires_transcript_bridge(agent: Any) -> bool:
     return hasattr(agent, "put_runtime_task")
 
 
-def latest_user_message_text(messages: list[Message]) -> str:
-    for msg in reversed(messages or []):
-        if msg.role == "user" and str(msg.content or "").strip():
-            return str(msg.content or "").strip()
-    return ""
+latest_user_message_text = history_store.latest_user_message_text
 
 
 def append_model_response_transcript_turn(path: str, user_text: str, assistant_text: str) -> bool:

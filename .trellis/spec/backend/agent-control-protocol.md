@@ -285,6 +285,7 @@ and app.py monolith risk.
 - History row source: `cached_session_rows(state, exclude_pid)` returns `(path, last_user_at, preview, rounds, description)`.
 - Sidebar display source: `load_history()` maps `session_names.json` or `preview` into `state.history_names`.
 - Recent row selector: `history_store.recent_history_items(history_entries, used_paths, limit)`, wrapped by `app.recent_history_items(...)` for the current default recent-session limit.
+- Transcript message selector: `history_store.latest_user_message_text(messages)`, re-exported from `app.py` for compatibility.
 - Process filtering helpers: `session_preview_from_pairs()`, `session_response_preview_text()`, `session_summary_titles_from_text()`, and `history_cache_has_process_only_preview()`.
 - Low-level response-body parser: `history_store.assistant_text_from_response_body(response_body)`, re-exported from `app.py` for compatibility.
 
@@ -299,12 +300,14 @@ and app.py monolith risk.
 - Inline metadata jobs may maintain descriptions and categories when supported, but they must not author persisted session titles.
 - Manual `/rename` or history rename writes `title_source:"manual"` and must not be overwritten by later model-owned `session.rename`.
 - Recent virtual history rows must be selected by normalized source path and descending positive activity timestamp, without mutating metadata or reading `State`.
+- Transcript bridge user prompt selection must scan stored `Message` rows from newest to oldest and return the stripped content of the newest non-empty `user` message.
 - Standalone progress-dot deltas from OMP (`.` on its own line) are process noise and must not render in the transcript.
 - Current OMP thinking process summaries should use a compact excerpt of the thinking text, not the fixed label `OMP 思考`.
 - Legacy process blocks with `<summary>OMP 思考</summary>` should render a compact excerpt from the `<thinking>` body.
 - `assistant_text_from_response_body(...)` belongs to `history_store.py` because it parses stored model response block bodies into assistant text without reading `State`, session metadata, Web Console payloads, or rendering state.
 - `assistant_text_from_response_body(...)` must preserve the stored-transcript parser contract: Python literal response lists join text dicts and string blocks, response dicts read `content` text lists or fallback `content`/`text` fields, malformed bodies fall back to cleaned raw text, and non-text literal values fall back to cleaned strings.
 - `recent_history_items(...)` belongs to `history_store.py` because it is a pure history row selector. It may depend on `path_utils.normalized_path(...)` but must not import the app facade to learn storage roots or UI state.
+- `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
 - `history_store.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
 ### 4. Validation & Error Matrix
@@ -314,6 +317,8 @@ and app.py monolith risk.
 - Stored response body is malformed -> low-level parser returns cleaned raw text rather than raising and breaking history restoration.
 - Recent selector receives rows with timestamps `30`, `10`, and `0` -> returns the `30` then `10` rows and excludes the `0` row.
 - Recent selector receives a `used_paths` set containing a normalized row path -> excludes that row from the virtual Recent group.
+- Transcript helper receives assistant/system rows plus blank user rows -> returns `""`.
+- Transcript helper receives multiple user rows where the newest non-empty content has surrounding spaces -> returns that newest content stripped.
 - Cached metadata has `preview:"OMP 思考"` and matching file mtime/size -> cache is treated stale and recomputed.
 - AI metadata context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
 - New user/assistant content by itself does not persist a new title; the title changes only when the main runtime emits `session.rename`.
@@ -334,8 +339,10 @@ and app.py monolith risk.
 - Base: A normal non-process assistant `<summary>` can still be used as a title candidate.
 - Base: The low-level response-body parser may return process-marked text; higher-level preview/title helpers still own process-summary filtering.
 - Base: `app.recent_history_items(...)` remains the compatibility wrapper that supplies `RECENT_SESSION_LIMIT` when no explicit limit is passed.
+- Base: `app.latest_user_message_text` remains a direct compatibility alias for callers in transcript bridge code.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
 - Bad: `history_store.py` imports `app.py` so it can call `latest_visible_reply_text(...)`.
+- Bad: `history_store.py` imports app runtime provider helpers just to decide whether to persist a transcript bridge turn.
 - Bad: Recent selection compares raw paths without normalization, causing duplicate sidebar rows when callers pass normalized `used_paths`.
 - Bad: Main transcript shows standalone `.` lines between process turns.
 
@@ -344,8 +351,10 @@ and app.py monolith risk.
 - `scripts/check_policy_gates.py` must assert OMP process summaries do not title history rows.
 - `scripts/check_policy_gates.py` must assert `assistant_text_from_response_body` is owned by `history_store.py`, re-exported by `app.py`, and that `history_store.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard dependencies.
 - `scripts/check_policy_gates.py` must assert `recent_history_items` is owned by `history_store.py`, app wrapper parity holds, zero-activity rows are excluded, and normalized `used_paths` de-duplicate virtual history groups.
+- `scripts/check_policy_gates.py` must assert `latest_user_message_text` is owned by `history_store.py`, app alias parity holds, blank user rows are skipped, and the newest non-empty user content wins.
 - Unit tests must assert response-body parser behavior for list bodies, dict `content` lists, dict fallback fields, and malformed raw bodies.
 - Unit tests must assert recent-history sorting, limit behavior, zero-timestamp exclusion, used-path de-duplication, and app wrapper parity.
+- Unit tests must assert transcript helper newest-user selection, blank-user skipping, no-user fallback, and app alias parity.
 - The test must seed a stale `session_meta.json` cache with `preview:"OMP 思考"` to prove cache invalidation.
 - The test must assert restored preview messages and AI metadata context exclude process-only summary and hidden reasoning.
 - Tests must assert automatic persisted title maintenance uses model-owned `session.rename`, while metadata refresh alone does not write titles and manual titles remain stable.

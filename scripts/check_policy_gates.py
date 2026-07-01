@@ -292,6 +292,13 @@ def assert_history_store_module_boundary() -> None:
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
     assert a.clear_missing_source_session_meta({"source_missing": True}) == history_store_mod.clear_missing_source_session_meta({"source_missing": True})
     assert a.is_subagent_session_log_sample("[GA TUI SubAgent Profile]") is history_store_mod.is_subagent_session_log_sample("[GA TUI SubAgent Profile]")
+    assert a.latest_user_message_text is history_store_mod.latest_user_message_text
+    assert history_store_mod.latest_user_message_text([
+        a.Message("assistant", "reply"),
+        a.Message("user", " first "),
+        a.Message("user", " "),
+        a.Message("user", " latest "),
+    ]) == "latest"
     assert a.assistant_text_from_response_body is history_store_mod.assistant_text_from_response_body
     assert history_store_mod.assistant_text_from_response_body(repr([{"type": "text", "text": "hello"}, "world"])) == "hello\nworld"
     source = Path(history_store_mod.__file__).read_text(encoding="utf-8")
