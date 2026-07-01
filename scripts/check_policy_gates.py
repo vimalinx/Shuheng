@@ -344,6 +344,7 @@ def assert_rendering_module_boundary() -> None:
         "split_table_row",
         "table_layout_lines",
         "markdown_layout_blocks",
+        "plain_layout_lines",
         "process_preview",
         "process_summary_text",
         "TURN_NO_RE",
@@ -788,6 +789,8 @@ def assert_rendering_module_boundary() -> None:
         ("separator", "──────┼──────"),
         ("body", "Alpha │ 3    "),
     ]
+    assert rendering_mod.plain_layout_lines("abcdefghij", 5) == ["abcde", "fghij"]
+    assert rendering_mod.plain_layout_lines("中文abc", 5) == ["中文a", "bc"]
     markdown_text = "\n".join(
         [
             "```python",
@@ -844,6 +847,10 @@ def assert_rendering_module_boundary() -> None:
         a.cp(2),
         a.cp(2),
     ]
+    rendered_plain = a.plain_blocks("中文abc", 5)
+    assert [line.text for line in rendered_plain] == rendering_mod.plain_layout_lines("中文abc", 5)
+    assert [line.attr for line in rendered_plain] == [a.cp(2), a.cp(2)]
+    assert a.plain_layout_lines is rendering_mod.plain_layout_lines
     rendered_table = a.render_table(table_lines, 24)
     assert [line.text for line in rendered_table] == [
         text for _kind, text in rendering_mod.table_layout_lines(table_lines, 24)
@@ -900,6 +907,7 @@ def assert_rendering_module_boundary() -> None:
         "def split_table_row",
         "def table_layout_lines",
         "def markdown_layout_blocks",
+        "def plain_layout_lines",
         "def message_cache_signature",
         "def process_turn_no",
         "def process_child_detail_text",

@@ -323,6 +323,10 @@ def markdown_layout_blocks(text: str, width: int) -> list[MarkdownLayoutLine]:
     return out
 
 
+def plain_layout_lines(text: str, width: int) -> list[str]:
+    return wrap_cells(text, width)
+
+
 def visible_reply_is_substantive(text: str) -> bool:
     clean = strip_inline_markdown(clean_text(text or "")).strip()
     if len(clean) >= 180:

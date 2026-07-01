@@ -583,6 +583,7 @@ is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
 markdown_layout_blocks = rendering_helpers.markdown_layout_blocks
+plain_layout_lines = rendering_helpers.plain_layout_lines
 visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
@@ -18801,7 +18802,7 @@ def markdown_blocks(text: str, width: int) -> list[RenderLine]:
 
 
 def plain_blocks(text: str, width: int) -> list[RenderLine]:
-    return [RenderLine(line, cp(2)) for line in wrap_cells(text, width)]
+    return [RenderLine(line, cp(2)) for line in plain_layout_lines(text, width)]
 
 
 def parse_subagent_result_notice(text: str) -> Optional[dict[str, str]]:

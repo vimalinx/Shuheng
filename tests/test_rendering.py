@@ -220,6 +220,21 @@ def test_app_markdown_blocks_wrapper_converts_layout_records_to_render_lines() -
     assert app_module.markdown_layout_blocks is rendering.markdown_layout_blocks
 
 
+def test_plain_layout_lines_wraps_plain_text() -> None:
+    assert rendering.plain_layout_lines("", 20) == [""]
+    assert rendering.plain_layout_lines("abcdefghij", 4) == ["abcd…"]
+    assert rendering.plain_layout_lines("abcdefghij", 5) == ["abcde", "fghij"]
+    assert rendering.plain_layout_lines("中文abc", 5) == ["中文a", "bc"]
+
+
+def test_app_plain_blocks_wrapper_converts_plain_layout_to_render_lines() -> None:
+    rendered = app_module.plain_blocks("中文abc", 5)
+
+    assert [line.text for line in rendered] == rendering.plain_layout_lines("中文abc", 5)
+    assert [line.attr for line in rendered] == [app_module.cp(2), app_module.cp(2)]
+    assert app_module.plain_layout_lines is rendering.plain_layout_lines
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0
@@ -914,6 +929,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.split_table_row is rendering.split_table_row
     assert app_module.table_layout_lines is rendering.table_layout_lines
     assert app_module.markdown_layout_blocks is rendering.markdown_layout_blocks
+    assert app_module.plain_layout_lines is rendering.plain_layout_lines
     assert app_module.LINE_NUMBERED_FILE_RE is rendering.LINE_NUMBERED_FILE_RE
     assert app_module.FENCE_BOUNDARY_RE is rendering.FENCE_BOUNDARY_RE
     assert app_module.next_nonblank_line is rendering.next_nonblank_line
