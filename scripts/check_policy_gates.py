@@ -751,6 +751,23 @@ def assert_governance_module_boundary() -> None:
     module_decision = governance_mod.policy_decision_to_dict(decision, timestamp=app_decision["timestamp"])
     assert app_decision == module_decision
     assert a.approval_metadata(decision=decision) == governance_mod.approval_metadata(decision=decision)
+    subagent_artifact_ref = "artifact://artifacts/subagent-results/result.md"
+    assert governance_mod.subagent_result_artifact_ref(["artifact://other.md", subagent_artifact_ref]) == subagent_artifact_ref
+    assert governance_mod.subagent_result_body_from_text("# Agent result\n\nTask: task_x\n\nbody") == "body"
+    assert governance_mod.subagent_name_from_task_row({"title": "子 agent 执行: Boundary"}) == "Boundary"
+    assert governance_mod.subagent_name_from_task_row(
+        {"assigned_agent": "agent-boundary"},
+        agent_name_lookup=lambda agent_id: "Boundary Meta" if agent_id == "agent-boundary" else "",
+    ) == "Boundary Meta"
+    assert governance_mod.subagent_result_task_first_timestamps(
+        [{"task_id": "task_x", "timestamp": "2"}, {"task_id": "task_x", "timestamp": "1"}],
+        timestamp_parser=lambda value: float(value),
+    ) == {"task_x": 1.0}
+    assert governance_mod.completed_subagent_result_row({
+        "status": "completed",
+        "kind": "subagent_task",
+        "artifact_refs": [subagent_artifact_ref],
+    })
 
     source = Path(governance_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -775,6 +792,8 @@ def assert_governance_module_boundary() -> None:
     old_progress = a.AGENT_PROGRESS_LEDGER_PATH
     old_locks = a.AGENT_LOCKS_PATH
     old_tasks = a.AGENT_TASK_LEDGER_PATH
+    old_subagents = a.SUBAGENTS_DIR
+    old_temp_subagents = a.TEMP_SUBAGENTS_DIR
     try:
         a.AGENT_HARNESS_DIR = harness
         a.AGENT_ARTIFACTS_DIR = os.path.join(harness, "artifacts")
@@ -782,9 +801,28 @@ def assert_governance_module_boundary() -> None:
         a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(harness, "progress.jsonl")
         a.AGENT_LOCKS_PATH = os.path.join(harness, "locks.json")
         a.AGENT_TASK_LEDGER_PATH = os.path.join(harness, "tasks.jsonl")
+        a.SUBAGENTS_DIR = os.path.join(root, "subagents")
+        a.TEMP_SUBAGENTS_DIR = os.path.join(root, "temp-subagents")
         artifact_ref = a.write_harness_artifact("boundary", "result", "body", source_task_id="task_boundary")
         assert artifact_ref.startswith("artifact://artifacts/boundary/"), artifact_ref
         assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)[-1]["uri"] == artifact_ref
+        result_path = os.path.join(a.AGENT_ARTIFACTS_DIR, "subagent-results", "result.md")
+        os.makedirs(os.path.dirname(result_path), exist_ok=True)
+        Path(result_path).write_text("# Agent result\n\nTask: task_x\n\nwrapped body", encoding="utf-8")
+        meta_path = os.path.join(a.SUBAGENTS_DIR, "agent-boundary", "meta.json")
+        os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+        Path(meta_path).write_text(json.dumps({"name": "Boundary From Disk"}), encoding="utf-8")
+        assert a.subagent_result_artifact_ref(["artifact://other.md", subagent_artifact_ref]) == subagent_artifact_ref
+        assert a.subagent_result_body_from_artifact(subagent_artifact_ref) == "wrapped body"
+        assert a.subagent_name_from_task_row({"assigned_agent": "agent-boundary"}) == "Boundary From Disk"
+        assert a.subagent_result_task_first_timestamps(
+            [{"task_id": "task_x", "timestamp": "2026-07-01T00:00:01"}]
+        )["task_x"] > 0
+        assert a.completed_subagent_result_row({
+            "status": "completed",
+            "assigned_agent": "agent-boundary",
+            "artifact_refs": [subagent_artifact_ref],
+        })
         progress = a.append_progress_ledger({"task_id": "task_boundary", "status": "working"})
         assert progress["schema_version"] == "agentprogress.v1", progress
         sub = a.SubAgentRuntime(agent_id="coder-boundary", name="Coder Boundary", home=root, role="coder")
@@ -798,6 +836,8 @@ def assert_governance_module_boundary() -> None:
         a.AGENT_PROGRESS_LEDGER_PATH = old_progress
         a.AGENT_LOCKS_PATH = old_locks
         a.AGENT_TASK_LEDGER_PATH = old_tasks
+        a.SUBAGENTS_DIR = old_subagents
+        a.TEMP_SUBAGENTS_DIR = old_temp_subagents
 
 
 def assert_context_pack_module_boundary() -> None:

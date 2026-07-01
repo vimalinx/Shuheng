@@ -1025,13 +1025,7 @@ def persist_ui_system_message(state: State, text: str, *, kind: str = "") -> Non
 
 
 def subagent_result_artifact_ref(refs: Any) -> str:
-    if not isinstance(refs, list):
-        return ""
-    for ref in refs:
-        value = str(ref or "").strip()
-        if value and "/subagent-results/" in value:
-            return value
-    return ""
+    return governance_store.subagent_result_artifact_ref(refs)
 
 
 def subagent_result_body_from_artifact(artifact_ref: str, read_limit: int = 65536) -> str:
@@ -1043,28 +1037,11 @@ def subagent_result_body_from_artifact(artifact_ref: str, read_limit: int = 6553
             text = fh.read(read_limit)
     except OSError:
         return ""
-    lines = text.splitlines()
-    idx = 0
-    if idx < len(lines) and lines[idx].lstrip().startswith("#"):
-        idx += 1
-        while idx < len(lines) and not lines[idx].strip():
-            idx += 1
-        if idx < len(lines) and lines[idx].strip().startswith("Task:"):
-            idx += 1
-        while idx < len(lines) and not lines[idx].strip():
-            idx += 1
-    return "\n".join(lines[idx:]).strip() or text.strip()
+    return governance_store.subagent_result_body_from_text(text)
 
 
 def subagent_name_from_task_row(row: dict[str, Any]) -> str:
-    title = str(row.get("title") or "").strip()
-    for prefix in ("子 agent 执行:", "子 agent 执行："):
-        if title.startswith(prefix):
-            return title[len(prefix):].strip()
-    if title:
-        return title
-    agent_id = str(row.get("assigned_agent") or "").strip()
-    if agent_id:
+    def agent_name_lookup(agent_id: str) -> str:
         candidate_paths = [subagent_meta_path(agent_id)]
         candidate_paths.extend(glob.glob(os.path.join(TEMP_SUBAGENTS_DIR, "*", agent_id, "meta.json")))
         for meta_path in candidate_paths:
@@ -1072,33 +1049,17 @@ def subagent_name_from_task_row(row: dict[str, Any]) -> str:
             name = str(meta.get("name") or "").strip()
             if name:
                 return name
-    return agent_id
+        return ""
+
+    return governance_store.subagent_name_from_task_row(row, agent_name_lookup=agent_name_lookup)
 
 
 def subagent_result_task_first_timestamps(rows: list[dict[str, Any]]) -> dict[str, float]:
-    first_seen: dict[str, float] = {}
-    for row in rows:
-        task_id = str(row.get("task_id") or "").strip()
-        if not task_id:
-            continue
-        ts = parse_timestamp_value(str(row.get("timestamp") or ""))
-        if ts <= 0:
-            continue
-        if task_id not in first_seen or ts < first_seen[task_id]:
-            first_seen[task_id] = ts
-    return first_seen
+    return governance_store.subagent_result_task_first_timestamps(rows, timestamp_parser=parse_timestamp_value)
 
 
 def completed_subagent_result_row(row: dict[str, Any]) -> bool:
-    if str(row.get("status") or "").lower() != "completed":
-        return False
-    if not subagent_result_artifact_ref(row.get("artifact_refs")):
-        return False
-    if str(row.get("kind") or "") == "subagent_task":
-        return True
-    assigned = str(row.get("assigned_agent") or "")
-    title = str(row.get("title") or "")
-    return assigned.startswith(("agent-", "tmp-agent-", "tmp-")) or title.startswith(("子 agent", "subagent"))
+    return governance_store.completed_subagent_result_row(row)
 
 
 def backfill_durable_subagent_result_messages_for_path(path: str) -> int:

@@ -260,6 +260,80 @@ def row_timestamp(row: dict[str, Any]) -> float:
     return parse_iso_timestamp(str(row.get("timestamp") or "")) or float(row.get("ts") or 0.0)
 
 
+def subagent_result_artifact_ref(refs: Any) -> str:
+    if not isinstance(refs, list):
+        return ""
+    for ref in refs:
+        value = str(ref or "").strip()
+        if value and "/subagent-results/" in value:
+            return value
+    return ""
+
+
+def subagent_result_body_from_text(text: str) -> str:
+    lines = str(text or "").splitlines()
+    idx = 0
+    if idx < len(lines) and lines[idx].lstrip().startswith("#"):
+        idx += 1
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+        if idx < len(lines) and lines[idx].strip().startswith("Task:"):
+            idx += 1
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+    return "\n".join(lines[idx:]).strip() or str(text or "").strip()
+
+
+def subagent_name_from_task_row(
+    row: dict[str, Any],
+    *,
+    agent_name_lookup: Optional[Callable[[str], str]] = None,
+) -> str:
+    title = str(row.get("title") or "").strip()
+    for prefix in ("子 agent 执行:", "子 agent 执行："):
+        if title.startswith(prefix):
+            return title[len(prefix):].strip()
+    if title:
+        return title
+    agent_id = str(row.get("assigned_agent") or "").strip()
+    if agent_id and agent_name_lookup is not None:
+        name = str(agent_name_lookup(agent_id) or "").strip()
+        if name:
+            return name
+    return agent_id
+
+
+def subagent_result_task_first_timestamps(
+    rows: list[dict[str, Any]],
+    *,
+    timestamp_parser: Optional[Callable[[str], float]] = None,
+) -> dict[str, float]:
+    parser = timestamp_parser or parse_iso_timestamp
+    first_seen: dict[str, float] = {}
+    for row in rows:
+        task_id = str(row.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        ts = parser(str(row.get("timestamp") or ""))
+        if ts <= 0:
+            continue
+        if task_id not in first_seen or ts < first_seen[task_id]:
+            first_seen[task_id] = ts
+    return first_seen
+
+
+def completed_subagent_result_row(row: dict[str, Any]) -> bool:
+    if str(row.get("status") or "").lower() != "completed":
+        return False
+    if not subagent_result_artifact_ref(row.get("artifact_refs")):
+        return False
+    if str(row.get("kind") or "") == "subagent_task":
+        return True
+    assigned = str(row.get("assigned_agent") or "")
+    title = str(row.get("title") or "")
+    return assigned.startswith(("agent-", "tmp-agent-", "tmp-")) or title.startswith(("子 agent", "subagent"))
+
+
 def load_agent_locks(locks_path: str) -> dict[str, Any]:
     try:
         with open(locks_path, encoding="utf-8") as fh:

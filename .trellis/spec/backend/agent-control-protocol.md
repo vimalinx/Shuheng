@@ -980,6 +980,74 @@ progress_items = [format_task(row) for row in read_jsonl("tasks.jsonl")]
 progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 ```
 
+## Scenario: Governance Subagent Result Helper Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition moves subagent-result task-ledger row interpretation into `governance.py`.
+- Applies to: subagent-result artifact-ref selection, generated artifact body prelude stripping, subagent result display-name derivation, first task timestamp lookup, and completed subagent-result row detection.
+- Non-goal: This does not move durable UI system-message backfill, session metadata writes, history restore, scheduled report row construction, Web Console payloads, rendering, command handlers, runtime dispatch, artifact path resolution, or storage-root behavior.
+
+### 2. Signatures
+
+- `governance.subagent_result_artifact_ref(refs) -> str`
+- `governance.subagent_result_body_from_text(text) -> str`
+- `governance.subagent_name_from_task_row(row, *, agent_name_lookup=None) -> str`
+- `governance.subagent_result_task_first_timestamps(rows, *, timestamp_parser=None) -> dict[str, float]`
+- `governance.completed_subagent_result_row(row) -> bool`
+- `app.py` keeps compatibility wrappers for the old names and injects app-owned artifact file reads, `parse_timestamp_value`, `subagent_meta_path(...)`, `TEMP_SUBAGENTS_DIR`, and `load_subagent_meta_file(...)` where needed.
+
+### 3. Contracts
+
+- `governance.py` may interpret already-loaded task ledger rows and artifact text, but must not import `ga_tui.app`, curses, mutable TUI `State`, render types, Web Console, dashboard, command handlers, or draw functions.
+- `subagent_result_artifact_ref(...)` returns the first non-empty artifact ref containing `/subagent-results/` from a list; non-list inputs return `""`.
+- `subagent_result_body_from_text(...)` strips the generated leading Markdown heading and optional `Task:` prelude from an already-loaded artifact body, returning the remaining body or the original stripped text.
+- `subagent_name_from_task_row(...)` strips the existing `子 agent 执行:` / `子 agent 执行：` title prefixes, falls back to title, then uses an injected `agent_name_lookup(agent_id)` before returning the assigned agent id.
+- `subagent_result_task_first_timestamps(...)` computes the earliest valid timestamp per task id over already-loaded rows; app wrappers inject the legacy timestamp parser when preserving historical backfill semantics matters.
+- `completed_subagent_result_row(...)` preserves the existing task ledger predicate: completed status, subagent-result artifact ref, and either `kind == "subagent_task"` or the existing assigned-agent/title subagent heuristics.
+- `app.py` remains the owner of artifact URI to local path resolution, artifact file reads, subagent meta file discovery, durable UI notice persistence, history ownership, scheduled report row construction, rendering, commands, and runtime side effects.
+
+### 4. Validation & Error Matrix
+
+- `artifact_refs` contains a normal artifact then a subagent-results artifact -> returns the subagent-results artifact.
+- Non-list `artifact_refs` -> `""`.
+- Generated artifact body beginning with `# ...`, blank lines, and `Task: ...` -> returns only the result body.
+- Task title `子 agent 执行: Coder` -> display name `Coder`.
+- Empty title and assigned agent with injected lookup -> injected display name.
+- Duplicate task rows with timestamps -> first timestamp wins.
+- Completed non-subagent row without subagent-result artifact -> false.
+- Completed `subagent_task` row with subagent-result artifact -> true.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `backfill_durable_subagent_result_messages_for_path(...)` stays in `app.py` but delegates row predicates and artifact body cleanup to `governance.py`.
+- Base: `app.py` wrappers still read the artifact file and subagent meta files because those paths are mutable app-owned runtime roots.
+- Bad: `governance.py` imports `ga_tui.app` to resolve artifact URIs or read `TEMP_SUBAGENTS_DIR`.
+- Bad: Governance helpers inline artifact bodies into progress rows or change task ledger schemas.
+
+### 6. Tests Required
+
+- Unit tests must assert direct governance helper behavior for artifact refs, generated body stripping, display names, first timestamps, and completed-row predicates.
+- Tests or policy gates must assert app wrapper parity for artifact file reads and subagent meta lookup with retargeted paths.
+- `scripts/check_policy_gates.py` must assert `governance.py` has no reverse dependency on `app.py`, curses, mutable TUI `State`, render types, draw functions, or panel/command formatters.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# governance.py
+from ga_tui.app import TEMP_SUBAGENTS_DIR, artifact_path_from_uri
+```
+
+#### Correct
+
+```python
+# app.py
+governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
+```
+
 ## Scenario: Secret Vault Value Helper Boundary
 
 ### 1. Scope / Trigger
