@@ -131,6 +131,29 @@ def test_message_render_cache_key_ignores_run_frame_and_sorts_expansions() -> No
     assert ("meta-a", "meta-b") in key0
 
 
+def test_process_preview_prefers_summary_then_clean_visible_line() -> None:
+    assert rendering.process_preview("<summary>真实进展</summary>\n<chunk>ignored</chunk>") == "真实进展"
+    assert rendering.process_preview(
+        "````text\nhidden block\n````\n"
+        "🛠️ Tool: `web.search`\n"
+        "📥 args: {}\n"
+        "args: skipped\n"
+        "  可以展示的过程标题  "
+    ) == "可以展示的过程标题"
+    assert rendering.process_preview("<thinking>   </thinking>") == "执行中"
+
+
+def test_process_summary_text_uses_thinking_for_legacy_process_only_summary() -> None:
+    assert rendering.process_summary_text("<summary>完成整理</summary>") == "完成整理"
+    assert rendering.process_summary_text("<summary>OMP 思考</summary><thinking>分析下一步边界</thinking>") == "分析下一步边界"
+    assert rendering.process_summary_text("no summary here") == ""
+
+
+def test_strip_meta_blocks_removes_process_metadata() -> None:
+    assert rendering.strip_meta_blocks("before <summary>hidden</summary> after") == "before  after"
+    assert rendering.strip_meta_blocks("<thinking>hidden</thinking>\nvisible") == "visible"
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -150,6 +173,9 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.char_index_for_cell is rendering.char_index_for_cell
     assert app_module.scoped_subagent_meta_keys is rendering.scoped_subagent_meta_keys
     assert app_module.message_render_cache_key is rendering.message_render_cache_key
+    assert app_module.strip_meta_blocks is rendering.strip_meta_blocks
+    assert app_module.process_preview is rendering.process_preview
+    assert app_module.process_summary_text is rendering.process_summary_text
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line

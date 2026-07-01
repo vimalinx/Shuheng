@@ -1,17 +1,63 @@
 """Curses-free rendering helper transforms for Shuheng."""
 from __future__ import annotations
 
+import re
+
 try:
-    from .text_utils import cell_width
+    from . import history_titles as history_title_policy
+    from .text_utils import cell_width, compact_title
     from .ui_types import RenderLine
 except Exception:
-    from text_utils import cell_width  # type: ignore
+    import history_titles as history_title_policy  # type: ignore
+    from text_utils import cell_width, compact_title  # type: ignore
     from ui_types import RenderLine  # type: ignore
 
 
 SelectionPoint = tuple[int, int]
 SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
+SUMMARY_RE = history_title_policy.SUMMARY_RE
+META_BLOCK_RE = history_title_policy.META_BLOCK_RE
+DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
+THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
+TOOL_CALL_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`")
+TOOL_USE_NAME_RE = re.compile(r"<tool_use>\s*\{[\s\S]*?\"name\"\s*:\s*\"([^\"]+)\"[\s\S]*?</tool_use>")
+
+
+def strip_meta_blocks(text: str) -> str:
+    return META_BLOCK_RE.sub("", text or "").strip()
+
+
+def process_preview(text: str) -> str:
+    summaries = SUMMARY_RE.findall(text or "")
+    if summaries:
+        title = compact_title(summaries[-1], 60)
+        if title:
+            return title
+    preview = DETAIL_FENCE_RE.sub(" ", text or "")
+    preview = META_BLOCK_RE.sub(" ", preview)
+    preview = TOOL_CALL_RE.sub(" ", preview)
+    preview = TOOL_USE_NAME_RE.sub(" ", preview)
+    for line in preview.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("```", "````", "args:", "📥")):
+            continue
+        title = compact_title(line, 60)
+        if title:
+            return title
+    return "执行中"
+
+
+def process_summary_text(text: str) -> str:
+    summaries = SUMMARY_RE.findall(text or "")
+    if not summaries:
+        return ""
+    summary = history_title_policy.compact_description(summaries[-1], 220)
+    if history_title_policy.is_process_only_session_title(summary):
+        thinking = THINKING_BLOCK_RE.findall(text or "")
+        if thinking:
+            return history_title_policy.compact_description(thinking[-1].strip(" \t\r\n\"'“”‘’"), 220)
+    return summary
 
 
 def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[str]) -> set[str]:

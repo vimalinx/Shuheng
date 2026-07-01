@@ -574,6 +574,9 @@ RUN_FRAMES = rendering_helpers.RUN_FRAMES
 char_index_for_cell = rendering_helpers.char_index_for_cell
 scoped_subagent_meta_keys = rendering_helpers.scoped_subagent_meta_keys
 message_render_cache_key = rendering_helpers.message_render_cache_key
+strip_meta_blocks = rendering_helpers.strip_meta_blocks
+process_preview = rendering_helpers.process_preview
+process_summary_text = rendering_helpers.process_summary_text
 running_indicator = rendering_helpers.running_indicator
 running_indicator_cell_width = rendering_helpers.running_indicator_cell_width
 render_running_indicator_line = rendering_helpers.render_running_indicator_line
@@ -17875,42 +17878,6 @@ def split_top_level_turn_markers(text: str) -> list[str]:
         offset += len(line)
     parts.append(text[last:])
     return parts
-
-
-def strip_meta_blocks(text: str) -> str:
-    return META_BLOCK_RE.sub("", text or "").strip()
-
-
-def process_preview(text: str) -> str:
-    summaries = SUMMARY_RE.findall(text or "")
-    if summaries:
-        title = compact_title(summaries[-1], 60)
-        if title:
-            return title
-    preview = DETAIL_FENCE_RE.sub(" ", text or "")
-    preview = META_BLOCK_RE.sub(" ", preview)
-    preview = TOOL_CALL_RE.sub(" ", preview)
-    preview = TOOL_USE_NAME_RE.sub(" ", preview)
-    for line in preview.splitlines():
-        line = line.strip()
-        if not line or line.startswith(("```", "````", "args:", "📥")):
-            continue
-        title = compact_title(line, 60)
-        if title:
-            return title
-    return "执行中"
-
-
-def process_summary_text(text: str) -> str:
-    summaries = SUMMARY_RE.findall(text or "")
-    if not summaries:
-        return ""
-    summary = compact_description(summaries[-1], 220)
-    if is_process_only_session_title(summary):
-        thinking = THINKING_BLOCK_RE.findall(text or "")
-        if thinking:
-            return compact_description(thinking[-1].strip(" \t\r\n\"'“”‘’"), 220)
-    return summary
 
 
 def process_title_text(text: str) -> str:

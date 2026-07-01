@@ -337,6 +337,9 @@ def assert_rendering_module_boundary() -> None:
         "char_index_for_cell",
         "scoped_subagent_meta_keys",
         "message_render_cache_key",
+        "strip_meta_blocks",
+        "process_preview",
+        "process_summary_text",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -413,6 +416,13 @@ def assert_rendering_module_boundary() -> None:
         {"agent-a", "agent-b"},
         "Boundary",
     ) == cache_key_frame0
+    assert rendering_mod.process_preview("<summary>可读总结</summary>") == "可读总结"
+    assert rendering_mod.process_preview(
+        "````text\nhidden\n````\n🛠️ Tool: `web.search`\n📥 args: {}\n实际过程"
+    ) == "实际过程"
+    assert rendering_mod.process_summary_text("<summary>OMP 思考</summary><thinking>具体分析</thinking>") == "具体分析"
+    assert rendering_mod.process_summary_text("plain body") == ""
+    assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(
