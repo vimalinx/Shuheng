@@ -136,7 +136,7 @@ try:
         protocol_compatibility_metadata,
         release_readiness_report,
     )
-    from .text_utils import ANSI_RE, cell_width, clean_text, pad_cells, truncate_cells, wrap_cells
+    from .text_utils import ANSI_RE, cell_width, clean_text, compact_category, compact_title, pad_cells, truncate_cells, wrap_cells
     from .ui_types import (
         HOME_SESSION_PREFIX,
         MAIN_HOME_SESSION_KEY,
@@ -249,7 +249,7 @@ except Exception:
         protocol_compatibility_metadata,
         release_readiness_report,
     )
-    from text_utils import ANSI_RE, cell_width, clean_text, pad_cells, truncate_cells, wrap_cells  # type: ignore
+    from text_utils import ANSI_RE, cell_width, clean_text, compact_category, compact_title, pad_cells, truncate_cells, wrap_cells  # type: ignore
     from ui_types import (  # type: ignore
         HOME_SESSION_PREFIX,
         MAIN_HOME_SESSION_KEY,
@@ -14529,11 +14529,6 @@ def rename_current_session(state: State, raw_name: str, source: str = "manual") 
     return f"当前会话已命名为: {name}；{persist_msg}"
 
 
-def compact_category(text: str) -> str:
-    text = compact_title(text, 18)
-    return "" if text.lower() in {"-", "clear", "none", "null", "未分类"} else text
-
-
 def session_category_label(meta: dict[str, Any]) -> str:
     return compact_category(str(meta.get("category") or "")) or "未分类"
 
@@ -17010,19 +17005,6 @@ def message_lines_cached(state: State, width: int) -> list[RenderLine]:
         )
         state.line_cache_key = key
     return state.line_cache
-
-
-def compact_title(text: str, max_width: int = 24) -> str:
-    text = clean_text(text)
-    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"[*_`#>\[\]{}]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip(" -:：。,.，")
-    text = re.sub(r"^(用户|User|The user)\s*(问|要求|想要|asked|wants|said)?\s*[:：]?\s*", "", text, flags=re.I)
-    text = re.sub(r"^(任务已完成|已完成|总结|结论)\s*[:：]?\s*", "", text)
-    if not text:
-        return ""
-    return truncate_cells(text, max_width).strip(" -:：。,.，")
 
 
 def short_session_title(text: str, fallback: str = "历史会话") -> str:

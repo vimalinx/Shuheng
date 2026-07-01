@@ -643,6 +643,73 @@ def normalize_dashboard_sections(raw_sections):
     ...
 ```
 
+## Scenario: Text Utility Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Pure terminal-cell or compact text helpers are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/text_utils.py`, compatibility aliases in `src/ga_tui/app.py`, title/category cleaning, sidebar/history title consumers, dashboard helpers, Web Console helpers, policy gates, and text utility unit tests.
+- Non-goal: This does not move history metadata, transcript parsing, Web Console history payloads, dashboard/home rendering, command handlers, runtime providers, ledgers, Secret Vault, or storage roots.
+
+### 2. Signatures
+
+- Lower-level helper module: `src/ga_tui/text_utils.py`.
+- Compatibility aliases in `app.py`:
+  - `ANSI_RE`.
+  - `cell_width(text)`.
+  - `truncate_cells(text, width)`.
+  - `pad_cells(text, width)`.
+  - `clean_text(text)`.
+  - `wrap_cells(text, width)`.
+  - `compact_title(text, max_width=24)`.
+  - `compact_category(text)`.
+
+### 3. Contracts
+
+- `text_utils.py` must remain a pure leaf module and must not import `ga_tui.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, Web Console, dashboard, or command handlers.
+- `compact_title(...)` strips ANSI/control display noise through `clean_text`, removes fenced code, HTML-like tags, lightweight markdown markers, leading user/request boilerplate, and leading completion/summary boilerplate before terminal-cell truncation.
+- `compact_category(...)` uses `compact_title(..., 18)` and returns an empty category for sentinel values `-`, `clear`, `none`, `null`, and `未分类`.
+- `app.py` remains the compatibility facade and exposes moved helpers as direct aliases or behavior-identical wrappers.
+
+### 4. Validation & Error Matrix
+
+- `text_utils.py` imports `ga_tui.app`, curses, TUI state, render types, runtime providers, stores, or command handlers -> policy gate fails.
+- App alias differs from module helper for the same input -> unit test or policy gate fails.
+- Title input includes code fences, HTML tags, or markdown markers -> helper removes layout/control noise before truncation.
+- Category input is a sentinel value -> helper returns `""` so callers can apply their own fallback label.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `session_title_for_path(...)` continues calling `app.compact_title(...)`, while the implementation lives in `ga_tui.text_utils`.
+- Good: `dashboard.py` and `web_console.py` import lower-level text helpers without depending on `app.py`.
+- Base: `compact_description(...)` stays in `app.py` for now because it still depends on control/procedure/detail regexes not yet separated into a lower-level boundary.
+- Bad: `text_utils.py` imports `TUI_CONTROL_RE` from `app.py`.
+- Bad: Moving sidebar row rendering into `text_utils.py` because it would couple text helpers to `State` and curses rendering.
+
+### 6. Tests Required
+
+- Unit tests must assert app wrapper parity, terminal-cell behavior, compact title cleanup, compact category sentinel handling, and no behavior drift for existing text helpers.
+- `scripts/check_policy_gates.py` must assert `text_utils.py` has no reverse import into `app.py` and no curses/TUI/runtime/store dependencies.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/text_utils.py scripts/check_policy_gates.py tests/test_cell_utils.py` must pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_cell_utils.py -p no:cacheprovider` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# text_utils.py
+from ga_tui.app import TUI_CONTROL_RE, State
+```
+
+#### Correct
+
+```python
+# text_utils.py
+def compact_title(text: str, max_width: int = 24) -> str:
+    ...
+```
+
 ## Scenario: Shared JSONL Ledger Store
 
 ### 1. Scope / Trigger

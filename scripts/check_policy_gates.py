@@ -254,6 +254,10 @@ def assert_leaf_module_boundaries() -> None:
     assert a.pad_cells is text_utils_mod.pad_cells
     assert a.clean_text is text_utils_mod.clean_text
     assert a.wrap_cells is text_utils_mod.wrap_cells
+    assert a.compact_title is text_utils_mod.compact_title
+    assert a.compact_category is text_utils_mod.compact_category
+    assert text_utils_mod.compact_title("用户要求: **实现** <b>功能</b> #1", 80) == "实现 功能 1"
+    assert text_utils_mod.compact_category("未分类") == ""
     assert a.Message is ui_types_mod.Message
     assert a.RenderLine is ui_types_mod.RenderLine
     assert a.State is ui_types_mod.State
@@ -264,6 +268,9 @@ def assert_leaf_module_boundaries() -> None:
         source = Path(module.__file__).read_text(encoding="utf-8")
         for forbidden in ("ga_tui.app", "from .app", "import app"):
             assert forbidden not in source, f"{module.__file__}: {forbidden}"
+    text_source = Path(text_utils_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in ("import curses", "from curses", "State", "SubAgentRuntime", "RenderLine"):
+        assert forbidden not in text_source, f"{text_utils_mod.__file__}: {forbidden}"
 
 
 def assert_history_store_module_boundary() -> None:

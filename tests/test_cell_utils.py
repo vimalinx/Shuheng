@@ -11,6 +11,8 @@ from ga_tui.text_utils import (
     ANSI_RE,
     cell_width,
     clean_text,
+    compact_category,
+    compact_title,
     pad_cells,
     truncate_cells,
     wrap_cells,
@@ -25,6 +27,8 @@ class TestAppCompatibilityAliases:
         assert app_module.pad_cells is text_utils.pad_cells
         assert app_module.clean_text is text_utils.clean_text
         assert app_module.wrap_cells is text_utils.wrap_cells
+        assert app_module.compact_title is text_utils.compact_title
+        assert app_module.compact_category is text_utils.compact_category
 
     def test_ui_types_reexported_from_app(self) -> None:
         assert app_module.Message is ui_types.Message
@@ -121,6 +125,30 @@ class TestCleanText:
     def test_osc_terminator(self) -> None:
         # OSC sequence ended by BEL.
         assert ANSI_RE.sub("", "\x1b]0;title\x07text") == "text"
+
+
+class TestCompactTitle:
+    def test_strips_markdown_html_and_boilerplate(self) -> None:
+        assert compact_title("用户要求: **实现** <b>功能</b> #1", 80) == "实现 功能 1"
+        assert compact_title("总结：下一步计划。", 80) == "下一步计划"
+
+    def test_drops_fenced_code_and_truncates_by_cells(self) -> None:
+        text = "```python\nprint('hidden')\n```\n枢衡标题abcdef"
+
+        assert compact_title(text, 8) == "枢衡标题…"
+
+    def test_empty_after_cleanup(self) -> None:
+        assert compact_title("```hidden```", 80) == ""
+
+
+class TestCompactCategory:
+    def test_filters_sentinel_values(self) -> None:
+        assert compact_category("-") == ""
+        assert compact_category("clear") == ""
+        assert compact_category("未分类") == ""
+
+    def test_compacts_regular_category(self) -> None:
+        assert compact_category("  **Shuheng / Agent**  ") == "Shuheng / Agent"
 
 
 class TestWrapCells:

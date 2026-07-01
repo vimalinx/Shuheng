@@ -65,3 +65,21 @@ def wrap_cells(text: str, width: int) -> list[str]:
                 current_w += w
         lines.append(current)
     return lines
+
+
+def compact_title(text: str, max_width: int = 24) -> str:
+    text = clean_text(text)
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"[*_`#>\[\]{}]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -:：。,.，")
+    text = re.sub(r"^(用户|User|The user)\s*(问|要求|想要|asked|wants|said)?\s*[:：]?\s*", "", text, flags=re.I)
+    text = re.sub(r"^(任务已完成|已完成|总结|结论)\s*[:：]?\s*", "", text)
+    if not text:
+        return ""
+    return truncate_cells(text, max_width).strip(" -:：。,.，")
+
+
+def compact_category(text: str) -> str:
+    text = compact_title(text, 18)
+    return "" if text.lower() in {"-", "clear", "none", "null", "未分类"} else text
