@@ -69,6 +69,63 @@ def test_strip_inline_markdown_cleans_inline_markup() -> None:
     assert rendering.strip_inline_markdown("**bold** __strong__ *italic* _em_") == "bold strong italic em"
 
 
+def test_interaction_card_formats_candidate_and_approval_prompts() -> None:
+    assert rendering.sanitize_interaction_candidates(['1) 继续', '["继续"]', "2、稍后", ""]) == ["继续", "稍后"]
+    assert rendering.render_interaction_card(
+        {
+            "tool": "ask_user",
+            "question": "选择下一步\n请确认",
+            "candidates": ["1) 继续", "2) 稍后"],
+        }
+    ) == (
+        "╭─ 需要你输入 · ask_user\n"
+        "│ 问题：\n"
+        "│   选择下一步\n"
+        "│   请确认\n"
+        "│\n"
+        "│ 候选项：\n"
+        "│   1) 继续\n"
+        "│   2) 稍后\n"
+        "│\n"
+        "│ 在底部回答框用 ↑/↓ 选择，Enter 提交；也可输入 1-2 或直接打字。\n"
+        "╰─"
+    )
+    assert rendering.render_interaction_card(
+        {"tool": "approval", "question": "批准写入？", "candidates": ["批准", "拒绝"]}
+    ).splitlines()[-2] == "│ 在底部回答框用 ↑/↓ 选择，Enter 执行；选“稍后处理”会保留待审批项。"
+
+
+def test_interaction_card_formats_request_user_input_and_fallback() -> None:
+    assert rendering.render_interaction_card(
+        {
+            "tool": "request_user_input",
+            "questions": [
+                {"header": "范围", "question": "要处理哪些文件？", "options": ["1) 全部", "2) 仅核心"]},
+                {"question": "是否提交？"},
+            ],
+        }
+    ) == (
+        "╭─ 需要你输入 · request_user_input\n"
+        "│ 1. 范围\n"
+        "│    要处理哪些文件？\n"
+        "│    1) 全部\n"
+        "│    2) 仅核心\n"
+        "│ 2. 问题 2\n"
+        "│    是否提交？\n"
+        "│\n"
+        "│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。\n"
+        "╰─"
+    )
+    assert rendering.render_interaction_card({}) == (
+        "╭─ 需要你输入 · interactive\n"
+        "│ 问题：\n"
+        "│   工具正在等待你的输入。\n"
+        "│\n"
+        "│ 在底部回答框直接输入答案，Enter 发送。\n"
+        "╰─"
+    )
+
+
 def test_is_table_separator_detects_markdown_alignment_rows() -> None:
     assert rendering.is_table_separator(["---", ":---", "---:", ":---:"])
     assert rendering.is_table_separator([" --- ", " :---: "])
@@ -1388,6 +1445,8 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_tool_output_blocks is rendering.strip_tool_output_blocks
     assert app_module.strip_standalone_dot_lines is rendering.strip_standalone_dot_lines
     assert app_module.visible_reply_text is rendering.visible_reply_text
+    assert app_module.sanitize_interaction_candidates is rendering.sanitize_interaction_candidates
+    assert app_module.render_interaction_card is rendering.render_interaction_card
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape

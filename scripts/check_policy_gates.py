@@ -398,6 +398,8 @@ def assert_rendering_module_boundary() -> None:
         "strip_tool_output_blocks",
         "strip_standalone_dot_lines",
         "visible_reply_text",
+        "sanitize_interaction_candidates",
+        "render_interaction_card",
         "visible_reply_is_substantive",
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
@@ -855,6 +857,50 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.visible_reply_text(hidden_detail_body, hide_detail_fences=True) == "Final answer"
     assert rendering_mod.strip_standalone_dot_lines("A\n.\n3.14\n . \nB") == "A\n3.14\nB"
     assert rendering_mod.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
+    assert rendering_mod.sanitize_interaction_candidates(['1) 继续', '["继续"]', "2、稍后", ""]) == ["继续", "稍后"]
+    assert rendering_mod.render_interaction_card(
+        {
+            "tool": "ask_user",
+            "question": "选择下一步\n请确认",
+            "candidates": ["1) 继续", "2) 稍后"],
+        }
+    ) == (
+        "╭─ 需要你输入 · ask_user\n"
+        "│ 问题：\n"
+        "│   选择下一步\n"
+        "│   请确认\n"
+        "│\n"
+        "│ 候选项：\n"
+        "│   1) 继续\n"
+        "│   2) 稍后\n"
+        "│\n"
+        "│ 在底部回答框用 ↑/↓ 选择，Enter 提交；也可输入 1-2 或直接打字。\n"
+        "╰─"
+    )
+    assert rendering_mod.render_interaction_card(
+        {"tool": "approval", "question": "批准写入？", "candidates": ["批准", "拒绝"]}
+    ).splitlines()[-2] == "│ 在底部回答框用 ↑/↓ 选择，Enter 执行；选“稍后处理”会保留待审批项。"
+    assert rendering_mod.render_interaction_card(
+        {
+            "tool": "request_user_input",
+            "questions": [
+                {"header": "范围", "question": "要处理哪些文件？", "options": ["1) 全部", "2) 仅核心"]},
+                {"question": "是否提交？"},
+            ],
+        }
+    ) == (
+        "╭─ 需要你输入 · request_user_input\n"
+        "│ 1. 范围\n"
+        "│    要处理哪些文件？\n"
+        "│    1) 全部\n"
+        "│    2) 仅核心\n"
+        "│ 2. 问题 2\n"
+        "│    是否提交？\n"
+        "│\n"
+        "│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。\n"
+        "╰─"
+    )
+    assert a.render_interaction_card({}) == rendering_mod.render_interaction_card({})
     assert rendering_mod.visible_reply_is_substantive("完整答复。" * 40)
     assert rendering_mod.visible_reply_is_substantive("# 结论\n" + ("结构化内容。" * 14))
     assert not rendering_mod.visible_reply_is_substantive("短答复")
@@ -1136,6 +1182,8 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
         "def preferred_group_visible_reply_text",
+        "def sanitize_interaction_candidates",
+        "def render_interaction_card",
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",

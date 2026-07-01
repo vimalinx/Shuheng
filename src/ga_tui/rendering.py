@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import hashlib
 import re
+from typing import Any
 
 try:
     from . import history_titles as history_title_policy
@@ -59,6 +60,69 @@ SEARCH_NOISE_MARKERS = (
     "result__snippet",
     "queryselectorall",
 )
+_INTERACTION_CAND_LEFT_TRIM = re.compile(r'^[",\[\]{}\\\s]+')
+_INTERACTION_CAND_RIGHT_TRIM = re.compile(r'[",\[\]{}\\\s]+$')
+_INTERACTION_CAND_NUMBER_PFX = re.compile(r"^\d+\s*[.)、：:）．]\s*")
+
+
+def sanitize_interaction_candidates(raw: Any) -> list[str]:
+    out: list[str] = []
+    items = raw if isinstance(raw, list) else [raw] if raw else []
+    for item in items:
+        s = str(item) if item is not None else ""
+        for line in s.replace("\\n", "\n").splitlines() or [s]:
+            line = _INTERACTION_CAND_LEFT_TRIM.sub("", line)
+            line = _INTERACTION_CAND_RIGHT_TRIM.sub("", line)
+            line = _INTERACTION_CAND_NUMBER_PFX.sub("", line)
+            line = line.strip()
+            if not line:
+                continue
+            if len(line) > 200:
+                line = line[:200] + "…"
+            if line not in out:
+                out.append(line)
+    return out
+
+
+def render_interaction_card(payload: dict[str, Any]) -> str:
+    tool = str(payload.get("tool") or "interactive")
+    question = str(payload.get("question") or "工具正在等待你的输入。").strip()
+    candidates = sanitize_interaction_candidates(payload.get("candidates"))
+    questions = payload.get("questions") if isinstance(payload.get("questions"), list) else []
+    lines = [f"╭─ 需要你输入 · {tool}"]
+    if questions:
+        for idx, item in enumerate(questions, 1):
+            if not isinstance(item, dict):
+                continue
+            header = str(item.get("header") or f"问题 {idx}").strip()
+            q_text = str(item.get("question") or "").strip()
+            lines.append(f"│ {idx}. {header}")
+            for part in q_text.splitlines() or [""]:
+                if part:
+                    lines.append(f"│    {part}")
+            options = sanitize_interaction_candidates(item.get("options"))
+            for opt_idx, opt in enumerate(options, 1):
+                lines.append(f"│    {opt_idx}) {opt}")
+    else:
+        lines.append("│ 问题：")
+        for part in question.splitlines() or [""]:
+            lines.append(f"│   {part}" if part else "│")
+        if candidates:
+            lines.append("│")
+            lines.append("│ 候选项：")
+            for idx, candidate in enumerate(candidates, 1):
+                lines.append(f"│   {idx}) {candidate}")
+    lines.append("│")
+    if candidates and tool == "approval":
+        lines.append("│ 在底部回答框用 ↑/↓ 选择，Enter 执行；选“稍后处理”会保留待审批项。")
+    elif candidates:
+        lines.append(f"│ 在底部回答框用 ↑/↓ 选择，Enter 提交；也可输入 1-{len(candidates)} 或直接打字。")
+    elif questions:
+        lines.append("│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。")
+    else:
+        lines.append("│ 在底部回答框直接输入答案，Enter 发送。")
+    lines.append("╰─")
+    return "\n".join(lines)
 
 
 def process_turn_label(marker: str) -> str:
