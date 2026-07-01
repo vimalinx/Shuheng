@@ -963,6 +963,14 @@ def process_summary_text(text: str) -> str:
     return summary
 
 
+def process_title_text_from_parts(summary: str, has_search_noise: bool, preview: str) -> str:
+    if summary:
+        return summary
+    if has_search_noise:
+        return "搜索/浏览输出已折叠"
+    return preview
+
+
 def next_nonblank_line(lines: list[str], start: int) -> str:
     for line in lines[start:]:
         if line.strip():

@@ -611,6 +611,7 @@ process_turn_lines = rendering_helpers.process_turn_lines
 boxed_user_lines = rendering_helpers.boxed_user_lines
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
+process_title_text_from_parts = rendering_helpers.process_title_text_from_parts
 process_turn_label = rendering_helpers.process_turn_label
 process_tool_suffix = rendering_helpers.process_tool_suffix
 process_turn_no = rendering_helpers.process_turn_no
@@ -17871,11 +17872,7 @@ def restore_backend_and_recent_messages(agent: Any, path: str) -> tuple[list[Mes
 
 def process_title_text(text: str) -> str:
     summary = process_summary_text(text)
-    if summary:
-        return summary
-    if process_has_search_noise(text):
-        return "搜索/浏览输出已折叠"
-    return process_preview(text)
+    return process_title_text_from_parts(summary, process_has_search_noise(text), process_preview(text))
 
 
 def process_tools(text: str) -> list[str]:

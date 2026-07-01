@@ -912,6 +912,23 @@ def test_process_summary_text_uses_thinking_for_legacy_process_only_summary() ->
     assert rendering.process_summary_text("no summary here") == ""
 
 
+def test_process_title_text_from_parts_preserves_title_priority() -> None:
+    assert rendering.process_title_text_from_parts("整理完成", True, "预览") == "整理完成"
+    assert rendering.process_title_text_from_parts("", True, "预览") == "搜索/浏览输出已折叠"
+    assert rendering.process_title_text_from_parts("", False, "预览") == "预览"
+
+    summary_body = "<summary>整理完成</summary>\n🛠️ Tool: `web.search`"
+    search_body = "🛠️ Tool: `web.search`\n📥 args: {}\nraw visible line"
+    preview_body = "raw visible line"
+    assert app_module.process_title_text(summary_body) == rendering.process_title_text_from_parts(
+        app_module.process_summary_text(summary_body),
+        app_module.process_has_search_noise(summary_body),
+        app_module.process_preview(summary_body),
+    )
+    assert app_module.process_title_text(search_body) == "搜索/浏览输出已折叠"
+    assert app_module.process_title_text(preview_body) == "raw visible line"
+
+
 def test_process_line_format_helpers_render_expected_strings() -> None:
     marker = "**LLM Running (Turn 7) ...**"
 
@@ -1496,6 +1513,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_meta_blocks is rendering.strip_meta_blocks
     assert app_module.process_preview is rendering.process_preview
     assert app_module.process_summary_text is rendering.process_summary_text
+    assert app_module.process_title_text_from_parts is rendering.process_title_text_from_parts
     assert app_module.strip_inline_markdown is rendering.strip_inline_markdown
     assert app_module.is_table_separator is rendering.is_table_separator
     assert app_module.split_table_row is rendering.split_table_row

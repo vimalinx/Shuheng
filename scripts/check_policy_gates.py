@@ -367,6 +367,7 @@ def assert_rendering_module_boundary() -> None:
         "plain_layout_lines",
         "process_preview",
         "process_summary_text",
+        "process_title_text_from_parts",
         "TURN_NO_RE",
         "process_turn_label",
         "process_tool_suffix",
@@ -499,6 +500,9 @@ def assert_rendering_module_boundary() -> None:
     ) == "实际过程"
     assert rendering_mod.process_summary_text("<summary>OMP 思考</summary><thinking>具体分析</thinking>") == "具体分析"
     assert rendering_mod.process_summary_text("plain body") == ""
+    assert rendering_mod.process_title_text_from_parts("整理完成", True, "预览") == "整理完成"
+    assert rendering_mod.process_title_text_from_parts("", True, "预览") == "搜索/浏览输出已折叠"
+    assert rendering_mod.process_title_text_from_parts("", False, "预览") == "预览"
     process_marker = "**LLM Running (Turn 12) ...**"
     process_body = (
         "<summary>整理过程</summary>\n"
@@ -507,6 +511,12 @@ def assert_rendering_module_boundary() -> None:
         "<tool_use>{\"name\":\"irc\"}</tool_use>\n"
     )
     process_tools = a.process_tools(process_body)
+    assert a.process_title_text_from_parts is rendering_mod.process_title_text_from_parts
+    assert a.process_title_text(process_body) == rendering_mod.process_title_text_from_parts(
+        a.process_summary_text(process_body),
+        a.process_has_search_noise(process_body),
+        a.process_preview(process_body),
+    )
     assert rendering_mod.process_turn_label(process_marker) == "Turn 12"
     assert rendering_mod.process_turn_label("missing") == "Turn"
     assert rendering_mod.process_turn_no(process_marker, 3) == 12
@@ -1262,6 +1272,7 @@ def assert_rendering_module_boundary() -> None:
         "def compose_request_user_input_answer",
         "def interaction_input_prompt_text",
         "def interaction_footer_text",
+        "def process_title_text_from_parts",
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",
