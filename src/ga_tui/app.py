@@ -94,6 +94,7 @@ try:
     from . import runtime_dispatch as runtime_dispatch_store
     from . import web_console as web_console_helpers
     from . import dashboard as dashboard_helpers
+    from . import rendering as rendering_helpers
     from . import path_utils
     from . import subagent_store as subagent_store_helpers
     from .genericagent_provider import (
@@ -211,6 +212,7 @@ except Exception:
     import runtime_dispatch as runtime_dispatch_store  # type: ignore
     import web_console as web_console_helpers  # type: ignore
     import dashboard as dashboard_helpers  # type: ignore
+    import rendering as rendering_helpers  # type: ignore
     import path_utils  # type: ignore
     import subagent_store as subagent_store_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
@@ -568,7 +570,10 @@ AUTO_CONTROL_CONTINUE_MAX_PER_SIGNATURE = 1
 AUTO_CONTROL_CONTINUE_MAX_PER_SESSION = 8
 PASTE_START = "\x1b[200~"
 PASTE_END = "\x1b[201~"
-RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
+RUN_FRAMES = rendering_helpers.RUN_FRAMES
+running_indicator = rendering_helpers.running_indicator
+running_indicator_cell_width = rendering_helpers.running_indicator_cell_width
+render_running_indicator_line = rendering_helpers.render_running_indicator_line
 _AGENT_COUNTER = itertools.count(1)
 _SESSION_LOG_COUNTER = itertools.count(1)
 COMMANDS: list[tuple[str, str, str, bool]] = [
@@ -19436,21 +19441,6 @@ def subagent_result_card_blocks(
         blocks.append(RenderLine("│ " + line.text if line.text else "│", line.attr))
     blocks.append(RenderLine("╰─", cp(10)))
     return blocks
-
-
-def running_indicator(frame: int) -> str:
-    return f"{RUN_FRAMES[frame % len(RUN_FRAMES)]} running..."
-
-
-def running_indicator_cell_width() -> int:
-    return max(cell_width(running_indicator(frame)) for frame in range(len(RUN_FRAMES)))
-
-
-def render_running_indicator_line(line: RenderLine, frame: int) -> str:
-    if line.kind != "running_indicator":
-        return line.text
-    prefix = " " * max(0, int(line.prefix_cells or 0))
-    return prefix + running_indicator(frame)
 
 
 def clear_selection(state: State) -> None:

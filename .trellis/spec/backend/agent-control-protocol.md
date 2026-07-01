@@ -1853,7 +1853,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 
 ### 2. Signatures
 
-- Frame source: `RUN_FRAMES` and `running_indicator(frame)`.
+- Frame source: `RUN_FRAMES` and `running_indicator(frame)`, implemented in `src/ga_tui/rendering.py` and re-exported from `src/ga_tui/app.py`.
+- Curses-free helper module: `src/ga_tui/rendering.py` owns `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)`.
 - Cached line marker: `RenderLine.kind == "running_indicator"`.
 - Visible row state: `State.running_indicator_rect`.
 - Lightweight redraw helper: `draw_running_indicator_frame(stdscr, state)`.
@@ -1861,6 +1862,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 3. Contracts
 
 - `run_frame` must not be part of `message_render_cache_key()` or the `message_lines_cached()` key.
+- `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
+- `app.py` remains the owner of visible row state, `record_running_indicator_rect(...)`, `draw_running_indicator_frame(...)`, full `draw_main(...)`, and event-loop frame advancement.
 - Long assistant messages must not run through markdown/process rendering on every animation tick.
 - Full `draw_main()` may render the current spinner frame from cached `RenderLine` metadata without mutating the cache.
 - The main event loop must not set `state.dirty` solely because `run_frame` advanced.
@@ -1883,6 +1886,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert run-frame changes do not invalidate message block cache keys.
+- Unit tests and `scripts/check_policy_gates.py` must assert running-indicator helpers are owned by `rendering.py`, app compatibility aliases match, helper output wraps by modulo, cached non-indicator lines pass through unchanged, indicator lines use `prefix_cells`, and `rendering.py` has no reverse dependency into app/curses/state/runtime/command/Web/dashboard/input owners.
 - Tests must assert a visible running indicator can be refreshed with a single row update and one curses refresh while preserving the cache and input cursor.
 
 ### 7. Wrong vs Correct

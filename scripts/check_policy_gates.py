@@ -43,6 +43,7 @@ from ga_tui import path_utils as path_utils_mod  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
+from ga_tui import rendering as rendering_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
 from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
 from ga_tui import subagent_store as subagent_store_mod  # noqa: E402
@@ -328,6 +329,51 @@ def assert_input_controller_module_boundary() -> None:
         "COMMANDS",
     ):
         assert forbidden not in source, f"{input_controller_mod.__file__}: {forbidden}"
+
+
+def assert_rendering_module_boundary() -> None:
+    for name in (
+        "RUN_FRAMES",
+        "running_indicator",
+        "running_indicator_cell_width",
+        "render_running_indicator_line",
+    ):
+        assert getattr(a, name) is getattr(rendering_mod, name), name
+    assert rendering_mod.running_indicator(0) == "[=     ] running..."
+    assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
+    assert rendering_mod.running_indicator_cell_width() == max(
+        rendering_mod.cell_width(rendering_mod.running_indicator(frame))
+        for frame in range(len(rendering_mod.RUN_FRAMES))
+    )
+    assert rendering_mod.render_running_indicator_line(
+        ui_types_mod.RenderLine("regular", kind="", prefix_cells=3),
+        1,
+    ) == "regular"
+    assert rendering_mod.render_running_indicator_line(
+        ui_types_mod.RenderLine("cached", kind="running_indicator", prefix_cells=2),
+        1,
+    ) == "  [==    ] running..."
+    source = Path(rendering_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "PanelItem",
+        "GatewayRequestHandler",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+        "input_controller",
+        "draw_",
+        "handle_key",
+        "handle_mouse",
+        "COMMANDS",
+    ):
+        assert forbidden not in source, f"{rendering_mod.__file__}: {forbidden}"
 
 
 def assert_history_store_module_boundary() -> None:
@@ -8184,6 +8230,7 @@ def run_checks() -> None:
     assert_history_store_module_boundary()
     assert_history_title_policy_module_boundary()
     assert_input_controller_module_boundary()
+    assert_rendering_module_boundary()
     assert_path_utils_module_boundary()
     assert_subagent_store_module_boundary()
     assert_secret_vault_module_boundary()
