@@ -38,6 +38,7 @@ from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
+from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
 from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
 from ga_tui import text_utils as text_utils_mod  # noqa: E402
@@ -500,6 +501,114 @@ def assert_context_pack_module_boundary() -> None:
         "format_approvals",
     ):
         assert forbidden not in source, f"{context_pack_mod.__file__}: {forbidden}"
+
+
+def assert_runtime_dispatch_module_boundary() -> None:
+    class RuntimeAgent:
+        _ga_tui_runtime_provider_id = "ohmypi"
+        native_session_file = " native/session.jsonl "
+        native_context_usage = {"tokens": "25", "context_window": "100", "percent": 0}
+
+        def __init__(self) -> None:
+            self.requests: list[a.RuntimeTaskRequest] = []
+
+        def get_llm_name(self, *, model: bool = False) -> str:
+            return "boundary-model" if model else "Boundary Model"
+
+        def put_runtime_task(self, request: a.RuntimeTaskRequest) -> queue.Queue:
+            self.requests.append(request)
+            result: queue.Queue = queue.Queue()
+            result.put({"done": "runtime"})
+            return result
+
+    class LegacyAgent:
+        def __init__(self) -> None:
+            self.prompts: list[tuple[str, str]] = []
+
+        def get_llm_name(self, *, model: bool = False) -> str:
+            del model
+            raise RuntimeError("missing")
+
+        def put_task(self, prompt: str, source: str = "") -> queue.Queue:
+            self.prompts.append((prompt, source))
+            result: queue.Queue = queue.Queue()
+            result.put({"done": "legacy"})
+            return result
+
+    runtime_agent = RuntimeAgent()
+    assert a.agent_runtime_provider_id(runtime_agent) == runtime_dispatch_mod.agent_runtime_provider_id(runtime_agent)
+    assert a.is_ohmypi_runtime_agent(runtime_agent) == runtime_dispatch_mod.is_ohmypi_runtime_agent(runtime_agent)
+    assert a.ohmypi_native_session_file(runtime_agent) == runtime_dispatch_mod.ohmypi_native_session_file(runtime_agent)
+    assert a.ohmypi_native_context_usage(runtime_agent) == runtime_dispatch_mod.ohmypi_native_context_usage(runtime_agent)
+
+    app_request = a.runtime_task_request_for_agent(
+        agent=runtime_agent,
+        task_id="task_runtime_boundary",
+        parent_task_id="task_parent",
+        prompt="Prompt",
+        source="boundary",
+        agent_id="agent-runtime",
+        role="researcher",
+        objective="Verify runtime dispatch boundary",
+        context_pack_ref="artifact://context_packs/agent-runtime/task_runtime_boundary.json",
+        permissions={"write_policy": "none"},
+        approval_policy={"approval_required_for": []},
+        output_contract={"format": "summary"},
+        metadata={"boundary": True},
+    )
+    module_request = runtime_dispatch_mod.runtime_task_request_for_agent(
+        agent=runtime_agent,
+        task_id="task_runtime_boundary",
+        parent_task_id="task_parent",
+        prompt="Prompt",
+        source="boundary",
+        agent_id="agent-runtime",
+        role="researcher",
+        objective="Verify runtime dispatch boundary",
+        context_pack_ref="artifact://context_packs/agent-runtime/task_runtime_boundary.json",
+        permissions={"write_policy": "none"},
+        approval_policy={"approval_required_for": []},
+        output_contract={"format": "summary"},
+        metadata={"boundary": True},
+    )
+    assert app_request == module_request
+    assert app_request.model == "boundary-model", app_request
+    assert app_request.artifact_refs == [
+        "artifact://context_packs/agent-runtime/task_runtime_boundary.json"
+    ], app_request
+    runtime_dispatch_mod.put_agent_runtime_task(runtime_agent, app_request)
+    assert runtime_agent.requests == [app_request]
+
+    legacy_agent = LegacyAgent()
+    legacy_request = runtime_dispatch_mod.runtime_task_request_for_agent(
+        agent=legacy_agent,
+        task_id="task_legacy_boundary",
+        prompt="Legacy prompt",
+        source="legacy-source",
+        agent_id="agent-legacy",
+        role="researcher",
+        objective="Legacy fallback",
+    )
+    assert legacy_request.provider_id == "unknown", legacy_request
+    assert legacy_request.model == "", legacy_request
+    runtime_dispatch_mod.put_agent_runtime_task(legacy_agent, legacy_request)
+    assert legacy_agent.prompts == [("Legacy prompt", "legacy-source")]
+
+    source = Path(runtime_dispatch_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "PanelItem",
+        "RenderLine",
+        "draw_",
+        "format_approvals",
+    ):
+        assert forbidden not in source, f"{runtime_dispatch_mod.__file__}: {forbidden}"
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7286,6 +7395,7 @@ def run_checks() -> None:
     assert_secret_vault_module_boundary()
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()
+    assert_runtime_dispatch_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()

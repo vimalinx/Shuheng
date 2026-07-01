@@ -1791,6 +1791,86 @@ configure_genericagent_provider_runtime(
 )
 ```
 
+## Scenario: Runtime Dispatch Helper Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Provider-neutral runtime identity, metadata, request-construction, or task-submit helper logic is moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/runtime_dispatch.py`, compatibility wrappers in `src/ga_tui/app.py`, `RuntimeTaskRequest` construction, OMP native session/context usage readers, runtime task submission fallback, policy gates, and unit tests.
+- Non-goal: This does not move runtime stream queue consumption, TUI message mutation, subagent task/chat state transitions, scheduler dispatch, Web Console runtime pumping, or runtime context-pack full/ref prompt selection.
+
+### 2. Signatures
+
+- Dataclass owner: `src/ga_tui/runtime.py` owns `RuntimeTaskRequest` and `RuntimeTaskEvent`.
+- Lower-level helper module: `src/ga_tui/runtime_dispatch.py`.
+- Compatibility wrappers in `app.py`:
+  - `agent_runtime_provider_id(agent)`.
+  - `is_ohmypi_runtime_agent(agent)`.
+  - `ohmypi_native_session_file(agent)`.
+  - `ohmypi_native_context_usage(agent)`.
+  - `runtime_task_request_for_agent(...)`.
+  - `put_agent_runtime_task(agent, request)`.
+
+### 3. Contracts
+
+- `runtime_dispatch.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
+- `runtime_dispatch.py` may import `RuntimeTaskRequest` from `runtime.py`; `runtime.py` remains the schema/dataclass owner.
+- `app.py` remains the compatibility facade and delegates the wrapper names to `runtime_dispatch.py`.
+- `runtime_task_request_for_agent(...)` must preserve every `RuntimeTaskRequest` field: task ids, provider id, agent id, role, objective, prompt, source, context-pack ref, model, permissions, approval policy, output contract, artifact refs, and metadata.
+- Full prompts are allowed only inside the in-memory request object. Durable request records remain governed by `RuntimeTaskRequest.to_record()` and must store bounded `prompt_preview`, `prompt_chars`, context-pack refs, and artifact refs instead of raw prompt bodies.
+- Provider id fallback is `"unknown"` when `_ga_tui_runtime_provider_id` is missing or blank.
+- Model fallback is an empty string when `agent.get_llm_name(model=True)` is missing or raises.
+- If explicit `artifact_refs` is absent and `context_pack_ref` exists, the request artifact refs default to `[context_pack_ref]`.
+- `put_agent_runtime_task(...)` must call `agent.put_runtime_task(request)` when available; otherwise it must fall back to `agent.put_task(request.prompt, source=request.source)`.
+- OMP native context usage normalization accepts both `contextWindow` and `context_window`, computes percent when absent, rejects invalid/non-dict usage payloads, and returns `{}` when both tokens and context window are unavailable.
+
+### 4. Validation & Error Matrix
+
+- `runtime_dispatch.py` imports app/UI/state symbols -> policy gate fails.
+- App wrapper request differs from module request for the same agent and args -> policy gate fails.
+- Agent has blank provider id -> provider id is `"unknown"`.
+- Agent model lookup raises -> request model is `""`.
+- Agent lacks `put_runtime_task` but has `put_task` -> legacy submit path receives the original prompt and source.
+- Agent has invalid OMP native usage -> metadata helper returns `{}`.
+- Request has a context-pack ref and no explicit artifact refs -> artifact refs include that context-pack ref.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `app.runtime_task_request_for_agent(...)` delegates to `runtime_dispatch.runtime_task_request_for_agent(...)` and returns an identical frozen dataclass.
+- Good: `runtime_dispatch.py` builds a request from a generic agent object without reading `State` or any app-global path.
+- Base: `runtime_context_prompt_for_agent(...)` stays in `app.py` because it mutates OMP per-agent context prompt counters and calls app-level context formatting wrappers.
+- Bad: `runtime_dispatch.py` imports `State` so it can decide which stream queue to update.
+- Bad: `runtime_dispatch.py` appends traces or task-ledger rows directly.
+- Bad: `runtime_dispatch.py` stores the raw prompt in durable JSONL records.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `runtime_dispatch.py` has no reverse app/UI dependency and that app wrappers preserve request/metadata parity.
+- Tests must cover provider id fallback, OMP detection by provider id or provider module, OMP native session/context usage helpers, request field preservation, model fallback, artifact-ref defaulting, and `put_runtime_task` vs `put_task` fallback.
+- Existing runtime provider tests must continue proving `RuntimeTaskRequest.to_record()` keeps bounded durable prompt records and OMP runtime events preserve request/context-pack refs.
+- Release verification must keep `python3 scripts/check_policy_gates.py`, Ruff, pytest, compileall, runtime smoke, build, wheel smoke, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+from ga_tui.app import State
+
+def put_agent_runtime_task(state: State, request):
+    append_trace(request.task_id, "runtime_task_requested", payload={"prompt": request.prompt})
+    state.agent.put_runtime_task(request)
+```
+
+#### Correct
+
+```python
+def put_agent_runtime_task(agent, request):
+    if hasattr(agent, "put_runtime_task"):
+        return agent.put_runtime_task(request)
+    return agent.put_task(request.prompt, source=request.source)
+```
+
 ## Scenario: Oh My Pi Runtime Provider
 
 ### 1. Scope / Trigger

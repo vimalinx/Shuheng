@@ -90,6 +90,7 @@ try:
     from . import secret_vault as secret_vault_store
     from . import governance as governance_store
     from . import context_packs as context_pack_store
+    from . import runtime_dispatch as runtime_dispatch_store
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -200,6 +201,7 @@ except Exception:
     import secret_vault as secret_vault_store  # type: ignore
     import governance as governance_store  # type: ignore
     import context_packs as context_pack_store  # type: ignore
+    import runtime_dispatch as runtime_dispatch_store  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -5702,46 +5704,19 @@ def build_main_runtime_context_pack(
 
 
 def agent_runtime_provider_id(agent: Any) -> str:
-    provider_id = str(getattr(agent, "_ga_tui_runtime_provider_id", "") or "").strip()
-    return provider_id or "unknown"
+    return runtime_dispatch_store.agent_runtime_provider_id(agent)
 
 
 def is_ohmypi_runtime_agent(agent: Any) -> bool:
-    if agent_runtime_provider_id(agent) == "ohmypi":
-        return True
-    module = str(getattr(type(agent), "__module__", "") or "")
-    return module.endswith("ohmypi_provider")
+    return runtime_dispatch_store.is_ohmypi_runtime_agent(agent)
 
 
 def ohmypi_native_session_file(agent: Any) -> str:
-    if not is_ohmypi_runtime_agent(agent):
-        return ""
-    return str(getattr(agent, "native_session_file", "") or "").strip()
+    return runtime_dispatch_store.ohmypi_native_session_file(agent)
 
 
 def ohmypi_native_context_usage(agent: Any) -> dict[str, Any]:
-    if not is_ohmypi_runtime_agent(agent):
-        return {}
-    raw = getattr(agent, "native_context_usage", {}) or {}
-    if not isinstance(raw, dict):
-        return {}
-    try:
-        tokens = max(0, int(raw.get("tokens", 0) or 0))
-    except (TypeError, ValueError):
-        tokens = 0
-    try:
-        context_window = max(0, int(raw.get("contextWindow", raw.get("context_window", 0)) or 0))
-    except (TypeError, ValueError):
-        context_window = 0
-    try:
-        percent = float(raw.get("percent", 0) or 0.0)
-    except (TypeError, ValueError):
-        percent = 0.0
-    if percent <= 0 and tokens > 0 and context_window > 0:
-        percent = tokens / context_window * 100.0
-    if tokens <= 0 and context_window <= 0:
-        return {}
-    return {"tokens": tokens, "contextWindow": context_window, "percent": max(0.0, percent)}
+    return runtime_dispatch_store.ohmypi_native_context_usage(agent)
 
 
 def runtime_task_request_for_agent(
@@ -5761,34 +5736,26 @@ def runtime_task_request_for_agent(
     artifact_refs: Optional[list[str]] = None,
     metadata: Optional[dict[str, Any]] = None,
 ) -> RuntimeTaskRequest:
-    model = ""
-    try:
-        model = str(agent.get_llm_name(model=True))
-    except Exception:
-        model = ""
-    return RuntimeTaskRequest(
+    return runtime_dispatch_store.runtime_task_request_for_agent(
+        agent=agent,
         task_id=task_id,
         parent_task_id=parent_task_id,
-        provider_id=agent_runtime_provider_id(agent),
         agent_id=agent_id,
         role=role,
         objective=objective,
         prompt=prompt,
         source=source,
         context_pack_ref=context_pack_ref,
-        model=model,
-        permissions=permissions or {},
-        approval_policy=approval_policy or {},
-        output_contract=output_contract or {},
-        artifact_refs=artifact_refs or ([context_pack_ref] if context_pack_ref else []),
-        metadata=metadata or {},
+        permissions=permissions,
+        approval_policy=approval_policy,
+        output_contract=output_contract,
+        artifact_refs=artifact_refs,
+        metadata=metadata,
     )
 
 
 def put_agent_runtime_task(agent: Any, request: RuntimeTaskRequest) -> Any:
-    if hasattr(agent, "put_runtime_task"):
-        return agent.put_runtime_task(request)
-    return agent.put_task(request.prompt, source=request.source)
+    return runtime_dispatch_store.put_agent_runtime_task(agent, request)
 
 
 def indent_text(text: str, prefix: str) -> str:
