@@ -37,6 +37,7 @@ from ga_tui import history_store as history_store_mod  # noqa: E402
 from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
+from ga_tui import path_utils as path_utils_mod  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
@@ -300,6 +301,44 @@ def assert_history_store_module_boundary() -> None:
     meta_path = os.path.join(root, "session_meta.json")
     history_store_mod.save_session_meta_registry(meta_path, {"model_responses_a.txt": {"rounds": 1}})
     assert history_store_mod.load_session_meta_registry(meta_path)["model_responses_a.txt"]["rounds"] == 1
+
+
+def assert_path_utils_module_boundary() -> None:
+    assert a.normalized_path is path_utils_mod.normalized_path
+    assert a.path_is_within is path_utils_mod.path_is_within
+    root = tempfile.mkdtemp(prefix="ga_tui_path_utils_")
+    history_root = os.path.join(root, "model_responses")
+    trash_root = os.path.join(history_root, ".trash")
+    os.makedirs(trash_root, exist_ok=True)
+    good_path = os.path.join(history_root, "model_responses_a.txt")
+    trash_path = os.path.join(trash_root, "model_responses_a.txt")
+    assert path_utils_mod.is_normal_session_log_path(
+        good_path,
+        model_responses_dir=history_root,
+        session_trash_dir=trash_root,
+    )
+    assert not path_utils_mod.is_normal_session_log_path(
+        trash_path,
+        model_responses_dir=history_root,
+        session_trash_dir=trash_root,
+    )
+    source = Path(path_utils_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "history_store",
+        "secret_vault",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+    ):
+        assert forbidden not in source, f"{path_utils_mod.__file__}: {forbidden}"
 
 
 def assert_secret_vault_module_boundary() -> None:
@@ -7596,6 +7635,7 @@ def run_checks() -> None:
     assert_release_gateway_module_boundaries()
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
+    assert_path_utils_module_boundary()
     assert_secret_vault_module_boundary()
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()

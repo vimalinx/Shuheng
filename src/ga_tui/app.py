@@ -93,6 +93,7 @@ try:
     from . import runtime_dispatch as runtime_dispatch_store
     from . import web_console as web_console_helpers
     from . import dashboard as dashboard_helpers
+    from . import path_utils
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -206,6 +207,7 @@ except Exception:
     import runtime_dispatch as runtime_dispatch_store  # type: ignore
     import web_console as web_console_helpers  # type: ignore
     import dashboard as dashboard_helpers  # type: ignore
+    import path_utils  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -844,27 +846,15 @@ def request_main_interrupt(state: State, prefix: str = "Ctrl+C") -> None:
     mark_dirty(state)
 
 
-def normalized_path(path: str) -> str:
-    return os.path.abspath(os.path.expanduser(path or ""))
-
-
-def path_is_within(path: str, root: str) -> bool:
-    try:
-        real_root = os.path.realpath(normalized_path(root))
-        real_path = os.path.realpath(normalized_path(path))
-        return os.path.commonpath([real_root, real_path]) == real_root
-    except Exception:
-        return False
+normalized_path = path_utils.normalized_path
+path_is_within = path_utils.path_is_within
 
 
 def is_normal_session_log_path(path: str) -> bool:
-    path = normalized_path(path)
-    base = os.path.basename(path)
-    return (
-        path_is_within(path, MODEL_RESPONSES_DIR)
-        and not path_is_within(path, SESSION_TRASH_DIR)
-        and base.startswith("model_responses")
-        and base.endswith(".txt")
+    return path_utils.is_normal_session_log_path(
+        path,
+        model_responses_dir=MODEL_RESPONSES_DIR,
+        session_trash_dir=SESSION_TRASH_DIR,
     )
 
 

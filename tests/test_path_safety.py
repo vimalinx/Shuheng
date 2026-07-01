@@ -11,6 +11,7 @@ from pathlib import Path
 
 import ga_tui.app as app
 
+from ga_tui import path_utils
 from ga_tui.app import (
     clean_subagent_id,
     normalized_path,
@@ -26,6 +27,7 @@ class TestNormalizedPath:
     def test_expands_user(self, monkeypatch) -> None:
         monkeypatch.setenv("HOME", "/tmp/shuheng-test-home")
         assert normalized_path("~/x") == "/tmp/shuheng-test-home/x"
+        assert path_utils.normalized_path("~/x") == "/tmp/shuheng-test-home/x"
 
     def test_makes_absolute(self) -> None:
         # Relative path resolved against cwd.
@@ -34,6 +36,9 @@ class TestNormalizedPath:
 
     def test_empty_falls_back_to_cwd(self) -> None:
         assert os.path.isabs(normalized_path(""))
+
+    def test_app_wrapper_matches_module(self) -> None:
+        assert app.normalized_path is path_utils.normalized_path
 
 
 class TestPathIsWithin:
@@ -63,6 +68,60 @@ class TestPathIsWithin:
         # After realpath this points outside tmp_path -> False (if it exists).
         # We assert the function does not crash and returns a bool.
         assert isinstance(path_is_within(traversing, str(tmp_path)), bool)
+
+    def test_app_wrapper_matches_module(self) -> None:
+        assert app.path_is_within is path_utils.path_is_within
+
+
+class TestNormalSessionLogPath:
+    def test_accepts_model_response_inside_history_root(self, tmp_path: Path) -> None:
+        history_root = tmp_path / "model_responses"
+        trash_root = history_root / ".trash"
+        history_root.mkdir()
+        path = history_root / "model_responses_a.txt"
+
+        assert path_utils.is_normal_session_log_path(
+            str(path),
+            model_responses_dir=str(history_root),
+            session_trash_dir=str(trash_root),
+        )
+
+    def test_rejects_trash_path(self, tmp_path: Path) -> None:
+        history_root = tmp_path / "model_responses"
+        trash_root = history_root / ".trash"
+        trash_root.mkdir(parents=True)
+        path = trash_root / "model_responses_a.txt"
+
+        assert not path_utils.is_normal_session_log_path(
+            str(path),
+            model_responses_dir=str(history_root),
+            session_trash_dir=str(trash_root),
+        )
+
+    def test_rejects_non_model_response_basename(self, tmp_path: Path) -> None:
+        history_root = tmp_path / "model_responses"
+        trash_root = history_root / ".trash"
+        history_root.mkdir()
+        path = history_root / "notes.txt"
+
+        assert not path_utils.is_normal_session_log_path(
+            str(path),
+            model_responses_dir=str(history_root),
+            session_trash_dir=str(trash_root),
+        )
+
+    def test_app_wrapper_uses_current_roots(self, tmp_path: Path) -> None:
+        old_model_responses_dir = app.MODEL_RESPONSES_DIR
+        old_session_trash_dir = app.SESSION_TRASH_DIR
+        try:
+            app.MODEL_RESPONSES_DIR = str(tmp_path / "model_responses")
+            app.SESSION_TRASH_DIR = str(tmp_path / "model_responses" / ".trash")
+            path = Path(app.MODEL_RESPONSES_DIR) / "model_responses_a.txt"
+
+            assert app.is_normal_session_log_path(str(path))
+        finally:
+            app.MODEL_RESPONSES_DIR = old_model_responses_dir
+            app.SESSION_TRASH_DIR = old_session_trash_dir
 
 
 class TestSecretSafeSessionId:

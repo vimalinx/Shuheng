@@ -720,6 +720,68 @@ def compact_title(text: str, max_width: int = 24) -> str:
     ...
 ```
 
+## Scenario: Path Utility Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition needs a shared lower-level home for filesystem path normalization and containment checks used by history, Secret Vault import validation, workspace checks, Web Console session refs, and policy gates.
+- Applies to: `src/ga_tui/path_utils.py`, compatibility aliases in `src/ga_tui/app.py`, normal session-log path checks, Shuheng-owned storage-root assertions, and path-safety unit tests.
+- Non-goal: This does not move Shuheng storage-root constants, frontend history storage configuration, legacy bootstrap, history metadata, Secret Vault storage behavior, Web Console payloads, commands, rendering, or input handling.
+
+### 2. Signatures
+
+- Leaf helpers: `path_utils.normalized_path(path)` and `path_utils.path_is_within(path, root)`.
+- Normal-history predicate: `path_utils.is_normal_session_log_path(path, *, model_responses_dir, session_trash_dir)`.
+- App compatibility: `app.normalized_path` and `app.path_is_within` are aliases; `app.is_normal_session_log_path(path)` injects `MODEL_RESPONSES_DIR` and `SESSION_TRASH_DIR`.
+
+### 3. Contracts
+
+- `normalized_path(...)` expands `~` and returns an absolute path.
+- `path_is_within(...)` resolves real paths and returns `False` instead of raising on invalid input.
+- Normal session logs must be under `MODEL_RESPONSES_DIR`, outside `SESSION_TRASH_DIR`, and named `model_responses*.txt`.
+- `path_utils.py` must remain a pure leaf module and must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, history store, Secret Vault, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- Storage-root ownership remains app-configured and test-retargetable; extracted helpers accept roots as parameters rather than reading app globals.
+
+### 4. Validation & Error Matrix
+
+- Path inside history root with `model_responses*.txt` basename -> normal session-log predicate returns true.
+- Path under `.trash` -> normal session-log predicate returns false even when basename matches.
+- Path outside history root or with a non-session basename -> normal session-log predicate returns false.
+- App tests retarget `MODEL_RESPONSES_DIR` / `SESSION_TRASH_DIR` -> app wrapper uses current app globals.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Future lower-level history or Secret Vault extraction imports `path_utils.py` for path containment without importing `app.py`.
+- Base: `app.py` still owns actual Shuheng root constants and passes them into the path utility predicate.
+- Bad: A lower-level module imports `ga_tui.app` solely to call `path_is_within(...)`.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `path_utils.py` owns path normalization/containment helpers and has no reverse import into app/TUI/rendering/runtime modules.
+- Unit tests must cover direct module behavior and app compatibility aliases/wrappers.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# history_store.py
+from ga_tui.app import path_is_within, MODEL_RESPONSES_DIR
+```
+
+#### Correct
+
+```python
+# history_store.py or another lower-level store
+from ga_tui import path_utils
+
+path_utils.is_normal_session_log_path(
+    path,
+    model_responses_dir=model_responses_dir,
+    session_trash_dir=session_trash_dir,
+)
+```
+
 ## Scenario: Shared JSONL Ledger Store
 
 ### 1. Scope / Trigger
