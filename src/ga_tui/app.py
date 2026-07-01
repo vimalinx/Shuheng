@@ -573,6 +573,7 @@ PASTE_END = "\x1b[201~"
 RUN_FRAMES = rendering_helpers.RUN_FRAMES
 char_index_for_cell = rendering_helpers.char_index_for_cell
 scoped_subagent_meta_keys = rendering_helpers.scoped_subagent_meta_keys
+message_cache_signature = rendering_helpers.message_cache_signature
 message_render_cache_key = rendering_helpers.message_render_cache_key
 strip_meta_blocks = rendering_helpers.strip_meta_blocks
 strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
@@ -16628,10 +16629,6 @@ def home_lines_uncached(state: State, width: int) -> list[RenderLine]:
     if is_main_home_session_key(state.selected_session):
         return main_home_lines_uncached(state, width)
     return []
-
-
-def message_cache_signature(messages: list[Message]) -> tuple[tuple[int, str, int, bool], ...]:
-    return tuple((id(msg), str(msg.role or ""), len(msg.content or ""), bool(msg.done)) for msg in messages)
 
 
 def prune_message_block_cache(state: State, live_keys: set[tuple[Any, ...]], max_entries: int = 1200) -> None:

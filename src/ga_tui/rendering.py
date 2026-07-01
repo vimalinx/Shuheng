@@ -403,6 +403,18 @@ def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[st
     return scoped_subagent_meta
 
 
+def message_cache_signature(messages: list[object]) -> tuple[tuple[int, str, int, bool], ...]:
+    return tuple(
+        (
+            id(msg),
+            str(getattr(msg, "role", "") or ""),
+            len(getattr(msg, "content", "") or ""),
+            bool(getattr(msg, "done", False)),
+        )
+        for msg in messages
+    )
+
+
 def message_render_cache_key(
     msg: object,
     msg_index: int,

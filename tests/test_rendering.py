@@ -137,6 +137,22 @@ def test_scoped_subagent_meta_keys_filters_only_current_scope() -> None:
     assert rendering.scoped_subagent_meta_keys("missing", expanded) == set()
 
 
+def test_message_cache_signature_tracks_identity_role_length_and_done() -> None:
+    msg = Message("assistant", "streaming body", done=False)
+    same_text = Message("assistant", "streaming body", done=False)
+    changed_role = Message("user", "streaming body", done=False)
+    changed_length = Message("assistant", "streaming body!", done=False)
+    changed_done = Message("assistant", "streaming body", done=True)
+
+    signature = rendering.message_cache_signature([msg])
+
+    assert signature == ((id(msg), "assistant", len("streaming body"), False),)
+    assert rendering.message_cache_signature([same_text]) != signature
+    assert rendering.message_cache_signature([changed_role]) != signature
+    assert rendering.message_cache_signature([changed_length]) != signature
+    assert rendering.message_cache_signature([changed_done]) != signature
+
+
 def test_message_render_cache_key_ignores_run_frame_and_sorts_expansions() -> None:
     msg = Message("assistant", "streaming body", done=False)
 
@@ -655,6 +671,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.RUN_FRAMES is rendering.RUN_FRAMES
     assert app_module.char_index_for_cell is rendering.char_index_for_cell
     assert app_module.scoped_subagent_meta_keys is rendering.scoped_subagent_meta_keys
+    assert app_module.message_cache_signature is rendering.message_cache_signature
     assert app_module.message_render_cache_key is rendering.message_render_cache_key
     assert app_module.strip_meta_blocks is rendering.strip_meta_blocks
     assert app_module.process_preview is rendering.process_preview

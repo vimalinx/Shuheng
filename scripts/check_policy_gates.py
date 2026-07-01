@@ -336,6 +336,7 @@ def assert_rendering_module_boundary() -> None:
         "RUN_FRAMES",
         "char_index_for_cell",
         "scoped_subagent_meta_keys",
+        "message_cache_signature",
         "message_render_cache_key",
         "strip_meta_blocks",
         "strip_inline_markdown",
@@ -414,6 +415,12 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.scoped_subagent_meta_keys("", expanded_meta) == expanded_meta
     assert rendering_mod.scoped_subagent_meta_keys("scope-boundary", expanded_meta) == {"agent-a", "agent-b"}
     msg = a.Message("assistant", "boundary streaming", done=False)
+    same_text_msg = a.Message("assistant", "boundary streaming", done=False)
+    assert rendering_mod.message_cache_signature([msg]) == (
+        (id(msg), "assistant", len("boundary streaming"), False),
+    )
+    assert rendering_mod.message_cache_signature([same_text_msg]) != rendering_mod.message_cache_signature([msg])
+    assert a.message_cache_signature([msg]) == rendering_mod.message_cache_signature([msg])
     cache_key_frame0 = rendering_mod.message_render_cache_key(
         msg,
         3,
@@ -758,6 +765,7 @@ def assert_rendering_module_boundary() -> None:
         "def strip_inline_markdown",
         "def is_table_separator",
         "def split_table_row",
+        "def message_cache_signature",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",
