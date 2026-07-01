@@ -1855,6 +1855,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 
 - Frame source: `RUN_FRAMES` and `running_indicator(frame)`, implemented in `src/ga_tui/rendering.py` and re-exported from `src/ga_tui/app.py`.
 - Curses-free helper module: `src/ga_tui/rendering.py` owns `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)`.
+- Message cache helper ownership: `rendering.scoped_subagent_meta_keys(process_scope, expanded_subagent_meta)` and `rendering.message_render_cache_key(...)`, re-exported by `app.py` for compatibility.
 - Selection geometry helpers: `rendering.char_index_for_cell(text, target_x)`, `rendering.ordered_selection_points(selection_start, selection_end)`, and `rendering.selection_span_for_line_points(points, line_idx, text)`, with `app.py` retaining the legacy `ordered_selection_points(state)` and `selection_span_for_line(state, line_idx, text)` wrappers.
 - Cached line marker: `RenderLine.kind == "running_indicator"`.
 - Visible row state: `State.running_indicator_rect`.
@@ -1863,6 +1864,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 3. Contracts
 
 - `run_frame` must not be part of `message_render_cache_key()` or the `message_lines_cached()` key.
+- `message_render_cache_key(...)` accepts the existing `run_frame` argument for call-site compatibility, but the returned key must ignore it so animation ticks do not invalidate cached message blocks.
+- `scoped_subagent_meta_keys(...)` is pure over explicit scope strings and expanded metadata ids. It returns all expanded keys when no process scope is active, otherwise only keys under `"<scope>:submeta:"` with that prefix stripped.
 - `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
 - `app.py` remains the owner of visible row state, `record_running_indicator_rect(...)`, `draw_running_indicator_frame(...)`, full `draw_main(...)`, and event-loop frame advancement.
 - `char_index_for_cell(...)` maps terminal-cell x coordinates to Python character indices with the same East Asian wide-character and zero-width combining-mark behavior as the existing text helpers.

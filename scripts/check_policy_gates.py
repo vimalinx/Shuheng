@@ -335,6 +335,8 @@ def assert_rendering_module_boundary() -> None:
     for name in (
         "RUN_FRAMES",
         "char_index_for_cell",
+        "scoped_subagent_meta_keys",
+        "message_render_cache_key",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -362,6 +364,55 @@ def assert_rendering_module_boundary() -> None:
         1,
         "abcdef",
     )
+    expanded_meta = {
+        "unscoped",
+        "scope-boundary:submeta:agent-a",
+        "scope-boundary:submeta:agent-b",
+        "other:submeta:agent-c",
+    }
+    assert rendering_mod.scoped_subagent_meta_keys("", expanded_meta) == expanded_meta
+    assert rendering_mod.scoped_subagent_meta_keys("scope-boundary", expanded_meta) == {"agent-a", "agent-b"}
+    msg = a.Message("assistant", "boundary streaming", done=False)
+    cache_key_frame0 = rendering_mod.message_render_cache_key(
+        msg,
+        3,
+        80,
+        True,
+        True,
+        0,
+        "scope-boundary",
+        {"g2", "g1"},
+        {"t2", "t1"},
+        {"agent-b", "agent-a"},
+        "Boundary",
+    )
+    cache_key_frame1 = rendering_mod.message_render_cache_key(
+        msg,
+        3,
+        80,
+        True,
+        True,
+        1,
+        "scope-boundary",
+        {"g1", "g2"},
+        {"t1", "t2"},
+        {"agent-a", "agent-b"},
+        "Boundary",
+    )
+    assert cache_key_frame1 == cache_key_frame0
+    assert a.message_render_cache_key(
+        msg,
+        3,
+        80,
+        True,
+        True,
+        7,
+        "scope-boundary",
+        {"g1", "g2"},
+        {"t1", "t2"},
+        {"agent-a", "agent-b"},
+        "Boundary",
+    ) == cache_key_frame0
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ga_tui import app as app_module
 from ga_tui import rendering
-from ga_tui.ui_types import RenderLine
+from ga_tui.ui_types import Message, RenderLine
 
 
 def test_running_indicator_frames_wrap_by_modulo() -> None:
@@ -68,6 +68,69 @@ def test_selection_span_for_line_points_clamps_columns_and_ignores_empty_ranges(
     assert rendering.selection_span_for_line_points(None, 1, "abc") is None
 
 
+def test_scoped_subagent_meta_keys_filters_only_current_scope() -> None:
+    expanded = {
+        "unscoped",
+        "scope-a:submeta:agent-1",
+        "scope-a:submeta:agent-2",
+        "scope-b:submeta:agent-3",
+    }
+
+    assert rendering.scoped_subagent_meta_keys("", expanded) == expanded
+    assert rendering.scoped_subagent_meta_keys("scope-a", expanded) == {"agent-1", "agent-2"}
+    assert rendering.scoped_subagent_meta_keys("missing", expanded) == set()
+
+
+def test_message_render_cache_key_ignores_run_frame_and_sorts_expansions() -> None:
+    msg = Message("assistant", "streaming body", done=False)
+
+    key0 = rendering.message_render_cache_key(
+        msg,
+        2,
+        80,
+        True,
+        True,
+        0,
+        "scope-a",
+        {"g2", "g1"},
+        {"t2", "t1"},
+        {"meta-b", "meta-a"},
+        "Worker",
+    )
+    key1 = rendering.message_render_cache_key(
+        msg,
+        2,
+        80,
+        True,
+        True,
+        99,
+        "scope-a",
+        {"g1", "g2"},
+        {"t1", "t2"},
+        {"meta-a", "meta-b"},
+        "Worker",
+    )
+    changed_width = rendering.message_render_cache_key(
+        msg,
+        2,
+        81,
+        True,
+        True,
+        0,
+        "scope-a",
+        {"g1", "g2"},
+        {"t1", "t2"},
+        {"meta-a", "meta-b"},
+        "Worker",
+    )
+
+    assert key1 == key0
+    assert changed_width != key0
+    assert ("g1", "g2") in key0
+    assert ("t1", "t2") in key0
+    assert ("meta-a", "meta-b") in key0
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -85,6 +148,8 @@ def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
 def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.RUN_FRAMES is rendering.RUN_FRAMES
     assert app_module.char_index_for_cell is rendering.char_index_for_cell
+    assert app_module.scoped_subagent_meta_keys is rendering.scoped_subagent_meta_keys
+    assert app_module.message_render_cache_key is rendering.message_render_cache_key
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line

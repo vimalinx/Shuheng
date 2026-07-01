@@ -14,6 +14,45 @@ SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 
 
+def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[str]) -> set[str]:
+    scoped_subagent_meta = set(expanded_subagent_meta)
+    if process_scope:
+        prefix = f"{process_scope}:submeta:"
+        scoped_subagent_meta = {key[len(prefix):] for key in expanded_subagent_meta if key.startswith(prefix)}
+    return scoped_subagent_meta
+
+
+def message_render_cache_key(
+    msg: object,
+    msg_index: int,
+    width: int,
+    fold_process: bool,
+    markdown: bool,
+    run_frame: int,
+    process_scope: str,
+    expanded_groups: set[str],
+    expanded_turns: set[str],
+    scoped_subagent_meta: set[str],
+    assistant_label: str = "AI",
+) -> tuple[object, ...]:
+    return (
+        id(msg),
+        msg_index,
+        str(getattr(msg, "role", "") or ""),
+        len(getattr(msg, "content", "") or ""),
+        hash(getattr(msg, "content", "") or ""),
+        bool(getattr(msg, "done", False)),
+        width,
+        fold_process,
+        markdown,
+        process_scope,
+        assistant_label,
+        tuple(sorted(expanded_groups)),
+        tuple(sorted(expanded_turns)),
+        tuple(sorted(scoped_subagent_meta)),
+    )
+
+
 def char_index_for_cell(text: str, target_x: int) -> int:
     target_x = max(0, target_x)
     used = 0
