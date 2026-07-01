@@ -316,6 +316,32 @@ def assert_history_store_module_boundary() -> None:
         {"role": "user", "content": "third"},
         {"role": "assistant", "content": "（预览）visible"},
     ]
+    assert a.history_round_count(pairs) == history_store_mod.history_round_count(
+        pairs,
+        user_text_from_prompt=a._user_text,
+    )
+    assert a.extract_recent_ui_messages_from_pairs(pairs, rounds=2) == history_store_mod.extract_recent_ui_messages_from_pairs(
+        pairs,
+        2,
+        user_text_from_prompt=a._user_text,
+        tool_results_from_prompt=a._tool_results_from_prompt,
+        format_response_segment=a._format_response_segment,
+    )
+    assert a.history_messages_from_pairs(pairs, 2) == history_store_mod.history_messages_from_pairs(
+        pairs,
+        2,
+        default_rounds=a.RESTORE_DISPLAY_ROUNDS,
+        user_text_from_prompt=a._user_text,
+        ui_messages_from_pairs=a.extract_recent_ui_messages_from_pairs,
+    )
+    grouped = history_store_mod.extract_recent_ui_messages_from_pairs(
+        [("one", "reply one"), ("", "follow up"), ("two", "reply two")],
+        2,
+        user_text_from_prompt=lambda prompt: str(prompt or "").strip(),
+        tool_results_from_prompt=lambda _prompt: {},
+        format_response_segment=lambda response, _tool: str(response or "").strip(),
+    )
+    assert grouped[1]["content"] == "\n\n**LLM Running (Turn 1) ...**\n\nreply one\n\n**LLM Running (Turn 2) ...**\n\nfollow up"
     assert a.parse_log_time("2026-06-30 12:34:56") == history_store_mod.parse_log_time("2026-06-30 12:34:56")
     assert a.is_model_response_basename("model_responses_a.txt") is history_store_mod.is_model_response_basename("model_responses_a.txt")
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")

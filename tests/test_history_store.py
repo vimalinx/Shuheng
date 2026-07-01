@@ -153,6 +153,102 @@ class TestRestorePreviewCompaction:
         assert app_module.compact_ui_preview_messages_from_pairs([("  user asks  ", response)]) == direct
 
 
+class TestRestoreMessageHelpers:
+    @staticmethod
+    def _user_text(prompt: str) -> str:
+        return prompt.strip()
+
+    @staticmethod
+    def _tool_results(prompt: str) -> dict[str, str]:
+        return {"tool": f"tool-for:{prompt.strip()}"} if prompt.strip().startswith("tool:") else {}
+
+    @staticmethod
+    def _format_segment(response: str, tool_results: dict[str, str]) -> str:
+        suffix = f" [{tool_results['tool']}]" if tool_results else ""
+        return response.strip() + suffix
+
+    def test_history_round_count_uses_non_blank_users_then_pair_count(self) -> None:
+        pairs = [(" first ", "one"), (" ", "two"), (" third ", "three")]
+
+        assert history_store.history_round_count(pairs, user_text_from_prompt=self._user_text) == 2
+        assert history_store.history_round_count([(" ", "one"), ("", "two")], user_text_from_prompt=self._user_text) == 2
+
+    def test_extract_recent_ui_messages_from_pairs_groups_promptless_turns(self) -> None:
+        pairs = [
+            ("first", "first reply"),
+            ("second", "second reply"),
+            ("", "second tool follow-up"),
+            ("tool:third", "third reply"),
+        ]
+
+        messages = history_store.extract_recent_ui_messages_from_pairs(
+            pairs,
+            2,
+            user_text_from_prompt=self._user_text,
+            tool_results_from_prompt=self._tool_results,
+            format_response_segment=self._format_segment,
+        )
+
+        assert messages == [
+            {"role": "user", "content": "second"},
+            {
+                "role": "assistant",
+                "content": (
+                    "\n\n**LLM Running (Turn 1) ...**\n\nsecond reply"
+                    "\n\n**LLM Running (Turn 2) ...**\n\nsecond tool follow-up [tool-for:tool:third]"
+                ),
+            },
+            {"role": "user", "content": "tool:third"},
+            {"role": "assistant", "content": "\n\n**LLM Running (Turn 1) ...**\n\nthird reply"},
+        ]
+
+    def test_history_messages_from_pairs_returns_message_rows_and_counts(self) -> None:
+        pairs = [("first", "first reply"), ("second", "second reply")]
+
+        messages, loaded, total = history_store.history_messages_from_pairs(
+            pairs,
+            1,
+            default_rounds=3,
+            user_text_from_prompt=self._user_text,
+            ui_messages_from_pairs=lambda source_pairs, rounds: history_store.extract_recent_ui_messages_from_pairs(
+                source_pairs,
+                rounds,
+                user_text_from_prompt=self._user_text,
+                tool_results_from_prompt=self._tool_results,
+                format_response_segment=self._format_segment,
+            ),
+        )
+
+        assert loaded == 1
+        assert total == 2
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "second"),
+            ("assistant", "\n\n**LLM Running (Turn 1) ...**\n\nsecond reply"),
+        ]
+
+    def test_app_restore_message_wrappers_preserve_behavior(self) -> None:
+        pairs = [("first", repr([{"type": "text", "text": "first reply"}])), ("second", "['second reply']")]
+
+        assert app_module.history_round_count(pairs) == history_store.history_round_count(
+            pairs,
+            user_text_from_prompt=app_module._user_text,
+        )
+        assert app_module.extract_recent_ui_messages_from_pairs(pairs, 1) == history_store.extract_recent_ui_messages_from_pairs(
+            pairs,
+            1,
+            user_text_from_prompt=app_module._user_text,
+            tool_results_from_prompt=app_module._tool_results_from_prompt,
+            format_response_segment=app_module._format_response_segment,
+        )
+        assert app_module.history_messages_from_pairs(pairs, 1) == history_store.history_messages_from_pairs(
+            pairs,
+            1,
+            default_rounds=app_module.RESTORE_DISPLAY_ROUNDS,
+            user_text_from_prompt=app_module._user_text,
+            ui_messages_from_pairs=app_module.extract_recent_ui_messages_from_pairs,
+        )
+
+
 class TestTranscriptStorage:
     def test_latest_user_message_text_selects_newest_non_blank_user(self) -> None:
         messages = [

@@ -18051,17 +18051,17 @@ def close_current_session(state: State) -> None:
 
 
 def history_round_count(pairs: list[tuple[str, str]]) -> int:
-    user_rounds = sum(1 for prompt, _response in pairs if _user_text(prompt))
-    return user_rounds or len(pairs)
+    return history_store.history_round_count(pairs, user_text_from_prompt=_user_text)
 
 
 def history_messages_from_pairs(pairs: list[tuple[str, str]], rounds: int) -> tuple[list[Message], int, int]:
-    total_rounds = history_round_count(pairs)
-    if total_rounds <= 0:
-        return [], 0, 0
-    loaded_rounds = max(1, min(int(rounds or RESTORE_DISPLAY_ROUNDS), total_rounds))
-    ui_messages = extract_recent_ui_messages_from_pairs(pairs, loaded_rounds)
-    return [Message(m["role"], m["content"]) for m in ui_messages], loaded_rounds, total_rounds
+    return history_store.history_messages_from_pairs(
+        pairs,
+        rounds,
+        default_rounds=RESTORE_DISPLAY_ROUNDS,
+        user_text_from_prompt=_user_text,
+        ui_messages_from_pairs=extract_recent_ui_messages_from_pairs,
+    )
 
 
 def read_history_messages(path: str, rounds: int) -> tuple[list[Message], int, int]:
@@ -18077,42 +18077,13 @@ def read_history_messages(path: str, rounds: int) -> tuple[list[Message], int, i
 
 
 def extract_recent_ui_messages_from_pairs(pairs: list[tuple[str, str]], rounds: int = RESTORE_DISPLAY_ROUNDS) -> list[dict[str, str]]:
-    if not pairs:
-        return []
-    start = 0
-    seen = 0
-    for idx in range(len(pairs) - 1, -1, -1):
-        if _user_text(pairs[idx][0]):
-            seen += 1
-            start = idx
-            if seen >= rounds:
-                break
-    recent = pairs[start:]
-    next_tr = [{} for _ in recent]
-    for idx in range(len(recent) - 1):
-        next_tr[idx] = _tool_results_from_prompt(recent[idx + 1][0])
-
-    out: list[dict[str, str]] = []
-    assistant = None
-    round_turn = 0
-    for idx, (prompt, response) in enumerate(recent):
-        user = _user_text(prompt)
-        seg = _format_response_segment(response, next_tr[idx])
-        if user:
-            if assistant is not None:
-                out.append(assistant)
-            out.append({"role": "user", "content": user})
-            assistant = {"role": "assistant", "content": f"\n\n**LLM Running (Turn 1) ...**\n\n{seg}"}
-            round_turn = 1
-        else:
-            if assistant is None:
-                assistant = {"role": "assistant", "content": ""}
-                round_turn = 1
-            round_turn += 1
-            assistant["content"] = (assistant["content"] or "") + f"\n\n**LLM Running (Turn {round_turn}) ...**\n\n" + seg
-    if assistant is not None:
-        out.append(assistant)
-    return [m for m in out if (m.get("content") or "").strip()]
+    return history_store.extract_recent_ui_messages_from_pairs(
+        pairs,
+        rounds,
+        user_text_from_prompt=_user_text,
+        tool_results_from_prompt=_tool_results_from_prompt,
+        format_response_segment=_format_response_segment,
+    )
 
 
 def ohmypi_session_file_for_history_path(path: str) -> str:

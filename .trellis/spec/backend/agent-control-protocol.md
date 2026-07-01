@@ -286,6 +286,7 @@ and app.py monolith risk.
 - Sidebar display source: `load_history()` maps `session_names.json` or `preview` into `state.history_names`.
 - Recent row selector: `history_store.recent_history_items(history_entries, used_paths, limit)`, wrapped by `app.recent_history_items(...)` for the current default recent-session limit.
 - Restore preview compaction: `history_store.compact_ui_preview_messages_from_pairs(...)`, wrapped by `app.compact_ui_preview_messages_from_pairs(...)` to inject app-owned prompt parsing, assistant preview shaping, and default loaded-round count.
+- Restore message shaping: `history_store.history_round_count(...)`, `history_store.extract_recent_ui_messages_from_pairs(...)`, and `history_store.history_messages_from_pairs(...)`, wrapped by `app.py` to inject app-owned prompt parsing, tool-result extraction, response-segment formatting, and default loaded-round count.
 - Transcript message selector: `history_store.latest_user_message_text(messages)`, re-exported from `app.py` for compatibility.
 - Process filtering helpers: `session_preview_from_pairs()`, `session_response_preview_text()`, `session_summary_titles_from_text()`, and `history_cache_has_process_only_preview()`.
 - Low-level response-body parser: `history_store.assistant_text_from_response_body(response_body)`, re-exported from `app.py` for compatibility.
@@ -309,6 +310,7 @@ and app.py monolith risk.
 - `assistant_text_from_response_body(...)` must preserve the stored-transcript parser contract: Python literal response lists join text dicts and string blocks, response dicts read `content` text lists or fallback `content`/`text` fields, malformed bodies fall back to cleaned raw text, and non-text literal values fall back to cleaned strings.
 - `recent_history_items(...)` belongs to `history_store.py` because it is a pure history row selector. It may depend on `path_utils.normalized_path(...)` but must not import the app facade to learn storage roots or UI state.
 - `compact_ui_preview_messages_from_pairs(...)` belongs to `history_store.py` because it is pure restore-preview message shaping over already-parsed transcript pairs. It accepts prompt-text and assistant-preview callables from the app facade and must not parse/write transcript files, inspect `State`, or own process-summary title policy.
+- `history_round_count(...)`, `extract_recent_ui_messages_from_pairs(...)`, and `history_messages_from_pairs(...)` belong to `history_store.py` because they shape already-parsed transcript pairs into recent restore message records. They accept app-provided prompt/tool/response-format callables and must not parse transcript files, switch providers, reset runtime backends, inspect UI state, write metadata, or own process-summary title policy.
 - `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
 - `history_store.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
@@ -320,6 +322,7 @@ and app.py monolith risk.
 - Recent selector receives rows with timestamps `30`, `10`, and `0` -> returns the `30` then `10` rows and excludes the `0` row.
 - Recent selector receives a `used_paths` set containing a normalized row path -> excludes that row from the virtual Recent group.
 - Restore preview compaction receives three non-empty user rounds and a two-round limit -> returns only the last two user rounds and their non-`执行中` assistant previews.
+- Restore message shaping receives promptless follow-up pairs between user turns -> groups them into the current assistant message with increasing `LLM Running (Turn N)` process markers.
 - Transcript helper receives assistant/system rows plus blank user rows -> returns `""`.
 - Transcript helper receives multiple user rows where the newest non-empty content has surrounding spaces -> returns that newest content stripped.
 - Cached metadata has `preview:"OMP 思考"` and matching file mtime/size -> cache is treated stale and recomputed.
@@ -343,6 +346,7 @@ and app.py monolith risk.
 - Base: The low-level response-body parser may return process-marked text; higher-level preview/title helpers still own process-summary filtering.
 - Base: `app.recent_history_items(...)` remains the compatibility wrapper that supplies `RECENT_SESSION_LIMIT` when no explicit limit is passed.
 - Base: `app.compact_ui_preview_messages_from_pairs(...)` remains the compatibility wrapper that supplies `RESTORE_DISPLAY_ROUNDS`, `_user_text`, and `session_response_preview_text`.
+- Base: `app.history_messages_from_pairs(...)` remains the compatibility wrapper that supplies `RESTORE_DISPLAY_ROUNDS`, `_user_text`, `_tool_results_from_prompt`, `_format_response_segment`, and `Message` conversion behavior through `history_store.py`.
 - Base: `app.latest_user_message_text` remains a direct compatibility alias for callers in transcript bridge code.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
 - Bad: `history_store.py` imports `app.py` so it can call `latest_visible_reply_text(...)`.
@@ -356,6 +360,7 @@ and app.py monolith risk.
 - `scripts/check_policy_gates.py` must assert `assistant_text_from_response_body` is owned by `history_store.py`, re-exported by `app.py`, and that `history_store.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard dependencies.
 - `scripts/check_policy_gates.py` must assert `recent_history_items` is owned by `history_store.py`, app wrapper parity holds, zero-activity rows are excluded, and normalized `used_paths` de-duplicate virtual history groups.
 - `scripts/check_policy_gates.py` must assert `compact_ui_preview_messages_from_pairs` is owned by `history_store.py`, app wrapper parity holds, recent-round selection works, blank user prompts are skipped, and `执行中` assistant previews are excluded.
+- `scripts/check_policy_gates.py` must assert restore message shaping helpers are owned by `history_store.py`, app wrapper parity holds, user-round fallback works, promptless follow-up turns are grouped into assistant process markers, and loaded/total restore counts are preserved.
 - `scripts/check_policy_gates.py` must assert `latest_user_message_text` is owned by `history_store.py`, app alias parity holds, blank user rows are skipped, and the newest non-empty user content wins.
 - Unit tests must assert response-body parser behavior for list bodies, dict `content` lists, dict fallback fields, and malformed raw bodies.
 - Unit tests must assert recent-history sorting, limit behavior, zero-timestamp exclusion, used-path de-duplication, and app wrapper parity.

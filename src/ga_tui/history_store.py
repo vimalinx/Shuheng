@@ -87,6 +87,77 @@ def compact_ui_preview_messages_from_pairs(
     return messages, loaded_rounds, total_rounds, len(messages)
 
 
+def history_round_count(
+    pairs: list[tuple[str, str]],
+    *,
+    user_text_from_prompt: Callable[[str], str],
+) -> int:
+    user_rounds = sum(1 for prompt, _response in pairs if user_text_from_prompt(prompt))
+    return user_rounds or len(pairs)
+
+
+def extract_recent_ui_messages_from_pairs(
+    pairs: list[tuple[str, str]],
+    rounds: int,
+    *,
+    user_text_from_prompt: Callable[[str], str],
+    tool_results_from_prompt: Callable[[str], dict[str, str]],
+    format_response_segment: Callable[[str, dict[str, str]], str],
+) -> list[dict[str, str]]:
+    if not pairs:
+        return []
+    start = 0
+    seen = 0
+    for idx in range(len(pairs) - 1, -1, -1):
+        if user_text_from_prompt(pairs[idx][0]):
+            seen += 1
+            start = idx
+            if seen >= rounds:
+                break
+    recent = pairs[start:]
+    next_tool_results = [{} for _ in recent]
+    for idx in range(len(recent) - 1):
+        next_tool_results[idx] = tool_results_from_prompt(recent[idx + 1][0])
+
+    out: list[dict[str, str]] = []
+    assistant = None
+    round_turn = 0
+    for idx, (prompt, response) in enumerate(recent):
+        user = user_text_from_prompt(prompt)
+        segment = format_response_segment(response, next_tool_results[idx])
+        if user:
+            if assistant is not None:
+                out.append(assistant)
+            out.append({"role": "user", "content": user})
+            assistant = {"role": "assistant", "content": f"\n\n**LLM Running (Turn 1) ...**\n\n{segment}"}
+            round_turn = 1
+        else:
+            if assistant is None:
+                assistant = {"role": "assistant", "content": ""}
+                round_turn = 1
+            round_turn += 1
+            assistant["content"] = (assistant["content"] or "") + f"\n\n**LLM Running (Turn {round_turn}) ...**\n\n" + segment
+    if assistant is not None:
+        out.append(assistant)
+    return [message for message in out if (message.get("content") or "").strip()]
+
+
+def history_messages_from_pairs(
+    pairs: list[tuple[str, str]],
+    rounds: int,
+    *,
+    default_rounds: int,
+    user_text_from_prompt: Callable[[str], str],
+    ui_messages_from_pairs: Callable[[list[tuple[str, str]], int], list[dict[str, str]]],
+) -> tuple[list[Message], int, int]:
+    total_rounds = history_round_count(pairs, user_text_from_prompt=user_text_from_prompt)
+    if total_rounds <= 0:
+        return [], 0, 0
+    loaded_rounds = max(1, min(int(rounds or default_rounds), total_rounds))
+    ui_messages = ui_messages_from_pairs(pairs, loaded_rounds)
+    return [Message(message["role"], message["content"]) for message in ui_messages], loaded_rounds, total_rounds
+
+
 def parse_log_time(text: str) -> float:
     text = (text or "").strip()
     if not text:
