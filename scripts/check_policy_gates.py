@@ -622,13 +622,50 @@ def assert_web_console_module_boundary() -> None:
         "web_console_clean_visible",
         "web_console_status_label",
         "web_console_metric",
+        "web_console_resolve_ref",
+        "web_console_action_payload",
+        "web_console_action_message",
+        "web_console_model_name_from_payload",
+        "web_console_schedule_control_from_payload",
     ):
         assert getattr(a, name) is getattr(web_console_mod, name), name
 
     task_ref = web_console_mod.web_console_ref("task", "task_web_console_boundary")
+    agent_ref = web_console_mod.web_console_ref("agent", "agent-web-boundary")
+    model_ref = web_console_mod.web_console_ref("model", "boundary-model")
     assert task_ref.startswith("task:"), task_ref
     assert "task_web_console_boundary" not in task_ref, task_ref
     assert web_console_mod.web_console_ref("missing", "task_web_console_boundary") == ""
+    refs = {
+        task_ref: ("task", "task_web_console_boundary"),
+        agent_ref: ("agent", "agent-web-boundary"),
+        model_ref: ("model", "boundary-model"),
+    }
+    assert web_console_mod.web_console_resolve_ref(refs, task_ref, "task") == (
+        True,
+        "task_web_console_boundary",
+        "",
+    )
+    assert web_console_mod.web_console_resolve_ref(refs, task_ref, "agent") == (
+        False,
+        "",
+        "界面引用类型不匹配：需要 agent。",
+    )
+    assert web_console_mod.web_console_action_payload({"payload": {"prompt": "hello"}}) == {"prompt": "hello"}
+    assert web_console_mod.web_console_action_message("artifact://raw task_123") == "[artifact] [task]"
+    assert web_console_mod.web_console_model_name_from_payload({"model_ref": model_ref}, refs) == (
+        True,
+        "boundary-model",
+        "",
+    )
+    ok_schedule, schedule_control, schedule_error = web_console_mod.web_console_schedule_control_from_payload(
+        {"target_agent_ref": agent_ref, "execution": {"mode": "main_prompt"}},
+        refs,
+    )
+    assert ok_schedule is True
+    assert schedule_error == ""
+    assert schedule_control["execution"]["mode"] == "agent_task"
+    assert schedule_control["execution"]["routing"]["selected_agent"] == "agent-web-boundary"
     cleaned = web_console_mod.web_console_clean_visible(
         "APPROVAL_REQUIRED hidden\n"
         "artifact://raw appr_123 approval=appr_secret task_123 schedrun_456 sched_789 agent-123 tmp-agent-demo",

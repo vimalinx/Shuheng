@@ -964,8 +964,8 @@ def web_console_html() -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, or metric row shaping are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/web_console.py`, compatibility aliases in `src/ga_tui/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, policy gates, and Web Console helper unit tests.
+- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, metric row shaping, action payload shaping, or sanitized action-ref resolution are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/web_console.py`, compatibility aliases in `src/ga_tui/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, action payload/ref helpers, policy gates, and Web Console helper unit tests.
 - Non-goal: This does not move `GatewayRequestHandler`, `/gui/action` mutation routing, snapshot construction, runtime pumping, state construction, scheduler/model/subagent mutation, standalone GUI loading, or storage-root ownership.
 
 ### 2. Signatures
@@ -980,6 +980,11 @@ def web_console_html() -> str:
   - `web_console_clean_visible(value, limit=320)`.
   - `web_console_status_label(status)`.
   - `web_console_metric(label, value, tone="")`.
+  - `web_console_resolve_ref(refs, ui_ref, expected_kind)`.
+  - `web_console_action_payload(payload)`.
+  - `web_console_action_message(text)`.
+  - `web_console_model_name_from_payload(action_data, refs)`.
+  - `web_console_schedule_control_from_payload(action_data, refs)`.
 
 ### 3. Contracts
 
@@ -993,6 +998,11 @@ def web_console_html() -> str:
 - Internal-ref masking must happen before and after inline-markdown stripping, because markdown emphasis rules can otherwise remove underscores from values such as `task_abc` or `schedrun_123` before the masks run.
 - `web_console_timestamp(...)` prefers ISO `timestamp`, `updated_at`, `created_at`, then `finished_at`, with `mtime` as fallback.
 - `web_console_metric(...)` returns a string-only display dict with `label`, `value`, and `tone`.
+- `web_console_resolve_ref(...)` resolves only current server-side opaque refs and returns `(False, "", <Chinese user-facing error>)` for missing refs, unknown refs, or kind mismatch.
+- `web_console_action_payload(...)` returns a shallow copy of the nested payload dict or `{}` for non-dict payloads.
+- `web_console_action_message(...)` applies Web Console visible-text sanitization and falls back to `动作已执行。` for empty messages.
+- `web_console_model_name_from_payload(...)` prefers explicit `model_name` / `model`, then resolves `model_ref` / `model_ui_ref` through `web_console_resolve_ref(...)`.
+- `web_console_schedule_control_from_payload(...)` may resolve a browser `target_agent_ref`, `agent_ref`, or `agent_ui_ref` into `execution.routing.selected_agent` and `execution.routing.target_selector.agent_id`, but it must not persist schedules or dispatch work.
 
 ### 4. Validation & Error Matrix
 
@@ -1002,6 +1012,8 @@ def web_console_html() -> str:
 - Sanitized visible text still contains `artifact://`, `appr_`, `approval=appr_`, `task_`, `schedrun_`, `sched_`, `agent-N`, or `tmp-agent-*` -> unit test or policy gate fails.
 - Unknown status contains raw internal id vocabulary after label conversion -> unit test fails.
 - Timestamp fields are absent or invalid -> helper returns numeric `mtime` fallback or `0.0`.
+- Schedule action payload contains an agent `ui_ref` -> helper returns an `agent_task` execution control with server-resolved `selected_agent`.
+- Schedule action payload contains a model/task/session ref where an agent ref is required -> helper returns a kind-mismatch error and no control payload.
 
 ### 5. Good/Base/Bad Cases
 
@@ -1009,12 +1021,13 @@ def web_console_html() -> str:
 - Good: `/gui/action` keeps schema validation in `app.py` but uses the schema constants from the helper module.
 - Base: `web_console_ref_map(...)` stays in `app.py` because it reads ledgers, model config, current history rows, and loaded subagents.
 - Base: `web_console_action_response(...)` stays in `app.py` because it may start the Web-console runtime pump and refresh snapshots.
+- Base: `web_console_apply_action(...)` stays in `app.py` because it calls governed mutation functions for approvals, schedules, models, tasks, and subagents.
 - Bad: `web_console.py` imports `State` so it can build snapshots.
 - Bad: `web_console.py` calls `decide_approval(...)`, `start_subagent_task(...)`, or `process_ui_queue(...)`.
 
 ### 6. Tests Required
 
-- Unit tests must assert helper behavior for stable opaque refs, invalid kinds, timestamp fallback, sanitization, status labels, metric shape, and `app.py` wrapper parity.
+- Unit tests must assert helper behavior for stable opaque refs, invalid kinds, timestamp fallback, sanitization, status labels, metric shape, action payload/message shaping, model ref resolution, schedule target-agent ref mapping, and `app.py` wrapper parity.
 - `scripts/check_policy_gates.py` must assert `web_console.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway handler, or mutation-dispatch dependencies.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/web_console.py scripts/check_policy_gates.py tests/test_web_console.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_web_console.py -p no:cacheprovider` must pass.

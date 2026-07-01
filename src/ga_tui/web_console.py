@@ -97,3 +97,74 @@ def web_console_status_label(status: Any) -> str:
 
 def web_console_metric(label: str, value: Any, tone: str = "") -> dict[str, str]:
     return {"label": str(label), "value": str(value), "tone": str(tone)}
+
+
+def web_console_resolve_ref(
+    refs: dict[str, tuple[str, str]],
+    ui_ref: Any,
+    expected_kind: str,
+) -> tuple[bool, str, str]:
+    ref = str(ui_ref or "").strip()
+    if not ref:
+        return False, "", "缺少 ui_ref。"
+    resolved = refs.get(ref)
+    if resolved is None:
+        return False, "", "找不到这个界面引用，请刷新后重试。"
+    kind, raw = resolved
+    if expected_kind and kind != expected_kind:
+        return False, "", f"界面引用类型不匹配：需要 {expected_kind}。"
+    return True, raw, ""
+
+
+def web_console_action_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("payload")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def web_console_action_message(text: Any) -> str:
+    return web_console_clean_visible(text, 900) or "动作已执行。"
+
+
+def web_console_model_name_from_payload(
+    action_data: dict[str, Any],
+    refs: dict[str, tuple[str, str]],
+) -> tuple[bool, str, str]:
+    model_name = str(action_data.get("model_name") or action_data.get("model") or "").strip()
+    if model_name:
+        return True, model_name, ""
+    model_ref = str(action_data.get("model_ref") or action_data.get("model_ui_ref") or "").strip()
+    if model_ref:
+        return web_console_resolve_ref(refs, model_ref, "model")
+    return True, "", ""
+
+
+def web_console_schedule_control_from_payload(
+    action_data: dict[str, Any],
+    refs: dict[str, tuple[str, str]],
+) -> tuple[bool, dict[str, Any], str]:
+    control = dict(action_data)
+    target_agent_ref = str(
+        control.pop("target_agent_ref", "")
+        or control.pop("agent_ref", "")
+        or control.pop("agent_ui_ref", "")
+        or ""
+    ).strip()
+    if not target_agent_ref:
+        return True, control, ""
+    ok_ref, agent_id, error = web_console_resolve_ref(refs, target_agent_ref, "agent")
+    if not ok_ref:
+        return False, {}, error
+    execution = control.get("execution") if isinstance(control.get("execution"), dict) else {}
+    execution = dict(execution)
+    if str(execution.get("mode") or "").strip().lower().replace("-", "_") != "agent_task":
+        execution["mode"] = "agent_task"
+    routing = execution.get("routing") if isinstance(execution.get("routing"), dict) else {}
+    routing = dict(routing)
+    routing["selected_agent"] = agent_id
+    selector = routing.get("target_selector") if isinstance(routing.get("target_selector"), dict) else {}
+    selector = dict(selector)
+    selector.setdefault("agent_id", agent_id)
+    routing["target_selector"] = selector
+    execution["routing"] = routing
+    control["execution"] = execution
+    return True, control, ""

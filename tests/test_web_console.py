@@ -82,6 +82,70 @@ def test_web_console_status_labels_and_metric_shape() -> None:
     }
 
 
+def test_web_console_action_ref_payload_and_message_helpers() -> None:
+    task_ref = web_console.web_console_ref("task", "task_raw")
+    refs = {task_ref: ("task", "task_raw")}
+
+    assert web_console.web_console_resolve_ref(refs, task_ref, "task") == (True, "task_raw", "")
+    assert web_console.web_console_resolve_ref(refs, "", "task") == (False, "", "缺少 ui_ref。")
+    assert web_console.web_console_resolve_ref(refs, "task:missing", "task") == (
+        False,
+        "",
+        "找不到这个界面引用，请刷新后重试。",
+    )
+    assert web_console.web_console_resolve_ref(refs, task_ref, "agent") == (
+        False,
+        "",
+        "界面引用类型不匹配：需要 agent。",
+    )
+    assert web_console.web_console_action_payload({"payload": {"prompt": "hello"}}) == {"prompt": "hello"}
+    assert web_console.web_console_action_payload({"payload": ["not", "dict"]}) == {}
+    assert web_console.web_console_action_message("artifact://raw task_internal") == "[artifact] [task]"
+    assert web_console.web_console_action_message("") == "动作已执行。"
+
+
+def test_web_console_model_and_schedule_action_helpers() -> None:
+    model_ref = web_console.web_console_ref("model", "deepseek")
+    agent_ref = web_console.web_console_ref("agent", "agent-123")
+    refs = {
+        model_ref: ("model", "deepseek"),
+        agent_ref: ("agent", "agent-123"),
+    }
+
+    assert web_console.web_console_model_name_from_payload({"model_name": "explicit-model"}, refs) == (
+        True,
+        "explicit-model",
+        "",
+    )
+    assert web_console.web_console_model_name_from_payload({"model_ref": model_ref}, refs) == (True, "deepseek", "")
+    assert web_console.web_console_model_name_from_payload({"model_ref": agent_ref}, refs) == (
+        False,
+        "",
+        "界面引用类型不匹配：需要 model。",
+    )
+
+    ok, control, error = web_console.web_console_schedule_control_from_payload(
+        {
+            "name": "巡检",
+            "target_agent_ref": agent_ref,
+            "execution": {"mode": "main_prompt", "routing": {"target_selector": {"role": "coder"}}},
+        },
+        refs,
+    )
+    assert ok is True
+    assert error == ""
+    assert control["name"] == "巡检"
+    assert control["execution"]["mode"] == "agent_task"
+    assert control["execution"]["routing"]["selected_agent"] == "agent-123"
+    assert control["execution"]["routing"]["target_selector"] == {"role": "coder", "agent_id": "agent-123"}
+    assert "target_agent_ref" not in control
+
+    ok, control, error = web_console.web_console_schedule_control_from_payload({"agent_ref": model_ref}, refs)
+    assert ok is False
+    assert control == {}
+    assert error == "界面引用类型不匹配：需要 agent。"
+
+
 def test_app_web_console_wrappers_match_module() -> None:
     assert app_module.WEB_CONSOLE_ACTION_REQUEST_SCHEMA == web_console.WEB_CONSOLE_ACTION_REQUEST_SCHEMA
     assert app_module.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA == web_console.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA
@@ -91,3 +155,8 @@ def test_app_web_console_wrappers_match_module() -> None:
     assert app_module.web_console_clean_visible is web_console.web_console_clean_visible
     assert app_module.web_console_status_label is web_console.web_console_status_label
     assert app_module.web_console_metric is web_console.web_console_metric
+    assert app_module.web_console_resolve_ref is web_console.web_console_resolve_ref
+    assert app_module.web_console_action_payload is web_console.web_console_action_payload
+    assert app_module.web_console_action_message is web_console.web_console_action_message
+    assert app_module.web_console_model_name_from_payload is web_console.web_console_model_name_from_payload
+    assert app_module.web_console_schedule_control_from_payload is web_console.web_console_schedule_control_from_payload
