@@ -697,6 +697,18 @@ def assert_secret_vault_module_boundary() -> None:
         {"path": "", "stable_id": "", "title": ""},
         [{"origin_import_path": "", "origin_stable_id": "", "title": ""}],
     )
+    import_entry = {"path": "/vault/imported.secret", "stable_id": "stable-import", "title": "Imported"}
+    native_entries = [
+        {"session_id": "bad", "origin_stable_id": "stable-import", "error": "bad"},
+        {"session_id": "native-import", "origin_stable_id": "stable-import", "title": "Other"},
+    ]
+    assert secret_vault_mod.secret_native_entry_for_import_entry(import_entry, native_entries) is native_entries[1]
+    original_secret_native_session_entries = a.secret_native_session_entries
+    try:
+        a.secret_native_session_entries = lambda state, *, include_payload=False: native_entries
+        assert a.secret_native_entry_for_import_entry(object(), import_entry) is native_entries[1]
+    finally:
+        a.secret_native_session_entries = original_secret_native_session_entries
     messages, loaded_rounds, total_rounds, message_count = secret_vault_mod.messages_from_secret_import_payload(
         {"raw_log_text": "raw assistant"},
         parse_pairs=lambda raw_log: [],

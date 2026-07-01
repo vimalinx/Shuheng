@@ -20006,11 +20006,10 @@ def rightbar_subagents(state: State) -> list[SubAgentRuntime]:
 
 
 def secret_native_entry_for_import_entry(state: State, import_entry: dict[str, Any]) -> Optional[dict[str, Any]]:
-    native_entries = [entry for entry in secret_native_session_entries(state, include_payload=False) if not entry.get("error")]
-    for native in native_entries:
-        if secret_import_represented_by_native(import_entry, [native]):
-            return native
-    return None
+    return secret_vault_store.secret_native_entry_for_import_entry(
+        import_entry,
+        secret_native_session_entries(state, include_payload=False),
+    )
 
 
 def subagent_sidebar_rows(state: State, sub: SubAgentRuntime, sidebar_w: int) -> list[tuple[str, Any, str, str]]:

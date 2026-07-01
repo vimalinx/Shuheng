@@ -740,6 +740,18 @@ def secret_import_represented_by_native(import_entry: dict[str, Any], native_ent
     return False
 
 
+def secret_native_entry_for_import_entry(
+    import_entry: dict[str, Any],
+    native_entries: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    for native in native_entries:
+        if native.get("error"):
+            continue
+        if secret_import_represented_by_native(import_entry, [native]):
+            return native
+    return None
+
+
 def messages_from_secret_import_payload(
     payload: dict[str, Any],
     *,

@@ -34,6 +34,7 @@ from ga_tui.secret_vault import (
     secret_encrypt_bytes,
     secret_import_represented_by_native,
     secret_import_key_id,
+    secret_native_entry_for_import_entry,
     secret_read_json_from_path,
     secret_session_state_payload,
     secret_session_title_for_messages,
@@ -371,6 +372,43 @@ class TestSecretValueHelpers:
             {"path": "", "stable_id": "", "title": ""},
             [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "other", "title": "Other"}],
         )
+
+    def test_native_entry_for_import_entry_returns_first_non_error_match(self) -> None:
+        import_entry = {
+            "path": "/vault/session/imported-sessions/alpha.secret",
+            "stable_id": "stable-alpha",
+            "title": "Alpha Import",
+        }
+        native_entries = [
+            {"session_id": "bad", "origin_stable_id": "stable-alpha", "error": "cannot decrypt"},
+            {"session_id": "native-alpha", "origin_stable_id": "stable-alpha", "title": "Other"},
+            {"session_id": "native-title", "origin_stable_id": "other", "title": "Alpha Import"},
+        ]
+
+        assert secret_native_entry_for_import_entry(import_entry, native_entries) is native_entries[1]
+        assert secret_native_entry_for_import_entry(
+            {"path": "/vault/none.secret", "stable_id": "none", "title": "None"},
+            native_entries,
+        ) is None
+
+    def test_app_native_entry_for_import_entry_wrapper_loads_state_entries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        native_entries = [
+            {"session_id": "native-alpha", "origin_stable_id": "stable-alpha"},
+        ]
+
+        def fake_secret_native_session_entries(state: object, *, include_payload: bool = False) -> list[dict[str, str]]:
+            assert include_payload is False
+            return native_entries
+
+        monkeypatch.setattr(app_module, "secret_native_session_entries", fake_secret_native_session_entries)
+
+        assert app_module.secret_native_entry_for_import_entry(
+            object(),
+            {"path": "", "stable_id": "stable-alpha", "title": ""},
+        ) is native_entries[0]
 
     def test_secret_import_payload_message_helper_uses_parsed_pairs(self) -> None:
         pair_rows = [("user prompt", "assistant response")]
