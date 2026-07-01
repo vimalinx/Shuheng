@@ -363,6 +363,8 @@ def assert_path_utils_module_boundary() -> None:
 def assert_subagent_store_module_boundary() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_subagent_store_")
     assert a.SUBAGENT_SESSION_PREFIX == subagent_store_mod.SUBAGENT_SESSION_PREFIX
+    assert a.SUBAGENT_CHAT_HISTORY_SCOPE == subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE
+    assert a.SUBAGENT_CHAT_MESSAGES_META_KEY == subagent_store_mod.SUBAGENT_CHAT_MESSAGES_META_KEY
     assert a.subagent_home_session_key is subagent_store_mod.subagent_home_session_key
     assert a.home_subagent_id_from_key is subagent_store_mod.home_subagent_id_from_key
     assert a.is_main_home_session_key is subagent_store_mod.is_main_home_session_key
@@ -389,6 +391,19 @@ def assert_subagent_store_module_boundary() -> None:
     assert sidebar_key == "subagent_session:ops-agent:chat-id-1"
     assert subagent_store_mod.subagent_session_from_sidebar_key(sidebar_key) == ("ops-agent", "chat-id-1")
     assert subagent_store_mod.secret_subagent_home("ops agent/中文") == "secret://subagents/ops-agent"
+    meta = {
+        "conversation_scope": subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE,
+        "agent_id": "ops-agent",
+        "subagent_chat_session_id": "chat-id-1",
+    }
+    sub = a.SubAgentRuntime(agent_id="ops-agent", name="Ops Agent", home="/tmp/ops-agent")
+    assert subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent")
+    assert subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent", "chat-id-1")
+    assert not subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent", "other")
+    assert not subagent_store_mod.subagent_chat_history_meta_matches(meta, "other-agent")
+    assert not subagent_store_mod.subagent_chat_history_meta_matches({**meta, "conversation_scope": "other"}, "ops-agent")
+    assert a.subagent_chat_history_meta_matches(meta, sub)
+    assert a.subagent_chat_history_meta_matches(meta, sub, "chat-id-1")
     assert not hasattr(subagent_store_mod, "write_subagent_chat_history_transcript")
     assert not hasattr(subagent_store_mod, "save_subagent_chat_messages_to_history")
     source = Path(subagent_store_mod.__file__).read_text(encoding="utf-8")

@@ -9,6 +9,8 @@ from typing import Any
 from .ui_types import MAIN_HOME_SESSION_KEY, SCHEDULED_REPORTS_SESSION_KEY, SUBAGENT_HOME_SESSION_PREFIX
 
 SUBAGENT_SESSION_PREFIX = "subagent_session:"
+SUBAGENT_CHAT_HISTORY_SCOPE = "subagent_chat"
+SUBAGENT_CHAT_MESSAGES_META_KEY = "subagent_chat_messages"
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -79,3 +81,13 @@ def subagent_session_from_sidebar_key(key: Any) -> tuple[str, str]:
     body = text[len(SUBAGENT_SESSION_PREFIX):]
     agent_id, sep, session_id = body.partition(":")
     return agent_id if sep else "", session_id if sep else ""
+
+
+def subagent_chat_history_meta_matches(meta: dict[str, Any], agent_id: str, session_id: str = "") -> bool:
+    if str(meta.get("conversation_scope") or "") != SUBAGENT_CHAT_HISTORY_SCOPE:
+        return False
+    if str(meta.get("agent_id") or "") != str(agent_id or ""):
+        return False
+    if session_id and str(meta.get("subagent_chat_session_id") or "") != session_id:
+        return False
+    return True

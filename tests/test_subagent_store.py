@@ -57,6 +57,25 @@ def test_subagent_new_chat_session_id_shape() -> None:
     assert app_module.subagent_new_chat_session_id is subagent_store.subagent_new_chat_session_id
 
 
+def test_subagent_chat_history_meta_matches_and_app_wrapper() -> None:
+    meta = {
+        "conversation_scope": subagent_store.SUBAGENT_CHAT_HISTORY_SCOPE,
+        "agent_id": "researcher",
+        "subagent_chat_session_id": "chat_20260701_120000_000000001",
+    }
+    sub = app_module.SubAgentRuntime(agent_id="researcher", name="Researcher", home="/tmp/researcher")
+
+    assert app_module.SUBAGENT_CHAT_HISTORY_SCOPE == subagent_store.SUBAGENT_CHAT_HISTORY_SCOPE
+    assert app_module.SUBAGENT_CHAT_MESSAGES_META_KEY == subagent_store.SUBAGENT_CHAT_MESSAGES_META_KEY
+    assert subagent_store.subagent_chat_history_meta_matches(meta, "researcher")
+    assert subagent_store.subagent_chat_history_meta_matches(meta, "researcher", session_id="chat_20260701_120000_000000001")
+    assert not subagent_store.subagent_chat_history_meta_matches(meta, "researcher", session_id="other")
+    assert not subagent_store.subagent_chat_history_meta_matches(meta, "other")
+    assert not subagent_store.subagent_chat_history_meta_matches({**meta, "conversation_scope": "other"}, "researcher")
+    assert app_module.subagent_chat_history_meta_matches(meta, sub)
+    assert app_module.subagent_chat_history_meta_matches(meta, sub, "chat_20260701_120000_000000001")
+
+
 def test_subagent_store_does_not_own_transcripts() -> None:
     assert not hasattr(subagent_store, "write_subagent_chat_history_transcript")
     assert not hasattr(subagent_store, "save_subagent_chat_messages_to_history")

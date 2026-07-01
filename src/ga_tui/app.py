@@ -432,8 +432,8 @@ SECRET_SUBAGENT_SESSION_ID = secret_vault_store.SECRET_SUBAGENT_SESSION_ID
 SECRET_SUBAGENT_META_KIND = secret_vault_store.SECRET_SUBAGENT_META_KIND
 SECRET_SUBAGENT_MEMORY_KIND = secret_vault_store.SECRET_SUBAGENT_MEMORY_KIND
 SECRET_SUBAGENT_CHAT_KIND = secret_vault_store.SECRET_SUBAGENT_CHAT_KIND
-SUBAGENT_CHAT_HISTORY_SCOPE = "subagent_chat"
-SUBAGENT_CHAT_MESSAGES_META_KEY = "subagent_chat_messages"
+SUBAGENT_CHAT_HISTORY_SCOPE = subagent_store_helpers.SUBAGENT_CHAT_HISTORY_SCOPE
+SUBAGENT_CHAT_MESSAGES_META_KEY = subagent_store_helpers.SUBAGENT_CHAT_MESSAGES_META_KEY
 SUBAGENT_META_LIFECYCLE_FIELDS = frozenset({"deleted", "deleted_at", "deleted_by"})
 SUBAGENT_META_ALLOWED_EXTRA_FIELDS = SUBAGENT_META_LIFECYCLE_FIELDS
 SECRET_VAULT_MIN_PASSWORD_CHARS = secret_vault_store.SECRET_VAULT_MIN_PASSWORD_CHARS
@@ -9477,13 +9477,7 @@ def messages_from_subagent_chat_payload(payload: dict[str, Any]) -> list[Message
 
 
 def subagent_chat_history_meta_matches(meta: dict[str, Any], sub: SubAgentRuntime, session_id: str = "") -> bool:
-    if str(meta.get("conversation_scope") or "") != SUBAGENT_CHAT_HISTORY_SCOPE:
-        return False
-    if str(meta.get("agent_id") or "") != sub.agent_id:
-        return False
-    if session_id and str(meta.get("subagent_chat_session_id") or "") != session_id:
-        return False
-    return True
+    return subagent_store_helpers.subagent_chat_history_meta_matches(meta, sub.agent_id, session_id=session_id)
 
 
 def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]]:
