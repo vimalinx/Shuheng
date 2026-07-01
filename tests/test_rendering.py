@@ -206,6 +206,28 @@ def test_stray_line_numbered_fence_close_does_not_swallow_next_turn_marker() -> 
     ]
 
 
+def test_close_unbalanced_markdown_fence_preserves_balanced_and_empty_text() -> None:
+    balanced = "intro\n```python\nprint('x')\n```\nfinal"
+
+    assert rendering.close_unbalanced_markdown_fence("") == ""
+    assert rendering.close_unbalanced_markdown_fence(balanced) == balanced
+
+
+def test_close_unbalanced_markdown_fence_appends_opening_tick_sequence() -> None:
+    assert rendering.close_unbalanced_markdown_fence("intro\n```python\nprint('x')") == (
+        "intro\n```python\nprint('x')\n```"
+    )
+    assert rendering.close_unbalanced_markdown_fence("intro\n````text\nbody") == "intro\n````text\nbody\n````"
+
+
+def test_close_unbalanced_markdown_fence_requires_suffixless_sufficient_close() -> None:
+    suffix_close = "intro\n```python\nbody\n```python"
+    short_close = "intro\n````python\nbody\n```"
+
+    assert rendering.close_unbalanced_markdown_fence(suffix_close) == suffix_close + "\n```"
+    assert rendering.close_unbalanced_markdown_fence(short_close) == short_close + "\n````"
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -234,6 +256,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.line_numbered_file_line is rendering.line_numbered_file_line
     assert app_module.stray_line_numbered_fence_close is rendering.stray_line_numbered_fence_close
     assert app_module.split_top_level_turn_markers is rendering.split_top_level_turn_markers
+    assert app_module.close_unbalanced_markdown_fence is rendering.close_unbalanced_markdown_fence
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line

@@ -581,6 +581,7 @@ next_nonblank_line = rendering_helpers.next_nonblank_line
 line_numbered_file_line = rendering_helpers.line_numbered_file_line
 stray_line_numbered_fence_close = rendering_helpers.stray_line_numbered_fence_close
 split_top_level_turn_markers = rendering_helpers.split_top_level_turn_markers
+close_unbalanced_markdown_fence = rendering_helpers.close_unbalanced_markdown_fence
 running_indicator = rendering_helpers.running_indicator
 running_indicator_cell_width = rendering_helpers.running_indicator_cell_width
 render_running_indicator_line = rendering_helpers.render_running_indicator_line
@@ -18694,26 +18695,6 @@ def preferred_group_visible_reply(process_turns: list[tuple[str, str]]) -> str:
         reply_block = "### IRC 回复\n" + "\n".join(f"- {reply}" for reply in irc_replies)
         chosen = (chosen.rstrip() + "\n\n" + reply_block).strip() if chosen else reply_block
     return chosen
-
-
-def close_unbalanced_markdown_fence(text: str) -> str:
-    in_code = False
-    fence_ticks = ""
-    for line in (text or "").splitlines():
-        boundary = re.match(r"^\s*(`{3,})(.*)$", line)
-        if not boundary:
-            continue
-        ticks = boundary.group(1)
-        suffix = boundary.group(2).strip()
-        if not in_code:
-            in_code = True
-            fence_ticks = ticks
-        elif len(ticks) >= len(fence_ticks) and not suffix:
-            in_code = False
-            fence_ticks = ""
-    if in_code and fence_ticks:
-        return (text or "").rstrip() + "\n" + fence_ticks
-    return text
 
 
 def append_process_turn(

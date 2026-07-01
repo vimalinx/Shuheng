@@ -346,6 +346,7 @@ def assert_rendering_module_boundary() -> None:
         "line_numbered_file_line",
         "stray_line_numbered_fence_close",
         "split_top_level_turn_markers",
+        "close_unbalanced_markdown_fence",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -447,6 +448,11 @@ def assert_rendering_module_boundary() -> None:
         "```\n",
         "7| file.py\n",
         "LLM Running (Turn 1) ...\n",
+    )
+    assert rendering_mod.close_unbalanced_markdown_fence("intro\n```python\nbody") == "intro\n```python\nbody\n```"
+    assert rendering_mod.close_unbalanced_markdown_fence("intro\n```python\nbody\n```") == "intro\n```python\nbody\n```"
+    assert rendering_mod.close_unbalanced_markdown_fence("intro\n````python\nbody\n```") == (
+        "intro\n````python\nbody\n```\n````"
     )
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."

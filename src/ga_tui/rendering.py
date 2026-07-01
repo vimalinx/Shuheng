@@ -20,6 +20,7 @@ SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
 LINE_NUMBERED_FILE_RE = re.compile(r"^[ \t]*\d+\|")
 FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
+MARKDOWN_FENCE_BOUNDARY_RE = re.compile(r"^\s*(`{3,})(.*)$")
 META_BLOCK_RE = history_title_policy.META_BLOCK_RE
 DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
@@ -124,6 +125,26 @@ def split_top_level_turn_markers(text: str) -> list[str]:
         offset += len(line)
     parts.append(text[last:])
     return parts
+
+
+def close_unbalanced_markdown_fence(text: str) -> str:
+    in_code = False
+    fence_ticks = ""
+    for line in (text or "").splitlines():
+        boundary = MARKDOWN_FENCE_BOUNDARY_RE.match(line)
+        if not boundary:
+            continue
+        ticks = boundary.group(1)
+        suffix = boundary.group(2).strip()
+        if not in_code:
+            in_code = True
+            fence_ticks = ticks
+        elif len(ticks) >= len(fence_ticks) and not suffix:
+            in_code = False
+            fence_ticks = ""
+    if in_code and fence_ticks:
+        return (text or "").rstrip() + "\n" + fence_ticks
+    return text
 
 
 def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[str]) -> set[str]:
