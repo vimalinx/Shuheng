@@ -19,6 +19,11 @@ class TestAppCompatibilityAliases:
         assert app_module.normalize_pasted_text is input_controller.normalize_pasted_text
         assert app_module.InputHistoryBrowseResult is input_controller.InputHistoryBrowseResult
         assert app_module.input_history_browse_result is input_controller.input_history_browse_result
+        assert app_module.InputTextEditResult is input_controller.InputTextEditResult
+        assert app_module.input_insert_result is input_controller.input_insert_result
+        assert app_module.input_delete_before_cursor_result is input_controller.input_delete_before_cursor_result
+        assert app_module.input_delete_at_cursor_result is input_controller.input_delete_at_cursor_result
+        assert app_module.input_horizontal_cursor_target is input_controller.input_horizontal_cursor_target
         assert app_module.MOUSE_BUTTON_STATES is input_controller.MOUSE_BUTTON_STATES
         assert app_module.mouse_button_mask_from_constants is input_controller.mouse_button_mask_from_constants
         assert app_module.mouse_modifier_mask_from_constants is input_controller.mouse_modifier_mask_from_constants
@@ -288,6 +293,108 @@ class TestInputHistoryBrowse:
         assert state.input_history_draft_cursor == 0
         assert state.command_index == 0
         assert state.dirty
+
+
+class TestInputTextEdit:
+    def test_empty_insert_reports_no_edit_without_clamping_cursor(self) -> None:
+        assert input_controller.input_insert_result("abc", 9, "") == input_controller.InputTextEditResult(
+            "abc",
+            9,
+            False,
+        )
+
+    def test_insert_clamps_cursor_and_moves_after_inserted_text(self) -> None:
+        assert input_controller.input_insert_result("abc", -3, "X") == input_controller.InputTextEditResult(
+            "Xabc",
+            1,
+            True,
+        )
+        assert input_controller.input_insert_result("abc", 99, "YZ") == input_controller.InputTextEditResult(
+            "abcYZ",
+            5,
+            True,
+        )
+
+    def test_delete_before_cursor_clamps_and_reports_actual_edit(self) -> None:
+        assert input_controller.input_delete_before_cursor_result("abc", 2) == input_controller.InputTextEditResult(
+            "ac",
+            1,
+            True,
+        )
+        assert input_controller.input_delete_before_cursor_result("abc", -2) == input_controller.InputTextEditResult(
+            "abc",
+            0,
+            False,
+        )
+        assert input_controller.input_delete_before_cursor_result("abc", 99) == input_controller.InputTextEditResult(
+            "ab",
+            2,
+            True,
+        )
+
+    def test_delete_at_cursor_clamps_and_reports_actual_edit(self) -> None:
+        assert input_controller.input_delete_at_cursor_result("abc", 1) == input_controller.InputTextEditResult(
+            "ac",
+            1,
+            True,
+        )
+        assert input_controller.input_delete_at_cursor_result("abc", -2) == input_controller.InputTextEditResult(
+            "bc",
+            0,
+            True,
+        )
+        assert input_controller.input_delete_at_cursor_result("abc", 99) == input_controller.InputTextEditResult(
+            "abc",
+            3,
+            False,
+        )
+
+    def test_horizontal_cursor_target_clamps_to_text_bounds(self) -> None:
+        assert input_controller.input_horizontal_cursor_target("abc", 1, -9) == 0
+        assert input_controller.input_horizontal_cursor_target("abc", 1, 1) == 2
+        assert input_controller.input_horizontal_cursor_target("abc", 1, 9) == 3
+
+    def test_app_insert_wrapper_applies_result_and_resets_browse_state(self) -> None:
+        state = SimpleNamespace(
+            input_text="abc",
+            input_cursor=1,
+            command_index=5,
+            input_history_index=0,
+            input_history_draft="draft",
+            input_history_draft_cursor=3,
+            dirty=False,
+        )
+
+        app_module.insert_input_text(state, "XY")
+
+        assert state.input_text == "aXYbc"
+        assert state.input_cursor == 3
+        assert state.command_index == 0
+        assert state.input_history_index is None
+        assert state.input_history_draft == ""
+        assert state.input_history_draft_cursor == 0
+        assert state.dirty
+
+    def test_app_insert_wrapper_ignores_empty_insert_without_dirtying(self) -> None:
+        state = SimpleNamespace(
+            input_text="abc",
+            input_cursor=2,
+            command_index=5,
+            input_history_index=0,
+            input_history_draft="draft",
+            input_history_draft_cursor=3,
+            dirty=False,
+        )
+
+        app_module.insert_input_text(state, "")
+
+        assert state.input_text == "abc"
+        assert state.input_cursor == 2
+        assert state.command_index == 5
+        assert state.input_history_index == 0
+        assert state.input_history_draft == "draft"
+        assert state.input_history_draft_cursor == 3
+        assert not state.dirty
 
 
 class TestMouseMaskHelpers:

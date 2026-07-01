@@ -290,6 +290,11 @@ def assert_input_controller_module_boundary() -> None:
         "normalize_pasted_text",
         "InputHistoryBrowseResult",
         "input_history_browse_result",
+        "InputTextEditResult",
+        "input_insert_result",
+        "input_delete_before_cursor_result",
+        "input_delete_at_cursor_result",
+        "input_horizontal_cursor_target",
         "mouse_button_mask_from_constants",
         "mouse_modifier_mask_from_constants",
         "mouse_known_bstate_mask_from_constants",
@@ -324,6 +329,26 @@ def assert_input_controller_module_boundary() -> None:
     assert input_controller_mod.input_history_browse_result(["old", "new"], "draft", 3, None, "", 0, -1) == (
         input_controller_mod.InputHistoryBrowseResult(True, "new", 3, 1, "draft", 3)
     )
+    assert input_controller_mod.input_insert_result("abc", 1, "X") == input_controller_mod.InputTextEditResult(
+        "aXbc",
+        2,
+        True,
+    )
+    assert input_controller_mod.input_insert_result("abc", 9, "") == input_controller_mod.InputTextEditResult(
+        "abc",
+        9,
+        False,
+    )
+    assert input_controller_mod.input_delete_before_cursor_result(
+        "abc",
+        2,
+    ) == input_controller_mod.InputTextEditResult("ac", 1, True)
+    assert input_controller_mod.input_delete_at_cursor_result("abc", 1) == input_controller_mod.InputTextEditResult(
+        "ac",
+        1,
+        True,
+    )
+    assert input_controller_mod.input_horizontal_cursor_target("abc", 1, 9) == 3
     mouse_constants = {
         "BUTTON1_PRESSED": 1 << 0,
         "BUTTON1_RELEASED": 1 << 1,

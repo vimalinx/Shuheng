@@ -774,8 +774,8 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, input-history browse target calculation, mouse-mask classification, and vertical cursor target helpers are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, input-history browsing callers, policy gates, and input-controller unit tests.
+- Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, input-history browse target calculation, text edit transition calculation, mouse-mask classification, and vertical cursor target helpers are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, input-history browsing callers, input text edit callers, policy gates, and input-controller unit tests.
 - Non-goal: This does not move the app-owned `move_input_cursor_vertical(...)` state mutation wrapper, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
 
 ### 2. Signatures
@@ -792,6 +792,11 @@ def compact_title(text: str, max_width: int = 24) -> str:
   - `normalize_pasted_text(text)`.
   - `InputHistoryBrowseResult`.
   - `input_history_browse_result(history, text, cursor, history_index, draft, draft_cursor, direction)`.
+  - `InputTextEditResult`.
+  - `input_insert_result(text, cursor, insertion)`.
+  - `input_delete_before_cursor_result(text, cursor)`.
+  - `input_delete_at_cursor_result(text, cursor)`.
+  - `input_horizontal_cursor_target(text, cursor, delta)`.
   - `mouse_button_mask_from_constants(button_no, constants)`.
   - `mouse_modifier_mask_from_constants(constants)`.
   - `mouse_known_bstate_mask_from_constants(constants, button_count=5)`.
@@ -817,6 +822,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - `input_vertical_cursor_target(...)` returns `(consumed, target_cursor)`. Empty or single-line display input returns `(False, None)`. Moving beyond the first or last wrapped display line returns `(True, None)` so callers can consume the key without mutation. Moving to an available wrapped line returns `(True, <raw cursor>)`, preserving the source display cell x as closely as possible over the same terminal-cell semantics as `input_cursor_info(...)`.
 - `normalize_pasted_text(...)` collapses one or more CR/LF runs plus surrounding spaces/tabs into one literal space, replaces remaining tabs with four spaces, and must not inspect terminal, curses, or mutable paste state.
 - `input_history_browse_result(...)` returns an immutable browse result over explicit values. Empty history and Down before browsing return `consumed=False`. First Up saves the current draft and cursor and selects the latest entry. Additional Up clamps at the oldest entry. Down moves toward newer entries, and moving beyond the newest entry restores the saved draft while clearing browse state.
+- `input_insert_result(...)`, `input_delete_before_cursor_result(...)`, `input_delete_at_cursor_result(...)`, and `input_horizontal_cursor_target(...)` return deterministic text/cursor transitions over explicit values. Non-empty insertion clamps the source cursor, inserts text, and moves the cursor after the inserted value. Empty insertion returns the original text/cursor with `edited=False`. Backspace-style deletion clamps the cursor, deletes only when the cursor is greater than zero, and reports whether text changed. Delete-style deletion clamps the cursor, deletes only when the cursor is before the end of the text, and reports whether text changed. Horizontal movement clamps the target cursor into `[0, len(text)]`.
 - Mouse bitmask helpers in `input_controller.py` are deterministic over explicit integer constants. They must not read curses globals directly.
 - `mouse_button_mask_from_constants(...)` ORs the supported button state constants (`PRESSED`, `RELEASED`, `CLICKED`, `DOUBLE_CLICKED`, `TRIPLE_CLICKED`) for the requested button.
 - `mouse_modifier_mask_from_constants(...)`, `mouse_known_bstate_mask_from_constants(...)`, `mouse_auxiliary_or_unknown_event_from_constants(...)`, and `clean_button1_action_from_constants(...)` preserve the existing primary-button/modifier/auxiliary/unknown-bit filtering semantics over explicit constants.
@@ -837,6 +843,11 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - `input_vertical_cursor_target("abcdef", 4, 5, 1)` -> `(True, None)`.
 - `normalize_pasted_text(" alpha \n\t beta\r\n gamma\t")` -> `" alpha beta gamma    "`.
 - `input_history_browse_result(["old", "new"], "draft", 3, None, "", 0, -1)` -> `InputHistoryBrowseResult(True, "new", 3, 1, "draft", 3)`.
+- `input_insert_result("abc", 1, "X")` -> `InputTextEditResult("aXbc", 2, True)`.
+- `input_insert_result("abc", 9, "")` -> `InputTextEditResult("abc", 9, False)`.
+- `input_delete_before_cursor_result("abc", 2)` -> `InputTextEditResult("ac", 1, True)`.
+- `input_delete_at_cursor_result("abc", 1)` -> `InputTextEditResult("ac", 1, True)`.
+- `input_horizontal_cursor_target("abc", 1, 9)` -> `3`.
 - `mouse_auxiliary_or_unknown_event_from_constants(primary_button_1 | modifier, constants)` -> `False`.
 - `mouse_auxiliary_or_unknown_event_from_constants(button_2, constants)` -> `True`.
 - `clean_button1_action_from_constants(button_1_clicked | modifier, button_1_clicked, constants)` -> `True`.
@@ -848,6 +859,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Good: `input_layout(...)` lives in `input_controller.py` because it is pure text geometry and prompt layout, while `draw_main(...)` remains in `app.py` and calls the compatibility alias.
 - Good: `normalize_pasted_text(...)` lives in `input_controller.py`, while bracketed paste mode, paste buffer mutation, and `handle_key(...)` stay in `app.py`.
 - Good: `input_history_browse_result(...)` lives in `input_controller.py`, while `browse_input_history(...)` stays in `app.py` and owns `State` mutation, command-index reset, and dirty marking.
+- Good: text edit transition helpers live in `input_controller.py`, while `app.py` keeps `insert_input_text(...)`, key handlers, command-index reset, input-history browse reset, and dirty marking.
 - Good: mouse bitmask classification helpers live in `input_controller.py` over explicit constants, while `app.py` keeps curses constant lookup and `handle_mouse(...)`.
 - Base: Future slices may move more input handling only after command and rendering boundaries are stable.
 - Bad: `input_controller.py` imports `State` so it can mutate `state.input_cursor`.
@@ -858,6 +870,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 - Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, input layout line/cursor behavior, vertical cursor target behavior, input-history browse target behavior, and `app.py` alias/wrapper parity.
 - Unit tests must assert paste normalization preserves collapsed newline and tab-replacement behavior plus app alias parity.
+- Unit tests must assert text insertion, backspace-style deletion, delete-style deletion, horizontal cursor movement, edit/no-edit flags, clamping behavior, app alias parity, and `insert_input_text(...)` wrapper state mutation/reset behavior.
 - Unit tests must assert direct mouse mask helper behavior over fake constants and `app.py` wrapper parity over curses constants.
 - `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.

@@ -766,11 +766,11 @@ def set_input_text(state: State, text: str, cursor: Optional[int] = None) -> Non
 
 
 def insert_input_text(state: State, text: str) -> None:
-    if not text:
+    result = input_insert_result(state.input_text, state.input_cursor, text)
+    if not result.edited:
         return
-    clamp_input_cursor(state)
-    state.input_text = state.input_text[:state.input_cursor] + text + state.input_text[state.input_cursor:]
-    state.input_cursor += len(text)
+    state.input_text = result.text
+    state.input_cursor = result.cursor
     state.command_index = 0
     reset_input_history_browse(state)
     mark_dirty(state)
@@ -19580,6 +19580,11 @@ input_vertical_cursor_target = input_controller_helpers.input_vertical_cursor_ta
 normalize_pasted_text = input_controller_helpers.normalize_pasted_text
 InputHistoryBrowseResult = input_controller_helpers.InputHistoryBrowseResult
 input_history_browse_result = input_controller_helpers.input_history_browse_result
+InputTextEditResult = input_controller_helpers.InputTextEditResult
+input_insert_result = input_controller_helpers.input_insert_result
+input_delete_before_cursor_result = input_controller_helpers.input_delete_before_cursor_result
+input_delete_at_cursor_result = input_controller_helpers.input_delete_at_cursor_result
+input_horizontal_cursor_target = input_controller_helpers.input_horizontal_cursor_target
 MOUSE_BUTTON_STATES = input_controller_helpers.MOUSE_BUTTON_STATES
 mouse_button_mask_from_constants = input_controller_helpers.mouse_button_mask_from_constants
 mouse_modifier_mask_from_constants = input_controller_helpers.mouse_modifier_mask_from_constants
@@ -25189,13 +25194,11 @@ def handle_key(stdscr, state: State, key) -> None:
         mark_dirty(state)
         return
     if key in (curses.KEY_LEFT,):
-        state.input_cursor -= 1
-        clamp_input_cursor(state)
+        state.input_cursor = input_horizontal_cursor_target(state.input_text, state.input_cursor, -1)
         mark_dirty(state)
         return
     if key in (curses.KEY_RIGHT,):
-        state.input_cursor += 1
-        clamp_input_cursor(state)
+        state.input_cursor = input_horizontal_cursor_target(state.input_text, state.input_cursor, 1)
         mark_dirty(state)
         return
     if key in (curses.KEY_PPAGE,):
@@ -25229,16 +25232,17 @@ def handle_key(stdscr, state: State, key) -> None:
         mark_dirty(state)
         return
     if key in (curses.KEY_BACKSPACE, 127, "\b"):
-        if state.input_cursor > 0:
-            state.input_text = state.input_text[:state.input_cursor - 1] + state.input_text[state.input_cursor:]
-            state.input_cursor -= 1
+        result = input_delete_before_cursor_result(state.input_text, state.input_cursor)
+        state.input_text = result.text
+        state.input_cursor = result.cursor
         state.command_index = 0
         reset_input_history_browse(state)
         mark_dirty(state)
         return
     if key in (curses.KEY_DC,):
-        if state.input_cursor < len(state.input_text):
-            state.input_text = state.input_text[:state.input_cursor] + state.input_text[state.input_cursor + 1:]
+        result = input_delete_at_cursor_result(state.input_text, state.input_cursor)
+        state.input_text = result.text
+        state.input_cursor = result.cursor
         state.command_index = 0
         reset_input_history_browse(state)
         mark_dirty(state)
@@ -25315,8 +25319,9 @@ def handle_key(stdscr, state: State, key) -> None:
         mark_dirty(state)
         return
     if isinstance(key, str) and key and key.isprintable():
-        state.input_text = state.input_text[:state.input_cursor] + key + state.input_text[state.input_cursor:]
-        state.input_cursor += len(key)
+        result = input_insert_result(state.input_text, state.input_cursor, key)
+        state.input_text = result.text
+        state.input_cursor = result.cursor
         state.command_index = 0
         reset_input_history_browse(state)
         mark_dirty(state)

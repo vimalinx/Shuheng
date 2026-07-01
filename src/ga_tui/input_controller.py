@@ -23,6 +23,13 @@ class InputHistoryBrowseResult:
     draft_cursor: int = 0
 
 
+@dataclass(frozen=True)
+class InputTextEditResult:
+    text: str
+    cursor: int
+    edited: bool = False
+
+
 def _mouse_constant(constants: Mapping[str, object], name: str) -> int:
     try:
         return int(constants.get(name, 0) or 0)
@@ -170,6 +177,38 @@ def input_history_browse_result(
     if next_index >= len(entries):
         return InputHistoryBrowseResult(True, next_draft, next_draft_cursor, None, "", 0)
     return InputHistoryBrowseResult(True, entries[next_index], len(entries[next_index]), next_index, next_draft, next_draft_cursor)
+
+
+def input_insert_result(text: str, cursor: int, insertion: str) -> InputTextEditResult:
+    raw = text or ""
+    if not insertion:
+        return InputTextEditResult(raw, int(cursor or 0), False)
+    insert_at = max(0, min(int(cursor or 0), len(raw)))
+    next_text = raw[:insert_at] + insertion + raw[insert_at:]
+    return InputTextEditResult(next_text, insert_at + len(insertion), True)
+
+
+def input_delete_before_cursor_result(text: str, cursor: int) -> InputTextEditResult:
+    raw = text or ""
+    delete_at = max(0, min(int(cursor or 0), len(raw)))
+    if delete_at <= 0:
+        return InputTextEditResult(raw, delete_at, False)
+    next_text = raw[:delete_at - 1] + raw[delete_at:]
+    return InputTextEditResult(next_text, delete_at - 1, True)
+
+
+def input_delete_at_cursor_result(text: str, cursor: int) -> InputTextEditResult:
+    raw = text or ""
+    delete_at = max(0, min(int(cursor or 0), len(raw)))
+    if delete_at >= len(raw):
+        return InputTextEditResult(raw, delete_at, False)
+    next_text = raw[:delete_at] + raw[delete_at + 1:]
+    return InputTextEditResult(next_text, delete_at, True)
+
+
+def input_horizontal_cursor_target(text: str, cursor: int, delta: int) -> int:
+    raw = text or ""
+    return max(0, min(int(cursor or 0) + int(delta or 0), len(raw)))
 
 
 def mouse_button_mask_from_constants(button_no: int, constants: Mapping[str, object]) -> int:
