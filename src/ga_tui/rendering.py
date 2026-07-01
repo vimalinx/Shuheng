@@ -237,6 +237,12 @@ def process_speech_summary_line_text(marker: str, summary: str, tools: list[str]
     return f"· 过程 {process_turn_label(marker)}: {summary}{process_tool_suffix(tools)}"
 
 
+def process_summary_append_lines(summary: str, summary_line: str) -> list[str]:
+    if summary and summary != "执行中":
+        return [summary_line]
+    return []
+
+
 def expanded_process_header_text(marker: str, summary: str, tools: list[str], current: bool) -> str:
     title = f": {summary}" if summary else ""
     status = "正在等待用户输入" if current else "已展开"

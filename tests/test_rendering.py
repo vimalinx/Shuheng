@@ -948,6 +948,9 @@ def test_process_line_format_helpers_render_expected_strings() -> None:
     assert rendering.process_speech_summary_line_text(marker, "整理结果", ["web.search"]) == (
         "· 过程 Turn 7: 整理结果 · tool: web.search"
     )
+    assert rendering.process_summary_append_lines("整理结果", "summary row") == ["summary row"]
+    assert rendering.process_summary_append_lines("", "summary row") == []
+    assert rendering.process_summary_append_lines("执行中", "summary row") == []
     assert rendering.expanded_process_header_text(marker, "整理结果", ["web.search"], True) == (
         "▾ 过程 Turn 7: 整理结果 · tool: web.search (正在等待用户输入)"
     )
@@ -1162,6 +1165,15 @@ def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
         "人工摘要",
         tools,
     )
+    rendered_summary: list[str] = []
+    assert app_module.append_process_summary_line(rendered_summary, marker, body)
+    assert rendered_summary == rendering.process_summary_append_lines(
+        app_module.process_summary_text(body),
+        app_module.process_speech_summary_line(marker, body, app_module.process_summary_text(body)),
+    )
+    pending_summary: list[str] = []
+    assert not app_module.append_process_summary_line(pending_summary, marker, "<summary>执行中</summary>")
+    assert pending_summary == []
     assert app_module.expanded_process_header(marker, body, True) == rendering.expanded_process_header_text(
         marker,
         app_module.process_summary_text(body),
@@ -1554,6 +1566,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.process_detail_line_text is rendering.process_detail_line_text
     assert app_module.process_speech_header_text is rendering.process_speech_header_text
     assert app_module.process_speech_summary_line_text is rendering.process_speech_summary_line_text
+    assert app_module.process_summary_append_lines is rendering.process_summary_append_lines
     assert app_module.expanded_process_header_text is rendering.expanded_process_header_text
     assert app_module.process_group_header_parts is rendering.process_group_header_parts
     assert app_module.process_group_header_text is rendering.process_group_header_text

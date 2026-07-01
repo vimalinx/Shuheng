@@ -376,6 +376,7 @@ def assert_rendering_module_boundary() -> None:
         "process_detail_line_text",
         "process_speech_header_text",
         "process_speech_summary_line_text",
+        "process_summary_append_lines",
         "expanded_process_header_text",
         "process_group_header_parts",
         "process_group_header_text",
@@ -540,6 +541,16 @@ def assert_rendering_module_boundary() -> None:
     )
     assert a.process_speech_summary_line(process_marker, process_body, "人工摘要") == (
         rendering_mod.process_speech_summary_line_text(process_marker, "人工摘要", process_tools)
+    )
+    assert rendering_mod.process_summary_append_lines("整理过程", "summary row") == ["summary row"]
+    assert rendering_mod.process_summary_append_lines("", "summary row") == []
+    assert rendering_mod.process_summary_append_lines("执行中", "summary row") == []
+    rendered_summary: list[str] = []
+    assert a.process_summary_append_lines is rendering_mod.process_summary_append_lines
+    assert a.append_process_summary_line(rendered_summary, process_marker, process_body)
+    assert rendered_summary == rendering_mod.process_summary_append_lines(
+        a.process_summary_text(process_body),
+        a.process_speech_summary_line(process_marker, process_body, a.process_summary_text(process_body)),
     )
     assert a.expanded_process_header(process_marker, process_body, True) == rendering_mod.expanded_process_header_text(
         process_marker,
@@ -1273,6 +1284,7 @@ def assert_rendering_module_boundary() -> None:
         "def interaction_input_prompt_text",
         "def interaction_footer_text",
         "def process_title_text_from_parts",
+        "def process_summary_append_lines",
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",

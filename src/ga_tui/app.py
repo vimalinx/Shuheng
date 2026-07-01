@@ -619,6 +619,7 @@ collapsed_process_line_text = rendering_helpers.collapsed_process_line_text
 process_detail_line_text = rendering_helpers.process_detail_line_text
 process_speech_header_text = rendering_helpers.process_speech_header_text
 process_speech_summary_line_text = rendering_helpers.process_speech_summary_line_text
+process_summary_append_lines = rendering_helpers.process_summary_append_lines
 expanded_process_header_text = rendering_helpers.expanded_process_header_text
 process_group_header_parts = rendering_helpers.process_group_header_parts
 process_group_header_text = rendering_helpers.process_group_header_text
@@ -18409,10 +18410,9 @@ def process_speech_summary_line(marker: str, body: str, summary: str) -> str:
 
 def append_process_summary_line(rendered: list[str], marker: str, body: str) -> bool:
     summary = process_summary_text(body)
-    if summary and summary != "执行中":
-        rendered.append(process_speech_summary_line(marker, body, summary))
-        return True
-    return False
+    lines = process_summary_append_lines(summary, process_speech_summary_line(marker, body, summary))
+    rendered.extend(lines)
+    return bool(lines)
 
 
 def expanded_process_header(marker: str, body: str, current: bool) -> str:
