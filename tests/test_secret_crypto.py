@@ -23,6 +23,8 @@ from ga_tui.secret_vault import (
     normalize_secret_proxy_endpoint,
     parse_secret_import_args,
     parse_secret_proxy_chain,
+    resolve_secret_imported_session_entry,
+    resolve_secret_native_session_entry,
     secret_b64,
     secret_create_vault,
     secret_crypto_available,
@@ -169,6 +171,8 @@ class TestAppCompatibility:
         assert app_module.parse_secret_import_args is parse_secret_import_args
         assert app_module.parse_secret_proxy_chain is parse_secret_proxy_chain
         assert app_module.normalize_secret_proxy_endpoint is normalize_secret_proxy_endpoint
+        assert app_module.resolve_secret_imported_session_entry is resolve_secret_imported_session_entry
+        assert app_module.resolve_secret_native_session_entry is resolve_secret_native_session_entry
 
 
 class TestSecretValueHelpers:
@@ -207,6 +211,129 @@ class TestSecretValueHelpers:
         assert normalize_secret_proxy_endpoint("tor") == SECRET_DEFAULT_TOR_SOCKS
         assert normalize_secret_proxy_endpoint("127.0.0.1:9051") == "socks5h://127.0.0.1:9051"
         assert normalize_secret_proxy_endpoint("http://proxy:8080") == "http://proxy:8080"
+
+    def test_imported_session_resolver_matches_current_candidates(self) -> None:
+        entries = [
+            {"path": "/vault/broken.secret", "error": "bad"},
+            {
+                "path": "/vault/session-a/imported-sessions/alpha.secret",
+                "stable_id": "stable-alpha",
+                "basename": "source-alpha.txt",
+                "title": "Alpha Title",
+            },
+            {
+                "path": "/vault/session-b/imported-sessions/beta.secret",
+                "stable_id": "stable-beta",
+                "basename": "source-beta.txt",
+                "title": "Beta Title",
+            },
+        ]
+
+        entry, error = resolve_secret_imported_session_entry(entries, "S2")
+        assert entry is entries[2]
+        assert error == ""
+
+        entry, error = resolve_secret_imported_session_entry(entries, "id:stable-alpha")
+        assert entry is entries[1]
+        assert error == ""
+
+        entry, error = resolve_secret_imported_session_entry(entries, "secret_import:beta.secret")
+        assert entry is entries[2]
+        assert error == ""
+
+        entry, error = resolve_secret_imported_session_entry(entries, "Alpha Title")
+        assert entry is None
+        assert error == "找不到 Secret 导入会话，请先 /Secret sessions 查看编号。"
+
+    def test_imported_session_resolver_errors(self) -> None:
+        assert resolve_secret_imported_session_entry([], "1") == (
+            None,
+            "Secret Vault 里没有可打开的已导入会话。",
+        )
+        assert resolve_secret_imported_session_entry([{"error": "bad"}], "") == (
+            None,
+            "Secret Vault 里没有可打开的已导入会话。",
+        )
+        assert resolve_secret_imported_session_entry([{"path": "/vault/a.secret"}], "") == (
+            None,
+            "Usage: /Secret open <编号|id|文件名>",
+        )
+        assert resolve_secret_imported_session_entry([{"path": "/vault/a.secret"}], "2") == (
+            None,
+            "索引越界: 1-1",
+        )
+        duplicate_entries = [
+            {"path": "/vault/a/dup.secret", "stable_id": "same"},
+            {"path": "/vault/b/dup.secret", "stable_id": "same"},
+        ]
+        assert resolve_secret_imported_session_entry(duplicate_entries, "same") == (
+            None,
+            "匹配到多个 Secret 导入会话：same",
+        )
+
+    def test_native_session_resolver_matches_current_candidates(self) -> None:
+        entries = [
+            {"session_id": "broken", "error": "bad"},
+            {"session_id": "alpha", "title": "Alpha Secret"},
+            {"session_id": "beta", "title": "Beta Secret"},
+        ]
+
+        entry, error = resolve_secret_native_session_entry(entries, "2")
+        assert entry is entries[2]
+        assert error == ""
+
+        entry, error = resolve_secret_native_session_entry(entries, "secret_session:beta")
+        assert entry is entries[2]
+        assert error == ""
+
+        entry, error = resolve_secret_native_session_entry(entries, "Alpha Secret")
+        assert entry is entries[1]
+        assert error == ""
+
+    def test_native_session_resolver_errors(self) -> None:
+        assert resolve_secret_native_session_entry([], "1") == (
+            None,
+            "Secret Vault 里没有可打开的加密会话。",
+        )
+        assert resolve_secret_native_session_entry([{"error": "bad"}], "") == (
+            None,
+            "Secret Vault 里没有可打开的加密会话。",
+        )
+        assert resolve_secret_native_session_entry([{"session_id": "a"}], "") == (
+            None,
+            "Usage: /Secret open-session <编号|session_id>",
+        )
+        assert resolve_secret_native_session_entry([{"session_id": "a"}], "2") == (
+            None,
+            "索引越界: 1-1",
+        )
+        duplicate_entries = [
+            {"session_id": "a", "title": "Same"},
+            {"session_id": "b", "title": "Same"},
+        ]
+        assert resolve_secret_native_session_entry(duplicate_entries, "Same") == (
+            None,
+            "匹配到多个 Secret 会话：Same",
+        )
+
+    def test_app_resolver_wrappers_delegate_to_secret_vault_helpers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        imported_entries = [{"path": "/vault/a.secret"}, {"path": "/vault/b.secret"}]
+        native_entries = [{"session_id": "a"}, {"session_id": "b"}]
+
+        monkeypatch.setattr(app_module, "secret_imported_session_entries", lambda state: imported_entries)
+        monkeypatch.setattr(
+            app_module,
+            "secret_native_session_entries",
+            lambda state, *, include_payload=False: native_entries if include_payload else [],
+        )
+
+        imported_entry, imported_error = app_module.resolve_secret_imported_session(object(), "2")
+        native_entry, native_error = app_module.resolve_secret_native_session(object(), "S2")
+
+        assert imported_entry is imported_entries[1]
+        assert imported_error == ""
+        assert native_entry is native_entries[1]
+        assert native_error == ""
 
 
 class TestSecretVaultStorage:

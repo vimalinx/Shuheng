@@ -647,6 +647,8 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.parse_secret_import_args is secret_vault_mod.parse_secret_import_args
     assert a.parse_secret_proxy_chain is secret_vault_mod.parse_secret_proxy_chain
     assert a.normalize_secret_proxy_endpoint is secret_vault_mod.normalize_secret_proxy_endpoint
+    assert a.resolve_secret_imported_session_entry is secret_vault_mod.resolve_secret_imported_session_entry
+    assert a.resolve_secret_native_session_entry is secret_vault_mod.resolve_secret_native_session_entry
     assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
     assert a.SECRET_AUTO_TOR_ENV == secret_vault_mod.SECRET_AUTO_TOR_ENV
     assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
@@ -662,6 +664,24 @@ def assert_secret_vault_module_boundary() -> None:
     ]
     assert secret_vault_mod.normalize_secret_proxy_endpoint("tor") == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
     assert secret_vault_mod.normalize_secret_proxy_endpoint("host:9051") == "socks5h://host:9051"
+    imported_entry, imported_error = secret_vault_mod.resolve_secret_imported_session_entry(
+        [
+            {"path": "/vault/a.secret", "error": "bad"},
+            {"path": "/vault/a/imported-sessions/alpha.secret", "stable_id": "stable-alpha"},
+        ],
+        "id:stable-alpha",
+    )
+    assert imported_error == ""
+    assert imported_entry and imported_entry["stable_id"] == "stable-alpha"
+    native_entry, native_error = secret_vault_mod.resolve_secret_native_session_entry(
+        [
+            {"session_id": "a", "error": "bad"},
+            {"session_id": "native-alpha", "title": "Native Alpha"},
+        ],
+        "secret_session:native-alpha",
+    )
+    assert native_error == ""
+    assert native_entry and native_entry["session_id"] == "native-alpha"
     source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
         assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"

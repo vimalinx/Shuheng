@@ -2611,6 +2611,8 @@ parse_secret_import_args = secret_vault_store.parse_secret_import_args
 messages_from_secret_session_payload = secret_vault_store.messages_from_secret_session_payload
 parse_secret_proxy_chain = secret_vault_store.parse_secret_proxy_chain
 normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endpoint
+resolve_secret_imported_session_entry = secret_vault_store.resolve_secret_imported_session_entry
+resolve_secret_native_session_entry = secret_vault_store.resolve_secret_native_session_entry
 
 
 def secret_vault_paths() -> secret_vault_store.SecretVaultPaths:
@@ -3143,38 +3145,7 @@ def format_secret_sessions(state: State) -> str:
 
 
 def resolve_secret_imported_session(state: State, target: str) -> tuple[Optional[dict[str, Any]], str]:
-    entries = [entry for entry in secret_imported_session_entries(state) if not entry.get("error")]
-    if not entries:
-        return None, "Secret Vault 里没有可打开的已导入会话。"
-    raw = secret_import_target_from_sidebar_key(target)
-    if not raw:
-        return None, "Usage: /Secret open <编号|id|文件名>"
-    m = re.fullmatch(r"[sS]?(\d+)", raw)
-    if m:
-        idx = int(m.group(1)) - 1
-        if 0 <= idx < len(entries):
-            return entries[idx], ""
-        return None, f"索引越界: 1-{len(entries)}"
-    normalized = re.sub(r"^(?:id:|#)", "", raw, flags=re.I)
-    matches = []
-    for entry in entries:
-        entry_path = str(entry.get("path") or "")
-        basename = os.path.basename(str(entry.get("path") or ""))
-        candidates = {
-            entry_path,
-            normalized_path(entry_path),
-            basename,
-            basename.removesuffix(".secret"),
-            str(entry.get("stable_id") or ""),
-            str(entry.get("basename") or ""),
-        }
-        if raw in candidates or normalized in candidates:
-            matches.append(entry)
-    if len(matches) == 1:
-        return matches[0], ""
-    if len(matches) > 1:
-        return None, f"匹配到多个 Secret 导入会话：{raw}"
-    return None, "找不到 Secret 导入会话，请先 /Secret sessions 查看编号。"
+    return resolve_secret_imported_session_entry(secret_imported_session_entries(state), target)
 
 
 def messages_from_secret_import_payload(payload: dict[str, Any]) -> tuple[list[Message], int, int, int]:
@@ -3247,29 +3218,7 @@ def restore_secret_imported_session(state: State, target: str) -> str:
 
 
 def resolve_secret_native_session(state: State, target: str) -> tuple[Optional[dict[str, Any]], str]:
-    entries = [entry for entry in secret_native_session_entries(state, include_payload=True) if not entry.get("error")]
-    if not entries:
-        return None, "Secret Vault 里没有可打开的加密会话。"
-    raw = secret_session_id_from_sidebar_key(target)
-    if not raw:
-        return None, "Usage: /Secret open-session <编号|session_id>"
-    m = re.fullmatch(r"[sS]?(\d+)", raw)
-    if m:
-        idx = int(m.group(1)) - 1
-        if 0 <= idx < len(entries):
-            return entries[idx], ""
-        return None, f"索引越界: 1-{len(entries)}"
-    matches = []
-    for entry in entries:
-        session_id = str(entry.get("session_id") or "")
-        title = str(entry.get("title") or "")
-        if raw in {session_id, title, secret_session_sidebar_key(session_id)}:
-            matches.append(entry)
-    if len(matches) == 1:
-        return matches[0], ""
-    if len(matches) > 1:
-        return None, f"匹配到多个 Secret 会话：{raw}"
-    return None, "找不到 Secret 会话。"
+    return resolve_secret_native_session_entry(secret_native_session_entries(state, include_payload=True), target)
 
 
 def restore_secret_native_session(state: State, target: str) -> str:

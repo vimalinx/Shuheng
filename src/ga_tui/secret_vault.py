@@ -656,6 +656,73 @@ def normalize_secret_proxy_endpoint(endpoint: str) -> str:
     return value
 
 
+def resolve_secret_imported_session_entry(
+    entries: list[dict[str, Any]],
+    target: str,
+) -> tuple[Optional[dict[str, Any]], str]:
+    candidates = [entry for entry in entries if not entry.get("error")]
+    if not candidates:
+        return None, "Secret Vault 里没有可打开的已导入会话。"
+    raw = secret_import_target_from_sidebar_key(target)
+    if not raw:
+        return None, "Usage: /Secret open <编号|id|文件名>"
+    match = re.fullmatch(r"[sS]?(\d+)", raw)
+    if match:
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < len(candidates):
+            return candidates[idx], ""
+        return None, f"索引越界: 1-{len(candidates)}"
+    normalized = re.sub(r"^(?:id:|#)", "", raw, flags=re.I)
+    matches: list[dict[str, Any]] = []
+    for entry in candidates:
+        entry_path = str(entry.get("path") or "")
+        basename = os.path.basename(entry_path)
+        entry_candidates = {
+            entry_path,
+            normalized_path(entry_path),
+            basename,
+            basename.removesuffix(".secret"),
+            str(entry.get("stable_id") or ""),
+            str(entry.get("basename") or ""),
+        }
+        if raw in entry_candidates or normalized in entry_candidates:
+            matches.append(entry)
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        return None, f"匹配到多个 Secret 导入会话：{raw}"
+    return None, "找不到 Secret 导入会话，请先 /Secret sessions 查看编号。"
+
+
+def resolve_secret_native_session_entry(
+    entries: list[dict[str, Any]],
+    target: str,
+) -> tuple[Optional[dict[str, Any]], str]:
+    candidates = [entry for entry in entries if not entry.get("error")]
+    if not candidates:
+        return None, "Secret Vault 里没有可打开的加密会话。"
+    raw = secret_session_id_from_sidebar_key(target)
+    if not raw:
+        return None, "Usage: /Secret open-session <编号|session_id>"
+    match = re.fullmatch(r"[sS]?(\d+)", raw)
+    if match:
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < len(candidates):
+            return candidates[idx], ""
+        return None, f"索引越界: 1-{len(candidates)}"
+    matches: list[dict[str, Any]] = []
+    for entry in candidates:
+        session_id = str(entry.get("session_id") or "")
+        title = str(entry.get("title") or "")
+        if raw in {session_id, title, secret_session_sidebar_key(session_id)}:
+            matches.append(entry)
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        return None, f"匹配到多个 Secret 会话：{raw}"
+    return None, "找不到 Secret 会话。"
+
+
 def secret_write_sealed_import(
     paths: SecretVaultPaths,
     public_key: bytes,
