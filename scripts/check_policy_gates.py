@@ -339,6 +339,8 @@ def assert_rendering_module_boundary() -> None:
         "message_render_cache_key",
         "strip_meta_blocks",
         "strip_inline_markdown",
+        "is_table_separator",
+        "split_table_row",
         "process_preview",
         "process_summary_text",
         "TURN_NO_RE",
@@ -698,6 +700,16 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.strip_inline_markdown("**bold** __strong__ *italic* _em_") == (
         "bold strong italic em"
     )
+    assert rendering_mod.is_table_separator(["---", ":---", "---:", ":---:"])
+    assert not rendering_mod.is_table_separator([])
+    assert not rendering_mod.is_table_separator(["---", "not-separator"])
+    assert rendering_mod.split_table_row(
+        "| **Name** | [Doc](https://example.invalid) | `cmd --flag` |"
+    ) == [
+        "Name",
+        "Doc (https://example.invalid)",
+        "cmd --flag",
+    ]
     assert rendering_mod.boxed_user_lines("hi", 20) == [
         "┌──────────┐",
         "│ hi       │",
@@ -744,6 +756,8 @@ def assert_rendering_module_boundary() -> None:
         "def preferred_group_visible_reply_text",
         "def boxed_user_lines",
         "def strip_inline_markdown",
+        "def is_table_separator",
+        "def split_table_row",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",

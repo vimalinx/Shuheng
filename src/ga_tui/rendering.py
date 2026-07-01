@@ -194,6 +194,15 @@ def strip_inline_markdown(text: str) -> str:
     return text
 
 
+def is_table_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
+
+
+def split_table_row(line: str) -> list[str]:
+    raw = line.strip().strip("|")
+    return [strip_inline_markdown(cell.strip()) for cell in raw.split("|")]
+
+
 def visible_reply_is_substantive(text: str) -> bool:
     clean = strip_inline_markdown(clean_text(text or "")).strip()
     if len(clean) >= 180:

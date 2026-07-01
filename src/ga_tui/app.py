@@ -578,6 +578,8 @@ strip_meta_blocks = rendering_helpers.strip_meta_blocks
 strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
 strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 strip_inline_markdown = rendering_helpers.strip_inline_markdown
+is_table_separator = rendering_helpers.is_table_separator
+split_table_row = rendering_helpers.split_table_row
 visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
@@ -18773,15 +18775,6 @@ def render_assistant_text(
                     if summary and summary != "执行中":
                         rendered.append(process_speech_summary_line(marker, body, summary))
     return "\n".join(line for line in rendered if line.strip()).strip()
-
-
-def is_table_separator(cells: list[str]) -> bool:
-    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", c.strip()) for c in cells)
-
-
-def split_table_row(line: str) -> list[str]:
-    raw = line.strip().strip("|")
-    return [strip_inline_markdown(c.strip()) for c in raw.split("|")]
 
 
 def render_table(lines: list[str], width: int) -> list[RenderLine]:
