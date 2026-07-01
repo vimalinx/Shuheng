@@ -285,6 +285,7 @@ and app.py monolith risk.
 - History row source: `cached_session_rows(state, exclude_pid)` returns `(path, last_user_at, preview, rounds, description)`.
 - Sidebar display source: `load_history()` maps `session_names.json` or `preview` into `state.history_names`.
 - Process filtering helpers: `session_preview_from_pairs()`, `session_response_preview_text()`, `session_summary_titles_from_text()`, and `history_cache_has_process_only_preview()`.
+- Low-level response-body parser: `history_store.assistant_text_from_response_body(response_body)`, re-exported from `app.py` for compatibility.
 
 ### 3. Contracts
 
@@ -299,10 +300,15 @@ and app.py monolith risk.
 - Standalone progress-dot deltas from OMP (`.` on its own line) are process noise and must not render in the transcript.
 - Current OMP thinking process summaries should use a compact excerpt of the thinking text, not the fixed label `OMP 思考`.
 - Legacy process blocks with `<summary>OMP 思考</summary>` should render a compact excerpt from the `<thinking>` body.
+- `assistant_text_from_response_body(...)` belongs to `history_store.py` because it parses stored model response block bodies into assistant text without reading `State`, session metadata, Web Console payloads, or rendering state.
+- `assistant_text_from_response_body(...)` must preserve the stored-transcript parser contract: Python literal response lists join text dicts and string blocks, response dicts read `content` text lists or fallback `content`/`text` fields, malformed bodies fall back to cleaned raw text, and non-text literal values fall back to cleaned strings.
+- `history_store.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
 ### 4. Validation & Error Matrix
 
 - Raw response has `<summary>OMP 思考</summary>` plus final visible prose -> sidebar title uses the user task, not `OMP 思考`.
+- Stored response body is a Python literal list/dict -> low-level parser returns the same assistant text that preview/title policy consumes.
+- Stored response body is malformed -> low-level parser returns cleaned raw text rather than raising and breaking history restoration.
 - Cached metadata has `preview:"OMP 思考"` and matching file mtime/size -> cache is treated stale and recomputed.
 - AI metadata context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
 - New user/assistant content by itself does not persist a new title; the title changes only when the main runtime emits `session.rename`.
@@ -321,12 +327,16 @@ and app.py monolith risk.
 - Good: A long OMP research turn with many thinking/tool/status blocks renders as one expandable `过程组` plus the final report, not dozens of separate `过程 Turn` lines.
 - Good: An OMP IRC demo shows the final conclusion and `IRC 回复` snippets from DemoAlpha/DemoBeta even if later turns only close the demo agents.
 - Base: A normal non-process assistant `<summary>` can still be used as a title candidate.
+- Base: The low-level response-body parser may return process-marked text; higher-level preview/title helpers still own process-summary filtering.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
+- Bad: `history_store.py` imports `app.py` so it can call `latest_visible_reply_text(...)`.
 - Bad: Main transcript shows standalone `.` lines between process turns.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert OMP process summaries do not title history rows.
+- `scripts/check_policy_gates.py` must assert `assistant_text_from_response_body` is owned by `history_store.py`, re-exported by `app.py`, and that `history_store.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard dependencies.
+- Unit tests must assert response-body parser behavior for list bodies, dict `content` lists, dict fallback fields, and malformed raw bodies.
 - The test must seed a stale `session_meta.json` cache with `preview:"OMP 思考"` to prove cache invalidation.
 - The test must assert restored preview messages and AI metadata context exclude process-only summary and hidden reasoning.
 - Tests must assert automatic persisted title maintenance uses model-owned `session.rename`, while metadata refresh alone does not write titles and manual titles remain stable.

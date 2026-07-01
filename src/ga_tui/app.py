@@ -1265,6 +1265,9 @@ def clear_missing_source_session_meta(meta: dict[str, Any]) -> tuple[dict[str, A
     return history_store.clear_missing_source_session_meta(meta)
 
 
+assistant_text_from_response_body = history_store.assistant_text_from_response_body
+
+
 def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[list[tuple[str, float, str, int, str]], bool]:
     names: dict[str, str] = {}
     if session_names is not None:
@@ -17025,32 +17028,6 @@ def compact_description(text: str, max_chars: int = SESSION_DESCRIPTION_LIMIT) -
     if len(text) > max_chars:
         text = text[: max(0, max_chars - 3)].rstrip(" -:：。,.，") + "..."
     return text
-
-
-def assistant_text_from_response_body(response_body: str) -> str:
-    try:
-        blocks = ast.literal_eval(response_body)
-    except Exception:
-        return clean_text(response_body)
-    if isinstance(blocks, list):
-        parts: list[str] = []
-        for block in blocks:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text") or ""))
-            elif isinstance(block, str):
-                parts.append(block)
-        return "\n".join(part for part in parts if part)
-    if isinstance(blocks, dict):
-        content = blocks.get("content")
-        if isinstance(content, list):
-            parts = [
-                str(item.get("text") or "")
-                for item in content
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            return "\n".join(part for part in parts if part)
-        return str(content or blocks.get("text") or "")
-    return clean_text(str(blocks or ""))
 
 
 def text_has_process_markers(text: str) -> bool:

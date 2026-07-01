@@ -90,3 +90,29 @@ class TestTranscriptStorage:
         assert "first reply" in content
         assert "second user" in content
         assert content.count("=== Prompt ===") == 2
+
+
+class TestResponseBodyParser:
+    def test_assistant_text_from_response_body_list(self) -> None:
+        body = repr([
+            {"type": "text", "text": "first"},
+            "second",
+            {"type": "image", "text": "ignored"},
+        ])
+
+        assert history_store.assistant_text_from_response_body(body) == "first\nsecond"
+
+    def test_assistant_text_from_response_body_content_list(self) -> None:
+        body = repr({"content": [{"type": "text", "text": "alpha"}, {"type": "text", "text": "beta"}]})
+
+        assert history_store.assistant_text_from_response_body(body) == "alpha\nbeta"
+
+    def test_assistant_text_from_response_body_dict_fallback_fields(self) -> None:
+        assert history_store.assistant_text_from_response_body(repr({"content": "direct"})) == "direct"
+        assert history_store.assistant_text_from_response_body(repr({"text": "text-field"})) == "text-field"
+
+    def test_assistant_text_from_response_body_malformed_falls_back_to_clean_text(self) -> None:
+        assert history_store.assistant_text_from_response_body("\x1b[31mnot python") == "not python"
+
+    def test_app_wrapper_matches_module(self) -> None:
+        assert app_module.assistant_text_from_response_body is history_store.assistant_text_from_response_body

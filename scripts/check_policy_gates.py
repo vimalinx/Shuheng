@@ -280,8 +280,21 @@ def assert_history_store_module_boundary() -> None:
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
     assert a.clear_missing_source_session_meta({"source_missing": True}) == history_store_mod.clear_missing_source_session_meta({"source_missing": True})
     assert a.is_subagent_session_log_sample("[GA TUI SubAgent Profile]") is history_store_mod.is_subagent_session_log_sample("[GA TUI SubAgent Profile]")
+    assert a.assistant_text_from_response_body is history_store_mod.assistant_text_from_response_body
+    assert history_store_mod.assistant_text_from_response_body(repr([{"type": "text", "text": "hello"}, "world"])) == "hello\nworld"
     source = Path(history_store_mod.__file__).read_text(encoding="utf-8")
-    for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "web_console",
+        "dashboard",
+    ):
         assert forbidden not in source, f"{history_store_mod.__file__}: {forbidden}"
     root = tempfile.mkdtemp(prefix="ga_tui_history_store_")
     meta_path = os.path.join(root, "session_meta.json")

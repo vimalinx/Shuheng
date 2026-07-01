@@ -1,6 +1,7 @@
 """Low-level history metadata and transcript storage helpers."""
 from __future__ import annotations
 
+import ast
 import json
 import os
 import time
@@ -192,6 +193,32 @@ def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -
         os.utime(path, None)
     except OSError:
         pass
+
+
+def assistant_text_from_response_body(response_body: str) -> str:
+    try:
+        blocks = ast.literal_eval(response_body)
+    except Exception:
+        return clean_text(response_body)
+    if isinstance(blocks, list):
+        parts: list[str] = []
+        for block in blocks:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(part for part in parts if part)
+    if isinstance(blocks, dict):
+        content = blocks.get("content")
+        if isinstance(content, list):
+            parts = [
+                str(item.get("text") or "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            return "\n".join(part for part in parts if part)
+        return str(content or blocks.get("text") or "")
+    return clean_text(str(blocks or ""))
 
 
 def messages_from_preview_dicts(raw: Any) -> list[Message]:
