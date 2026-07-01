@@ -3150,14 +3150,12 @@ def resolve_secret_imported_session(state: State, target: str) -> tuple[Optional
 
 
 def messages_from_secret_import_payload(payload: dict[str, Any]) -> tuple[list[Message], int, int, int]:
-    raw_log = str(payload.get("raw_log_text") or "")
-    pairs = _pairs(raw_log)
-    if pairs:
-        messages, loaded_rounds, total_rounds = history_messages_from_pairs(pairs, RESTORE_DISPLAY_ROUNDS)
-        return messages, loaded_rounds, total_rounds, len(messages)
-    if raw_log.strip():
-        return [Message("assistant", raw_log.strip())], 1, 1, 1
-    return [Message("system", "Secret 导入会话为空。")], 0, 0, 1
+    return secret_vault_store.messages_from_secret_import_payload(
+        payload,
+        parse_pairs=_pairs,
+        messages_from_pairs=history_messages_from_pairs,
+        restore_display_rounds=RESTORE_DISPLAY_ROUNDS,
+    )
 
 
 def restore_secret_imported_session(state: State, target: str) -> str:

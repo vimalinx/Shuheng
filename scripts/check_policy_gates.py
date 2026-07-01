@@ -650,6 +650,12 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.resolve_secret_imported_session_entry is secret_vault_mod.resolve_secret_imported_session_entry
     assert a.resolve_secret_native_session_entry is secret_vault_mod.resolve_secret_native_session_entry
     assert a.secret_import_represented_by_native is secret_vault_mod.secret_import_represented_by_native
+    assert a.messages_from_secret_import_payload({"raw_log_text": ""}) == secret_vault_mod.messages_from_secret_import_payload(
+        {"raw_log_text": ""},
+        parse_pairs=a._pairs,
+        messages_from_pairs=a.history_messages_from_pairs,
+        restore_display_rounds=a.RESTORE_DISPLAY_ROUNDS,
+    )
     assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
     assert a.SECRET_AUTO_TOR_ENV == secret_vault_mod.SECRET_AUTO_TOR_ENV
     assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
@@ -691,6 +697,14 @@ def assert_secret_vault_module_boundary() -> None:
         {"path": "", "stable_id": "", "title": ""},
         [{"origin_import_path": "", "origin_stable_id": "", "title": ""}],
     )
+    messages, loaded_rounds, total_rounds, message_count = secret_vault_mod.messages_from_secret_import_payload(
+        {"raw_log_text": "raw assistant"},
+        parse_pairs=lambda raw_log: [],
+        messages_from_pairs=lambda pairs, rounds: ([], 0, 0),
+        restore_display_rounds=3,
+    )
+    assert [(message.role, message.content) for message in messages] == [("assistant", "raw assistant")]
+    assert (loaded_rounds, total_rounds, message_count) == (1, 1, 1)
     source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
         assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"

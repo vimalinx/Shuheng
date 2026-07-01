@@ -740,6 +740,23 @@ def secret_import_represented_by_native(import_entry: dict[str, Any], native_ent
     return False
 
 
+def messages_from_secret_import_payload(
+    payload: dict[str, Any],
+    *,
+    parse_pairs: Callable[[str], list[tuple[str, str]]],
+    messages_from_pairs: Callable[[list[tuple[str, str]], int], tuple[list[Message], int, int]],
+    restore_display_rounds: int,
+) -> tuple[list[Message], int, int, int]:
+    raw_log = str(payload.get("raw_log_text") or "")
+    pairs = parse_pairs(raw_log)
+    if pairs:
+        messages, loaded_rounds, total_rounds = messages_from_pairs(pairs, restore_display_rounds)
+        return messages, loaded_rounds, total_rounds, len(messages)
+    if raw_log.strip():
+        return [Message("assistant", raw_log.strip())], 1, 1, 1
+    return [Message("system", "Secret 导入会话为空。")], 0, 0, 1
+
+
 def secret_write_sealed_import(
     paths: SecretVaultPaths,
     public_key: bytes,

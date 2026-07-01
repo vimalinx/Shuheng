@@ -25,6 +25,7 @@ from ga_tui.secret_vault import (
     parse_secret_proxy_chain,
     resolve_secret_imported_session_entry,
     resolve_secret_native_session_entry,
+    messages_from_secret_import_payload as secret_import_messages_from_payload,
     secret_b64,
     secret_create_vault,
     secret_crypto_available,
@@ -370,6 +371,87 @@ class TestSecretValueHelpers:
             {"path": "", "stable_id": "", "title": ""},
             [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "other", "title": "Other"}],
         )
+
+    def test_secret_import_payload_message_helper_uses_parsed_pairs(self) -> None:
+        pair_rows = [("user prompt", "assistant response")]
+
+        def parse_pairs(raw_log: str) -> list[tuple[str, str]]:
+            assert raw_log == "parsed log"
+            return pair_rows
+
+        def messages_from_pairs(
+            pairs: list[tuple[str, str]],
+            rounds: int,
+        ) -> tuple[list[app_module.Message], int, int]:
+            assert pairs is pair_rows
+            assert rounds == 2
+            return [app_module.Message("user", "parsed user"), app_module.Message("assistant", "parsed assistant")], 2, 5
+
+        messages, loaded_rounds, total_rounds, message_count = secret_import_messages_from_payload(
+            {"raw_log_text": "parsed log"},
+            parse_pairs=parse_pairs,
+            messages_from_pairs=messages_from_pairs,
+            restore_display_rounds=2,
+        )
+
+        assert [(msg.role, msg.content) for msg in messages] == [
+            ("user", "parsed user"),
+            ("assistant", "parsed assistant"),
+        ]
+        assert loaded_rounds == 2
+        assert total_rounds == 5
+        assert message_count == 2
+
+    def test_secret_import_payload_message_helper_fallbacks(self) -> None:
+        def parse_pairs(raw_log: str) -> list[tuple[str, str]]:
+            return []
+
+        def messages_from_pairs(
+            pairs: list[tuple[str, str]],
+            rounds: int,
+        ) -> tuple[list[app_module.Message], int, int]:
+            return [], 0, 0
+
+        messages, loaded_rounds, total_rounds, message_count = secret_import_messages_from_payload(
+            {"raw_log_text": "  raw assistant only  "},
+            parse_pairs=parse_pairs,
+            messages_from_pairs=messages_from_pairs,
+            restore_display_rounds=3,
+        )
+        assert [(msg.role, msg.content) for msg in messages] == [("assistant", "raw assistant only")]
+        assert (loaded_rounds, total_rounds, message_count) == (1, 1, 1)
+
+        messages, loaded_rounds, total_rounds, message_count = secret_import_messages_from_payload(
+            {},
+            parse_pairs=parse_pairs,
+            messages_from_pairs=messages_from_pairs,
+            restore_display_rounds=3,
+        )
+        assert [(msg.role, msg.content) for msg in messages] == [("system", "Secret 导入会话为空。")]
+        assert (loaded_rounds, total_rounds, message_count) == (0, 0, 1)
+
+    def test_app_import_payload_message_wrapper_injects_history_helpers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pair_rows = [("user prompt", "assistant response")]
+
+        monkeypatch.setattr(app_module, "_pairs", lambda raw_log: pair_rows if raw_log == "parsed log" else [])
+        monkeypatch.setattr(app_module, "RESTORE_DISPLAY_ROUNDS", 7)
+
+        def fake_history_messages_from_pairs(
+            pairs: list[tuple[str, str]],
+            rounds: int,
+        ) -> tuple[list[app_module.Message], int, int]:
+            assert pairs is pair_rows
+            assert rounds == 7
+            return [app_module.Message("assistant", "from app wrapper")], 1, 1
+
+        monkeypatch.setattr(app_module, "history_messages_from_pairs", fake_history_messages_from_pairs)
+
+        messages, loaded_rounds, total_rounds, message_count = app_module.messages_from_secret_import_payload(
+            {"raw_log_text": "parsed log"}
+        )
+
+        assert [(msg.role, msg.content) for msg in messages] == [("assistant", "from app wrapper")]
+        assert (loaded_rounds, total_rounds, message_count) == (1, 1, 1)
 
 
 class TestSecretVaultStorage:
