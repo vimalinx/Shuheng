@@ -79,6 +79,31 @@ def test_subagent_identity_helpers_and_app_wrappers(tmp_path: Path, monkeypatch:
     assert app_module.unique_runtime_subagent_id(state, "Researcher") == "tmp-researcher-234567890123-2"
 
 
+def test_subagent_skill_ref_normalization_and_app_alias() -> None:
+    long_ref = "x" * 221
+
+    assert app_module.normalize_subagent_skill_refs is subagent_store.normalize_subagent_skill_refs
+    assert subagent_store.normalize_subagent_skill_refs("skill://custom-sop, custom-sop\nOther Skill") == [
+        "custom-sop",
+        "Other Skill",
+    ]
+    assert subagent_store.normalize_subagent_skill_refs(
+        [
+            {"ref": "alpha"},
+            {"name": "beta"},
+            {"skill": "gamma"},
+            {"path": "delta"},
+            {"ref": "ALPHA"},
+            "",
+            long_ref,
+            "skill:// spaced   ref ",
+        ],
+        limit=4,
+    ) == ["alpha", "beta", "gamma", "delta"]
+    assert subagent_store.normalize_subagent_skill_refs({"enabled": True, "disabled": False}) == ["enabled"]
+    assert subagent_store.normalize_subagent_skill_refs("one two", limit=0) == ["one", "two"]
+
+
 def test_subagent_new_chat_session_id_shape() -> None:
     session_id = subagent_store.subagent_new_chat_session_id()
 

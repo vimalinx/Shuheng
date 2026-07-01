@@ -494,6 +494,7 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.clean_subagent_id is subagent_store_mod.clean_subagent_id
     assert a.normalize_subagent_identity_text is subagent_store_mod.normalize_subagent_identity_text
     assert a.compact_identity_text is subagent_store_mod.compact_identity_text
+    assert a.normalize_subagent_skill_refs is subagent_store_mod.normalize_subagent_skill_refs
     assert subagent_store_mod.unique_subagent_id.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_secret_subagent_id.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_runtime_subagent_id.__module__ == "ga_tui.subagent_store"
@@ -529,6 +530,15 @@ def assert_subagent_store_module_boundary() -> None:
     assert subagent_store_mod.normalize_subagent_identity_text("Ops：Code-Reviewer!") == "ops code reviewer"
     assert subagent_store_mod.compact_identity_text("Ops：Code-Reviewer!") == "opscodereviewer"
     assert subagent_store_mod.unique_subagent_id("Ops Agent", subagents_dir=root) == "ops-agent-2"
+    assert subagent_store_mod.normalize_subagent_skill_refs("skill://custom-sop, custom-sop\nOther Skill") == [
+        "custom-sop",
+        "Other Skill",
+    ]
+    assert subagent_store_mod.normalize_subagent_skill_refs(
+        [{"ref": "alpha"}, {"name": "beta"}, {"skill": "gamma"}, {"path": "delta"}, {"ref": "ALPHA"}],
+        limit=3,
+    ) == ["alpha", "beta", "gamma"]
+    assert subagent_store_mod.normalize_subagent_skill_refs({"enabled": True, "disabled": False}) == ["enabled"]
     meta = {
         "conversation_scope": subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE,
         "agent_id": "ops-agent",

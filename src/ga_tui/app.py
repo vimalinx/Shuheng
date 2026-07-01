@@ -9392,6 +9392,7 @@ subagent_session_from_sidebar_key = subagent_store_helpers.subagent_session_from
 clean_subagent_id = subagent_store_helpers.clean_subagent_id
 normalize_subagent_identity_text = subagent_store_helpers.normalize_subagent_identity_text
 compact_identity_text = subagent_store_helpers.compact_identity_text
+normalize_subagent_skill_refs = subagent_store_helpers.normalize_subagent_skill_refs
 
 
 def subagent_file_path(sub: SubAgentRuntime, filename: str) -> str:
@@ -9992,40 +9993,6 @@ def subagent_memory_text(sub: SubAgentRuntime) -> str:
     if sub.security_context == "secret":
         return sub.memory_text if sub.persistent else ""
     return read_text_file(subagent_memory_file(sub), "") if sub.persistent else ""
-
-
-def normalize_subagent_skill_refs(value: Any, limit: Optional[int] = None) -> list[str]:
-    raw_items: list[str] = []
-    if isinstance(value, str):
-        text = value.strip()
-        if "," in text or "\n" in text:
-            raw_items.extend(part.strip() for part in re.split(r"[,\n]+", text))
-        else:
-            raw_items.extend(part.strip() for part in text.split())
-    elif isinstance(value, (list, tuple, set)):
-        for item in value:
-            if isinstance(item, dict):
-                raw_items.append(str(item.get("ref") or item.get("name") or item.get("skill") or item.get("path") or ""))
-            else:
-                raw_items.append(str(item or ""))
-    elif isinstance(value, dict):
-        raw_items.extend(str(key) for key, enabled in value.items() if enabled)
-    seen: set[str] = set()
-    refs: list[str] = []
-    for item in raw_items:
-        ref = clean_text(str(item or "")).strip()
-        ref = ref.removeprefix("skill://").strip()
-        ref = re.sub(r"\s+", " ", ref)
-        if not ref or len(ref) > 220:
-            continue
-        key = ref.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        refs.append(ref)
-        if limit is not None and limit > 0 and len(refs) >= limit:
-            break
-    return refs
 
 
 def subagent_skill_roots() -> list[str]:
