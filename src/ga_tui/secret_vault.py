@@ -723,6 +723,23 @@ def resolve_secret_native_session_entry(
     return None, "找不到 Secret 会话。"
 
 
+def secret_import_represented_by_native(import_entry: dict[str, Any], native_entries: list[dict[str, Any]]) -> bool:
+    raw_import_path = str(import_entry.get("path") or "")
+    import_path = normalized_path(raw_import_path) if raw_import_path else ""
+    stable_id = str(import_entry.get("stable_id") or "")
+    title = str(import_entry.get("title") or "")
+    for native in native_entries:
+        raw_native_import_path = str(native.get("origin_import_path") or "")
+        native_import_path = normalized_path(raw_native_import_path) if raw_native_import_path else ""
+        if import_path and native_import_path == import_path:
+            return True
+        if stable_id and str(native.get("origin_stable_id") or "") == stable_id:
+            return True
+        if title and str(native.get("title") or "") == title:
+            return True
+    return False
+
+
 def secret_write_sealed_import(
     paths: SecretVaultPaths,
     public_key: bytes,

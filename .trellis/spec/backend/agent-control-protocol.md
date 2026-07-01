@@ -997,6 +997,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - `secret_vault.normalize_secret_proxy_endpoint(endpoint) -> str`
 - `secret_vault.resolve_secret_imported_session_entry(entries, target) -> tuple[dict | None, str]`
 - `secret_vault.resolve_secret_native_session_entry(entries, target) -> tuple[dict | None, str]`
+- `secret_vault.secret_import_represented_by_native(import_entry, native_entries) -> bool`
 - `app.py` re-exports the moved helpers as compatibility aliases.
 
 ### 3. Contracts
@@ -1009,6 +1010,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - `normalize_secret_proxy_endpoint(...)` maps `tor` to the default Tor SOCKS endpoint and prefixes bare endpoints with `socks5h://`.
 - `resolve_secret_imported_session_entry(...)` owns only pure matching over already-loaded imported session entries: it filters error rows, returns the existing usage message for an empty target, accepts 1-based numeric targets, and matches the existing imported-session candidate set of raw path, normalized path, filename, filename without `.secret`, `stable_id`, and source `basename`.
 - `resolve_secret_native_session_entry(...)` owns only pure matching over already-loaded native Secret session entries: it filters error rows, returns the existing usage message for an empty target, accepts 1-based numeric targets, and matches `session_id`, title, or the sidebar-key form after normal sidebar-key normalization.
+- `secret_import_represented_by_native(...)` owns only pure imported/native entry linking: it compares normalized import paths, stable ids, and titles over already-loaded entries, and empty fields must not create accidental matches.
 - `app.py` remains the owner of mutable Secret state, approval gates, command wiring, source file migration side effects, proxy env mutation, network health checks, and runtime/backend restore.
 
 ### 4. Validation & Error Matrix
@@ -1025,6 +1027,8 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Imported resolver duplicate stable id -> `匹配到多个 Secret 导入会话：<target>`.
 - Native resolver target `secret_session:native-alpha` -> matching non-error native entry.
 - Native resolver duplicate title -> `匹配到多个 Secret 会话：<target>`.
+- Imported/native link predicate matches by normalized `origin_import_path`, `origin_stable_id`, or title.
+- Imported/native link predicate with all-empty values -> no match.
 
 ### 5. Good/Base/Bad Cases
 
@@ -1035,7 +1039,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 ### 6. Tests Required
 
-- Unit tests must assert Secret title fallback, payload title normalization, import arg aliases, proxy chain parsing, endpoint normalization, imported/native resolver behavior, and app alias parity.
+- Unit tests must assert Secret title fallback, payload title normalization, import arg aliases, proxy chain parsing, endpoint normalization, imported/native resolver behavior, imported/native link predicate behavior, and app alias parity.
 - `scripts/check_policy_gates.py` must assert moved helper ownership and that `secret_vault.py` has no reverse import into `app.py` or curses/UI owners.
 - `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
 

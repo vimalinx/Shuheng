@@ -31,6 +31,7 @@ from ga_tui.secret_vault import (
     secret_decrypt_bytes,
     secret_derive_key,
     secret_encrypt_bytes,
+    secret_import_represented_by_native,
     secret_import_key_id,
     secret_read_json_from_path,
     secret_session_state_payload,
@@ -173,6 +174,7 @@ class TestAppCompatibility:
         assert app_module.normalize_secret_proxy_endpoint is normalize_secret_proxy_endpoint
         assert app_module.resolve_secret_imported_session_entry is resolve_secret_imported_session_entry
         assert app_module.resolve_secret_native_session_entry is resolve_secret_native_session_entry
+        assert app_module.secret_import_represented_by_native is secret_import_represented_by_native
 
 
 class TestSecretValueHelpers:
@@ -334,6 +336,40 @@ class TestSecretValueHelpers:
         assert imported_error == ""
         assert native_entry is native_entries[1]
         assert native_error == ""
+
+    def test_imported_entry_native_link_matches_existing_fields(self) -> None:
+        import_entry = {
+            "path": "/vault/session/imported-sessions/alpha.secret",
+            "stable_id": "stable-alpha",
+            "title": "Alpha Import",
+        }
+
+        assert secret_import_represented_by_native(
+            import_entry,
+            [{"origin_import_path": "/vault/session/imported-sessions/alpha.secret"}],
+        )
+        assert secret_import_represented_by_native(
+            import_entry,
+            [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "stable-alpha"}],
+        )
+        assert secret_import_represented_by_native(
+            import_entry,
+            [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "other", "title": "Alpha Import"}],
+        )
+        assert not secret_import_represented_by_native(
+            import_entry,
+            [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "other", "title": "Other"}],
+        )
+
+    def test_imported_entry_native_link_ignores_empty_values(self) -> None:
+        assert not secret_import_represented_by_native(
+            {"path": "", "stable_id": "", "title": ""},
+            [{"origin_import_path": "", "origin_stable_id": "", "title": ""}],
+        )
+        assert not secret_import_represented_by_native(
+            {"path": "", "stable_id": "", "title": ""},
+            [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "other", "title": "Other"}],
+        )
 
 
 class TestSecretVaultStorage:

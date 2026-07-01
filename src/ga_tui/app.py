@@ -2613,6 +2613,7 @@ parse_secret_proxy_chain = secret_vault_store.parse_secret_proxy_chain
 normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endpoint
 resolve_secret_imported_session_entry = secret_vault_store.resolve_secret_imported_session_entry
 resolve_secret_native_session_entry = secret_vault_store.resolve_secret_native_session_entry
+secret_import_represented_by_native = secret_vault_store.secret_import_represented_by_native
 
 
 def secret_vault_paths() -> secret_vault_store.SecretVaultPaths:
@@ -20004,20 +20005,6 @@ def rightbar_subagent_sections(state: State) -> tuple[list[SubAgentRuntime], lis
 def rightbar_subagents(state: State) -> list[SubAgentRuntime]:
     persistent, temporary = rightbar_subagent_sections(state)
     return persistent + temporary
-
-
-def secret_import_represented_by_native(import_entry: dict[str, Any], native_entries: list[dict[str, Any]]) -> bool:
-    import_path = normalized_path(str(import_entry.get("path") or ""))
-    stable_id = str(import_entry.get("stable_id") or "")
-    title = str(import_entry.get("title") or "")
-    for native in native_entries:
-        if import_path and normalized_path(str(native.get("origin_import_path") or "")) == import_path:
-            return True
-        if stable_id and str(native.get("origin_stable_id") or "") == stable_id:
-            return True
-        if title and str(native.get("title") or "") == title:
-            return True
-    return False
 
 
 def secret_native_entry_for_import_entry(state: State, import_entry: dict[str, Any]) -> Optional[dict[str, Any]]:

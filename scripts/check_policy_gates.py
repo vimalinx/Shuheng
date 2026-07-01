@@ -649,6 +649,7 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.normalize_secret_proxy_endpoint is secret_vault_mod.normalize_secret_proxy_endpoint
     assert a.resolve_secret_imported_session_entry is secret_vault_mod.resolve_secret_imported_session_entry
     assert a.resolve_secret_native_session_entry is secret_vault_mod.resolve_secret_native_session_entry
+    assert a.secret_import_represented_by_native is secret_vault_mod.secret_import_represented_by_native
     assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
     assert a.SECRET_AUTO_TOR_ENV == secret_vault_mod.SECRET_AUTO_TOR_ENV
     assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
@@ -682,6 +683,14 @@ def assert_secret_vault_module_boundary() -> None:
     )
     assert native_error == ""
     assert native_entry and native_entry["session_id"] == "native-alpha"
+    assert secret_vault_mod.secret_import_represented_by_native(
+        {"path": "/vault/imported.secret", "stable_id": "stable-import", "title": "Imported"},
+        [{"origin_import_path": "/tmp/other.secret", "origin_stable_id": "stable-import", "title": "Other"}],
+    )
+    assert not secret_vault_mod.secret_import_represented_by_native(
+        {"path": "", "stable_id": "", "title": ""},
+        [{"origin_import_path": "", "origin_stable_id": "", "title": ""}],
+    )
     source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
         assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"
