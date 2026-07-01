@@ -217,6 +217,32 @@ def visible_reply_has_section_shape(text: str) -> bool:
     return bool(re.search(r"(?m)^#{1,3}\s+\S+", text or "")) or "结论" in (text or "")
 
 
+def preferred_group_visible_reply_text(visible_items: list[str], irc_replies: list[str]) -> str:
+    chosen = visible_items[-1] if visible_items else ""
+    if chosen and (not visible_reply_is_substantive(chosen) or visible_reply_is_housekeeping_summary(chosen)):
+        chosen_len = len(_strip_inline_markdown(clean_text(chosen)).strip())
+        for candidate in reversed(visible_items[:-1]):
+            candidate_len = len(_strip_inline_markdown(clean_text(candidate)).strip())
+            if (
+                visible_reply_is_substantive(candidate)
+                and (
+                    candidate_len >= max(160, chosen_len * 3)
+                    or (visible_reply_has_section_shape(candidate) and candidate_len >= max(80, chosen_len * 2))
+                )
+            ):
+                chosen = candidate
+                break
+    unique_irc_replies: list[str] = []
+    for reply in irc_replies:
+        reply = str(reply or "").strip()
+        if reply and reply not in unique_irc_replies and reply not in chosen:
+            unique_irc_replies.append(reply)
+    if unique_irc_replies:
+        reply_block = "### IRC 回复\n" + "\n".join(f"- {reply}" for reply in unique_irc_replies)
+        chosen = (chosen.rstrip() + "\n\n" + reply_block).strip() if chosen else reply_block
+    return chosen
+
+
 def latest_visible_reply_text(text: str, has_tool_noise: Callable[[str], bool] | None = None) -> str:
     body_text = text or ""
     parts = split_top_level_turn_markers(body_text)

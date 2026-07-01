@@ -373,6 +373,7 @@ def assert_rendering_module_boundary() -> None:
         "visible_reply_is_substantive",
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
+        "preferred_group_visible_reply_text",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -612,6 +613,47 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.visible_reply_has_section_shape("## 方案\n正文")
     assert rendering_mod.visible_reply_has_section_shape("最终结论：继续")
     assert not rendering_mod.visible_reply_has_section_shape("plain paragraph")
+    rich_visible_reply = "## 方案\n" + ("这里是结构化、可读、对用户有用的完整内容。" * 12)
+    housekeeping_reply = "Summary: task complete\nConfidence: high"
+    assert rendering_mod.preferred_group_visible_reply_text(
+        [rich_visible_reply, housekeeping_reply],
+        [],
+    ) == rich_visible_reply
+    assert rendering_mod.preferred_group_visible_reply_text(
+        ["First answer. " * 20, "Second answer. " * 20],
+        [],
+    ) == "Second answer. " * 20
+    assert rendering_mod.preferred_group_visible_reply_text(
+        ["Final answer mentions Bob: already handled"],
+        ["Alice: hello", "Alice: hello", "Bob: already handled", ""],
+    ) == "Final answer mentions Bob: already handled\n\n### IRC 回复\n- Alice: hello"
+    assert rendering_mod.preferred_group_visible_reply_text([], ["Alice: hello"]) == "### IRC 回复\n- Alice: hello"
+    group_turns = [
+        ("**LLM Running (Turn 1) ...**", rich_visible_reply),
+        ("**LLM Running (Turn 2) ...**", housekeeping_reply),
+    ]
+    assert a.preferred_group_visible_reply(group_turns) == rendering_mod.preferred_group_visible_reply_text(
+        [
+            rendering_mod.visible_reply_text(
+                body,
+                hide_detail_fences=a.process_has_tool_noise(body),
+            ).strip()
+            for _marker, body in group_turns
+        ],
+        [],
+    )
+    irc_body = (
+        "🛠️ Tool: `irc` 📥 args:\n"
+        "````text\n{}\n````\n"
+        "`````\n"
+        "{\"content\":[{\"text\":\"Reply from Alice: hello\"}]}\n"
+        "`````\n"
+    )
+    irc_replies = a.irc_reply_snippets_from_process_body(irc_body)
+    assert irc_replies == ["Alice: hello"]
+    assert a.preferred_group_visible_reply(
+        [("**LLM Running (Turn 3) ...**", irc_body)]
+    ) == rendering_mod.preferred_group_visible_reply_text([], irc_replies)
     latest_turn_text = (
         "LLM Running (Turn 1) ...\n"
         "Earlier answer\n"
@@ -665,6 +707,7 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_substantive",
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
+        "def preferred_group_visible_reply_text",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",

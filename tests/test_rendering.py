@@ -220,6 +220,30 @@ def test_process_search_noise_helper_uses_tools_and_body_markers() -> None:
     assert not rendering.process_has_search_noise_text("visible answer", ["irc"])
 
 
+def test_preferred_group_visible_reply_text_prefers_latest_visible_reply() -> None:
+    first = "First answer. " * 20
+    second = "Second answer. " * 20
+
+    assert rendering.preferred_group_visible_reply_text([first, second], []) == second
+
+
+def test_preferred_group_visible_reply_text_prefers_richer_earlier_reply_over_housekeeping() -> None:
+    rich = "## 方案\n" + ("这里是结构化、可读、对用户有用的完整内容。" * 12)
+    housekeeping = "Summary: task complete\nConfidence: high"
+
+    assert rendering.preferred_group_visible_reply_text([rich, housekeeping], []) == rich
+
+
+def test_preferred_group_visible_reply_text_appends_deduped_irc_replies() -> None:
+    chosen = "Final answer mentions Bob: already handled"
+
+    assert rendering.preferred_group_visible_reply_text(
+        [chosen],
+        ["Alice: hello", "Alice: hello", "Bob: already handled", ""],
+    ) == "Final answer mentions Bob: already handled\n\n### IRC 回复\n- Alice: hello"
+    assert rendering.preferred_group_visible_reply_text([], ["Alice: hello"]) == "### IRC 回复\n- Alice: hello"
+
+
 def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
     marker = "**LLM Running (Turn 7) ...**"
     body = (
@@ -300,6 +324,42 @@ def test_app_process_noise_wrappers_inject_process_tools() -> None:
     assert app_module.process_has_tool_noise(body) == rendering.process_has_tool_noise_text(body, tools)
     assert app_module.process_has_search_noise(body) == rendering.process_has_search_noise_text(body, tools)
     assert app_module.process_has_search_noise("google.com/search?q=needle")
+
+
+def test_app_preferred_group_visible_reply_wrapper_delegates_selection_to_rendering() -> None:
+    rich = "## 方案\n" + ("这里是结构化、可读、对用户有用的完整内容。" * 12)
+    housekeeping = "Summary: task complete\nConfidence: high"
+    turns = [
+        ("**LLM Running (Turn 1) ...**", rich),
+        ("**LLM Running (Turn 2) ...**", housekeeping),
+    ]
+    visible_items = [
+        rendering.visible_reply_text(body, hide_detail_fences=app_module.process_has_tool_noise(body)).strip()
+        for _marker, body in turns
+    ]
+
+    assert app_module.preferred_group_visible_reply(turns) == rendering.preferred_group_visible_reply_text(
+        visible_items,
+        [],
+    )
+
+
+def test_app_preferred_group_visible_reply_wrapper_keeps_irc_parsing_app_owned() -> None:
+    body = (
+        "🛠️ Tool: `irc` 📥 args:\n"
+        "````text\n{}\n````\n"
+        "`````\n"
+        "{\"content\":[{\"text\":\"Reply from Alice: hello\"}]}\n"
+        "`````\n"
+    )
+    turns = [("**LLM Running (Turn 3) ...**", body)]
+    irc_replies = app_module.irc_reply_snippets_from_process_body(body)
+
+    assert irc_replies == ["Alice: hello"]
+    assert app_module.preferred_group_visible_reply(turns) == rendering.preferred_group_visible_reply_text(
+        [],
+        irc_replies,
+    )
 
 
 def test_app_process_group_header_wrapper_preserves_summary_and_tool_selection() -> None:
@@ -559,6 +619,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape
+    assert app_module.preferred_group_visible_reply_text is rendering.preferred_group_visible_reply_text
     assert app_module.TURN_NO_RE is rendering.TURN_NO_RE
     assert app_module.process_turn_label is rendering.process_turn_label
     assert app_module.process_tool_suffix is rendering.process_tool_suffix

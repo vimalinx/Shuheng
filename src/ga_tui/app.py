@@ -581,6 +581,7 @@ visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
 visible_reply_has_section_shape = rendering_helpers.visible_reply_has_section_shape
+preferred_group_visible_reply_text = rendering_helpers.preferred_group_visible_reply_text
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
 process_turn_label = rendering_helpers.process_turn_label
@@ -18580,29 +18581,10 @@ def preferred_group_visible_reply(process_turns: list[tuple[str, str]]) -> str:
         visible = visible_reply_text(body, hide_detail_fences=process_has_tool_noise(body)).strip()
         if visible:
             visible_items.append(visible)
-    chosen = visible_items[-1] if visible_items else ""
-    if chosen and (not visible_reply_is_substantive(chosen) or visible_reply_is_housekeeping_summary(chosen)):
-        chosen_len = len(strip_inline_markdown(clean_text(chosen)).strip())
-        for candidate in reversed(visible_items[:-1]):
-            candidate_len = len(strip_inline_markdown(clean_text(candidate)).strip())
-            if (
-                visible_reply_is_substantive(candidate)
-                and (
-                    candidate_len >= max(160, chosen_len * 3)
-                    or (visible_reply_has_section_shape(candidate) and candidate_len >= max(80, chosen_len * 2))
-                )
-            ):
-                chosen = candidate
-                break
     irc_replies: list[str] = []
     for _marker, body in process_turns:
-        for reply in irc_reply_snippets_from_process_body(body):
-            if reply not in irc_replies and reply not in chosen:
-                irc_replies.append(reply)
-    if irc_replies:
-        reply_block = "### IRC 回复\n" + "\n".join(f"- {reply}" for reply in irc_replies)
-        chosen = (chosen.rstrip() + "\n\n" + reply_block).strip() if chosen else reply_block
-    return chosen
+        irc_replies.extend(irc_reply_snippets_from_process_body(body))
+    return rendering_helpers.preferred_group_visible_reply_text(visible_items, irc_replies)
 
 
 def append_process_turn(
