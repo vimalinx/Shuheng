@@ -94,6 +94,7 @@ try:
     from . import web_console as web_console_helpers
     from . import dashboard as dashboard_helpers
     from . import path_utils
+    from . import subagent_store as subagent_store_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -208,6 +209,7 @@ except Exception:
     import web_console as web_console_helpers  # type: ignore
     import dashboard as dashboard_helpers  # type: ignore
     import path_utils  # type: ignore
+    import subagent_store as subagent_store_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -443,7 +445,7 @@ SECRET_AUTO_TOR_ENV = "GA_TUI_SECRET_AUTO_TOR"
 SECRET_DEFAULT_TOR_SOCKS = "socks5h://127.0.0.1:9050"
 SECRET_IMPORT_SESSION_PREFIX = secret_vault_store.SECRET_IMPORT_SESSION_PREFIX
 SECRET_NATIVE_SESSION_PREFIX = secret_vault_store.SECRET_NATIVE_SESSION_PREFIX
-SUBAGENT_SESSION_PREFIX = "subagent_session:"
+SUBAGENT_SESSION_PREFIX = subagent_store_helpers.SUBAGENT_SESSION_PREFIX
 SECRET_PROXY_ENV_KEYS = ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy")
 TOKEN_STAT_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
 TUI_POLL_TIMEOUT_MS = 25
@@ -631,29 +633,11 @@ def cp(index: int) -> int:
         return 0
 
 
-def subagent_home_session_key(agent_id: str) -> str:
-    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", agent_id or "agent").strip("-") or "agent"
-    return f"{SUBAGENT_HOME_SESSION_PREFIX}{safe_agent}"
-
-
-def home_subagent_id_from_key(key: Any) -> str:
-    text = str(key or "")
-    if not text.startswith(SUBAGENT_HOME_SESSION_PREFIX):
-        return ""
-    return text[len(SUBAGENT_HOME_SESSION_PREFIX):]
-
-
-def is_main_home_session_key(key: Any) -> bool:
-    return str(key or "") == MAIN_HOME_SESSION_KEY
-
-
-def is_scheduled_reports_session_key(key: Any) -> bool:
-    return str(key or "") == SCHEDULED_REPORTS_SESSION_KEY
-
-
-def is_home_session_key(key: Any) -> bool:
-    text = str(key or "")
-    return text in {MAIN_HOME_SESSION_KEY, SCHEDULED_REPORTS_SESSION_KEY} or text.startswith(SUBAGENT_HOME_SESSION_PREFIX)
+subagent_home_session_key = subagent_store_helpers.subagent_home_session_key
+home_subagent_id_from_key = subagent_store_helpers.home_subagent_id_from_key
+is_main_home_session_key = subagent_store_helpers.is_main_home_session_key
+is_scheduled_reports_session_key = subagent_store_helpers.is_scheduled_reports_session_key
+is_home_session_key = subagent_store_helpers.is_home_session_key
 
 
 def expire_last_error_if_needed(state: State, ttl: float = 4.0) -> bool:
@@ -9392,47 +9376,31 @@ def clear_pending_approval_interaction(state: State, approval_id: str) -> None:
 
 
 def subagent_home(agent_id: str) -> str:
-    return os.path.join(SUBAGENTS_DIR, agent_id)
+    return subagent_store_helpers.subagent_home(agent_id, subagents_dir=SUBAGENTS_DIR)
 
 
-def secret_subagent_home(agent_id: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", agent_id or "agent").strip("-") or "agent"
-    return f"secret://subagents/{safe}"
+secret_subagent_home = subagent_store_helpers.secret_subagent_home
 
 
 def subagent_meta_path(agent_id: str) -> str:
-    return os.path.join(subagent_home(agent_id), "meta.json")
+    return subagent_store_helpers.subagent_meta_path(agent_id, subagents_dir=SUBAGENTS_DIR)
 
 
 def subagent_profile_path(agent_id: str) -> str:
-    return os.path.join(subagent_home(agent_id), "profile.md")
+    return subagent_store_helpers.subagent_profile_path(agent_id, subagents_dir=SUBAGENTS_DIR)
 
 
 def subagent_memory_path(agent_id: str) -> str:
-    return os.path.join(subagent_home(agent_id), "memory.md")
+    return subagent_store_helpers.subagent_memory_path(agent_id, subagents_dir=SUBAGENTS_DIR)
 
 
 def subagent_events_path(agent_id: str) -> str:
-    return os.path.join(subagent_home(agent_id), "events.jsonl")
+    return subagent_store_helpers.subagent_events_path(agent_id, subagents_dir=SUBAGENTS_DIR)
 
 
-def subagent_new_chat_session_id() -> str:
-    return f"chat_{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
-
-
-def subagent_session_sidebar_key(agent_id: str, session_id: str) -> str:
-    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", agent_id or "agent").strip("-") or "agent"
-    safe_session = re.sub(r"[^A-Za-z0-9_.-]+", "-", session_id or "current").strip("-") or "current"
-    return f"{SUBAGENT_SESSION_PREFIX}{safe_agent}:{safe_session}"
-
-
-def subagent_session_from_sidebar_key(key: Any) -> tuple[str, str]:
-    text = str(key or "")
-    if not text.startswith(SUBAGENT_SESSION_PREFIX):
-        return "", ""
-    body = text[len(SUBAGENT_SESSION_PREFIX):]
-    agent_id, sep, session_id = body.partition(":")
-    return agent_id if sep else "", session_id if sep else ""
+subagent_new_chat_session_id = subagent_store_helpers.subagent_new_chat_session_id
+subagent_session_sidebar_key = subagent_store_helpers.subagent_session_sidebar_key
+subagent_session_from_sidebar_key = subagent_store_helpers.subagent_session_from_sidebar_key
 
 
 def subagent_file_path(sub: SubAgentRuntime, filename: str) -> str:

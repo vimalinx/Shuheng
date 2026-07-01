@@ -43,6 +43,7 @@ from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
 from ga_tui import scheduler as sched  # noqa: E402
 from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
+from ga_tui import subagent_store as subagent_store_mod  # noqa: E402
 from ga_tui import text_utils as text_utils_mod  # noqa: E402
 from ga_tui import ui_types as ui_types_mod  # noqa: E402
 from ga_tui import web_console as web_console_mod  # noqa: E402
@@ -357,6 +358,56 @@ def assert_path_utils_module_boundary() -> None:
         "runtime_dispatch",
     ):
         assert forbidden not in source, f"{path_utils_mod.__file__}: {forbidden}"
+
+
+def assert_subagent_store_module_boundary() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_subagent_store_")
+    assert a.SUBAGENT_SESSION_PREFIX == subagent_store_mod.SUBAGENT_SESSION_PREFIX
+    assert a.subagent_home_session_key is subagent_store_mod.subagent_home_session_key
+    assert a.home_subagent_id_from_key is subagent_store_mod.home_subagent_id_from_key
+    assert a.is_main_home_session_key is subagent_store_mod.is_main_home_session_key
+    assert a.is_scheduled_reports_session_key is subagent_store_mod.is_scheduled_reports_session_key
+    assert a.is_home_session_key is subagent_store_mod.is_home_session_key
+    assert a.secret_subagent_home is subagent_store_mod.secret_subagent_home
+    assert a.subagent_new_chat_session_id is subagent_store_mod.subagent_new_chat_session_id
+    assert a.subagent_session_sidebar_key is subagent_store_mod.subagent_session_sidebar_key
+    assert a.subagent_session_from_sidebar_key is subagent_store_mod.subagent_session_from_sidebar_key
+    original_root = a.SUBAGENTS_DIR
+    try:
+        a.SUBAGENTS_DIR = root
+        assert a.subagent_home("agent/raw") == subagent_store_mod.subagent_home("agent/raw", subagents_dir=root)
+        assert a.subagent_meta_path("agent/raw") == subagent_store_mod.subagent_meta_path("agent/raw", subagents_dir=root)
+        assert a.subagent_profile_path("agent/raw") == subagent_store_mod.subagent_profile_path("agent/raw", subagents_dir=root)
+        assert a.subagent_memory_path("agent/raw") == subagent_store_mod.subagent_memory_path("agent/raw", subagents_dir=root)
+        assert a.subagent_events_path("agent/raw") == subagent_store_mod.subagent_events_path("agent/raw", subagents_dir=root)
+    finally:
+        a.SUBAGENTS_DIR = original_root
+    home_key = subagent_store_mod.subagent_home_session_key("ops agent/中文")
+    assert home_key == "__home__:sub:ops-agent"
+    assert subagent_store_mod.home_subagent_id_from_key(home_key) == "ops-agent"
+    sidebar_key = subagent_store_mod.subagent_session_sidebar_key("ops agent/中文", "chat id/1")
+    assert sidebar_key == "subagent_session:ops-agent:chat-id-1"
+    assert subagent_store_mod.subagent_session_from_sidebar_key(sidebar_key) == ("ops-agent", "chat-id-1")
+    assert subagent_store_mod.secret_subagent_home("ops agent/中文") == "secret://subagents/ops-agent"
+    assert not hasattr(subagent_store_mod, "write_subagent_chat_history_transcript")
+    assert not hasattr(subagent_store_mod, "save_subagent_chat_messages_to_history")
+    source = Path(subagent_store_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "history_store",
+        "secret_vault",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+    ):
+        assert forbidden not in source, f"{subagent_store_mod.__file__}: {forbidden}"
 
 
 def assert_secret_vault_module_boundary() -> None:
@@ -7654,6 +7705,7 @@ def run_checks() -> None:
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
     assert_path_utils_module_boundary()
+    assert_subagent_store_module_boundary()
     assert_secret_vault_module_boundary()
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()

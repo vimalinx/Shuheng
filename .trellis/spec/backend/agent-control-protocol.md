@@ -485,6 +485,7 @@ def recent_history_items(history_entries, used_paths, limit):
   - Main home: `MAIN_HOME_SESSION_KEY == "__home__:main"`.
   - Scheduled-report home: `SCHEDULED_REPORTS_SESSION_KEY == "__home__:scheduled_reports"`.
   - Persistent subagent home: `subagent_home_session_key(agent_id) == "__home__:sub:<safe-agent-id>"`.
+- Pure home-key helpers live in `subagent_store.py` and are re-exported from `app.py` for compatibility.
 - Commands:
   - `/home [agent]` opens the main home, current persistent-agent home, or named persistent-agent home.
   - `/reports` or `/home reports` opens the scheduled-report home page next to the main home entry.
@@ -525,6 +526,7 @@ def recent_history_items(history_entries, used_paths, limit):
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home restores that agent's last entered chat session, auto-switches to that agent's chat interface, and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
 - Entering a persistent subagent chat through `/chat`, a sidebar subagent-session row, or home plain text input must persist the selected subagent chat session id/ref to subagent metadata so a later restart restores the last entered subagent conversation from canonical history instead of the newest empty session. Subagent metadata must not own the transcript.
+- `subagent_store.py` may own pure subagent home-key and sidebar-key shaping, but it must not own dashboard rendering, `State`, `SubAgentRuntime`, history transcript persistence, Secret Vault payload storage, runtime providers, Web Console payloads, or curses rendering.
 
 ### 4. Validation & Error Matrix
 
@@ -980,6 +982,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Queue path: `queue_subagent_chat_input(state, sub, text, interrupt_requested=False) -> str`.
 - Stream path: `consume_subagent_chat_queue(...)` emits `("sub_chat_stream", subagent_id, task_id, text, done)`.
 - Web action: `POST /gui/action` with `action:"agent.chat"` resolves a sanitized agent `ui_ref` and calls the same dispatcher.
+- Subagent store helpers: `subagent_store.subagent_home(...)`, `subagent_store.subagent_*_path(...)`, `subagent_store.subagent_session_sidebar_key(...)`, and `subagent_store.subagent_session_from_sidebar_key(...)`, with `app.py` wrappers injecting app-owned roots such as `SUBAGENTS_DIR`.
 
 ### 3. Contracts
 
@@ -988,6 +991,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - A blocked direct-chat input, such as locked Secret Vault or failed default-model application, must persist the user's attempted message plus a completed assistant error message.
 - A runtime `done` frame with no visible text must be converted to an explicit `[ERROR] runtime completed without a visible reply.` message and treated as a runtime failure.
 - Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts. Subagent runtime agents must use a non-persistent transcript sink such as `os.devnull`, not `sub.home/model_responses.txt`, so agent-local state stays metadata/refs/runtime only.
+- Subagent home/path helpers belong to `subagent_store.py` only as metadata/ref path helpers. They must not become a second transcript writer or read/write normal non-secret chat messages.
 - Restoring a non-secret persistent direct-chat session must parse the
   canonical Shuheng history transcript first. `session_meta.json` may cache
   title, preview, counts, and routing refs, but it must not be the
@@ -2800,6 +2804,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 - `AGENT_HARNESS_DIR` defaults to `~/.shuheng/memory/agent_harness`.
 - `SUBAGENTS_DIR` defaults to `~/.shuheng/memory/subagents`.
 - `TEMP_SUBAGENTS_DIR` defaults to `~/.shuheng/temp/subagents`.
+- Parameterized subagent store path helpers accept `SUBAGENTS_DIR` from `app.py`; the lower-level module must not import the app facade to discover storage roots.
 - `SECRET_VAULT_DIR` defaults to `~/.shuheng/memory/secret_vault`.
 - OMP isolated runtime files default to `~/.shuheng/memory/agent_harness/runtime/ohmypi/agent`.
 - Legacy bootstrap marker: `~/.shuheng/.legacy_import.json`.
@@ -2825,6 +2830,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 - Session naming must persist through the same Shuheng-owned `session_names.json` registry; it must not use GenericAgent's default `frontends/session_names.py` storage path.
 - Harness writes for tasks, approvals, artifacts, traces, schedules, gateway metadata, runtime provider metadata, and memory candidates must live under the Shuheng-owned `AGENT_HARNESS_DIR` by default.
 - Persistent subagent memory must live under Shuheng-owned `SUBAGENTS_DIR`; temporary subagents must live under Shuheng-owned `TEMP_SUBAGENTS_DIR`.
+- Persistent subagent home helpers must keep profile, memory, event, and metadata refs under `SUBAGENTS_DIR`; ordinary non-secret conversation turns remain history-owned under `MODEL_RESPONSES_DIR`.
 - Secret Vault encrypted storage must live under Shuheng-owned `SECRET_VAULT_DIR` by default.
 - OMP memory append prompts must read Shuheng-owned memory sources, not GenericAgent `memory/`.
 - On normal first launch with the default `~/.shuheng` home, Shuheng may bootstrap existing GenericAgent state by copying missing files from `${ROOT_DIR}/temp/model_responses` and `${ROOT_DIR}/memory` into the Shuheng-owned tree.
