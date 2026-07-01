@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 try:
     from .text_utils import cell_width
@@ -10,6 +11,16 @@ except Exception:
     from text_utils import cell_width  # type: ignore
 
 MOUSE_BUTTON_STATES = ("PRESSED", "RELEASED", "CLICKED", "DOUBLE_CLICKED", "TRIPLE_CLICKED")
+
+
+@dataclass(frozen=True)
+class InputHistoryBrowseResult:
+    consumed: bool
+    text: str = ""
+    cursor: int = 0
+    history_index: int | None = None
+    draft: str = ""
+    draft_cursor: int = 0
 
 
 def _mouse_constant(constants: Mapping[str, object], name: str) -> int:
@@ -128,6 +139,37 @@ def input_vertical_cursor_target(text: str, width: int, cursor: int, direction: 
 
 def normalize_pasted_text(text: str) -> str:
     return re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text).replace("\t", "    ")
+
+
+def input_history_browse_result(
+    history: Sequence[str],
+    text: str,
+    cursor: int,
+    history_index: int | None,
+    draft: str,
+    draft_cursor: int,
+    direction: int,
+) -> InputHistoryBrowseResult:
+    entries = list(history or [])
+    if not entries:
+        return InputHistoryBrowseResult(False)
+    next_draft = draft or ""
+    next_draft_cursor = int(draft_cursor or 0)
+    if history_index is None:
+        next_draft = text
+        next_draft_cursor = int(cursor or 0)
+        if direction < 0:
+            next_index = len(entries) - 1
+        else:
+            return InputHistoryBrowseResult(False)
+    else:
+        next_index = history_index + direction
+
+    if next_index < 0:
+        next_index = 0
+    if next_index >= len(entries):
+        return InputHistoryBrowseResult(True, next_draft, next_draft_cursor, None, "", 0)
+    return InputHistoryBrowseResult(True, entries[next_index], len(entries[next_index]), next_index, next_draft, next_draft_cursor)
 
 
 def mouse_button_mask_from_constants(button_no: int, constants: Mapping[str, object]) -> int:

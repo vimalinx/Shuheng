@@ -13628,27 +13628,21 @@ def runtime_registry_record() -> dict[str, Any]:
 
 
 def browse_input_history(state: State, direction: int) -> bool:
-    if not state.input_history:
+    result = input_history_browse_result(
+        state.input_history,
+        state.input_text,
+        state.input_cursor,
+        state.input_history_index,
+        state.input_history_draft,
+        state.input_history_draft_cursor,
+        direction,
+    )
+    if not result.consumed:
         return False
-    if state.input_history_index is None:
-        state.input_history_draft = state.input_text
-        state.input_history_draft_cursor = state.input_cursor
-        if direction < 0:
-            state.input_history_index = len(state.input_history) - 1
-        else:
-            return False
-    else:
-        state.input_history_index += direction
-
-    if state.input_history_index < 0:
-        state.input_history_index = 0
-    if state.input_history_index >= len(state.input_history):
-        state.input_history_index = None
-        set_input_text(state, state.input_history_draft, state.input_history_draft_cursor)
-        state.input_history_draft = ""
-        state.input_history_draft_cursor = 0
-    else:
-        set_input_text(state, state.input_history[state.input_history_index])
+    state.input_history_index = result.history_index
+    state.input_history_draft = result.draft
+    state.input_history_draft_cursor = result.draft_cursor
+    set_input_text(state, result.text, result.cursor)
     state.command_index = 0
     mark_dirty(state)
     return True
@@ -19584,6 +19578,8 @@ input_cursor_info = input_controller_helpers.input_cursor_info
 input_layout = input_controller_helpers.input_layout
 input_vertical_cursor_target = input_controller_helpers.input_vertical_cursor_target
 normalize_pasted_text = input_controller_helpers.normalize_pasted_text
+InputHistoryBrowseResult = input_controller_helpers.InputHistoryBrowseResult
+input_history_browse_result = input_controller_helpers.input_history_browse_result
 MOUSE_BUTTON_STATES = input_controller_helpers.MOUSE_BUTTON_STATES
 mouse_button_mask_from_constants = input_controller_helpers.mouse_button_mask_from_constants
 mouse_modifier_mask_from_constants = input_controller_helpers.mouse_modifier_mask_from_constants

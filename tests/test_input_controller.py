@@ -17,6 +17,8 @@ class TestAppCompatibilityAliases:
         assert app_module.input_layout is input_controller.input_layout
         assert app_module.input_vertical_cursor_target is input_controller.input_vertical_cursor_target
         assert app_module.normalize_pasted_text is input_controller.normalize_pasted_text
+        assert app_module.InputHistoryBrowseResult is input_controller.InputHistoryBrowseResult
+        assert app_module.input_history_browse_result is input_controller.input_history_browse_result
         assert app_module.MOUSE_BUTTON_STATES is input_controller.MOUSE_BUTTON_STATES
         assert app_module.mouse_button_mask_from_constants is input_controller.mouse_button_mask_from_constants
         assert app_module.mouse_modifier_mask_from_constants is input_controller.mouse_modifier_mask_from_constants
@@ -223,6 +225,69 @@ class TestPasteNormalization:
     def test_app_alias_matches_input_controller_helper(self) -> None:
         text = "one\n two\tthree"
         assert app_module.normalize_pasted_text(text) == input_controller.normalize_pasted_text(text)
+
+
+class TestInputHistoryBrowse:
+    def test_empty_history_or_down_before_browsing_does_not_consume(self) -> None:
+        assert not input_controller.input_history_browse_result([], "draft", 2, None, "", 0, -1).consumed
+        assert not input_controller.input_history_browse_result(["old"], "draft", 2, None, "", 0, 1).consumed
+
+    def test_first_up_saves_draft_and_selects_latest_entry(self) -> None:
+        result = input_controller.input_history_browse_result(["old", "new"], "draft", 3, None, "", 0, -1)
+
+        assert result == input_controller.InputHistoryBrowseResult(True, "new", 3, 1, "draft", 3)
+
+    def test_up_clamps_at_oldest_entry(self) -> None:
+        result = input_controller.input_history_browse_result(["old", "new"], "new", 3, 1, "draft", 3, -9)
+
+        assert result == input_controller.InputHistoryBrowseResult(True, "old", 3, 0, "draft", 3)
+
+    def test_down_restores_draft_after_newest_entry(self) -> None:
+        result = input_controller.input_history_browse_result(["old"], "old", 3, 0, "draft", 2, 1)
+
+        assert result == input_controller.InputHistoryBrowseResult(True, "draft", 2, None, "", 0)
+
+    def test_app_wrapper_applies_history_result_and_marks_dirty(self) -> None:
+        state = SimpleNamespace(
+            input_history=["old", "new"],
+            input_text="draft",
+            input_cursor=2,
+            input_history_index=None,
+            input_history_draft="",
+            input_history_draft_cursor=0,
+            command_index=3,
+            dirty=False,
+        )
+
+        assert app_module.browse_input_history(state, -1)
+        assert state.input_text == "new"
+        assert state.input_cursor == 3
+        assert state.input_history_index == 1
+        assert state.input_history_draft == "draft"
+        assert state.input_history_draft_cursor == 2
+        assert state.command_index == 0
+        assert state.dirty
+
+    def test_app_wrapper_restores_saved_draft_after_newest_entry(self) -> None:
+        state = SimpleNamespace(
+            input_history=["old"],
+            input_text="old",
+            input_cursor=3,
+            input_history_index=0,
+            input_history_draft="draft",
+            input_history_draft_cursor=2,
+            command_index=4,
+            dirty=False,
+        )
+
+        assert app_module.browse_input_history(state, 1)
+        assert state.input_text == "draft"
+        assert state.input_cursor == 2
+        assert state.input_history_index is None
+        assert state.input_history_draft == ""
+        assert state.input_history_draft_cursor == 0
+        assert state.command_index == 0
+        assert state.dirty
 
 
 class TestMouseMaskHelpers:

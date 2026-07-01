@@ -288,6 +288,8 @@ def assert_input_controller_module_boundary() -> None:
         "input_layout",
         "input_vertical_cursor_target",
         "normalize_pasted_text",
+        "InputHistoryBrowseResult",
+        "input_history_browse_result",
         "mouse_button_mask_from_constants",
         "mouse_modifier_mask_from_constants",
         "mouse_known_bstate_mask_from_constants",
@@ -319,6 +321,9 @@ def assert_input_controller_module_boundary() -> None:
     assert input_controller_mod.input_vertical_cursor_target("abcdef", 4, 5, -1) == (True, 3)
     assert input_controller_mod.input_vertical_cursor_target("abcdef", 4, 5, 1) == (True, None)
     assert input_controller_mod.normalize_pasted_text(" alpha \n\t beta\r\n gamma\t") == " alpha beta gamma    "
+    assert input_controller_mod.input_history_browse_result(["old", "new"], "draft", 3, None, "", 0, -1) == (
+        input_controller_mod.InputHistoryBrowseResult(True, "new", 3, 1, "draft", 3)
+    )
     mouse_constants = {
         "BUTTON1_PRESSED": 1 << 0,
         "BUTTON1_RELEASED": 1 << 1,
