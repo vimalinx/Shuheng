@@ -856,6 +856,15 @@ def test_process_search_noise_helper_uses_tools_and_body_markers() -> None:
     assert not rendering.process_has_search_noise_text("visible answer", ["irc"])
 
 
+def test_process_group_header_parts_dedupes_summaries_and_caps_tools() -> None:
+    assert rendering.process_group_header_parts(
+        ["整理结果", "整理结果", "", "复核输出"],
+        [["web.search", "irc"], ["irc", "todo", "code"], ["ignored"]],
+        4,
+    ) == ("整理结果 / 复核输出", ["web.search", "irc", "todo"])
+    assert rendering.process_group_header_parts(["", ""], [[], ["web.search"]], 2) == ("2 条过程", ["web.search"])
+
+
 def test_preferred_group_visible_reply_text_prefers_latest_visible_reply() -> None:
     first = "First answer. " * 20
     second = "Second answer. " * 20
@@ -1013,6 +1022,25 @@ def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
         marker,
         app_module.process_summary_text(body),
         tools,
+        True,
+    )
+    group_turns = [
+        (marker, body),
+        (
+            "**LLM Running (Turn 8) ...**",
+            "<summary>复核输出</summary>\n<tool_use>{\"name\":\"todo\"}</tool_use>\n",
+        ),
+    ]
+    title, group_tools = rendering.process_group_header_parts(
+        [app_module.process_summary_text(turn_body) for _turn_marker, turn_body in group_turns],
+        [app_module.process_tools(turn_body) for _turn_marker, turn_body in group_turns],
+        len(group_turns),
+    )
+    assert app_module.process_group_header("G2", group_turns, False, True) == rendering.process_group_header_text(
+        "G2",
+        title,
+        group_tools,
+        False,
         True,
     )
     assert app_module.process_turn_no(marker, 99) == rendering.process_turn_no(marker, 99)
@@ -1375,6 +1403,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.process_speech_header_text is rendering.process_speech_header_text
     assert app_module.process_speech_summary_line_text is rendering.process_speech_summary_line_text
     assert app_module.expanded_process_header_text is rendering.expanded_process_header_text
+    assert app_module.process_group_header_parts is rendering.process_group_header_parts
     assert app_module.process_group_header_text is rendering.process_group_header_text
     assert app_module.collapsed_process_child_line_text is rendering.collapsed_process_child_line_text
     assert app_module.expanded_process_child_header_text is rendering.expanded_process_child_header_text

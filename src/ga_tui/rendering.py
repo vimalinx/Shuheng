@@ -112,6 +112,31 @@ def process_turn_no(marker: str, fallback: int) -> int:
     return fallback
 
 
+def process_group_header_parts(
+    summary_values: list[str],
+    tool_groups: list[list[str]],
+    turn_count: int,
+    tool_limit: int = 3,
+) -> tuple[str, list[str]]:
+    summaries: list[str] = []
+    for summary in summary_values:
+        if summary and summary not in summaries:
+            summaries.append(summary)
+
+    tool_names: list[str] = []
+    for tools in tool_groups:
+        for tool in tools:
+            if tool and tool not in tool_names:
+                tool_names.append(tool)
+            if len(tool_names) >= tool_limit:
+                break
+        if len(tool_names) >= tool_limit:
+            break
+
+    title = history_title_policy.compact_description(" / ".join(summaries), 120) if summaries else f"{turn_count} 条过程"
+    return title, tool_names
+
+
 def process_group_header_text(label: str, title: str, tools: list[str], current: bool, expanded: bool) -> str:
     icon = "▾" if expanded else "▸"
     status = "正在执行" if current else ("已展开" if expanded else "已折叠")

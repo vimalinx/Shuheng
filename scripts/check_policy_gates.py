@@ -376,6 +376,7 @@ def assert_rendering_module_boundary() -> None:
         "process_speech_header_text",
         "process_speech_summary_line_text",
         "expanded_process_header_text",
+        "process_group_header_parts",
         "process_group_header_text",
         "collapsed_process_child_line_text",
         "expanded_process_child_header_text",
@@ -527,6 +528,34 @@ def assert_rendering_module_boundary() -> None:
         process_marker,
         a.process_summary_text(process_body),
         process_tools,
+        True,
+    )
+    assert rendering_mod.process_group_header_parts(
+        ["整理过程", "整理过程", "", "复核输出"],
+        [["web.search", "irc"], ["irc", "todo", "code"], ["ignored"]],
+        4,
+    ) == ("整理过程 / 复核输出", ["web.search", "irc", "todo"])
+    assert rendering_mod.process_group_header_parts(["", ""], [[], ["web.search"]], 2) == (
+        "2 条过程",
+        ["web.search"],
+    )
+    group_turns = [
+        (process_marker, process_body),
+        (
+            "**LLM Running (Turn 13) ...**",
+            "<summary>复核输出</summary>\n<tool_use>{\"name\":\"todo\"}</tool_use>\n",
+        ),
+    ]
+    group_title, group_tools = rendering_mod.process_group_header_parts(
+        [a.process_summary_text(body) for _marker, body in group_turns],
+        [a.process_tools(body) for _marker, body in group_turns],
+        len(group_turns),
+    )
+    assert a.process_group_header("G6", group_turns, False, True) == rendering_mod.process_group_header_text(
+        "G6",
+        group_title,
+        group_tools,
+        False,
         True,
     )
     assert a.process_group_header("G6", [(process_marker, process_body)], False, False) == (
@@ -1134,6 +1163,7 @@ def assert_rendering_module_boundary() -> None:
         "def markdown_layout_blocks",
         "def plain_layout_lines",
         "def message_cache_signature",
+        "def process_group_header_parts",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",

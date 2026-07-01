@@ -612,6 +612,7 @@ process_detail_line_text = rendering_helpers.process_detail_line_text
 process_speech_header_text = rendering_helpers.process_speech_header_text
 process_speech_summary_line_text = rendering_helpers.process_speech_summary_line_text
 expanded_process_header_text = rendering_helpers.expanded_process_header_text
+process_group_header_parts = rendering_helpers.process_group_header_parts
 process_group_header_text = rendering_helpers.process_group_header_text
 collapsed_process_child_line_text = rendering_helpers.collapsed_process_child_line_text
 expanded_process_child_header_text = rendering_helpers.expanded_process_child_header_text
@@ -18506,20 +18507,12 @@ def expanded_process_header(marker: str, body: str, current: bool) -> str:
 
 
 def process_group_header(label: str, turns: list[tuple[str, str]], current: bool, expanded: bool) -> str:
-    tool_names: list[str] = []
-    summaries: list[str] = []
+    summary_values: list[str] = []
+    tool_groups: list[list[str]] = []
     for _marker, body in turns:
-        summary = process_summary_text(body)
-        if summary and summary not in summaries:
-            summaries.append(summary)
-        for tool in process_tools(body):
-            if tool not in tool_names:
-                tool_names.append(tool)
-            if len(tool_names) >= 3:
-                break
-        if len(tool_names) >= 3:
-            break
-    title = compact_description(" / ".join(summaries), 120) if summaries else f"{len(turns)} 条过程"
+        summary_values.append(process_summary_text(body))
+        tool_groups.append(process_tools(body))
+    title, tool_names = rendering_helpers.process_group_header_parts(summary_values, tool_groups, len(turns))
     return rendering_helpers.process_group_header_text(label, title, tool_names, current, expanded)
 
 
