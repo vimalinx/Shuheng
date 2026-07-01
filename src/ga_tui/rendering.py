@@ -16,6 +16,7 @@ except Exception:
 
 SelectionPoint = tuple[int, int]
 SelectionPoints = tuple[SelectionPoint, SelectionPoint]
+TableLayoutLine = tuple[str, str]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
@@ -201,6 +202,29 @@ def is_table_separator(cells: list[str]) -> bool:
 def split_table_row(line: str) -> list[str]:
     raw = line.strip().strip("|")
     return [strip_inline_markdown(cell.strip()) for cell in raw.split("|")]
+
+
+def table_layout_lines(lines: list[str], width: int) -> list[TableLayoutLine]:
+    rows = [split_table_row(line) for line in lines]
+    rows = [row for row in rows if not is_table_separator(row)]
+    if not rows:
+        return []
+    cols = max(len(row) for row in rows)
+    for row in rows:
+        row.extend([""] * (cols - len(row)))
+    col_widths = [max(cell_width(row[i]) for row in rows) for i in range(cols)]
+    budget = max(8, width - 3 * (cols - 1))
+    if sum(col_widths) > budget:
+        cap = max(6, budget // max(1, cols))
+        col_widths = [min(w, cap) for w in col_widths]
+    out: list[TableLayoutLine] = []
+    for idx, row in enumerate(rows):
+        rendered = " │ ".join(pad_cells(row[i], col_widths[i]) for i in range(cols))
+        out.append(("header" if idx == 0 else "body", rendered))
+        if idx == 0 and len(rows) > 1:
+            sep = "─┼─".join("─" * w for w in col_widths)
+            out.append(("separator", sep))
+    return out
 
 
 def visible_reply_is_substantive(text: str) -> bool:

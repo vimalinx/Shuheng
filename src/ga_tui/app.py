@@ -581,6 +581,7 @@ strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 strip_inline_markdown = rendering_helpers.strip_inline_markdown
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
+table_layout_lines = rendering_helpers.table_layout_lines
 visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
@@ -18769,25 +18770,15 @@ def render_assistant_text(
 
 
 def render_table(lines: list[str], width: int) -> list[RenderLine]:
-    rows = [split_table_row(line) for line in lines]
-    rows = [row for row in rows if not is_table_separator(row)]
-    if not rows:
-        return []
-    cols = max(len(row) for row in rows)
-    for row in rows:
-        row.extend([""] * (cols - len(row)))
-    col_widths = [max(cell_width(row[i]) for row in rows) for i in range(cols)]
-    budget = max(8, width - 3 * (cols - 1))
-    if sum(col_widths) > budget:
-        cap = max(6, budget // max(1, cols))
-        col_widths = [min(w, cap) for w in col_widths]
     out: list[RenderLine] = []
-    for idx, row in enumerate(rows):
-        rendered = " │ ".join(pad_cells(row[i], col_widths[i]) for i in range(cols))
-        out.append(RenderLine(rendered, cp(7) | curses.A_BOLD if idx == 0 else cp(2)))
-        if idx == 0 and len(rows) > 1:
-            sep = "─┼─".join("─" * w for w in col_widths)
-            out.append(RenderLine(sep, cp(10)))
+    for kind, text in table_layout_lines(lines, width):
+        if kind == "header":
+            attr = cp(7) | curses.A_BOLD
+        elif kind == "separator":
+            attr = cp(10)
+        else:
+            attr = cp(2)
+        out.append(RenderLine(text, attr))
     return out
 
 

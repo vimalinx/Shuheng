@@ -88,6 +88,57 @@ def test_split_table_row_trims_edges_and_cleans_inline_markdown() -> None:
     assert rendering.split_table_row(" name | _value_ ") == ["name", "value"]
 
 
+def test_table_layout_lines_formats_header_separator_and_body_rows() -> None:
+    lines = [
+        "| **Name** | Count |",
+        "| --- | ---: |",
+        "| Alpha | 3 |",
+        "| 中文 | 20 |",
+    ]
+
+    assert rendering.table_layout_lines(lines, 24) == [
+        ("header", "Name  │ Count"),
+        ("separator", "──────┼──────"),
+        ("body", "Alpha │ 3    "),
+        ("body", "中文  │ 20   "),
+    ]
+
+
+def test_table_layout_lines_returns_empty_for_separator_only_tables() -> None:
+    assert rendering.table_layout_lines(["| --- | :---: |"], 80) == []
+
+
+def test_table_layout_lines_caps_columns_to_available_width() -> None:
+    lines = [
+        "| First column is long | Second column is long |",
+        "| --- | --- |",
+        "| alpha beta gamma | delta epsilon zeta |",
+    ]
+
+    assert rendering.table_layout_lines(lines, 15) == [
+        ("header", "First … │ Second…"),
+        ("separator", "───────┼───────"),
+        ("body", "alpha … │ delta …"),
+    ]
+
+
+def test_app_render_table_wrapper_converts_layout_records_to_render_lines() -> None:
+    lines = [
+        "| Name | Count |",
+        "| --- | ---: |",
+        "| Alpha | 3 |",
+    ]
+
+    rendered = app_module.render_table(lines, 24)
+
+    assert [line.text for line in rendered] == [text for _kind, text in rendering.table_layout_lines(lines, 24)]
+    assert [line.attr for line in rendered] == [
+        app_module.cp(7) | app_module.curses.A_BOLD,
+        app_module.cp(10),
+        app_module.cp(2),
+    ]
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0
@@ -780,6 +831,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_inline_markdown is rendering.strip_inline_markdown
     assert app_module.is_table_separator is rendering.is_table_separator
     assert app_module.split_table_row is rendering.split_table_row
+    assert app_module.table_layout_lines is rendering.table_layout_lines
     assert app_module.LINE_NUMBERED_FILE_RE is rendering.LINE_NUMBERED_FILE_RE
     assert app_module.FENCE_BOUNDARY_RE is rendering.FENCE_BOUNDARY_RE
     assert app_module.next_nonblank_line is rendering.next_nonblank_line

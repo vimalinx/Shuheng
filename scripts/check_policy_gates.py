@@ -342,6 +342,7 @@ def assert_rendering_module_boundary() -> None:
         "strip_inline_markdown",
         "is_table_separator",
         "split_table_row",
+        "table_layout_lines",
         "process_preview",
         "process_summary_text",
         "TURN_NO_RE",
@@ -776,6 +777,21 @@ def assert_rendering_module_boundary() -> None:
         "Doc (https://example.invalid)",
         "cmd --flag",
     ]
+    table_lines = [
+        "| Name | Count |",
+        "| --- | ---: |",
+        "| Alpha | 3 |",
+    ]
+    assert rendering_mod.table_layout_lines(table_lines, 24) == [
+        ("header", "Name  │ Count"),
+        ("separator", "──────┼──────"),
+        ("body", "Alpha │ 3    "),
+    ]
+    rendered_table = a.render_table(table_lines, 24)
+    assert [line.text for line in rendered_table] == [
+        text for _kind, text in rendering_mod.table_layout_lines(table_lines, 24)
+    ]
+    assert [line.attr for line in rendered_table] == [a.cp(7) | curses.A_BOLD, a.cp(10), a.cp(2)]
     assert rendering_mod.boxed_user_lines("hi", 20) == [
         "┌──────────┐",
         "│ hi       │",
@@ -825,6 +841,7 @@ def assert_rendering_module_boundary() -> None:
         "def strip_inline_markdown",
         "def is_table_separator",
         "def split_table_row",
+        "def table_layout_lines",
         "def message_cache_signature",
         "def process_turn_no",
         "def process_child_detail_text",
