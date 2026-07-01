@@ -91,6 +91,7 @@ try:
     from . import governance as governance_store
     from . import context_packs as context_pack_store
     from . import runtime_dispatch as runtime_dispatch_store
+    from . import web_console as web_console_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -202,6 +203,7 @@ except Exception:
     import governance as governance_store  # type: ignore
     import context_packs as context_pack_store  # type: ignore
     import runtime_dispatch as runtime_dispatch_store  # type: ignore
+    import web_console as web_console_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -6531,10 +6533,15 @@ class WebConsoleReadOnlyAgent:
         return "-"
 
 
-WEB_CONSOLE_ACTION_REQUEST_SCHEMA = "shuheng.web_console.action_request.v1"
-WEB_CONSOLE_ACTION_RESPONSE_SCHEMA = "shuheng.web_console.action_response.v1"
-WEB_CONSOLE_REF_KINDS = {"agent", "approval", "artifact", "model", "schedule", "session", "task"}
+WEB_CONSOLE_ACTION_REQUEST_SCHEMA = web_console_helpers.WEB_CONSOLE_ACTION_REQUEST_SCHEMA
+WEB_CONSOLE_ACTION_RESPONSE_SCHEMA = web_console_helpers.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA
+WEB_CONSOLE_REF_KINDS = web_console_helpers.WEB_CONSOLE_REF_KINDS
 WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS = 60 * 60 * 6
+web_console_ref = web_console_helpers.web_console_ref
+web_console_timestamp = web_console_helpers.web_console_timestamp
+web_console_clean_visible = web_console_helpers.web_console_clean_visible
+web_console_status_label = web_console_helpers.web_console_status_label
+web_console_metric = web_console_helpers.web_console_metric
 
 
 def web_console_state(*, runtime_agent: bool = False) -> State:
@@ -6547,15 +6554,6 @@ def web_console_state(*, runtime_agent: bool = False) -> State:
     state.current_title = "main"
     load_subagents(state)
     return state
-
-
-def web_console_ref(kind: str, raw_id: Any) -> str:
-    kind = str(kind or "").strip().lower()
-    raw = str(raw_id or "").strip()
-    if kind not in WEB_CONSOLE_REF_KINDS or not raw:
-        return ""
-    digest = hashlib.sha256(f"shuheng.web_console.v1\0{kind}\0{raw}".encode("utf-8", errors="replace")).hexdigest()[:16]
-    return f"{kind}:{digest}"
 
 
 def web_console_model_rows() -> list[dict[str, str]]:
@@ -6666,54 +6664,6 @@ def web_console_start_runtime_pump_if_needed(state: State) -> None:
     ).start()
 
 
-def web_console_timestamp(row: dict[str, Any]) -> float:
-    for key in ("timestamp", "updated_at", "created_at", "finished_at"):
-        parsed = parse_iso_timestamp(str(row.get(key) or ""))
-        if parsed:
-            return parsed
-    try:
-        return float(row.get("mtime") or 0.0)
-    except Exception:
-        return 0.0
-
-
-def web_console_clean_visible(value: Any, limit: int = 320) -> str:
-    kept_lines: list[str] = []
-    for raw_line in str(value or "").splitlines():
-        if "APPROVAL_REQUIRED" in raw_line:
-            continue
-        kept_lines.append(raw_line)
-    text = clean_text(strip_inline_markdown("\n".join(kept_lines))).strip()
-    text = re.sub(r"artifact://\S+", "[artifact]", text)
-    text = re.sub(r"\bappr[_0-9][A-Za-z0-9_:-]+\b", "[approval]", text)
-    text = re.sub(r"\bapproval=[^\s,;，；]+", "approval=[hidden]", text)
-    text = re.sub(r"\btask_[A-Za-z0-9_:-]+\b", "[task]", text)
-    text = re.sub(r"\bschedrun_[A-Za-z0-9_:-]+\b", "[schedule-run]", text)
-    text = re.sub(r"\bsched_[A-Za-z0-9_:-]+\b", "[schedule]", text)
-    text = re.sub(r"\bagent-\d+\b", "子代理", text)
-    text = re.sub(r"\btmp-agent-[A-Za-z0-9_.:-]+\b", "临时代理", text)
-    return truncate_cells(text, limit).strip()
-
-
-def web_console_status_label(status: Any) -> str:
-    raw = str(status or "").strip()
-    mapping = {
-        "approval_required": "待审批",
-        "completed": "完成",
-        "working": "进行中",
-        "running": "运行中",
-        "created": "待开始",
-        "pending": "待处理",
-        "cancelled": "已取消",
-        "canceled": "已取消",
-        "failed": "失败",
-        "rejected": "已拒绝",
-        "enabled": "启用",
-        "disabled": "停用",
-    }
-    return mapping.get(raw.lower(), web_console_clean_visible(raw or "-", 60) or "-")
-
-
 def web_console_agent_name(state: State, agent_id: str, fallback: str = "") -> str:
     agent_id = str(agent_id or "")
     if agent_id in state.subagents:
@@ -6722,10 +6672,6 @@ def web_console_agent_name(state: State, agent_id: str, fallback: str = "") -> s
         return fallback or "主 agent"
     meta = load_subagent_meta(agent_id)
     return str(meta.get("name") or fallback or "子代理")
-
-
-def web_console_metric(label: str, value: Any, tone: str = "") -> dict[str, str]:
-    return {"label": str(label), "value": str(value), "tone": str(tone)}
 
 
 def web_console_main_summary(

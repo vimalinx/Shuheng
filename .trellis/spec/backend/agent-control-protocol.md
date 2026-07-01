@@ -960,6 +960,87 @@ def web_console_html() -> str:
     return load_web_console_html()
 ```
 
+## Scenario: Web Console Helper Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, or metric row shaping are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/web_console.py`, compatibility aliases in `src/ga_tui/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, policy gates, and Web Console helper unit tests.
+- Non-goal: This does not move `GatewayRequestHandler`, `/gui/action` mutation routing, snapshot construction, runtime pumping, state construction, scheduler/model/subagent mutation, standalone GUI loading, or storage-root ownership.
+
+### 2. Signatures
+
+- Lower-level helper module: `src/ga_tui/web_console.py`.
+- Compatibility aliases in `app.py`:
+  - `WEB_CONSOLE_ACTION_REQUEST_SCHEMA`.
+  - `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA`.
+  - `WEB_CONSOLE_REF_KINDS`.
+  - `web_console_ref(kind, raw_id)`.
+  - `web_console_timestamp(row)`.
+  - `web_console_clean_visible(value, limit=320)`.
+  - `web_console_status_label(status)`.
+  - `web_console_metric(label, value, tone="")`.
+
+### 3. Contracts
+
+- `web_console.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, `RenderLine`, `GatewayRequestHandler`, or runtime mutation helpers.
+- `app.py` remains the compatibility facade and exposes the helper names as direct aliases or behavior-identical wrappers.
+- `WEB_CONSOLE_ACTION_REQUEST_SCHEMA` remains `shuheng.web_console.action_request.v1`.
+- `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA` remains `shuheng.web_console.action_response.v1`.
+- `WEB_CONSOLE_REF_KINDS` remains limited to `agent`, `approval`, `artifact`, `model`, `schedule`, `session`, and `task`.
+- `web_console_ref(...)` returns an opaque stable `<kind>:<digest>` value for valid non-empty kinds/ids and `""` for unknown kinds or blank ids. It must not expose raw task ids, approval ids, artifact URIs, filesystem paths, model names, or agent ids.
+- `web_console_clean_visible(...)` strips approval-only process markers and masks raw artifact refs, approval ids, approval query values, task ids, schedule run ids, schedule ids, internal agent ids, and temporary agent ids.
+- Internal-ref masking must happen before and after inline-markdown stripping, because markdown emphasis rules can otherwise remove underscores from values such as `task_abc` or `schedrun_123` before the masks run.
+- `web_console_timestamp(...)` prefers ISO `timestamp`, `updated_at`, `created_at`, then `finished_at`, with `mtime` as fallback.
+- `web_console_metric(...)` returns a string-only display dict with `label`, `value`, and `tone`.
+
+### 4. Validation & Error Matrix
+
+- `web_console.py` imports `ga_tui.app`, curses, TUI state, gateway handler, or runtime mutation helpers -> policy gate fails.
+- App alias differs from module helper for the same input -> unit test or policy gate fails.
+- Unknown `ui_ref` kind or blank raw id -> helper returns `""`.
+- Sanitized visible text still contains `artifact://`, `appr_`, `approval=appr_`, `task_`, `schedrun_`, `sched_`, `agent-N`, or `tmp-agent-*` -> unit test or policy gate fails.
+- Unknown status contains raw internal id vocabulary after label conversion -> unit test fails.
+- Timestamp fields are absent or invalid -> helper returns numeric `mtime` fallback or `0.0`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/gui/snapshot` rows keep using `app.web_console_clean_visible(...)`, while the implementation is owned by `ga_tui.web_console`.
+- Good: `/gui/action` keeps schema validation in `app.py` but uses the schema constants from the helper module.
+- Base: `web_console_ref_map(...)` stays in `app.py` because it reads ledgers, model config, current history rows, and loaded subagents.
+- Base: `web_console_action_response(...)` stays in `app.py` because it may start the Web-console runtime pump and refresh snapshots.
+- Bad: `web_console.py` imports `State` so it can build snapshots.
+- Bad: `web_console.py` calls `decide_approval(...)`, `start_subagent_task(...)`, or `process_ui_queue(...)`.
+
+### 6. Tests Required
+
+- Unit tests must assert helper behavior for stable opaque refs, invalid kinds, timestamp fallback, sanitization, status labels, metric shape, and `app.py` wrapper parity.
+- `scripts/check_policy_gates.py` must assert `web_console.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway handler, or mutation-dispatch dependencies.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/web_console.py scripts/check_policy_gates.py tests/test_web_console.py` must pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_web_console.py -p no:cacheprovider` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# web_console.py
+from ga_tui.app import State, decide_approval, process_ui_queue
+
+def web_console_snapshot() -> dict:
+    ...
+```
+
+#### Correct
+
+```python
+# web_console.py
+WEB_CONSOLE_ACTION_REQUEST_SCHEMA = "shuheng.web_console.action_request.v1"
+
+def web_console_ref(kind: str, raw_id: object) -> str:
+    ...
+```
+
 ## Scenario: Per-Agent Dedicated Skills
 
 ### 1. Scope / Trigger

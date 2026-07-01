@@ -43,6 +43,7 @@ from ga_tui import scheduler as sched  # noqa: E402
 from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
 from ga_tui import text_utils as text_utils_mod  # noqa: E402
 from ga_tui import ui_types as ui_types_mod  # noqa: E402
+from ga_tui import web_console as web_console_mod  # noqa: E402
 
 
 def retarget_harness(root: str) -> None:
@@ -609,6 +610,67 @@ def assert_runtime_dispatch_module_boundary() -> None:
         "format_approvals",
     ):
         assert forbidden not in source, f"{runtime_dispatch_mod.__file__}: {forbidden}"
+
+
+def assert_web_console_module_boundary() -> None:
+    assert a.WEB_CONSOLE_ACTION_REQUEST_SCHEMA == web_console_mod.WEB_CONSOLE_ACTION_REQUEST_SCHEMA
+    assert a.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA == web_console_mod.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA
+    assert a.WEB_CONSOLE_REF_KINDS is web_console_mod.WEB_CONSOLE_REF_KINDS
+    for name in (
+        "web_console_ref",
+        "web_console_timestamp",
+        "web_console_clean_visible",
+        "web_console_status_label",
+        "web_console_metric",
+    ):
+        assert getattr(a, name) is getattr(web_console_mod, name), name
+
+    task_ref = web_console_mod.web_console_ref("task", "task_web_console_boundary")
+    assert task_ref.startswith("task:"), task_ref
+    assert "task_web_console_boundary" not in task_ref, task_ref
+    assert web_console_mod.web_console_ref("missing", "task_web_console_boundary") == ""
+    cleaned = web_console_mod.web_console_clean_visible(
+        "APPROVAL_REQUIRED hidden\n"
+        "artifact://raw appr_123 approval=appr_secret task_123 schedrun_456 sched_789 agent-123 tmp-agent-demo",
+        500,
+    )
+    for raw in (
+        "APPROVAL_REQUIRED",
+        "artifact://",
+        "appr_123",
+        "approval=appr_secret",
+        "task_123",
+        "schedrun_456",
+        "sched_789",
+        "agent-123",
+        "tmp-agent-demo",
+    ):
+        assert raw not in cleaned, cleaned
+    assert web_console_mod.web_console_status_label("approval_required") == "待审批"
+    assert web_console_mod.web_console_metric("待审批", 2, "warn") == {
+        "label": "待审批",
+        "value": "2",
+        "tone": "warn",
+    }
+
+    source = Path(web_console_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "PanelItem",
+        "RenderLine",
+        "draw_",
+        "GatewayRequestHandler",
+        "process_ui_queue",
+        "start_subagent_task",
+        "decide_approval",
+    ):
+        assert forbidden not in source, f"{web_console_mod.__file__}: {forbidden}"
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7396,6 +7458,7 @@ def run_checks() -> None:
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()
     assert_runtime_dispatch_module_boundary()
+    assert_web_console_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
