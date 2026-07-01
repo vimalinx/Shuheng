@@ -982,7 +982,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Queue path: `queue_subagent_chat_input(state, sub, text, interrupt_requested=False) -> str`.
 - Stream path: `consume_subagent_chat_queue(...)` emits `("sub_chat_stream", subagent_id, task_id, text, done)`.
 - Web action: `POST /gui/action` with `action:"agent.chat"` resolves a sanitized agent `ui_ref` and calls the same dispatcher.
-- Subagent store helpers: `subagent_store.subagent_home(...)`, `subagent_store.subagent_*_path(...)`, `subagent_store.subagent_session_sidebar_key(...)`, `subagent_store.subagent_session_from_sidebar_key(...)`, and `subagent_store.subagent_chat_history_meta_matches(...)`, with `app.py` wrappers injecting app-owned roots such as `SUBAGENTS_DIR` or runtime objects such as `SubAgentRuntime`.
+- Subagent store helpers: `subagent_store.subagent_home(...)`, `subagent_store.subagent_*_path(...)`, `subagent_store.subagent_session_sidebar_key(...)`, `subagent_store.subagent_session_from_sidebar_key(...)`, `subagent_store.subagent_chat_history_meta_matches(...)`, and pure subagent chat preview/count helpers, with `app.py` wrappers injecting app-owned roots such as `SUBAGENTS_DIR` or runtime objects such as `SubAgentRuntime`.
 
 ### 3. Contracts
 
@@ -993,6 +993,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Non-secret persistent direct-chat transcripts must be saved in canonical Shuheng history under `MODEL_RESPONSES_DIR` with subagent metadata such as `conversation_scope`, `agent_id`, and `subagent_chat_session_id`; per-agent `sessions/*.json` files are legacy import sources only and must not receive new authoritative non-secret transcripts. Subagent runtime agents must use a non-persistent transcript sink such as `os.devnull`, not `sub.home/model_responses.txt`, so agent-local state stays metadata/refs/runtime only.
 - Subagent home/path helpers belong to `subagent_store.py` only as metadata/ref path helpers. They must not become a second transcript writer or read/write normal non-secret chat messages.
 - `subagent_store.subagent_chat_history_meta_matches(meta, agent_id, session_id)` owns only the pure metadata/ref predicate: scope must be `subagent_chat`, agent id must match, and a non-empty requested session id must match `subagent_chat_session_id`.
+- `subagent_store.normalize_loaded_subagent_chat_messages(...)`, `subagent_store.subagent_chat_history_preview_messages(...)`, `subagent_store.subagent_chat_history_rounds(...)`, and `subagent_store.subagent_chat_history_last_user_at(...)` own only metadata preview/count shaping. They must not decode Secret Vault message records, parse history transcript files, write history rows, or inspect runtime state.
 - Restoring a non-secret persistent direct-chat session must parse the
   canonical Shuheng history transcript first. `session_meta.json` may cache
   title, preview, counts, and routing refs, but it must not be the
@@ -1035,6 +1036,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 - Tests must keep TUI home plain-text and Web `agent.chat` on the shared `start_subagent_chat(...)` dispatcher, and assert Web agent conversation can hydrate from canonical history-backed subagent chat state instead of relying only on process-local `sub.messages`.
 - Tests must assert non-secret persistent direct-chat persistence is history-backed and does not create new per-agent transcript JSON files or `sub.home/model_responses.txt` runtime transcript files; legacy per-agent JSON files remain non-destructively importable.
 - Tests must assert subagent chat metadata matching is owned by `subagent_store.py`, app wrapper parity holds, wrong scope/agent/session rows are rejected, and `subagent_store.py` does not import history transcript or Secret Vault payload modules.
+- Tests must assert subagent chat preview/count helpers are owned by `subagent_store.py`, app alias parity holds, interrupted assistant restoration is marked done with the durable suffix, preview rows filter unsupported roles and blank cleaned content, and round counts only include non-blank user rows.
 - Tests must assert new non-secret history meta does not store a full
   `subagent_chat_messages` copy, and a seeded stale legacy meta copy cannot
   override the canonical transcript on reload.

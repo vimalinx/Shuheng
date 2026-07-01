@@ -9455,19 +9455,7 @@ def subagent_chat_session_payload(sub: SubAgentRuntime, *, source: str = "") -> 
     }
 
 
-def normalize_loaded_subagent_chat_messages(messages: list[Message]) -> list[Message]:
-    if not messages:
-        return messages
-    last = messages[-1]
-    if last.role == "assistant" and not last.done:
-        content = (last.content or "").rstrip()
-        suffix = "[上一轮子 agent 输出中断，已按恢复记录收尾。]"
-        if content:
-            content = f"{content}\n\n{suffix}"
-        else:
-            content = suffix
-        messages[-1] = Message("assistant", content, done=True)
-    return messages
+normalize_loaded_subagent_chat_messages = subagent_store_helpers.normalize_loaded_subagent_chat_messages
 
 
 def messages_from_subagent_chat_payload(payload: dict[str, Any]) -> list[Message]:
@@ -9488,17 +9476,7 @@ def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -
     history_store.write_subagent_chat_history_transcript(path, messages)
 
 
-def subagent_chat_history_preview_messages(messages: list[Message], limit: int = 20) -> list[dict[str, str]]:
-    records: list[dict[str, str]] = []
-    for msg in messages[-limit:]:
-        role = str(msg.role or "")
-        if role not in {"user", "assistant", "system"}:
-            continue
-        content = clean_text(msg.content or "").strip()
-        if not content:
-            continue
-        records.append({"role": role, "content": content})
-    return records
+subagent_chat_history_preview_messages = subagent_store_helpers.subagent_chat_history_preview_messages
 
 
 def subagent_chat_history_preview(messages: list[Message], sub: SubAgentRuntime) -> str:
@@ -9532,12 +9510,8 @@ def subagent_chat_history_description(messages: list[Message], preview: str = ""
     return compact_description("；".join(snippets), SESSION_DESCRIPTION_LIMIT)
 
 
-def subagent_chat_history_rounds(messages: list[Message]) -> int:
-    return sum(1 for msg in messages if msg.role == "user" and str(msg.content or "").strip())
-
-
-def subagent_chat_history_last_user_at(messages: list[Message], fallback: float) -> float:
-    return fallback if any(msg.role == "user" and str(msg.content or "").strip() for msg in messages) else fallback
+subagent_chat_history_rounds = subagent_store_helpers.subagent_chat_history_rounds
+subagent_chat_history_last_user_at = subagent_store_helpers.subagent_chat_history_last_user_at
 
 
 def subagent_chat_history_path_for_session(

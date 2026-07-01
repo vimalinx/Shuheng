@@ -76,6 +76,56 @@ def test_subagent_chat_history_meta_matches_and_app_wrapper() -> None:
     assert app_module.subagent_chat_history_meta_matches(meta, sub, "chat_20260701_120000_000000001")
 
 
+def test_normalize_loaded_subagent_chat_messages_closes_interrupted_assistant() -> None:
+    messages = [
+        app_module.Message("user", "继续"),
+        app_module.Message("assistant", "partial  \n", done=False),
+    ]
+
+    normalized = subagent_store.normalize_loaded_subagent_chat_messages(messages)
+
+    assert normalized is messages
+    assert normalized[-1].done is True
+    assert normalized[-1].role == "assistant"
+    assert normalized[-1].content == "partial\n\n[上一轮子 agent 输出中断，已按恢复记录收尾。]"
+    assert app_module.normalize_loaded_subagent_chat_messages is subagent_store.normalize_loaded_subagent_chat_messages
+
+
+def test_subagent_chat_history_preview_messages_filters_and_limits() -> None:
+    messages = [
+        app_module.Message("user", "old"),
+        app_module.Message("tool", "ignored"),
+        app_module.Message("user", " \x1b[31mnew user "),
+        app_module.Message("assistant", "  "),
+        app_module.Message("system", "notice"),
+        app_module.Message("assistant", "new reply"),
+    ]
+
+    records = subagent_store.subagent_chat_history_preview_messages(messages, limit=4)
+
+    assert records == [
+        {"role": "user", "content": "new user"},
+        {"role": "system", "content": "notice"},
+        {"role": "assistant", "content": "new reply"},
+    ]
+    assert app_module.subagent_chat_history_preview_messages is subagent_store.subagent_chat_history_preview_messages
+
+
+def test_subagent_chat_history_rounds_and_last_user_at() -> None:
+    messages = [
+        app_module.Message("user", "first"),
+        app_module.Message("assistant", "reply"),
+        app_module.Message("user", " "),
+        app_module.Message("user", "latest"),
+    ]
+
+    assert subagent_store.subagent_chat_history_rounds(messages) == 2
+    assert subagent_store.subagent_chat_history_last_user_at(messages, 123.5) == 123.5
+    assert subagent_store.subagent_chat_history_last_user_at([], 42.0) == 42.0
+    assert app_module.subagent_chat_history_rounds is subagent_store.subagent_chat_history_rounds
+    assert app_module.subagent_chat_history_last_user_at is subagent_store.subagent_chat_history_last_user_at
+
+
 def test_subagent_store_does_not_own_transcripts() -> None:
     assert not hasattr(subagent_store, "write_subagent_chat_history_transcript")
     assert not hasattr(subagent_store, "save_subagent_chat_messages_to_history")

@@ -374,6 +374,10 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.subagent_new_chat_session_id is subagent_store_mod.subagent_new_chat_session_id
     assert a.subagent_session_sidebar_key is subagent_store_mod.subagent_session_sidebar_key
     assert a.subagent_session_from_sidebar_key is subagent_store_mod.subagent_session_from_sidebar_key
+    assert a.normalize_loaded_subagent_chat_messages is subagent_store_mod.normalize_loaded_subagent_chat_messages
+    assert a.subagent_chat_history_preview_messages is subagent_store_mod.subagent_chat_history_preview_messages
+    assert a.subagent_chat_history_rounds is subagent_store_mod.subagent_chat_history_rounds
+    assert a.subagent_chat_history_last_user_at is subagent_store_mod.subagent_chat_history_last_user_at
     original_root = a.SUBAGENTS_DIR
     try:
         a.SUBAGENTS_DIR = root
@@ -404,6 +408,28 @@ def assert_subagent_store_module_boundary() -> None:
     assert not subagent_store_mod.subagent_chat_history_meta_matches({**meta, "conversation_scope": "other"}, "ops-agent")
     assert a.subagent_chat_history_meta_matches(meta, sub)
     assert a.subagent_chat_history_meta_matches(meta, sub, "chat-id-1")
+    interrupted = [a.Message("user", "continue"), a.Message("assistant", "partial  \n", done=False)]
+    normalized = subagent_store_mod.normalize_loaded_subagent_chat_messages(interrupted)
+    assert normalized[-1].done is True
+    assert normalized[-1].content == "partial\n\n[上一轮子 agent 输出中断，已按恢复记录收尾。]"
+    preview_rows = subagent_store_mod.subagent_chat_history_preview_messages(
+        [
+            a.Message("user", "old"),
+            a.Message("tool", "ignored"),
+            a.Message("user", " \x1b[31mnew user "),
+            a.Message("assistant", "  "),
+            a.Message("system", "notice"),
+            a.Message("assistant", "new reply"),
+        ],
+        limit=4,
+    )
+    assert preview_rows == [
+        {"role": "user", "content": "new user"},
+        {"role": "system", "content": "notice"},
+        {"role": "assistant", "content": "new reply"},
+    ]
+    assert subagent_store_mod.subagent_chat_history_rounds([a.Message("user", "one"), a.Message("user", " ")]) == 1
+    assert subagent_store_mod.subagent_chat_history_last_user_at([], 42.0) == 42.0
     assert not hasattr(subagent_store_mod, "write_subagent_chat_history_transcript")
     assert not hasattr(subagent_store_mod, "save_subagent_chat_messages_to_history")
     source = Path(subagent_store_mod.__file__).read_text(encoding="utf-8")
