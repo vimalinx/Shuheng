@@ -929,6 +929,31 @@ def test_process_title_text_from_parts_preserves_title_priority() -> None:
     assert app_module.process_title_text(preview_body) == "raw visible line"
 
 
+def test_process_display_summary_text_prefers_summary_and_suppresses_running() -> None:
+    assert rendering.process_display_summary_text("整理完成", "预览") == "整理完成"
+    assert rendering.process_display_summary_text("", "预览") == "预览"
+    assert rendering.process_display_summary_text("执行中", "预览") == ""
+    assert rendering.process_display_summary_text("", "执行中") == ""
+    assert rendering.process_display_summary_text("", "") == ""
+
+
+def test_render_assistant_text_uses_display_summary_policy_for_no_final_text() -> None:
+    rendered = app_module.render_assistant_text(
+        "LLM Running (Turn 1) ...\n<summary>整理完成</summary>\n",
+        done=True,
+        fold_process=True,
+    )
+    running = app_module.render_assistant_text(
+        "LLM Running (Turn 1) ...\n<summary>执行中</summary>\n",
+        done=False,
+        fold_process=True,
+    )
+
+    assert rendered == "· 过程 Turn 1: 整理完成"
+    assert "· 过程 Turn 1: 执行中" not in running
+    assert running == "▸ 过程 Turn 1: 执行中 (正在执行)"
+
+
 def test_process_line_format_helpers_render_expected_strings() -> None:
     marker = "**LLM Running (Turn 7) ...**"
 
@@ -1119,6 +1144,8 @@ def test_app_append_process_turn_wrapper_delegates_line_selection_to_rendering()
     final_text = app_module.visible_reply_text(body, hide_detail_fences=has_process_noise)
     summary = app_module.process_summary_text(body)
     title_summary = app_module.process_title_text(body)
+    display_summary = app_module.process_display_summary_text(summary, "")
+    fallback_summary = app_module.process_display_summary_text(title_summary, "")
     assert rendered == rendering.process_turn_lines(
         final_text,
         has_process_noise=has_process_noise,
@@ -1127,12 +1154,10 @@ def test_app_append_process_turn_wrapper_delegates_line_selection_to_rendering()
         collapse_whole=False,
         collapsed_line=app_module.collapsed_process_line(marker, body, current=True),
         speech_header_line=app_module.process_speech_header(marker, body),
-        summary_line=app_module.process_speech_summary_line(marker, body, summary)
-        if summary and summary != "执行中"
-        else "",
+        summary_line=app_module.process_speech_summary_line(marker, body, display_summary) if display_summary else "",
         detail_line=app_module.process_detail_line(marker, body, current=True),
-        fallback_summary_line=app_module.process_speech_summary_line(marker, body, title_summary)
-        if title_summary and title_summary != "执行中"
+        fallback_summary_line=app_module.process_speech_summary_line(marker, body, fallback_summary)
+        if fallback_summary
         else "",
     )
 
@@ -1164,6 +1189,10 @@ def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
         marker,
         "人工摘要",
         tools,
+    )
+    assert app_module.process_display_summary_text("整理结果", "fallback") == rendering.process_display_summary_text(
+        "整理结果",
+        "fallback",
     )
     rendered_summary: list[str] = []
     assert app_module.append_process_summary_line(rendered_summary, marker, body)
@@ -1566,6 +1595,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.process_detail_line_text is rendering.process_detail_line_text
     assert app_module.process_speech_header_text is rendering.process_speech_header_text
     assert app_module.process_speech_summary_line_text is rendering.process_speech_summary_line_text
+    assert app_module.process_display_summary_text is rendering.process_display_summary_text
     assert app_module.process_summary_append_lines is rendering.process_summary_append_lines
     assert app_module.expanded_process_header_text is rendering.expanded_process_header_text
     assert app_module.process_group_header_parts is rendering.process_group_header_parts

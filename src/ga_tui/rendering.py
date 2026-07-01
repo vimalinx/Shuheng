@@ -237,8 +237,15 @@ def process_speech_summary_line_text(marker: str, summary: str, tools: list[str]
     return f"· 过程 {process_turn_label(marker)}: {summary}{process_tool_suffix(tools)}"
 
 
+def process_display_summary_text(summary: str, preview: str) -> str:
+    display = summary or preview
+    if display and display != "执行中":
+        return display
+    return ""
+
+
 def process_summary_append_lines(summary: str, summary_line: str) -> list[str]:
-    if summary and summary != "执行中":
+    if process_display_summary_text(summary, ""):
         return [summary_line]
     return []
 

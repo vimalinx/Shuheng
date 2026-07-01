@@ -376,6 +376,7 @@ def assert_rendering_module_boundary() -> None:
         "process_detail_line_text",
         "process_speech_header_text",
         "process_speech_summary_line_text",
+        "process_display_summary_text",
         "process_summary_append_lines",
         "expanded_process_header_text",
         "process_group_header_parts",
@@ -504,6 +505,20 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.process_title_text_from_parts("整理完成", True, "预览") == "整理完成"
     assert rendering_mod.process_title_text_from_parts("", True, "预览") == "搜索/浏览输出已折叠"
     assert rendering_mod.process_title_text_from_parts("", False, "预览") == "预览"
+    assert rendering_mod.process_display_summary_text("整理完成", "预览") == "整理完成"
+    assert rendering_mod.process_display_summary_text("", "预览") == "预览"
+    assert rendering_mod.process_display_summary_text("执行中", "预览") == ""
+    assert rendering_mod.process_display_summary_text("", "执行中") == ""
+    assert a.render_assistant_text(
+        "LLM Running (Turn 1) ...\n<summary>整理完成</summary>\n",
+        done=True,
+        fold_process=True,
+    ) == "· 过程 Turn 1: 整理完成"
+    assert a.render_assistant_text(
+        "LLM Running (Turn 1) ...\n<summary>执行中</summary>\n",
+        done=False,
+        fold_process=True,
+    ) == "▸ 过程 Turn 1: 执行中 (正在执行)"
     process_marker = "**LLM Running (Turn 12) ...**"
     process_body = (
         "<summary>整理过程</summary>\n"
@@ -542,6 +557,8 @@ def assert_rendering_module_boundary() -> None:
     assert a.process_speech_summary_line(process_marker, process_body, "人工摘要") == (
         rendering_mod.process_speech_summary_line_text(process_marker, "人工摘要", process_tools)
     )
+    assert a.process_display_summary_text is rendering_mod.process_display_summary_text
+    assert a.process_display_summary_text(a.process_summary_text(process_body), "fallback") == "整理过程"
     assert rendering_mod.process_summary_append_lines("整理过程", "summary row") == ["summary row"]
     assert rendering_mod.process_summary_append_lines("", "summary row") == []
     assert rendering_mod.process_summary_append_lines("执行中", "summary row") == []
@@ -1089,18 +1106,20 @@ def assert_rendering_module_boundary() -> None:
     a.append_process_turn(rendered_process_turn, process_marker, process_body, current=True)
     process_summary = a.process_summary_text(process_body)
     process_title = a.process_title_text(process_body)
+    process_display_summary = a.process_display_summary_text(process_summary, "")
+    process_fallback_summary = a.process_display_summary_text(process_title, "")
     assert rendered_process_turn == rendering_mod.process_turn_lines(
         a.visible_reply_text(process_body, hide_detail_fences=a.process_has_tool_noise(process_body)),
         has_process_noise=a.process_has_tool_noise(process_body),
         has_call_noise=a.process_has_tool_call_noise(process_body),
         collapsed_line=a.collapsed_process_line(process_marker, process_body, current=True),
         speech_header_line=a.process_speech_header(process_marker, process_body),
-        summary_line=a.process_speech_summary_line(process_marker, process_body, process_summary)
-        if process_summary and process_summary != "执行中"
+        summary_line=a.process_speech_summary_line(process_marker, process_body, process_display_summary)
+        if process_display_summary
         else "",
         detail_line=a.process_detail_line(process_marker, process_body, current=True),
-        fallback_summary_line=a.process_speech_summary_line(process_marker, process_body, process_title)
-        if process_title and process_title != "执行中"
+        fallback_summary_line=a.process_speech_summary_line(process_marker, process_body, process_fallback_summary)
+        if process_fallback_summary
         else "",
     )
     latest_turn_text = (
@@ -1284,6 +1303,7 @@ def assert_rendering_module_boundary() -> None:
         "def interaction_input_prompt_text",
         "def interaction_footer_text",
         "def process_title_text_from_parts",
+        "def process_display_summary_text",
         "def process_summary_append_lines",
         "def process_turn_lines",
         "def boxed_user_lines",

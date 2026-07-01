@@ -619,6 +619,7 @@ collapsed_process_line_text = rendering_helpers.collapsed_process_line_text
 process_detail_line_text = rendering_helpers.process_detail_line_text
 process_speech_header_text = rendering_helpers.process_speech_header_text
 process_speech_summary_line_text = rendering_helpers.process_speech_summary_line_text
+process_display_summary_text = rendering_helpers.process_display_summary_text
 process_summary_append_lines = rendering_helpers.process_summary_append_lines
 expanded_process_header_text = rendering_helpers.expanded_process_header_text
 process_group_header_parts = rendering_helpers.process_group_header_parts
@@ -18527,6 +18528,8 @@ def append_process_turn(
     final_text = visible_reply_text(body, hide_detail_fences=has_process_noise)
     summary = process_summary_text(body)
     title_summary = process_title_text(body)
+    display_summary = process_display_summary_text(summary, "")
+    fallback_summary = process_display_summary_text(title_summary, "")
     rendered.extend(
         rendering_helpers.process_turn_lines(
             final_text,
@@ -18536,13 +18539,9 @@ def append_process_turn(
             collapse_whole=collapse_whole,
             collapsed_line=collapsed_process_line(marker, body, current=current),
             speech_header_line=process_speech_header(marker, body),
-            summary_line=process_speech_summary_line(marker, body, summary)
-            if summary and summary != "执行中"
-            else "",
+            summary_line=process_speech_summary_line(marker, body, display_summary) if display_summary else "",
             detail_line=process_detail_line(marker, body, current=current),
-            fallback_summary_line=process_speech_summary_line(marker, body, title_summary)
-            if title_summary and title_summary != "执行中"
-            else "",
+            fallback_summary_line=process_speech_summary_line(marker, body, fallback_summary) if fallback_summary else "",
         )
     )
 
@@ -18645,8 +18644,8 @@ def render_assistant_text(
                 append_process_summary_line(rendered, marker, body)
                 rendered.append(final_text)
             else:
-                summary = process_summary_text(body) or process_preview(body)
-                if summary and summary != "执行中":
+                summary = process_display_summary_text(process_summary_text(body), process_preview(body))
+                if summary:
                     rendered.append(process_speech_summary_line(marker, body, summary))
         return "\n".join(line for line in rendered if line.strip()).strip()
 
@@ -18671,8 +18670,8 @@ def render_assistant_text(
                     append_process_summary_line(rendered, marker, body)
                     rendered.append(final_text)
                 else:
-                    summary = process_summary_text(body) or process_preview(body)
-                    if summary and summary != "执行中":
+                    summary = process_display_summary_text(process_summary_text(body), process_preview(body))
+                    if summary:
                         rendered.append(process_speech_summary_line(marker, body, summary))
                     else:
                         rendered.append(collapsed_process_line(marker, body, current=not done))
@@ -18685,8 +18684,8 @@ def render_assistant_text(
                     append_process_summary_line(rendered, marker, body)
                     rendered.append(final_text)
                 else:
-                    summary = process_summary_text(body) or process_preview(body)
-                    if summary and summary != "执行中":
+                    summary = process_display_summary_text(process_summary_text(body), process_preview(body))
+                    if summary:
                         rendered.append(process_speech_summary_line(marker, body, summary))
     return "\n".join(line for line in rendered if line.strip()).strip()
 
