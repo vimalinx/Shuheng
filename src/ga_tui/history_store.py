@@ -55,6 +55,38 @@ def recent_history_items(
     return [(idx, item) for idx, item, _activity_at in recent_candidates[:limit]]
 
 
+def compact_ui_preview_messages_from_pairs(
+    pairs: list[tuple[str, str]],
+    rounds: int,
+    *,
+    default_rounds: int,
+    user_text_from_prompt: Callable[[str], str],
+    response_preview_text: Callable[[str], str],
+) -> tuple[list[dict[str, str]], int, int, int]:
+    user_rounds = sum(1 for prompt, _response in pairs if user_text_from_prompt(prompt))
+    total_rounds = user_rounds or len(pairs)
+    if total_rounds <= 0:
+        return [], 0, 0, 0
+    loaded_rounds = max(1, min(int(rounds or default_rounds), total_rounds))
+    start = 0
+    seen = 0
+    for idx in range(len(pairs) - 1, -1, -1):
+        if user_text_from_prompt(pairs[idx][0]):
+            seen += 1
+            start = idx
+            if seen >= loaded_rounds:
+                break
+    messages: list[dict[str, str]] = []
+    for prompt, response in pairs[start:]:
+        user = user_text_from_prompt(prompt)
+        if user:
+            messages.append({"role": "user", "content": user})
+        summary = response_preview_text(response)
+        if summary and summary != "执行中":
+            messages.append({"role": "assistant", "content": f"（预览）{summary}"})
+    return messages, loaded_rounds, total_rounds, len(messages)
+
+
 def parse_log_time(text: str) -> float:
     text = (text or "").strip()
     if not text:

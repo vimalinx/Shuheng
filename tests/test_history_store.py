@@ -89,6 +89,70 @@ class TestRecentHistoryItems:
         assert result == history_store.recent_history_items(entries, set(), app_module.RECENT_SESSION_LIMIT)
 
 
+class TestRestorePreviewCompaction:
+    @staticmethod
+    def _user_text(prompt: str) -> str:
+        return prompt.strip()
+
+    @staticmethod
+    def _response_preview(response: str) -> str:
+        return response.strip()
+
+    def test_compact_ui_preview_messages_from_pairs_selects_recent_rounds(self) -> None:
+        pairs = [
+            ("first", "first reply"),
+            ("   ", "blank user reply"),
+            ("second", "执行中"),
+            ("third", "third reply"),
+        ]
+
+        messages, loaded, total, count = history_store.compact_ui_preview_messages_from_pairs(
+            pairs,
+            2,
+            default_rounds=3,
+            user_text_from_prompt=self._user_text,
+            response_preview_text=self._response_preview,
+        )
+
+        assert loaded == 2
+        assert total == 3
+        assert count == 3
+        assert messages == [
+            {"role": "user", "content": "second"},
+            {"role": "user", "content": "third"},
+            {"role": "assistant", "content": "（预览）third reply"},
+        ]
+
+    def test_compact_ui_preview_messages_from_pairs_falls_back_to_pair_count(self) -> None:
+        messages, loaded, total, count = history_store.compact_ui_preview_messages_from_pairs(
+            [(" ", "one"), ("", "two")],
+            5,
+            default_rounds=3,
+            user_text_from_prompt=self._user_text,
+            response_preview_text=self._response_preview,
+        )
+
+        assert loaded == 2
+        assert total == 2
+        assert count == 2
+        assert messages == [
+            {"role": "assistant", "content": "（预览）one"},
+            {"role": "assistant", "content": "（预览）two"},
+        ]
+
+    def test_app_compact_ui_preview_wrapper_preserves_behavior(self) -> None:
+        response = repr([{"type": "text", "text": "visible reply"}])
+        direct = history_store.compact_ui_preview_messages_from_pairs(
+            [("  user asks  ", response)],
+            app_module.RESTORE_DISPLAY_ROUNDS,
+            default_rounds=app_module.RESTORE_DISPLAY_ROUNDS,
+            user_text_from_prompt=app_module._user_text,
+            response_preview_text=app_module.session_response_preview_text,
+        )
+
+        assert app_module.compact_ui_preview_messages_from_pairs([("  user asks  ", response)]) == direct
+
+
 class TestTranscriptStorage:
     def test_latest_user_message_text_selects_newest_non_blank_user(self) -> None:
         messages = [

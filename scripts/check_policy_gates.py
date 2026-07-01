@@ -288,6 +288,34 @@ def assert_history_store_module_boundary() -> None:
         2,
     )
     assert [idx for idx, _item in history_store_mod.recent_history_items(history_entries, set(), 5)] == [2, 1]
+    pairs = [
+        (" first ", "old reply"),
+        (" ", "ignored-user reply"),
+        (" second ", "执行中"),
+        (" third ", "visible"),
+    ]
+    assert a.compact_ui_preview_messages_from_pairs(pairs, rounds=2) == history_store_mod.compact_ui_preview_messages_from_pairs(
+        pairs,
+        2,
+        default_rounds=a.RESTORE_DISPLAY_ROUNDS,
+        user_text_from_prompt=a._user_text,
+        response_preview_text=a.session_response_preview_text,
+    )
+    preview_messages, preview_loaded, preview_total, preview_count = history_store_mod.compact_ui_preview_messages_from_pairs(
+        pairs,
+        2,
+        default_rounds=3,
+        user_text_from_prompt=lambda prompt: str(prompt or "").strip(),
+        response_preview_text=lambda response: str(response or "").strip(),
+    )
+    assert preview_loaded == 2
+    assert preview_total == 3
+    assert preview_count == 3
+    assert preview_messages == [
+        {"role": "user", "content": "second"},
+        {"role": "user", "content": "third"},
+        {"role": "assistant", "content": "（预览）visible"},
+    ]
     assert a.parse_log_time("2026-06-30 12:34:56") == history_store_mod.parse_log_time("2026-06-30 12:34:56")
     assert a.is_model_response_basename("model_responses_a.txt") is history_store_mod.is_model_response_basename("model_responses_a.txt")
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
