@@ -17,6 +17,7 @@ except Exception:
 SelectionPoint = tuple[int, int]
 SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 TableLayoutLine = tuple[str, str]
+MarkdownLayoutLine = tuple[str, str]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
@@ -224,6 +225,101 @@ def table_layout_lines(lines: list[str], width: int) -> list[TableLayoutLine]:
         if idx == 0 and len(rows) > 1:
             sep = "─┼─".join("─" * w for w in col_widths)
             out.append(("separator", sep))
+    return out
+
+
+def markdown_layout_blocks(text: str, width: int) -> list[MarkdownLayoutLine]:
+    out: list[MarkdownLayoutLine] = []
+    lines = (text or "").splitlines()
+    i = 0
+    in_code = False
+    code_lang = ""
+    while i < len(lines):
+        raw = lines[i].rstrip()
+        stripped = raw.strip()
+
+        fence = re.match(r"^`{3,}(.*)$", stripped)
+        if fence:
+            if not in_code:
+                in_code = True
+                code_lang = fence.group(1).strip() or "code"
+                out.append(("code_header", "╭─ " + code_lang))
+            else:
+                in_code = False
+                out.append(("code_footer", "╰─"))
+            i += 1
+            continue
+        if in_code:
+            for wrapped in wrap_cells(raw, max(8, width - 2)):
+                out.append(("code_body", "│ " + wrapped))
+            i += 1
+            continue
+
+        if "|" in raw and i + 1 < len(lines) and "|" in lines[i + 1]:
+            maybe_sep = split_table_row(lines[i + 1])
+            if is_table_separator(maybe_sep):
+                table_lines = [raw, lines[i + 1]]
+                i += 2
+                while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                    table_lines.append(lines[i])
+                    i += 1
+                for kind, rendered in table_layout_lines(table_lines, width):
+                    out.append((f"table_{kind}", rendered))
+                continue
+
+        if not stripped:
+            out.append(("blank", ""))
+            i += 1
+            continue
+        if re.fullmatch(r"[-*_]{3,}", stripped):
+            out.append(("rule", "─" * min(width, 80)))
+            i += 1
+            continue
+
+        heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if heading:
+            level = len(heading.group(1))
+            marker = "█" if level <= 2 else "▪"
+            kind = "heading_major" if level <= 2 else "heading_minor"
+            for wrapped in wrap_cells(strip_inline_markdown(heading.group(2)), max(8, width - 2)):
+                out.append((kind, f"{marker} {wrapped}"))
+            i += 1
+            continue
+
+        quote = re.match(r"^>\s?(.*)$", stripped)
+        if quote:
+            for wrapped in wrap_cells(strip_inline_markdown(quote.group(1)), max(8, width - 2)):
+                out.append(("quote", "▌ " + wrapped))
+            i += 1
+            continue
+
+        task = re.match(r"^[-*+]\s+\[([ xX])\]\s+(.+)$", stripped)
+        if task:
+            mark = "☑" if task.group(1).lower() == "x" else "☐"
+            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(task.group(2)), max(8, width - 4))):
+                out.append(("body", ("  " + mark + " " if n == 0 else "    ") + wrapped))
+            i += 1
+            continue
+
+        bullet = re.match(r"^([-*+])\s+(.+)$", stripped)
+        if bullet:
+            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(bullet.group(2)), max(8, width - 4))):
+                out.append(("body", ("  • " if n == 0 else "    ") + wrapped))
+            i += 1
+            continue
+
+        numbered = re.match(r"^(\d+[.)])\s+(.+)$", stripped)
+        if numbered:
+            label = numbered.group(1)
+            indent = " " * (len(label) + 3)
+            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(numbered.group(2)), max(8, width - len(indent)))):
+                out.append(("body", (f"  {label} " if n == 0 else indent) + wrapped))
+            i += 1
+            continue
+
+        for wrapped in wrap_cells(strip_inline_markdown(raw), width):
+            out.append(("body", wrapped))
+        i += 1
     return out
 
 

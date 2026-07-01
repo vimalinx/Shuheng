@@ -139,6 +139,87 @@ def test_app_render_table_wrapper_converts_layout_records_to_render_lines() -> N
     ]
 
 
+def test_markdown_layout_blocks_covers_markdown_block_shapes() -> None:
+    text = "\n".join(
+        [
+            "```python",
+            "print('枢衡')",
+            "```",
+            "",
+            "| **Name** | Count |",
+            "| --- | ---: |",
+            "| Alpha | 3 |",
+            "---",
+            "## **Heading**",
+            "### Minor",
+            "> quote *text*",
+            "- [x] done",
+            "- [ ] todo",
+            "* bullet **item**",
+            "12. numbered `item`",
+            "plain body",
+        ]
+    )
+
+    assert rendering.markdown_layout_blocks(text, 32) == [
+        ("code_header", "╭─ python"),
+        ("code_body", "│ print('枢衡')"),
+        ("code_footer", "╰─"),
+        ("blank", ""),
+        ("table_header", "Name  │ Count"),
+        ("table_separator", "──────┼──────"),
+        ("table_body", "Alpha │ 3    "),
+        ("rule", "────────────────────────────────"),
+        ("heading_major", "█ Heading"),
+        ("heading_minor", "▪ Minor"),
+        ("quote", "▌ quote text"),
+        ("body", "  ☑ done"),
+        ("body", "  ☐ todo"),
+        ("body", "  • bullet item"),
+        ("body", "  12. numbered item"),
+        ("body", "plain body"),
+    ]
+
+
+def test_app_markdown_blocks_wrapper_converts_layout_records_to_render_lines() -> None:
+    text = "\n".join(
+        [
+            "```python",
+            "print('x')",
+            "```",
+            "",
+            "| Name | Count |",
+            "| --- | ---: |",
+            "| Alpha | 3 |",
+            "---",
+            "## Heading",
+            "### Minor",
+            "> quote",
+            "- [x] done",
+        ]
+    )
+
+    rendered = app_module.markdown_blocks(text, 32)
+    layout = rendering.markdown_layout_blocks(text, 32)
+
+    assert [line.text for line in rendered] == [line for _kind, line in layout]
+    assert [line.attr for line in rendered] == [
+        app_module.cp(10) | app_module.curses.A_BOLD,
+        app_module.cp(2),
+        app_module.cp(10),
+        0,
+        app_module.cp(7) | app_module.curses.A_BOLD,
+        app_module.cp(10),
+        app_module.cp(2),
+        app_module.cp(10),
+        app_module.cp(7) | app_module.curses.A_BOLD,
+        app_module.cp(1) | app_module.curses.A_BOLD,
+        app_module.cp(10),
+        app_module.cp(2),
+    ]
+    assert app_module.markdown_layout_blocks is rendering.markdown_layout_blocks
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0
@@ -832,6 +913,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.is_table_separator is rendering.is_table_separator
     assert app_module.split_table_row is rendering.split_table_row
     assert app_module.table_layout_lines is rendering.table_layout_lines
+    assert app_module.markdown_layout_blocks is rendering.markdown_layout_blocks
     assert app_module.LINE_NUMBERED_FILE_RE is rendering.LINE_NUMBERED_FILE_RE
     assert app_module.FENCE_BOUNDARY_RE is rendering.FENCE_BOUNDARY_RE
     assert app_module.next_nonblank_line is rendering.next_nonblank_line

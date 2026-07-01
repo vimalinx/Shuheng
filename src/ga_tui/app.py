@@ -582,6 +582,7 @@ strip_inline_markdown = rendering_helpers.strip_inline_markdown
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
+markdown_layout_blocks = rendering_helpers.markdown_layout_blocks
 visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
@@ -18784,95 +18785,18 @@ def render_table(lines: list[str], width: int) -> list[RenderLine]:
 
 def markdown_blocks(text: str, width: int) -> list[RenderLine]:
     out: list[RenderLine] = []
-    lines = (text or "").splitlines()
-    i = 0
-    in_code = False
-    code_lang = ""
-    while i < len(lines):
-        raw = lines[i].rstrip()
-        stripped = raw.strip()
-
-        fence = re.match(r"^`{3,}(.*)$", stripped)
-        if fence:
-            if not in_code:
-                in_code = True
-                code_lang = fence.group(1).strip() or "code"
-                out.append(RenderLine("╭─ " + code_lang, cp(10) | curses.A_BOLD))
-            else:
-                in_code = False
-                out.append(RenderLine("╰─", cp(10)))
-            i += 1
-            continue
-        if in_code:
-            for wrapped in wrap_cells(raw, max(8, width - 2)):
-                out.append(RenderLine("│ " + wrapped, cp(2)))
-            i += 1
-            continue
-
-        if "|" in raw and i + 1 < len(lines) and "|" in lines[i + 1]:
-            maybe_sep = split_table_row(lines[i + 1])
-            if is_table_separator(maybe_sep):
-                table_lines = [raw, lines[i + 1]]
-                i += 2
-                while i < len(lines) and "|" in lines[i] and lines[i].strip():
-                    table_lines.append(lines[i])
-                    i += 1
-                out.extend(render_table(table_lines, width))
-                continue
-
-        if not stripped:
-            out.append(RenderLine(""))
-            i += 1
-            continue
-        if re.fullmatch(r"[-*_]{3,}", stripped):
-            out.append(RenderLine("─" * min(width, 80), cp(10)))
-            i += 1
-            continue
-
-        heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
-        if heading:
-            level = len(heading.group(1))
-            marker = "█" if level <= 2 else "▪"
-            attr = (cp(7) if level <= 2 else cp(1)) | curses.A_BOLD
-            for wrapped in wrap_cells(strip_inline_markdown(heading.group(2)), max(8, width - 2)):
-                out.append(RenderLine(f"{marker} {wrapped}", attr))
-            i += 1
-            continue
-
-        quote = re.match(r"^>\s?(.*)$", stripped)
-        if quote:
-            for wrapped in wrap_cells(strip_inline_markdown(quote.group(1)), max(8, width - 2)):
-                out.append(RenderLine("▌ " + wrapped, cp(10)))
-            i += 1
-            continue
-
-        task = re.match(r"^[-*+]\s+\[([ xX])\]\s+(.+)$", stripped)
-        if task:
-            mark = "☑" if task.group(1).lower() == "x" else "☐"
-            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(task.group(2)), max(8, width - 4))):
-                out.append(RenderLine(("  " + mark + " " if n == 0 else "    ") + wrapped, cp(2)))
-            i += 1
-            continue
-
-        bullet = re.match(r"^([-*+])\s+(.+)$", stripped)
-        if bullet:
-            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(bullet.group(2)), max(8, width - 4))):
-                out.append(RenderLine(("  • " if n == 0 else "    ") + wrapped, cp(2)))
-            i += 1
-            continue
-
-        numbered = re.match(r"^(\d+[.)])\s+(.+)$", stripped)
-        if numbered:
-            label = numbered.group(1)
-            indent = " " * (len(label) + 3)
-            for n, wrapped in enumerate(wrap_cells(strip_inline_markdown(numbered.group(2)), max(8, width - len(indent)))):
-                out.append(RenderLine((f"  {label} " if n == 0 else indent) + wrapped, cp(2)))
-            i += 1
-            continue
-
-        for wrapped in wrap_cells(strip_inline_markdown(raw), width):
-            out.append(RenderLine(wrapped, cp(2)))
-        i += 1
+    for kind, line in markdown_layout_blocks(text, width):
+        if kind in {"code_header", "heading_major", "table_header"}:
+            attr = cp(7) | curses.A_BOLD if kind != "code_header" else cp(10) | curses.A_BOLD
+        elif kind in {"code_footer", "rule", "quote", "table_separator"}:
+            attr = cp(10)
+        elif kind == "heading_minor":
+            attr = cp(1) | curses.A_BOLD
+        elif kind == "blank":
+            attr = 0
+        else:
+            attr = cp(2)
+        out.append(RenderLine(line, attr))
     return out
 
 

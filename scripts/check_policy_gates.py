@@ -343,6 +343,7 @@ def assert_rendering_module_boundary() -> None:
         "is_table_separator",
         "split_table_row",
         "table_layout_lines",
+        "markdown_layout_blocks",
         "process_preview",
         "process_summary_text",
         "TURN_NO_RE",
@@ -787,6 +788,62 @@ def assert_rendering_module_boundary() -> None:
         ("separator", "──────┼──────"),
         ("body", "Alpha │ 3    "),
     ]
+    markdown_text = "\n".join(
+        [
+            "```python",
+            "print('x')",
+            "```",
+            "",
+            "| Name | Count |",
+            "| --- | ---: |",
+            "| Alpha | 3 |",
+            "---",
+            "## Heading",
+            "### Minor",
+            "> quote",
+            "- [x] done",
+            "* bullet",
+            "1. numbered",
+            "plain",
+        ]
+    )
+    markdown_layout = rendering_mod.markdown_layout_blocks(markdown_text, 32)
+    assert markdown_layout == [
+        ("code_header", "╭─ python"),
+        ("code_body", "│ print('x')"),
+        ("code_footer", "╰─"),
+        ("blank", ""),
+        ("table_header", "Name  │ Count"),
+        ("table_separator", "──────┼──────"),
+        ("table_body", "Alpha │ 3    "),
+        ("rule", "────────────────────────────────"),
+        ("heading_major", "█ Heading"),
+        ("heading_minor", "▪ Minor"),
+        ("quote", "▌ quote"),
+        ("body", "  ☑ done"),
+        ("body", "  • bullet"),
+        ("body", "  1. numbered"),
+        ("body", "plain"),
+    ]
+    rendered_markdown = a.markdown_blocks(markdown_text, 32)
+    assert [line.text for line in rendered_markdown] == [line for _kind, line in markdown_layout]
+    assert [line.attr for line in rendered_markdown] == [
+        a.cp(10) | curses.A_BOLD,
+        a.cp(2),
+        a.cp(10),
+        0,
+        a.cp(7) | curses.A_BOLD,
+        a.cp(10),
+        a.cp(2),
+        a.cp(10),
+        a.cp(7) | curses.A_BOLD,
+        a.cp(1) | curses.A_BOLD,
+        a.cp(10),
+        a.cp(2),
+        a.cp(2),
+        a.cp(2),
+        a.cp(2),
+    ]
     rendered_table = a.render_table(table_lines, 24)
     assert [line.text for line in rendered_table] == [
         text for _kind, text in rendering_mod.table_layout_lines(table_lines, 24)
@@ -842,6 +899,7 @@ def assert_rendering_module_boundary() -> None:
         "def is_table_separator",
         "def split_table_row",
         "def table_layout_lines",
+        "def markdown_layout_blocks",
         "def message_cache_signature",
         "def process_turn_no",
         "def process_child_detail_text",
