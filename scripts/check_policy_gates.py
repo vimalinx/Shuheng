@@ -338,6 +338,7 @@ def assert_rendering_module_boundary() -> None:
         "scoped_subagent_meta_keys",
         "message_render_cache_key",
         "strip_meta_blocks",
+        "strip_inline_markdown",
         "process_preview",
         "process_summary_text",
         "TURN_NO_RE",
@@ -689,6 +690,14 @@ def assert_rendering_module_boundary() -> None:
         fallback_noise_body,
         has_tool_noise=a.process_has_tool_noise,
     )
+    assert rendering_mod.strip_inline_markdown("![alt](https://example.invalid/img.png)") == "[alt]"
+    assert rendering_mod.strip_inline_markdown("[docs](https://example.invalid)") == (
+        "docs (https://example.invalid)"
+    )
+    assert rendering_mod.strip_inline_markdown("run `cmd --flag` now") == "run cmd --flag now"
+    assert rendering_mod.strip_inline_markdown("**bold** __strong__ *italic* _em_") == (
+        "bold strong italic em"
+    )
     assert rendering_mod.boxed_user_lines("hi", 20) == [
         "┌──────────┐",
         "│ hi       │",
@@ -734,6 +743,7 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_has_section_shape",
         "def preferred_group_visible_reply_text",
         "def boxed_user_lines",
+        "def strip_inline_markdown",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",

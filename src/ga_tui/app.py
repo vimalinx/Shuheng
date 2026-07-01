@@ -577,6 +577,7 @@ message_render_cache_key = rendering_helpers.message_render_cache_key
 strip_meta_blocks = rendering_helpers.strip_meta_blocks
 strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
 strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
+strip_inline_markdown = rendering_helpers.strip_inline_markdown
 visible_reply_text = rendering_helpers.visible_reply_text
 visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
@@ -18772,16 +18773,6 @@ def render_assistant_text(
                     if summary and summary != "执行中":
                         rendered.append(process_speech_summary_line(marker, body, summary))
     return "\n".join(line for line in rendered if line.strip()).strip()
-
-
-def strip_inline_markdown(text: str) -> str:
-    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"[\1]", text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    text = re.sub(r"(\*\*|__)(.*?)\1", r"\2", text)
-    text = re.sub(r"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)", r"\1", text)
-    text = re.sub(r"(?<!_)_(?!_)(.*?)(?<!_)_(?!_)", r"\1", text)
-    return text
 
 
 def is_table_separator(cells: list[str]) -> bool:

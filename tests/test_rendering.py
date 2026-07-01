@@ -62,6 +62,13 @@ def test_boxed_user_lines_pads_wide_text_by_cells() -> None:
     assert len({rendering.cell_width(line) for line in lines}) == 1
 
 
+def test_strip_inline_markdown_cleans_inline_markup() -> None:
+    assert rendering.strip_inline_markdown("![alt](https://example.invalid/img.png)") == "[alt]"
+    assert rendering.strip_inline_markdown("[docs](https://example.invalid)") == "docs (https://example.invalid)"
+    assert rendering.strip_inline_markdown("run `cmd --flag` now") == "run cmd --flag now"
+    assert rendering.strip_inline_markdown("**bold** __strong__ *italic* _em_") == "bold strong italic em"
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0
@@ -633,6 +640,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_meta_blocks is rendering.strip_meta_blocks
     assert app_module.process_preview is rendering.process_preview
     assert app_module.process_summary_text is rendering.process_summary_text
+    assert app_module.strip_inline_markdown is rendering.strip_inline_markdown
     assert app_module.LINE_NUMBERED_FILE_RE is rendering.LINE_NUMBERED_FILE_RE
     assert app_module.FENCE_BOUNDARY_RE is rendering.FENCE_BOUNDARY_RE
     assert app_module.next_nonblank_line is rendering.next_nonblank_line

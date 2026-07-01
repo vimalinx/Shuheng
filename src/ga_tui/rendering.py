@@ -184,7 +184,7 @@ def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
     return strip_standalone_dot_lines(text)
 
 
-def _strip_inline_markdown(text: str) -> str:
+def strip_inline_markdown(text: str) -> str:
     text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"[\1]", text)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
@@ -195,7 +195,7 @@ def _strip_inline_markdown(text: str) -> str:
 
 
 def visible_reply_is_substantive(text: str) -> bool:
-    clean = _strip_inline_markdown(clean_text(text or "")).strip()
+    clean = strip_inline_markdown(clean_text(text or "")).strip()
     if len(clean) >= 180:
         return True
     markers = ("# ", "## ", "### ", "|", "- ", "1.", "1. ", "✅", "结论", "报告")
@@ -203,7 +203,7 @@ def visible_reply_is_substantive(text: str) -> bool:
 
 
 def visible_reply_is_housekeeping_summary(text: str) -> bool:
-    clean = _strip_inline_markdown(clean_text(text or "")).strip()
+    clean = strip_inline_markdown(clean_text(text or "")).strip()
     if not clean:
         return False
     first_line = clean.splitlines()[0].strip()
@@ -220,9 +220,9 @@ def visible_reply_has_section_shape(text: str) -> bool:
 def preferred_group_visible_reply_text(visible_items: list[str], irc_replies: list[str]) -> str:
     chosen = visible_items[-1] if visible_items else ""
     if chosen and (not visible_reply_is_substantive(chosen) or visible_reply_is_housekeeping_summary(chosen)):
-        chosen_len = len(_strip_inline_markdown(clean_text(chosen)).strip())
+        chosen_len = len(strip_inline_markdown(clean_text(chosen)).strip())
         for candidate in reversed(visible_items[:-1]):
-            candidate_len = len(_strip_inline_markdown(clean_text(candidate)).strip())
+            candidate_len = len(strip_inline_markdown(clean_text(candidate)).strip())
             if (
                 visible_reply_is_substantive(candidate)
                 and (
