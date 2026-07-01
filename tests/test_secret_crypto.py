@@ -17,8 +17,12 @@ from ga_tui.secret_vault import (
     NACL_XCHACHA_NPUBBYTES,
     SecretVaultPaths,
     SecretVaultError,
+    SECRET_DEFAULT_TOR_SOCKS,
     ensure_secret_vault_dirs,
     load_secret_vault_meta,
+    normalize_secret_proxy_endpoint,
+    parse_secret_import_args,
+    parse_secret_proxy_chain,
     secret_b64,
     secret_create_vault,
     secret_crypto_available,
@@ -27,6 +31,8 @@ from ga_tui.secret_vault import (
     secret_encrypt_bytes,
     secret_import_key_id,
     secret_read_json_from_path,
+    secret_session_state_payload,
+    secret_session_title_for_messages,
     secret_session_id_from_path,
     secret_storage_path_for_session,
     secret_unb64,
@@ -156,6 +162,51 @@ class TestAppCompatibility:
         assert app_module.secret_encrypt_bytes is secret_encrypt_bytes
         assert app_module.secret_decrypt_bytes is secret_decrypt_bytes
         assert app_module.NACL_XCHACHA_KEYBYTES == NACL_XCHACHA_KEYBYTES
+
+    def test_app_reexports_secret_value_helpers(self) -> None:
+        assert app_module.secret_session_title_for_messages is secret_session_title_for_messages
+        assert app_module.secret_session_state_payload is secret_session_state_payload
+        assert app_module.parse_secret_import_args is parse_secret_import_args
+        assert app_module.parse_secret_proxy_chain is parse_secret_proxy_chain
+        assert app_module.normalize_secret_proxy_endpoint is normalize_secret_proxy_endpoint
+
+
+class TestSecretValueHelpers:
+    def test_secret_session_title_normalization(self) -> None:
+        messages = [
+            app_module.Message("system", "ignored"),
+            app_module.Message("user", "  迁移普通会话到 Secret  "),
+            app_module.Message("assistant", "done"),
+        ]
+
+        assert secret_session_title_for_messages("Secret: 手动标题", messages) == "手动标题"
+        assert secret_session_title_for_messages("Secret Vault", messages) == "迁移普通会话到 Secret"
+        assert secret_session_title_for_messages("", []) == "Secret 会话"
+
+    def test_secret_session_state_payload_normalizes_title(self) -> None:
+        messages = [app_module.Message("user", "保存这个 Secret 会话")]
+
+        payload = secret_session_state_payload("../secret id", "Secret: main", messages, source="unit")
+
+        assert payload["schema_version"] == "secret.session_state.v1"
+        assert payload["session_id"] == "..-secret-id"
+        assert payload["title"] == "保存这个 Secret 会话"
+        assert payload["source"] == "unit"
+        assert payload["messages"][0]["role"] == "user"
+
+    def test_import_arg_and_proxy_value_helpers(self) -> None:
+        assert parse_secret_import_args("") == ("delete", "current")
+        assert parse_secret_import_args("archive 2") == ("archive", "2")
+        assert parse_secret_import_args("删除 id:abc") == ("delete", "id:abc")
+        assert parse_secret_import_args("target only") == ("delete", "target only")
+        assert parse_secret_proxy_chain("tor -> 127.0.0.1:9051; https://proxy") == [
+            "tor",
+            "127.0.0.1:9051",
+            "https://proxy",
+        ]
+        assert normalize_secret_proxy_endpoint("tor") == SECRET_DEFAULT_TOR_SOCKS
+        assert normalize_secret_proxy_endpoint("127.0.0.1:9051") == "socks5h://127.0.0.1:9051"
+        assert normalize_secret_proxy_endpoint("http://proxy:8080") == "http://proxy:8080"
 
 
 class TestSecretVaultStorage:

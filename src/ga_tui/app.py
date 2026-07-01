@@ -443,10 +443,11 @@ SECRET_COPY_CONFIRM_TTL_SECONDS = 20.0
 SECRET_VAULT_PASSWORD_RULE_TEXT = secret_vault_store.SECRET_VAULT_PASSWORD_RULE_TEXT
 SECRET_NETWORK_CHAIN_ENV = secret_vault_store.SECRET_NETWORK_CHAIN_ENV
 SECRET_TOR_SOCKS_ENV = secret_vault_store.SECRET_TOR_SOCKS_ENV
-SECRET_AUTO_TOR_ENV = "GA_TUI_SECRET_AUTO_TOR"
-SECRET_DEFAULT_TOR_SOCKS = "socks5h://127.0.0.1:9050"
+SECRET_AUTO_TOR_ENV = secret_vault_store.SECRET_AUTO_TOR_ENV
+SECRET_DEFAULT_TOR_SOCKS = secret_vault_store.SECRET_DEFAULT_TOR_SOCKS
 SECRET_IMPORT_SESSION_PREFIX = secret_vault_store.SECRET_IMPORT_SESSION_PREFIX
 SECRET_NATIVE_SESSION_PREFIX = secret_vault_store.SECRET_NATIVE_SESSION_PREFIX
+SECRET_IMPORT_DISPOSITION_ALIASES = secret_vault_store.SECRET_IMPORT_DISPOSITION_ALIASES
 SUBAGENT_SESSION_PREFIX = subagent_store_helpers.SUBAGENT_SESSION_PREFIX
 SECRET_PROXY_ENV_KEYS = ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy")
 TOKEN_STAT_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
@@ -2603,6 +2604,13 @@ secret_message_record = secret_vault_store.secret_message_record
 secret_message_from_record = secret_vault_store.secret_message_from_record
 secret_session_sidebar_key = secret_vault_store.secret_session_sidebar_key
 secret_session_id_from_sidebar_key = secret_vault_store.secret_session_id_from_sidebar_key
+secret_session_title_for_messages = secret_vault_store.secret_session_title_for_messages
+secret_messages_to_backend_history = secret_vault_store.secret_messages_to_backend_history
+secret_session_state_payload = secret_vault_store.secret_session_state_payload
+parse_secret_import_args = secret_vault_store.parse_secret_import_args
+messages_from_secret_session_payload = secret_vault_store.messages_from_secret_session_payload
+parse_secret_proxy_chain = secret_vault_store.parse_secret_proxy_chain
+normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endpoint
 
 
 def secret_vault_paths() -> secret_vault_store.SecretVaultPaths:
@@ -2716,32 +2724,9 @@ def secret_append_transcript_turn(state: State, user_text: str, assistant_text: 
     return ok, detail
 
 
-def secret_session_title_for_messages(title: str, messages: list[Message]) -> str:
-    title = compact_title(str(title or ""), 80)
-    if title.startswith("Secret: "):
-        title = compact_title(title.removeprefix("Secret: "), 80)
-    if title and title not in {"main", "Secret Vault", "运行中会话", "空闲会话"}:
-        return title
-    return compact_title(suggested_session_title(messages) or title or "Secret 会话", 80)
-
-
-def secret_messages_to_backend_history(messages: list[Message]) -> list[dict[str, Any]]:
-    return secret_vault_store.secret_messages_to_backend_history(messages)
-
-
 def restore_backend_from_secret_messages(agent: Any, messages: list[Message]) -> None:
     history = secret_messages_to_backend_history(messages)
     reset_agent_runtime_context_no_snapshot(agent, history)
-
-
-def secret_session_state_payload(session_id: str, title: str, messages: list[Message], *, source: str = "", origin: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    return secret_vault_store.secret_session_state_payload(
-        session_id,
-        secret_session_title_for_messages(title, messages),
-        messages,
-        source=source,
-        origin=origin,
-    )
 
 
 def clear_secret_session_sidebar_cache(state: State) -> None:
@@ -2787,34 +2772,6 @@ def secret_save_current_session_state(state: State, *, source: str = "ui") -> tu
         source=source,
         origin=state.secret_active_origin,
     )
-
-
-SECRET_IMPORT_DISPOSITION_ALIASES = {
-    "delete": "delete",
-    "del": "delete",
-    "remove": "delete",
-    "rm": "delete",
-    "删除": "delete",
-    "archive": "archive",
-    "archived": "archive",
-    "归档": "archive",
-}
-
-
-def parse_secret_import_args(raw: str) -> tuple[str, str]:
-    text = (raw or "").strip()
-    disposition = "delete"
-    target = "current"
-    if not text:
-        return disposition, target
-    first, _, rest = text.partition(" ")
-    parsed = SECRET_IMPORT_DISPOSITION_ALIASES.get(first.lower())
-    if parsed:
-        disposition = parsed
-        target = rest.strip() or "current"
-    else:
-        target = text
-    return disposition, target
 
 
 def clear_pending_secret_import(state: State) -> None:
@@ -3315,10 +3272,6 @@ def resolve_secret_native_session(state: State, target: str) -> tuple[Optional[d
     return None, "找不到 Secret 会话。"
 
 
-def messages_from_secret_session_payload(payload: dict[str, Any]) -> list[Message]:
-    return secret_vault_store.messages_from_secret_session_payload(payload)
-
-
 def restore_secret_native_session(state: State, target: str) -> str:
     if not state.secret_vault.unlocked or not state.secret_vault.key:
         return "Secret Vault 已锁定：请先 /Secret 解锁。"
@@ -3393,14 +3346,6 @@ def secret_hint_lines(state: State, width: int) -> list[tuple[str, int]]:
     return lines
 
 
-def parse_secret_proxy_chain(raw: str) -> list[str]:
-    text = (raw or "").strip()
-    if not text:
-        return []
-    text = text.replace("->", ",").replace(";", ",")
-    return [item.strip() for item in re.split(r"[,\s]+", text) if item.strip()]
-
-
 def secret_auto_tor_enabled() -> bool:
     raw = (os.environ.get(SECRET_AUTO_TOR_ENV) or "").strip().lower()
     return raw not in {"0", "false", "no", "off", "disabled"}
@@ -3417,15 +3362,6 @@ def secret_configured_proxy_chain() -> list[str]:
         if endpoint not in chain:
             chain.append(endpoint)
     return chain
-
-
-def normalize_secret_proxy_endpoint(endpoint: str) -> str:
-    value = (endpoint or "").strip()
-    if value.lower() == "tor":
-        return SECRET_DEFAULT_TOR_SOCKS
-    if value and "://" not in value:
-        value = f"socks5h://{value}"
-    return value
 
 
 def secret_proxy_endpoint_healthy(endpoint: str, timeout: float = 1.0) -> tuple[bool, str]:

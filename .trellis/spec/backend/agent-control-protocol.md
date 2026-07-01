@@ -980,6 +980,73 @@ progress_items = [format_task(row) for row in read_jsonl("tasks.jsonl")]
 progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 ```
 
+## Scenario: Secret Vault Value Helper Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition moves Secret Vault value shaping into `secret_vault.py`.
+- Applies to: Secret session title fallback, Secret session-state payload titles, Secret import argument parsing, Secret proxy-chain parsing, and proxy endpoint string normalization.
+- Non-goal: This does not move Secret unlock/setup state, password-entry UI, Secret prompt rendering, import validation/execution, ordinary-source deletion/archive, encrypted file IO, network health checks, proxy environment mutation, native/imported restore orchestration, backend reset, history parsing, Web Console payloads, commands, rendering, or transcript storage.
+
+### 2. Signatures
+
+- `secret_vault.secret_session_title_for_messages(title, messages) -> str`
+- `secret_vault.secret_session_state_payload(session_id, title, messages, source="", origin=None) -> dict`
+- `secret_vault.parse_secret_import_args(raw) -> tuple[str, str]`
+- `secret_vault.parse_secret_proxy_chain(raw) -> list[str]`
+- `secret_vault.normalize_secret_proxy_endpoint(endpoint) -> str`
+- `app.py` re-exports the moved helpers as compatibility aliases.
+
+### 3. Contracts
+
+- Secret value helpers may depend on `Message`, text helpers, and existing history-title fallback policy, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime providers, Web Console, dashboard, command handlers, or rendering owners.
+- `secret_session_title_for_messages(...)` strips a `Secret: ` prefix, rejects placeholder titles such as `main` / `Secret Vault` / running or idle labels, and falls back to a message-derived title or `Secret 会话`.
+- `secret_session_state_payload(...)` must normalize the persisted payload title through `secret_session_title_for_messages(...)`.
+- `parse_secret_import_args(...)` maps delete/archive aliases while preserving unknown text as the target.
+- `parse_secret_proxy_chain(...)` accepts comma, whitespace, semicolon, and `->` separators without reading environment variables.
+- `normalize_secret_proxy_endpoint(...)` maps `tor` to the default Tor SOCKS endpoint and prefixes bare endpoints with `socks5h://`.
+- `app.py` remains the owner of mutable Secret state, approval gates, command wiring, source file migration side effects, proxy env mutation, network health checks, and runtime/backend restore.
+
+### 4. Validation & Error Matrix
+
+- Title `Secret: main` plus a user message -> payload title uses the message-derived title.
+- Title `Secret: 手动标题` -> title is `手动标题`.
+- Empty title and no messages -> title is `Secret 会话`.
+- Import args `archive 2` -> `("archive", "2")`.
+- Import args `删除 id:abc` -> `("delete", "id:abc")`.
+- Import args with unknown first token -> defaults to delete disposition and treats the whole text as target.
+- Proxy chain `tor -> host:9051; http://proxy` -> `["tor", "host:9051", "http://proxy"]`.
+- Proxy endpoint `host:9051` -> `socks5h://host:9051`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `secret_vault.py` owns Secret payload title normalization and import/proxy value parsing without touching storage or UI state.
+- Base: `app.py` calls the same helper names through direct aliases while it still owns command handling and side effects.
+- Bad: `secret_vault.py` imports `ga_tui.app` to read `SECRET_DEFAULT_TOR_SOCKS` or call command/runtime helpers.
+- Bad: A pure parsing helper reads environment variables, checks network sockets, mutates proxy env vars, or queues policy approvals.
+
+### 6. Tests Required
+
+- Unit tests must assert Secret title fallback, payload title normalization, import arg aliases, proxy chain parsing, endpoint normalization, and app alias parity.
+- `scripts/check_policy_gates.py` must assert moved helper ownership and that `secret_vault.py` has no reverse import into `app.py` or curses/UI owners.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# secret_vault.py
+from ga_tui.app import SECRET_DEFAULT_TOR_SOCKS, State
+```
+
+#### Correct
+
+```python
+# app.py
+normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endpoint
+```
+
 ## Scenario: Direct Subagent Chat Visibility
 
 ### 1. Scope / Trigger

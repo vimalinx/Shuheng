@@ -12,8 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 try:
+    from .history_titles import suggested_session_title
+    from .text_utils import compact_title
     from .ui_types import Message
 except Exception:  # pragma: no cover - direct module execution compatibility
+    from history_titles import suggested_session_title  # type: ignore
+    from text_utils import compact_title  # type: ignore
     from ui_types import Message  # type: ignore
 
 try:
@@ -57,8 +61,20 @@ SECRET_VAULT_PASSWORD_RULE_TEXT = (
 )
 SECRET_NETWORK_CHAIN_ENV = "GA_TUI_SECRET_PROXY_CHAIN"
 SECRET_TOR_SOCKS_ENV = "GA_TUI_SECRET_TOR_SOCKS"
+SECRET_AUTO_TOR_ENV = "GA_TUI_SECRET_AUTO_TOR"
+SECRET_DEFAULT_TOR_SOCKS = "socks5h://127.0.0.1:9050"
 SECRET_IMPORT_SESSION_PREFIX = "secret_import:"
 SECRET_NATIVE_SESSION_PREFIX = "secret_session:"
+SECRET_IMPORT_DISPOSITION_ALIASES = {
+    "delete": "delete",
+    "del": "delete",
+    "remove": "delete",
+    "rm": "delete",
+    "删除": "delete",
+    "archive": "archive",
+    "archived": "archive",
+    "归档": "archive",
+}
 
 
 @dataclass(frozen=True)
@@ -556,6 +572,15 @@ def secret_import_target_from_sidebar_key(key: Any) -> str:
     return text
 
 
+def secret_session_title_for_messages(title: str, messages: list[Message]) -> str:
+    title = compact_title(str(title or ""), 80)
+    if title.startswith("Secret: "):
+        title = compact_title(title.removeprefix("Secret: "), 80)
+    if title and title not in {"main", "Secret Vault", "运行中会话", "空闲会话"}:
+        return title
+    return compact_title(suggested_session_title(messages) or title or "Secret 会话", 80)
+
+
 def secret_messages_to_backend_history(messages: list[Message]) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     for msg in messages:
@@ -579,7 +604,7 @@ def secret_session_state_payload(
     payload = {
         "schema_version": "secret.session_state.v1",
         "session_id": secret_safe_session_id(session_id),
-        "title": title,
+        "title": secret_session_title_for_messages(title, messages),
         "updated_at": now_iso(),
         "source": source,
         "messages": [secret_message_record(msg) for msg in messages],
@@ -596,6 +621,39 @@ def messages_from_secret_session_payload(payload: dict[str, Any]) -> list[Messag
     if messages:
         return messages
     return [Message("system", "Secret 会话为空。")]
+
+
+def parse_secret_import_args(raw: str) -> tuple[str, str]:
+    text = (raw or "").strip()
+    disposition = "delete"
+    target = "current"
+    if not text:
+        return disposition, target
+    first, _, rest = text.partition(" ")
+    parsed = SECRET_IMPORT_DISPOSITION_ALIASES.get(first.lower())
+    if parsed:
+        disposition = parsed
+        target = rest.strip() or "current"
+    else:
+        target = text
+    return disposition, target
+
+
+def parse_secret_proxy_chain(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    text = text.replace("->", ",").replace(";", ",")
+    return [item.strip() for item in re.split(r"[,\s]+", text) if item.strip()]
+
+
+def normalize_secret_proxy_endpoint(endpoint: str) -> str:
+    value = (endpoint or "").strip()
+    if value.lower() == "tor":
+        return SECRET_DEFAULT_TOR_SOCKS
+    if value and "://" not in value:
+        value = f"socks5h://{value}"
+    return value
 
 
 def secret_write_sealed_import(

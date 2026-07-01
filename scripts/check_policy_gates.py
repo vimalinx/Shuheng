@@ -642,7 +642,26 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.secret_decrypt_bytes is secret_vault_mod.secret_decrypt_bytes
     assert a.secret_safe_session_id("../x") == secret_vault_mod.secret_safe_session_id("../x")
     assert a.secret_session_sidebar_key("abc") == secret_vault_mod.secret_session_sidebar_key("abc")
+    assert a.secret_session_title_for_messages is secret_vault_mod.secret_session_title_for_messages
+    assert a.secret_session_state_payload is secret_vault_mod.secret_session_state_payload
+    assert a.parse_secret_import_args is secret_vault_mod.parse_secret_import_args
+    assert a.parse_secret_proxy_chain is secret_vault_mod.parse_secret_proxy_chain
+    assert a.normalize_secret_proxy_endpoint is secret_vault_mod.normalize_secret_proxy_endpoint
     assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
+    assert a.SECRET_AUTO_TOR_ENV == secret_vault_mod.SECRET_AUTO_TOR_ENV
+    assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
+    assert secret_vault_mod.secret_session_title_for_messages(
+        "Secret Vault",
+        [a.Message("user", "secret boundary title")],
+    ) == "secret boundary title"
+    assert secret_vault_mod.parse_secret_import_args("归档 id:abc") == ("archive", "id:abc")
+    assert secret_vault_mod.parse_secret_proxy_chain("tor -> host:9051; http://proxy") == [
+        "tor",
+        "host:9051",
+        "http://proxy",
+    ]
+    assert secret_vault_mod.normalize_secret_proxy_endpoint("tor") == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
+    assert secret_vault_mod.normalize_secret_proxy_endpoint("host:9051") == "socks5h://host:9051"
     source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
         assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"
