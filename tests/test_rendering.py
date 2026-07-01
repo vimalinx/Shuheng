@@ -235,6 +235,92 @@ def test_app_plain_blocks_wrapper_converts_plain_layout_to_render_lines() -> Non
     assert app_module.plain_layout_lines is rendering.plain_layout_lines
 
 
+def test_parse_subagent_result_notice_extracts_headers_and_body() -> None:
+    notice = rendering.parse_subagent_result_notice(
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n"
+        "\n"
+        "主体回复\n"
+        "第二行\n"
+    )
+
+    assert notice == {
+        "name": "研究员",
+        "agent_id": "agent-research",
+        "task_id": "task_123",
+        "artifact_ref": "artifact://subagent-results/report.md",
+        "body": "主体回复\n第二行",
+    }
+    assert rendering.parse_subagent_result_notice("ordinary system message") is None
+
+
+def test_subagent_result_metadata_helpers_split_entries_and_summary() -> None:
+    notice = {
+        "name": "研究员",
+        "agent_id": "agent-research",
+        "task_id": "task_123",
+        "artifact_ref": "artifact://subagent-results/report.md",
+        "body": "",
+    }
+    reply, metadata_lines = rendering.split_subagent_result_reply_and_metadata(
+        "可见回复\n"
+        "\n"
+        "---\n"
+        "Findings:\n"
+        "1. 第一项\n"
+        "2. 第二项\n"
+        "Confidence: 高\n"
+        "Risks: 无\n"
+    )
+
+    assert reply == "可见回复"
+    assert metadata_lines == [
+        "Findings:",
+        "1. 第一项",
+        "2. 第二项",
+        "Confidence: 高",
+        "Risks: 无",
+    ]
+    assert rendering.subagent_result_metadata_entries(metadata_lines) == [
+        ("Findings", "1. 第一项\n2. 第二项"),
+        ("Confidence", "高"),
+        ("Risks", "无"),
+    ]
+    assert rendering.subagent_result_metadata_labels(notice, metadata_lines) == [
+        "Task",
+        "Artifact",
+        "Findings",
+        "Confidence",
+        "Risks",
+    ]
+    assert rendering.count_list_like_metadata_value("a, b, c") == 3
+    assert rendering.count_list_like_metadata_value("无") == 0
+    assert rendering.subagent_result_metadata_summary(notice, metadata_lines) == (
+        "Confidence: 高 · Findings: 2 · Risks: 0 · Task · Artifact"
+    )
+    assert rendering.subagent_meta_label(notice).startswith("S")
+    assert len(rendering.subagent_meta_label(notice)) == 9
+
+
+def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
+    for name in (
+        "SUBAGENT_RESULT_HEADER_RE",
+        "SUBAGENT_RESULT_META_LABEL_RE",
+        "parse_subagent_result_notice",
+        "subagent_result_metadata_separator",
+        "subagent_result_metadata_label",
+        "subagent_result_metadata_value",
+        "split_subagent_result_reply_and_metadata",
+        "subagent_result_metadata_labels",
+        "count_list_like_metadata_value",
+        "subagent_result_metadata_entries",
+        "subagent_result_metadata_summary",
+        "subagent_meta_label",
+    ):
+        assert getattr(app_module, name) is getattr(rendering, name), name
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0

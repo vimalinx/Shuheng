@@ -520,15 +520,8 @@ SECRET_CRYPTO_IMPORT_ERROR = secret_vault_store.SECRET_CRYPTO_IMPORT_ERROR
 
 
 SUMMARY_RE = history_title_policy.SUMMARY_RE
-SUBAGENT_RESULT_HEADER_RE = re.compile(r"^子\s*agent\s*回复\s*·\s*(?P<name>.*?)\s*\((?P<agent_id>[^)]+)\)\s*$")
-SUBAGENT_RESULT_META_LABEL_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?(?:\*\*)?"
-    r"(Summary|Findings|Evidence refs?|Risks?|Artifact refs?|Confidence|Source quality|"
-    r"Critical issues|Minor issues|Missing context|Approval risks|Recommended fixes|"
-    r"Memory candidates|Files|Changed files|Tests)"
-    r"(?:\*\*)?\s*[:：]",
-    re.IGNORECASE,
-)
+SUBAGENT_RESULT_HEADER_RE = rendering_helpers.SUBAGENT_RESULT_HEADER_RE
+SUBAGENT_RESULT_META_LABEL_RE = rendering_helpers.SUBAGENT_RESULT_META_LABEL_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
 TURN_NO_RE = rendering_helpers.TURN_NO_RE
 LINE_NUMBERED_FILE_RE = rendering_helpers.LINE_NUMBERED_FILE_RE
@@ -579,6 +572,16 @@ strip_meta_blocks = rendering_helpers.strip_meta_blocks
 strip_tool_output_blocks = rendering_helpers.strip_tool_output_blocks
 strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 strip_inline_markdown = rendering_helpers.strip_inline_markdown
+parse_subagent_result_notice = rendering_helpers.parse_subagent_result_notice
+subagent_result_metadata_separator = rendering_helpers.subagent_result_metadata_separator
+subagent_result_metadata_label = rendering_helpers.subagent_result_metadata_label
+subagent_result_metadata_value = rendering_helpers.subagent_result_metadata_value
+split_subagent_result_reply_and_metadata = rendering_helpers.split_subagent_result_reply_and_metadata
+subagent_result_metadata_labels = rendering_helpers.subagent_result_metadata_labels
+count_list_like_metadata_value = rendering_helpers.count_list_like_metadata_value
+subagent_result_metadata_entries = rendering_helpers.subagent_result_metadata_entries
+subagent_result_metadata_summary = rendering_helpers.subagent_result_metadata_summary
+subagent_meta_label = rendering_helpers.subagent_meta_label
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
@@ -18805,128 +18808,10 @@ def plain_blocks(text: str, width: int) -> list[RenderLine]:
     return [RenderLine(line, cp(2)) for line in plain_layout_lines(text, width)]
 
 
-def parse_subagent_result_notice(text: str) -> Optional[dict[str, str]]:
-    lines = clean_text(text).splitlines()
-    if not lines:
-        return None
-    match = SUBAGENT_RESULT_HEADER_RE.match(lines[0].strip())
-    if not match:
-        return None
-    task_id = ""
-    artifact_ref = ""
-    body_start = 1
-    for idx, line in enumerate(lines[1:], 1):
-        stripped = line.strip()
-        if not stripped:
-            body_start = idx + 1
-            break
-        if stripped.lower().startswith("task:"):
-            task_id = stripped.split(":", 1)[1].strip()
-            body_start = idx + 1
-            continue
-        if stripped.lower().startswith("artifact:"):
-            artifact_ref = stripped.split(":", 1)[1].strip()
-            body_start = idx + 1
-            continue
-        body_start = idx
-        break
-    body = "\n".join(lines[body_start:]).strip()
-    return {
-        "name": match.group("name").strip(),
-        "agent_id": match.group("agent_id").strip(),
-        "task_id": task_id,
-        "artifact_ref": artifact_ref,
-        "body": body,
-    }
-
-
 def render_subagent_result_body(text: str, fold_process: bool) -> str:
     rendered = render_assistant_text(text, True, fold_process)
     rendered = clean_text(rendered).strip()
     return rendered or "(empty result)"
-
-
-def subagent_result_metadata_separator(line: str) -> bool:
-    stripped = (line or "").strip()
-    if stripped in {"---", "***", "___"}:
-        return True
-    return len(stripped) >= 6 and len(set(stripped)) == 1 and stripped[0] in {"-", "_", "*", "─"}
-
-
-def subagent_result_metadata_label(line: str) -> str:
-    match = SUBAGENT_RESULT_META_LABEL_RE.match(line or "")
-    if not match:
-        return ""
-    return " ".join(word.capitalize() for word in match.group(1).split())
-
-
-def subagent_result_metadata_value(line: str) -> str:
-    if not subagent_result_metadata_label(line):
-        return ""
-    return strip_inline_markdown((line or "").split(":", 1)[-1].split("：", 1)[-1]).strip(" -")
-
-
-def split_subagent_result_reply_and_metadata(text: str) -> tuple[str, list[str]]:
-    lines = clean_text(text).splitlines()
-    footer_start = -1
-    for idx, line in enumerate(lines):
-        if not subagent_result_metadata_label(line):
-            continue
-        footer_start = idx
-        prev = idx - 1
-        while prev >= 0 and not lines[prev].strip():
-            prev -= 1
-        if prev >= 0 and subagent_result_metadata_separator(lines[prev]):
-            footer_start = prev
-        break
-    if footer_start < 0:
-        return clean_text(text).strip(), []
-    reply = "\n".join(lines[:footer_start]).strip()
-    metadata = [
-        line.strip()
-        for line in lines[footer_start:]
-        if line.strip() and not subagent_result_metadata_separator(line)
-    ]
-    return reply, metadata
-
-
-def subagent_result_metadata_labels(notice: dict[str, str], metadata_lines: list[str]) -> list[str]:
-    labels: list[str] = []
-    for label, present in (("Task", bool(notice.get("task_id"))), ("Artifact", bool(notice.get("artifact_ref")))):
-        if present:
-            labels.append(label)
-    for line in metadata_lines:
-        label = subagent_result_metadata_label(line)
-        if label and label not in labels:
-            labels.append(label)
-    return labels
-
-
-def count_list_like_metadata_value(value: str) -> Optional[int]:
-    stripped = strip_inline_markdown(value or "").strip()
-    if not stripped:
-        return None
-    empty_value = stripped.strip("。.!！ ")
-    if empty_value in {"无", "-", "—", "none", "None", "N/A", "n/a"}:
-        return 0
-    numbered = re.findall(r"(?:^|\n)\s*\d+[.)]\s+", stripped)
-    bullets = re.findall(r"(?:^|\n)\s*[-*•]\s+", stripped)
-    if numbered or bullets:
-        return max(len(numbered), len(bullets))
-    if "," in stripped or "，" in stripped:
-        return len([item for item in re.split(r"[,，]", stripped) if item.strip()])
-    return None
-
-
-def subagent_result_metadata_entries(metadata_lines: list[str]) -> list[tuple[str, str]]:
-    entries: list[tuple[str, list[str]]] = []
-    for line in metadata_lines:
-        label = subagent_result_metadata_label(line)
-        if label:
-            entries.append((label, [subagent_result_metadata_value(line)]))
-        elif entries:
-            entries[-1][1].append(line)
-    return [(label, "\n".join(part for part in parts if part).strip()) for label, parts in entries]
 
 
 def subagent_result_reply_excerpt(text: str, limit: int = SUBAGENT_CONTEXT_REPLY_LIMIT) -> tuple[str, list[str]]:
@@ -19028,32 +18913,6 @@ def subagent_context_updates_from_messages(messages: list[Message], path: str = 
         selected.append(update)
         total += cost
     return "\n\n".join(reversed(selected))
-
-
-def subagent_result_metadata_summary(notice: dict[str, str], metadata_lines: list[str]) -> str:
-    highlights: list[str] = []
-    for label, value in subagent_result_metadata_entries(metadata_lines):
-        if not label or not value:
-            continue
-        if label == "Confidence":
-            highlights.insert(0, f"Confidence: {truncate_cells(value, 18)}")
-            continue
-        if label in {"Risks", "Findings", "Evidence refs", "Artifact refs", "Tests", "Critical issues", "Minor issues"}:
-            count = count_list_like_metadata_value(value)
-            highlights.append(f"{label}: {count}" if count is not None else f"{label}: {truncate_cells(value, 14)}")
-    if not any(item.startswith("Task:") for item in highlights) and notice.get("task_id"):
-        highlights.append("Task")
-    if not any(item.startswith("Artifact") for item in highlights) and notice.get("artifact_ref"):
-        highlights.append("Artifact")
-    if not highlights:
-        highlights = subagent_result_metadata_labels(notice, metadata_lines)
-    return " · ".join(highlights[:6]) + (f" · +{len(highlights) - 6}" if len(highlights) > 6 else "")
-
-
-def subagent_meta_label(notice: dict[str, str]) -> str:
-    seed = f"{notice.get('agent_id','')}|{notice.get('task_id','')}|{notice.get('artifact_ref','')}"
-    digest = hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:8]
-    return f"S{digest}"
 
 
 def subagent_result_metadata_detail_blocks(notice: dict[str, str], metadata_lines: list[str], width: int) -> list[RenderLine]:

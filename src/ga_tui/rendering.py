@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import hashlib
 import re
 
 try:
     from . import history_titles as history_title_policy
-    from .text_utils import cell_width, clean_text, compact_title, pad_cells, wrap_cells
+    from .text_utils import cell_width, clean_text, compact_title, pad_cells, truncate_cells, wrap_cells
     from .ui_types import RenderLine
 except Exception:
     import history_titles as history_title_policy  # type: ignore
-    from text_utils import cell_width, clean_text, compact_title, pad_cells, wrap_cells  # type: ignore
+    from text_utils import cell_width, clean_text, compact_title, pad_cells, truncate_cells, wrap_cells  # type: ignore
     from ui_types import RenderLine  # type: ignore
 
 
@@ -35,6 +36,15 @@ TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
 TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
 TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
 FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*$", re.IGNORECASE | re.MULTILINE)
+SUBAGENT_RESULT_HEADER_RE = re.compile(r"^子\s*agent\s*回复\s*·\s*(?P<name>.*?)\s*\((?P<agent_id>[^)]+)\)\s*$")
+SUBAGENT_RESULT_META_LABEL_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?"
+    r"(Summary|Findings|Evidence refs?|Risks?|Artifact refs?|Confidence|Source quality|"
+    r"Critical issues|Minor issues|Missing context|Approval risks|Recommended fixes|"
+    r"Memory candidates|Files|Changed files|Tests)"
+    r"(?:\*\*)?\s*[:：]",
+    re.IGNORECASE,
+)
 SEARCH_NOISE_MARKERS = (
     "google.com/search",
     "duckduckgo",
@@ -194,6 +204,150 @@ def strip_inline_markdown(text: str) -> str:
     text = re.sub(r"(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)", r"\1", text)
     text = re.sub(r"(?<!_)_(?!_)(.*?)(?<!_)_(?!_)", r"\1", text)
     return text
+
+
+def parse_subagent_result_notice(text: str) -> dict[str, str] | None:
+    lines = clean_text(text).splitlines()
+    if not lines:
+        return None
+    match = SUBAGENT_RESULT_HEADER_RE.match(lines[0].strip())
+    if not match:
+        return None
+    task_id = ""
+    artifact_ref = ""
+    body_start = 1
+    for idx, line in enumerate(lines[1:], 1):
+        stripped = line.strip()
+        if not stripped:
+            body_start = idx + 1
+            break
+        if stripped.lower().startswith("task:"):
+            task_id = stripped.split(":", 1)[1].strip()
+            body_start = idx + 1
+            continue
+        if stripped.lower().startswith("artifact:"):
+            artifact_ref = stripped.split(":", 1)[1].strip()
+            body_start = idx + 1
+            continue
+        body_start = idx
+        break
+    body = "\n".join(lines[body_start:]).strip()
+    return {
+        "name": match.group("name").strip(),
+        "agent_id": match.group("agent_id").strip(),
+        "task_id": task_id,
+        "artifact_ref": artifact_ref,
+        "body": body,
+    }
+
+
+def subagent_result_metadata_separator(line: str) -> bool:
+    stripped = (line or "").strip()
+    if stripped in {"---", "***", "___"}:
+        return True
+    return len(stripped) >= 6 and len(set(stripped)) == 1 and stripped[0] in {"-", "_", "*", "─"}
+
+
+def subagent_result_metadata_label(line: str) -> str:
+    match = SUBAGENT_RESULT_META_LABEL_RE.match(line or "")
+    if not match:
+        return ""
+    return " ".join(word.capitalize() for word in match.group(1).split())
+
+
+def subagent_result_metadata_value(line: str) -> str:
+    if not subagent_result_metadata_label(line):
+        return ""
+    return strip_inline_markdown((line or "").split(":", 1)[-1].split("：", 1)[-1]).strip(" -")
+
+
+def split_subagent_result_reply_and_metadata(text: str) -> tuple[str, list[str]]:
+    lines = clean_text(text).splitlines()
+    footer_start = -1
+    for idx, line in enumerate(lines):
+        if not subagent_result_metadata_label(line):
+            continue
+        footer_start = idx
+        prev = idx - 1
+        while prev >= 0 and not lines[prev].strip():
+            prev -= 1
+        if prev >= 0 and subagent_result_metadata_separator(lines[prev]):
+            footer_start = prev
+        break
+    if footer_start < 0:
+        return clean_text(text).strip(), []
+    reply = "\n".join(lines[:footer_start]).strip()
+    metadata = [
+        line.strip()
+        for line in lines[footer_start:]
+        if line.strip() and not subagent_result_metadata_separator(line)
+    ]
+    return reply, metadata
+
+
+def subagent_result_metadata_labels(notice: dict[str, str], metadata_lines: list[str]) -> list[str]:
+    labels: list[str] = []
+    for label, present in (("Task", bool(notice.get("task_id"))), ("Artifact", bool(notice.get("artifact_ref")))):
+        if present:
+            labels.append(label)
+    for line in metadata_lines:
+        label = subagent_result_metadata_label(line)
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def count_list_like_metadata_value(value: str) -> int | None:
+    stripped = strip_inline_markdown(value or "").strip()
+    if not stripped:
+        return None
+    empty_value = stripped.strip("。.!！ ")
+    if empty_value in {"无", "-", "—", "none", "None", "N/A", "n/a"}:
+        return 0
+    numbered = re.findall(r"(?:^|\n)\s*\d+[.)]\s+", stripped)
+    bullets = re.findall(r"(?:^|\n)\s*[-*•]\s+", stripped)
+    if numbered or bullets:
+        return max(len(numbered), len(bullets))
+    if "," in stripped or "，" in stripped:
+        return len([item for item in re.split(r"[,，]", stripped) if item.strip()])
+    return None
+
+
+def subagent_result_metadata_entries(metadata_lines: list[str]) -> list[tuple[str, str]]:
+    entries: list[tuple[str, list[str]]] = []
+    for line in metadata_lines:
+        label = subagent_result_metadata_label(line)
+        if label:
+            entries.append((label, [subagent_result_metadata_value(line)]))
+        elif entries:
+            entries[-1][1].append(line)
+    return [(label, "\n".join(part for part in parts if part).strip()) for label, parts in entries]
+
+
+def subagent_result_metadata_summary(notice: dict[str, str], metadata_lines: list[str]) -> str:
+    highlights: list[str] = []
+    for label, value in subagent_result_metadata_entries(metadata_lines):
+        if not label or not value:
+            continue
+        if label == "Confidence":
+            highlights.insert(0, f"Confidence: {truncate_cells(value, 18)}")
+            continue
+        if label in {"Risks", "Findings", "Evidence refs", "Artifact refs", "Tests", "Critical issues", "Minor issues"}:
+            count = count_list_like_metadata_value(value)
+            highlights.append(f"{label}: {count}" if count is not None else f"{label}: {truncate_cells(value, 14)}")
+    if not any(item.startswith("Task:") for item in highlights) and notice.get("task_id"):
+        highlights.append("Task")
+    if not any(item.startswith("Artifact") for item in highlights) and notice.get("artifact_ref"):
+        highlights.append("Artifact")
+    if not highlights:
+        highlights = subagent_result_metadata_labels(notice, metadata_lines)
+    return " · ".join(highlights[:6]) + (f" · +{len(highlights) - 6}" if len(highlights) > 6 else "")
+
+
+def subagent_meta_label(notice: dict[str, str]) -> str:
+    seed = f"{notice.get('agent_id','')}|{notice.get('task_id','')}|{notice.get('artifact_ref','')}"
+    digest = hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:8]
+    return f"S{digest}"
 
 
 def is_table_separator(cells: list[str]) -> bool:

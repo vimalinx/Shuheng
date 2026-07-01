@@ -340,6 +340,18 @@ def assert_rendering_module_boundary() -> None:
         "message_render_cache_key",
         "strip_meta_blocks",
         "strip_inline_markdown",
+        "SUBAGENT_RESULT_HEADER_RE",
+        "SUBAGENT_RESULT_META_LABEL_RE",
+        "parse_subagent_result_notice",
+        "subagent_result_metadata_separator",
+        "subagent_result_metadata_label",
+        "subagent_result_metadata_value",
+        "split_subagent_result_reply_and_metadata",
+        "subagent_result_metadata_labels",
+        "count_list_like_metadata_value",
+        "subagent_result_metadata_entries",
+        "subagent_result_metadata_summary",
+        "subagent_meta_label",
         "is_table_separator",
         "split_table_row",
         "table_layout_lines",
@@ -563,6 +575,56 @@ def assert_rendering_module_boundary() -> None:
     )
     assert a.process_has_search_noise("google.com/search?q=needle")
     assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
+    subagent_notice_text = (
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n"
+        "\n"
+        "可见回复\n"
+        "\n"
+        "---\n"
+        "Findings:\n"
+        "1. 第一项\n"
+        "2. 第二项\n"
+        "Confidence: 高\n"
+        "Risks: 无\n"
+    )
+    notice = rendering_mod.parse_subagent_result_notice(subagent_notice_text)
+    assert notice == {
+        "name": "研究员",
+        "agent_id": "agent-research",
+        "task_id": "task_123",
+        "artifact_ref": "artifact://subagent-results/report.md",
+        "body": "可见回复\n\n---\nFindings:\n1. 第一项\n2. 第二项\nConfidence: 高\nRisks: 无",
+    }
+    assert a.parse_subagent_result_notice(subagent_notice_text) == notice
+    reply, metadata_lines = rendering_mod.split_subagent_result_reply_and_metadata(notice["body"])
+    assert reply == "可见回复"
+    assert metadata_lines == [
+        "Findings:",
+        "1. 第一项",
+        "2. 第二项",
+        "Confidence: 高",
+        "Risks: 无",
+    ]
+    assert rendering_mod.subagent_result_metadata_entries(metadata_lines) == [
+        ("Findings", "1. 第一项\n2. 第二项"),
+        ("Confidence", "高"),
+        ("Risks", "无"),
+    ]
+    assert rendering_mod.subagent_result_metadata_labels(notice, metadata_lines) == [
+        "Task",
+        "Artifact",
+        "Findings",
+        "Confidence",
+        "Risks",
+    ]
+    assert rendering_mod.subagent_result_metadata_summary(notice, metadata_lines) == (
+        "Confidence: 高 · Findings: 2 · Risks: 0 · Task · Artifact"
+    )
+    assert rendering_mod.count_list_like_metadata_value("a, b, c") == 3
+    assert rendering_mod.count_list_like_metadata_value("无") == 0
+    assert rendering_mod.subagent_meta_label(notice).startswith("S")
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
         "intro\n",
@@ -903,6 +965,16 @@ def assert_rendering_module_boundary() -> None:
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",
+        "def parse_subagent_result_notice",
+        "def subagent_result_metadata_separator",
+        "def subagent_result_metadata_label",
+        "def subagent_result_metadata_value",
+        "def split_subagent_result_reply_and_metadata",
+        "def subagent_result_metadata_labels",
+        "def count_list_like_metadata_value",
+        "def subagent_result_metadata_entries",
+        "def subagent_result_metadata_summary",
+        "def subagent_meta_label",
         "def is_table_separator",
         "def split_table_row",
         "def table_layout_lines",
