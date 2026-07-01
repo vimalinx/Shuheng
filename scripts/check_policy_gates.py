@@ -359,6 +359,7 @@ def assert_rendering_module_boundary() -> None:
         "subagent_result_context_confidence",
         "format_subagent_result_context_update_text",
         "bounded_subagent_context_updates",
+        "subagent_result_card_layout_lines",
         "is_table_separator",
         "split_table_row",
         "table_layout_lines",
@@ -717,6 +718,33 @@ def assert_rendering_module_boundary() -> None:
         "可见回复"
     )
     assert rendering_mod.bounded_subagent_context_updates(["old", "dup", "new", "dup"], 2, 100) == "dup\n\nnew"
+    card_meta_label = rendering_mod.subagent_meta_label(notice)
+    assert rendering_mod.subagent_result_card_layout_lines(notice, metadata_lines, set(), 120) == [
+        ("title", "╭─ 子 agent 回复 · 研究员 (agent-research)"),
+        (
+            "metadata_summary",
+            f"│ ▸ 元信息 {card_meta_label} (已折叠，点击) · Confidence: 高 · Findings: 2 · Risks: 0 · Task · Artifact",
+        ),
+        ("reply_header", "├─ 回复"),
+        ("footer", "╰─"),
+    ]
+    assert rendering_mod.subagent_result_card_layout_lines(notice, metadata_lines, {card_meta_label}, 120) == [
+        ("title", "╭─ 子 agent 回复 · 研究员 (agent-research)"),
+        (
+            "metadata_summary",
+            f"│ ▾ 元信息 {card_meta_label} (已展开，点击) · Confidence: 高 · Findings: 2 · Risks: 0 · Task · Artifact",
+        ),
+        ("metadata_detail", ""),
+        ("reply_header", "├─ 回复"),
+        ("footer", "╰─"),
+    ]
+    assert [line.text for line in a.subagent_result_card_blocks(subagent_notice_text, 124, False, True, set())] == [
+        "╭─ 子 agent 回复 · 研究员 (agent-research)",
+        f"│ ▸ 元信息 {card_meta_label} (已折叠，点击) · Confidence: 高 · Findings: 2 · Risks: 0 · Task · Artifact",
+        "├─ 回复",
+        "│ 可见回复",
+        "╰─",
+    ]
     app_context_rendered = a.render_subagent_result_body(rendered_context_body, fold_process=True)
     app_reply, app_context_metadata = rendering_mod.subagent_result_reply_excerpt_text(app_context_rendered, 80)
     assert a.subagent_result_reply_excerpt(rendered_context_body, 80) == (app_reply, app_context_metadata)
@@ -1099,6 +1127,7 @@ def assert_rendering_module_boundary() -> None:
         "def subagent_result_context_confidence",
         "def format_subagent_result_context_update_text",
         "def bounded_subagent_context_updates",
+        "def subagent_result_card_layout_lines",
         "def is_table_separator",
         "def split_table_row",
         "def table_layout_lines",

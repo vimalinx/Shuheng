@@ -517,6 +517,115 @@ def test_app_subagent_result_context_update_wrappers_delegate_to_rendering_helpe
     )
 
 
+def test_subagent_result_card_layout_lines_shape_card_chrome_and_metadata_state() -> None:
+    notice = rendering.parse_subagent_result_notice(
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n"
+        "\n"
+        "可见回复\n"
+        "\n"
+        "---\n"
+        "Findings:\n"
+        "1. 第一项\n"
+        "2. 第二项\n"
+        "Confidence: 高\n"
+    )
+    assert notice is not None
+    reply_body, metadata_lines = rendering.split_subagent_result_reply_and_metadata(notice["body"])
+    assert reply_body == "可见回复"
+    meta_label = rendering.subagent_meta_label(notice)
+
+    assert rendering.subagent_result_card_layout_lines(notice, metadata_lines, set(), 120) == [
+        ("title", "╭─ 子 agent 回复 · 研究员 (agent-research)"),
+        (
+            "metadata_summary",
+            f"│ ▸ 元信息 {meta_label} (已折叠，点击) · Confidence: 高 · Findings: 2 · Task · Artifact",
+        ),
+        ("reply_header", "├─ 回复"),
+        ("footer", "╰─"),
+    ]
+    assert rendering.subagent_result_card_layout_lines(notice, metadata_lines, {meta_label}, 120) == [
+        ("title", "╭─ 子 agent 回复 · 研究员 (agent-research)"),
+        (
+            "metadata_summary",
+            f"│ ▾ 元信息 {meta_label} (已展开，点击) · Confidence: 高 · Findings: 2 · Task · Artifact",
+        ),
+        ("metadata_detail", ""),
+        ("reply_header", "├─ 回复"),
+        ("footer", "╰─"),
+    ]
+
+
+def test_subagent_result_card_layout_lines_omits_empty_metadata_region() -> None:
+    notice = rendering.parse_subagent_result_notice("子 agent 回复 · Worker (agent-x)\n\nplain body")
+    assert notice is not None
+
+    assert rendering.subagent_result_card_layout_lines(notice, [], set(), 120) == [
+        ("title", "╭─ 子 agent 回复 · Worker (agent-x)"),
+        ("reply_header", "├─ 回复"),
+        ("footer", "╰─"),
+    ]
+
+
+def test_app_subagent_result_card_blocks_delegate_chrome_to_rendering_layout() -> None:
+    notice_text = (
+        "子 agent 回复 · 研究员 (agent-research)\n"
+        "Task: task_123\n"
+        "Artifact: artifact://subagent-results/report.md\n"
+        "\n"
+        "可见回复\n"
+        "\n"
+        "---\n"
+        "Confidence: 高\n"
+    )
+    notice = rendering.parse_subagent_result_notice(notice_text)
+    assert notice is not None
+    meta_label = rendering.subagent_meta_label(notice)
+
+    collapsed_blocks = app_module.subagent_result_card_blocks(
+        notice_text,
+        124,
+        markdown=False,
+        fold_process=True,
+        expanded_meta=set(),
+    )
+    collapsed_text = [line.text for line in collapsed_blocks]
+    assert collapsed_text == [
+        "╭─ 子 agent 回复 · 研究员 (agent-research)",
+        f"│ ▸ 元信息 {meta_label} (已折叠，点击) · Confidence: 高 · Task · Artifact",
+        "├─ 回复",
+        "│ 可见回复",
+        "╰─",
+    ]
+    assert collapsed_blocks[0].attr == app_module.cp(10) | app_module.curses.A_BOLD
+    assert collapsed_blocks[1].attr == app_module.cp(9)
+    assert collapsed_blocks[2].attr == app_module.cp(10)
+    assert collapsed_blocks[3].attr == app_module.cp(2)
+    assert collapsed_blocks[4].attr == app_module.cp(10)
+
+    expanded_text = [
+        line.text
+        for line in app_module.subagent_result_card_blocks(
+            notice_text,
+            124,
+            markdown=False,
+            fold_process=True,
+            expanded_meta={meta_label},
+        )
+    ]
+    assert expanded_text == [
+        "╭─ 子 agent 回复 · 研究员 (agent-research)",
+        f"│ ▾ 元信息 {meta_label} (已展开，点击) · Confidence: 高 · Task · Artifact",
+        "│   Task: task_123",
+        "│   Artifact: artifact://subagent-results/report.md",
+        "│   Confidence: 高",
+        "├─ 回复",
+        "│ 可见回复",
+        "╰─",
+    ]
+
+
 def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
     for name in (
         "SUBAGENT_RESULT_HEADER_RE",
@@ -538,6 +647,7 @@ def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
         "subagent_result_context_confidence",
         "format_subagent_result_context_update_text",
         "bounded_subagent_context_updates",
+        "subagent_result_card_layout_lines",
     ):
         assert getattr(app_module, name) is getattr(rendering, name), name
 

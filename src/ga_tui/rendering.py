@@ -19,6 +19,7 @@ SelectionPoint = tuple[int, int]
 SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 TableLayoutLine = tuple[str, str]
 MarkdownLayoutLine = tuple[str, str]
+SubagentResultCardLayoutLine = tuple[str, str]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
@@ -486,6 +487,30 @@ def bounded_subagent_context_updates(updates: list[str], update_limit: int, tota
         selected.append(update)
         total += cost
     return "\n\n".join(reversed(selected))
+
+
+def subagent_result_card_layout_lines(
+    notice: dict[str, str],
+    metadata_lines: list[str],
+    expanded_meta: set[str],
+    body_width: int,
+) -> list[SubagentResultCardLayoutLine]:
+    title = f"╭─ 子 agent 回复 · {notice['name']} ({notice['agent_id']})"
+    lines: list[SubagentResultCardLayoutLine] = [("title", title)]
+    metadata_labels = subagent_result_metadata_labels(notice, metadata_lines)
+    if metadata_labels:
+        meta_label = subagent_meta_label(notice)
+        expanded = meta_label in expanded_meta
+        icon = "▾" if expanded else "▸"
+        status = "已展开" if expanded else "已折叠"
+        summary = subagent_result_metadata_summary(notice, metadata_lines)
+        meta_text = truncate_cells(f"{icon} 元信息 {meta_label} ({status}，点击) · {summary}", body_width)
+        lines.append(("metadata_summary", "│ " + meta_text))
+        if expanded:
+            lines.append(("metadata_detail", ""))
+    lines.append(("reply_header", "├─ 回复"))
+    lines.append(("footer", "╰─"))
+    return lines
 
 
 def is_table_separator(cells: list[str]) -> bool:

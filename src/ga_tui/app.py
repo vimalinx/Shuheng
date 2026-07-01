@@ -589,6 +589,7 @@ subagent_result_reply_excerpt_text = rendering_helpers.subagent_result_reply_exc
 subagent_result_context_confidence = rendering_helpers.subagent_result_context_confidence
 format_subagent_result_context_update_text = rendering_helpers.format_subagent_result_context_update_text
 bounded_subagent_context_updates = rendering_helpers.bounded_subagent_context_updates
+subagent_result_card_layout_lines = rendering_helpers.subagent_result_card_layout_lines
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
@@ -18903,27 +18904,26 @@ def subagent_result_card_blocks(
         return []
     expanded_meta = expanded_meta or set()
     body_width = max(8, width - 4)
-    title = f"╭─ 子 agent 回复 · {notice['name']} ({notice['agent_id']})"
-    blocks: list[RenderLine] = [RenderLine(title, cp(10) | curses.A_BOLD)]
     body = render_subagent_result_body(notice["body"], fold_process)
     reply_body, metadata_lines = split_subagent_result_reply_and_metadata(body)
-    metadata_labels = subagent_result_metadata_labels(notice, metadata_lines)
-    if metadata_labels:
-        meta_label = subagent_meta_label(notice)
-        expanded = meta_label in expanded_meta
-        icon = "▾" if expanded else "▸"
-        summary = subagent_result_metadata_summary(notice, metadata_lines)
-        status = "已展开" if expanded else "已折叠"
-        blocks.append(RenderLine("│ " + truncate_cells(f"{icon} 元信息 {meta_label} ({status}，点击) · {summary}", body_width), cp(9)))
-        if expanded:
-            blocks.extend(subagent_result_metadata_detail_blocks(notice, metadata_lines, body_width - 2))
-    blocks.append(RenderLine("├─ 回复", cp(10)))
+    layout_lines = subagent_result_card_layout_lines(notice, metadata_lines, expanded_meta, body_width)
     body_blocks = markdown_blocks(reply_body or "(empty result)", body_width) if markdown else plain_blocks(reply_body or "(empty result)", body_width)
     if not body_blocks:
         body_blocks = [RenderLine("(empty result)", cp(2))]
-    for line in body_blocks:
-        blocks.append(RenderLine("│ " + line.text if line.text else "│", line.attr))
-    blocks.append(RenderLine("╰─", cp(10)))
+    blocks: list[RenderLine] = []
+    for kind, line_text in layout_lines:
+        if kind == "title":
+            blocks.append(RenderLine(line_text, cp(10) | curses.A_BOLD))
+        elif kind == "metadata_summary":
+            blocks.append(RenderLine(line_text, cp(9)))
+        elif kind == "metadata_detail":
+            blocks.extend(subagent_result_metadata_detail_blocks(notice, metadata_lines, body_width - 2))
+        elif kind == "reply_header":
+            blocks.append(RenderLine(line_text, cp(10)))
+            for line in body_blocks:
+                blocks.append(RenderLine("│ " + line.text if line.text else "│", line.attr))
+        elif kind == "footer":
+            blocks.append(RenderLine(line_text, cp(10)))
     return blocks
 
 
