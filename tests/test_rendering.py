@@ -138,12 +138,35 @@ def test_interaction_answer_helpers_preserve_candidate_and_prompt_behavior() -> 
     assert rendering.interaction_input_prompt_text(True, is_approval=True) == "approval> "
     assert rendering.interaction_input_prompt_text(True, current_question_index=1) == "q2> "
     assert rendering.interaction_input_prompt_text(True) == "? "
+    assert rendering.interaction_footer_text(False) == ""
+    assert (
+        rendering.interaction_footer_text(True, has_candidates=True, is_approval=True)
+        == "↑/↓ 选择，空输入 Enter 执行选中审批动作；选“稍后处理”保留待审批项。"
+    )
+    assert (
+        rendering.interaction_footer_text(True, has_candidates=True)
+        == "↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
+    )
+    assert (
+        rendering.interaction_footer_text(True, has_questions=True)
+        == "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
+    )
+    assert rendering.interaction_footer_text(True) == "等待你的输入：直接在下面回答；Enter 发送。"
 
     payload = {"candidates": candidates, "_selection": 2}
     assert app_module.interaction_answer_from_input(payload, "") == "稍后处理"
     assert app_module.interaction_answer_from_input(payload, "1") == "批准并执行"
     assert app_module.interaction_input_prompt({"tool": "approval", "approval_id": "appr_test"}) == "approval> "
     assert app_module.interaction_input_prompt({"questions": [{"question": "A"}, {"question": "B"}], "_current": 1}) == "q2> "
+    assert app_module.interaction_footer(None) == rendering.interaction_footer_text(False)
+    assert app_module.interaction_footer(payload) == rendering.interaction_footer_text(True, has_candidates=True)
+    assert app_module.interaction_footer({"questions": [{"question": "A"}]}) == rendering.interaction_footer_text(
+        True,
+        has_questions=True,
+    )
+    assert app_module.interaction_footer({"tool": "approval", "approval_id": "appr_test", "candidates": candidates}) == (
+        rendering.interaction_footer_text(True, has_candidates=True, is_approval=True)
+    )
 
 
 def test_compose_request_user_input_answer_formats_questions() -> None:
@@ -1490,6 +1513,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.interaction_answer_from_text is rendering.interaction_answer_from_text
     assert app_module.compose_request_user_input_answer is rendering.compose_request_user_input_answer
     assert app_module.interaction_input_prompt_text is rendering.interaction_input_prompt_text
+    assert app_module.interaction_footer_text is rendering.interaction_footer_text
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape

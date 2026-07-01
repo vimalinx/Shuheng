@@ -403,6 +403,7 @@ def assert_rendering_module_boundary() -> None:
         "interaction_answer_from_text",
         "compose_request_user_input_answer",
         "interaction_input_prompt_text",
+        "interaction_footer_text",
         "visible_reply_is_substantive",
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
@@ -927,6 +928,17 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.interaction_input_prompt_text(True, is_approval=True) == "approval> "
     assert rendering_mod.interaction_input_prompt_text(True, current_question_index=1) == "q2> "
     assert rendering_mod.interaction_input_prompt_text(True) == "? "
+    assert rendering_mod.interaction_footer_text(False) == ""
+    assert rendering_mod.interaction_footer_text(True, has_candidates=True, is_approval=True) == (
+        "↑/↓ 选择，空输入 Enter 执行选中审批动作；选“稍后处理”保留待审批项。"
+    )
+    assert rendering_mod.interaction_footer_text(True, has_candidates=True) == (
+        "↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
+    )
+    assert rendering_mod.interaction_footer_text(True, has_questions=True) == (
+        "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
+    )
+    assert rendering_mod.interaction_footer_text(True) == "等待你的输入：直接在下面回答；Enter 发送。"
     assert a.render_interaction_card({}) == rendering_mod.render_interaction_card({})
     assert a.compose_request_user_input_answer is rendering_mod.compose_request_user_input_answer
     payload = {"candidates": answer_candidates, "_selection": 2}
@@ -937,6 +949,15 @@ def assert_rendering_module_boundary() -> None:
     )
     assert a.interaction_input_prompt({"tool": "approval", "approval_id": "appr_policy"}) == "approval> "
     assert a.interaction_input_prompt({"questions": [{"question": "A"}, {"question": "B"}], "_current": 1}) == "q2> "
+    assert a.interaction_footer(None) == rendering_mod.interaction_footer_text(False)
+    assert a.interaction_footer(payload) == rendering_mod.interaction_footer_text(True, has_candidates=True)
+    assert a.interaction_footer({"questions": [{"question": "A"}]}) == rendering_mod.interaction_footer_text(
+        True,
+        has_questions=True,
+    )
+    assert a.interaction_footer({"tool": "approval", "approval_id": "appr_policy", "candidates": answer_candidates}) == (
+        rendering_mod.interaction_footer_text(True, has_candidates=True, is_approval=True)
+    )
     assert rendering_mod.visible_reply_is_substantive("完整答复。" * 40)
     assert rendering_mod.visible_reply_is_substantive("# 结论\n" + ("结构化内容。" * 14))
     assert not rendering_mod.visible_reply_is_substantive("短答复")
@@ -1223,6 +1244,7 @@ def assert_rendering_module_boundary() -> None:
         "def interaction_answer_from_text",
         "def compose_request_user_input_answer",
         "def interaction_input_prompt_text",
+        "def interaction_footer_text",
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",

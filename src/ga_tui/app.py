@@ -577,6 +577,7 @@ render_interaction_card = rendering_helpers.render_interaction_card
 interaction_answer_from_text = rendering_helpers.interaction_answer_from_text
 compose_request_user_input_answer = rendering_helpers.compose_request_user_input_answer
 interaction_input_prompt_text = rendering_helpers.interaction_input_prompt_text
+interaction_footer_text = rendering_helpers.interaction_footer_text
 parse_subagent_result_notice = rendering_helpers.parse_subagent_result_notice
 subagent_result_metadata_separator = rendering_helpers.subagent_result_metadata_separator
 subagent_result_metadata_label = rendering_helpers.subagent_result_metadata_label
@@ -18157,16 +18158,13 @@ def extract_interaction_request(text: str) -> Optional[dict[str, Any]]:
 
 
 def interaction_footer(payload: Optional[dict[str, Any]]) -> str:
-    if not payload:
-        return ""
     candidates = interaction_current_candidates(payload)
-    if candidates and is_approval_interaction(payload):
-        return "↑/↓ 选择，空输入 Enter 执行选中审批动作；选“稍后处理”保留待审批项。"
-    if candidates:
-        return "↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
-    if interaction_questions(payload):
-        return "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
-    return "等待你的输入：直接在下面回答；Enter 发送。"
+    return interaction_footer_text(
+        bool(payload),
+        has_candidates=bool(candidates),
+        is_approval=is_approval_interaction(payload),
+        has_questions=bool(interaction_questions(payload)),
+    )
 
 
 def interaction_hint_lines(payload: Optional[dict[str, Any]], width: int) -> list[tuple[str, int]]:

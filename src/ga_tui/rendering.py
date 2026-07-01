@@ -172,6 +172,24 @@ def interaction_input_prompt_text(
     return "? "
 
 
+def interaction_footer_text(
+    has_payload: bool,
+    *,
+    has_candidates: bool = False,
+    is_approval: bool = False,
+    has_questions: bool = False,
+) -> str:
+    if not has_payload:
+        return ""
+    if has_candidates and is_approval:
+        return "↑/↓ 选择，空输入 Enter 执行选中审批动作；选“稍后处理”保留待审批项。"
+    if has_candidates:
+        return "↑/↓ 选择，空输入 Enter 提交选中项；也可以直接打字回答。"
+    if has_questions:
+        return "request_user_input 独立输入口：输入本题答案，Enter 记录并进入下一题。"
+    return "等待你的输入：直接在下面回答；Enter 发送。"
+
+
 def process_turn_label(marker: str) -> str:
     turn = TURN_NO_RE.search(marker or "")
     return f"Turn {turn.group(1)}" if turn else "Turn"
