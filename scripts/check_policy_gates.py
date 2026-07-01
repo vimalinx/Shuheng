@@ -795,6 +795,20 @@ def assert_governance_module_boundary() -> None:
     assert governance_mod.recovery_plan_history(recovery_plans_path, "task_boundary")[0]["recovery_plan_id"] == "recoveryplan_boundary"
     assert governance_mod.recovery_replay_steps("retry")[-1]["step"] == "link_replacement_task"
     assert governance_mod.recovery_replay_steps("unknown")[-1]["step"] == "manual_review"
+    assert governance_mod.task_status_marker("completed") == "✓"
+    assert governance_mod.task_status_marker("failed") == "✕"
+    assert governance_mod.task_status_marker("running") == "●"
+    assert governance_mod.task_status_marker("input_required") == "?"
+    assert governance_mod.task_status_marker("other") == "○"
+    assert governance_mod.row_looks_like_subagent_task({"kind": "subagent_task"}, "")
+    assert governance_mod.row_looks_like_subagent_task({"assigned_agent": "agent-boundary"}, "agent-boundary")
+    assert not governance_mod.row_looks_like_subagent_task({"kind": "task"}, "human")
+    assert governance_mod.task_display_title({"title": "Boundary Title"}) == "Boundary Title"
+    assert governance_mod.task_display_title(
+        {"kind": "subagent_task", "assigned_agent": "agent-boundary"},
+        owner_name="Boundary Agent",
+    ) == "子 agent 任务: Boundary Agent"
+    assert governance_mod.task_display_title({"objective": "Boundary objective"}) == "Boundary objective"
 
     source = Path(governance_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -868,6 +882,19 @@ def assert_governance_module_boundary() -> None:
         assert a.recovery_history("task_boundary")[0]["recovery_id"] == "recovery_boundary"
         assert a.recovery_plan_history("task_boundary")[0]["recovery_plan_id"] == "recoveryplan_boundary"
         assert a.recovery_replay_steps("release_lock")[-1]["step"] == "release_owned_writer_lock"
+        assert a.task_status_marker("completed") == "✓"
+        assert a.row_looks_like_subagent_task({"assigned_agent": "agent-boundary"}, "agent-boundary")
+        panel_state = a.State(agent=object())
+        panel_state.subagents["agent-boundary"] = a.SubAgentRuntime(
+            agent_id="agent-boundary",
+            name="Boundary Runtime",
+            home=root,
+            role="researcher",
+        )
+        assert a.task_display_title(
+            {"kind": "subagent_task", "assigned_agent": "agent-boundary"},
+            panel_state,
+        ) == "子 agent 任务: Boundary Runtime"
     finally:
         a.AGENT_HARNESS_DIR = old_harness
         a.AGENT_ARTIFACTS_DIR = old_artifacts_dir

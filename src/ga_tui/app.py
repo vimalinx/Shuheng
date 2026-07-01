@@ -19793,16 +19793,7 @@ def subagent_status_marker(sub: SubAgentRuntime) -> str:
 
 
 def task_status_marker(status: str, approval: str = "-") -> str:
-    status_l = (status or "").lower()
-    if status_l == "completed":
-        return "✓"
-    if status_l in {"failed", "cancelled", "canceled", "rejected", "aborted"}:
-        return "✕"
-    if approval == "pending" or status_l in {"approval_required", "input_required", "waiting-input"}:
-        return "?"
-    if status_l in {"working", "running", "accepted", "pending"}:
-        return "●"
-    return "○"
+    return governance_store.task_status_marker(status, approval)
 
 
 def task_owner_display_name(state: Optional[State], row: dict[str, Any]) -> str:
@@ -19821,25 +19812,11 @@ def task_owner_display_name(state: Optional[State], row: dict[str, Any]) -> str:
 
 
 def row_looks_like_subagent_task(row: dict[str, Any], owner: str) -> bool:
-    kind = str(row.get("kind") or "")
-    if kind in {"subagent_task", "subagent"}:
-        return True
-    if owner.startswith(("agent-", "tmp-")):
-        return True
-    return False
+    return governance_store.row_looks_like_subagent_task(row, owner)
 
 
 def task_display_title(row: dict[str, Any], state: Optional[State] = None) -> str:
-    for key in ("title", "display_title", "task_title"):
-        value = clean_text(str(row.get(key) or "")).strip()
-        if value:
-            return value
-    owner = str(row.get("assigned_agent") or "").strip()
-    owner_name = task_owner_display_name(state, row)
-    if owner_name and row_looks_like_subagent_task(row, owner):
-        return f"子 agent 任务: {owner_name}"
-    objective = clean_text(str(row.get("objective") or row.get("summary") or row.get("error") or row.get("task_id") or ""))
-    return objective or "任务"
+    return governance_store.task_display_title(row, owner_name=task_owner_display_name(state, row))
 
 
 def selected_plan_id_from_rows(

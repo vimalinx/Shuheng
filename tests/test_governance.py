@@ -158,6 +158,48 @@ def test_checkpoint_recovery_read_model_helpers(tmp_path: Path, monkeypatch) -> 
     assert app_module.recovery_replay_steps("release_lock")[-1]["step"] == "release_owned_writer_lock"
 
 
+def test_task_display_helpers_and_app_wrappers() -> None:
+    assert governance.task_status_marker("completed") == "✓"
+    assert governance.task_status_marker("failed") == "✕"
+    assert governance.task_status_marker("working") == "●"
+    assert governance.task_status_marker("whatever", approval="pending") == "?"
+    assert governance.task_status_marker("whatever") == "○"
+
+    subagent_row = {"kind": "subagent_task", "assigned_agent": "worker"}
+    agent_owner_row = {"assigned_agent": "agent-reader"}
+    normal_row = {"kind": "task", "assigned_agent": "human"}
+    assert governance.row_looks_like_subagent_task(subagent_row, "worker")
+    assert governance.row_looks_like_subagent_task(agent_owner_row, "agent-reader")
+    assert not governance.row_looks_like_subagent_task(normal_row, "human")
+
+    assert governance.task_display_title({"title": "Explicit"}) == "Explicit"
+    assert governance.task_display_title({"display_title": "Display"}) == "Display"
+    assert governance.task_display_title({"task_title": "Task Title"}) == "Task Title"
+    assert governance.task_display_title(
+        {"kind": "subagent_task", "assigned_agent": "agent-reader"},
+        owner_name="Reader",
+    ) == "子 agent 任务: Reader"
+    assert governance.task_display_title({"objective": "Objective text"}) == "Objective text"
+    assert governance.task_display_title({"summary": "Summary text"}) == "Summary text"
+    assert governance.task_display_title({"error": "Error text"}) == "Error text"
+    assert governance.task_display_title({"task_id": "task_fallback"}) == "task_fallback"
+    assert governance.task_display_title({}) == "任务"
+
+    state = app_module.State(agent=object())
+    state.subagents["agent-reader"] = SubAgentRuntime(
+        agent_id="agent-reader",
+        name="Reader Runtime",
+        home="",
+        role="researcher",
+    )
+    assert app_module.task_status_marker("completed") == governance.task_status_marker("completed")
+    assert app_module.row_looks_like_subagent_task(agent_owner_row, "agent-reader")
+    assert app_module.task_display_title(
+        {"kind": "subagent_task", "assigned_agent": "agent-reader"},
+        state,
+    ) == "子 agent 任务: Reader Runtime"
+
+
 def test_progress_approval_artifact_and_trace_round_trip(tmp_path: Path) -> None:
     harness = tmp_path / "agent_harness"
     artifacts_dir = harness / "artifacts"

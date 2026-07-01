@@ -413,6 +413,41 @@ def completed_subagent_result_row(row: dict[str, Any]) -> bool:
     return assigned.startswith(("agent-", "tmp-agent-", "tmp-")) or title.startswith(("子 agent", "subagent"))
 
 
+def task_status_marker(status: str, approval: str = "-") -> str:
+    status_l = (status or "").lower()
+    if status_l == "completed":
+        return "✓"
+    if status_l in {"failed", "cancelled", "canceled", "rejected", "aborted"}:
+        return "✕"
+    if approval == "pending" or status_l in {"approval_required", "input_required", "waiting-input"}:
+        return "?"
+    if status_l in {"working", "running", "accepted", "pending"}:
+        return "●"
+    return "○"
+
+
+def row_looks_like_subagent_task(row: dict[str, Any], owner: str) -> bool:
+    kind = str(row.get("kind") or "")
+    if kind in {"subagent_task", "subagent"}:
+        return True
+    if str(owner or "").startswith(("agent-", "tmp-")):
+        return True
+    return False
+
+
+def task_display_title(row: dict[str, Any], *, owner_name: str = "") -> str:
+    for key in ("title", "display_title", "task_title"):
+        value = clean_text(str(row.get(key) or "")).strip()
+        if value:
+            return value
+    owner = str(row.get("assigned_agent") or "").strip()
+    owner_name = str(owner_name or "").strip()
+    if owner_name and row_looks_like_subagent_task(row, owner):
+        return f"子 agent 任务: {owner_name}"
+    objective = clean_text(str(row.get("objective") or row.get("summary") or row.get("error") or row.get("task_id") or ""))
+    return objective or "任务"
+
+
 def load_agent_locks(locks_path: str) -> dict[str, Any]:
     try:
         with open(locks_path, encoding="utf-8") as fh:

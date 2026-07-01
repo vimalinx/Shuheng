@@ -1117,6 +1117,68 @@ def latest_checkpoint_for_task(task_id):
     return governance.latest_checkpoint_for_task(AGENT_CHECKPOINT_INDEX_PATH, task_id)
 ```
 
+## Scenario: Governance Task Display Helper Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition moves pure task-ledger display row interpretation into `governance.py`.
+- Applies to: task status markers, subagent-task row detection, and task display title fallback over already-loaded rows.
+- Non-goal: This does not move owner display-name lookup, subagent meta file IO, mutable TUI state reads, rightbar rows, panel rendering, Web Console payloads, dashboard home lines, command handlers, or storage-root behavior.
+
+### 2. Signatures
+
+- `governance.task_status_marker(status, approval="-") -> str`
+- `governance.row_looks_like_subagent_task(row, owner) -> bool`
+- `governance.task_display_title(row, *, owner_name="") -> str`
+- `app.py` keeps compatibility wrappers for the old names. `task_display_title(row, state=None)` injects app-owned `task_owner_display_name(state, row)`.
+
+### 3. Contracts
+
+- `governance.py` may interpret task ledger row values, status strings, approval status, and an already-resolved owner display name.
+- `governance.py` must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or subagent meta file IO.
+- `task_status_marker(...)` preserves the existing marker mapping: completed -> `✓`, failed/cancelled/rejected/aborted -> `✕`, pending approval/input -> `?`, running/working/accepted/pending -> `●`, and default -> `○`.
+- `row_looks_like_subagent_task(...)` preserves the existing predicate: explicit `subagent_task` / `subagent` kind or owner id starting with `agent-` / `tmp-`.
+- `task_display_title(...)` preserves existing title precedence: `title`, `display_title`, `task_title`, subagent owner-name fallback, objective/summary/error/task id, then `任务`.
+- `app.py` remains the owner of resolving owner display names from live subagents or subagent metadata files and of all visible row rendering.
+
+### 4. Validation & Error Matrix
+
+- Completed, failed, waiting-input, working, and unknown statuses -> expected markers.
+- Explicit title fields -> first non-empty title wins.
+- Subagent row plus injected owner name -> `子 agent 任务: <name>`.
+- Normal row plus owner name -> objective/summary/error/task-id fallback, not subagent title.
+- Empty row -> `任务`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: rightbar/panel code stays in `app.py` and calls compatibility wrappers for row title and marker text.
+- Base: `task_owner_display_name(...)` stays in `app.py` because it reads live subagents and metadata files.
+- Bad: `governance.py` imports `State` or `load_subagent_meta(...)` to resolve names.
+- Bad: display-title extraction changes task ledger schema or approval semantics.
+
+### 6. Tests Required
+
+- Unit tests must assert direct governance helper behavior for marker mapping, subagent row predicates, title precedence, owner-name fallback, and wrapper parity.
+- `scripts/check_policy_gates.py` must assert the expanded governance boundary and wrapper parity.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# governance.py
+from ga_tui.app import State, load_subagent_meta
+```
+
+#### Correct
+
+```python
+# app.py
+def task_display_title(row, state=None):
+    return governance.task_display_title(row, owner_name=task_owner_display_name(state, row))
+```
+
 ## Scenario: Secret Vault Value Helper Boundary
 
 ### 1. Scope / Trigger
