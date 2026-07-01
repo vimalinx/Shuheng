@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ga_tui import app as app_module
 from ga_tui import history_store
+from ga_tui import path_utils
 from ga_tui.ui_types import Message
 
 
@@ -42,6 +43,50 @@ class TestSessionMetaRegistry:
             assert history_store.load_session_meta_registry(app_module.SESSION_META_PATH)["model_responses_a.txt"]["rounds"] == 2
         finally:
             app_module.SESSION_META_PATH = old_path
+
+
+class TestRecentHistoryItems:
+    def test_sorts_by_activity_desc_and_applies_limit(self, tmp_path: Path) -> None:
+        older = str(tmp_path / "model_responses_old.txt")
+        newer = str(tmp_path / "model_responses_new.txt")
+        zero = str(tmp_path / "model_responses_zero.txt")
+        entries = [
+            (1, (older, 10.0, "old", 1)),
+            (2, (zero, 0.0, "zero", 1)),
+            (3, (newer, 30.0, "new", 1)),
+        ]
+
+        result = history_store.recent_history_items(entries, set(), 1)
+
+        assert result == [(3, (newer, 30.0, "new", 1))]
+
+    def test_excludes_used_normalized_paths(self, tmp_path: Path) -> None:
+        used = str(tmp_path / "model_responses_used.txt")
+        other = str(tmp_path / "model_responses_other.txt")
+        entries = [
+            (1, (used, 40.0, "used", 1)),
+            (2, (other, 20.0, "other", 1)),
+        ]
+
+        result = history_store.recent_history_items(
+            entries,
+            {path_utils.normalized_path(used)},
+            5,
+        )
+
+        assert result == [(2, (other, 20.0, "other", 1))]
+
+    def test_app_wrapper_preserves_default_recent_limit(self, tmp_path: Path) -> None:
+        entries = [
+            (idx, (str(tmp_path / f"model_responses_{idx}.txt"), float(idx), f"item {idx}", idx))
+            for idx in range(1, app_module.RECENT_SESSION_LIMIT + 3)
+        ]
+
+        result = app_module.recent_history_items(entries, set())
+
+        assert len(result) == app_module.RECENT_SESSION_LIMIT
+        assert result[0][0] == app_module.RECENT_SESSION_LIMIT + 2
+        assert result == history_store.recent_history_items(entries, set(), app_module.RECENT_SESSION_LIMIT)
 
 
 class TestTranscriptStorage:

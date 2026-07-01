@@ -879,14 +879,7 @@ def recent_history_items(
     used_paths: set[str],
     limit: int = RECENT_SESSION_LIMIT,
 ) -> list[tuple[int, tuple[str, float, str, int]]]:
-    recent_candidates = [
-        (idx, item, float(item[1] or 0.0))
-        for idx, item in history_entries
-        if float(item[1] or 0.0) > 0
-        and normalized_path(item[0]) not in used_paths
-    ]
-    recent_candidates.sort(key=lambda entry: entry[2], reverse=True)
-    return [(idx, item) for idx, item, _activity_at in recent_candidates[:limit]]
+    return history_store.recent_history_items(history_entries, used_paths, limit)
 
 
 def set_session_meta_fields(state: State, path: str, **fields: Any) -> None:

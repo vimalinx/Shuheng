@@ -276,6 +276,17 @@ def assert_leaf_module_boundaries() -> None:
 
 def assert_history_store_module_boundary() -> None:
     assert a.session_key("/tmp/model_responses_a.txt") == history_store_mod.session_key("/tmp/model_responses_a.txt")
+    history_entries = [
+        (1, ("/tmp/model_responses_old.txt", 1.0, "old", 1)),
+        (2, ("/tmp/model_responses_new.txt", 3.0, "new", 1)),
+        (3, ("/tmp/model_responses_zero.txt", 0.0, "zero", 1)),
+    ]
+    assert a.recent_history_items(history_entries, set(), limit=2) == history_store_mod.recent_history_items(
+        history_entries,
+        set(),
+        2,
+    )
+    assert [idx for idx, _item in history_store_mod.recent_history_items(history_entries, set(), 5)] == [2, 1]
     assert a.parse_log_time("2026-06-30 12:34:56") == history_store_mod.parse_log_time("2026-06-30 12:34:56")
     assert a.is_model_response_basename("model_responses_a.txt") is history_store_mod.is_model_response_basename("model_responses_a.txt")
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
