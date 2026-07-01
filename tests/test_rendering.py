@@ -316,6 +316,107 @@ def test_preferred_group_visible_reply_text_appends_deduped_irc_replies() -> Non
     assert rendering.preferred_group_visible_reply_text([], ["Alice: hello"]) == "### IRC 回复\n- Alice: hello"
 
 
+def test_process_turn_lines_closes_final_text_and_adds_header_detail() -> None:
+    assert rendering.process_turn_lines(
+        "```python\nprint('x')",
+        has_process_noise=True,
+        has_call_noise=True,
+        fold_details=True,
+        collapsed_line="collapsed",
+        speech_header_line="header",
+        detail_line="detail",
+    ) == [
+        "header",
+        "```python\nprint('x')\n```",
+        "detail",
+    ]
+
+
+def test_process_turn_lines_collapses_whole_process_output() -> None:
+    folded = rendering.process_turn_lines(
+        "visible answer",
+        has_process_noise=True,
+        has_call_noise=False,
+        fold_details=True,
+        collapse_whole=True,
+        collapsed_line="collapsed",
+        summary_line="summary",
+    )
+    unfolded = rendering.process_turn_lines(
+        "visible answer",
+        has_process_noise=True,
+        has_call_noise=False,
+        fold_details=False,
+        collapse_whole=True,
+        collapsed_line="collapsed",
+        summary_line="summary",
+    )
+
+    assert folded == ["visible answer", "collapsed"]
+    assert unfolded == ["visible answer"]
+
+
+def test_process_turn_lines_uses_fallback_summary_or_collapsed_noise() -> None:
+    assert rendering.process_turn_lines(
+        "",
+        has_process_noise=True,
+        has_call_noise=True,
+        fold_details=True,
+        collapsed_line="collapsed",
+        detail_line="detail",
+        fallback_summary_line="fallback summary",
+    ) == ["fallback summary", "detail"]
+    assert rendering.process_turn_lines(
+        "",
+        has_process_noise=True,
+        has_call_noise=False,
+        collapsed_line="collapsed",
+    ) == ["collapsed"]
+    assert rendering.process_turn_lines(
+        "",
+        has_process_noise=False,
+        has_call_noise=False,
+        fallback_summary_line="fallback summary",
+    ) == ["fallback summary"]
+
+
+def test_app_append_process_turn_wrapper_delegates_line_selection_to_rendering() -> None:
+    marker = "**LLM Running (Turn 9) ...**"
+    body = (
+        "<summary>查询资料</summary>\n"
+        "Final answer\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n"
+        "{\"q\":\"needle\"}\n"
+        "````\n"
+    )
+    rendered: list[str] = []
+
+    app_module.append_process_turn(rendered, marker, body, current=True)
+
+    has_process_noise = app_module.process_has_tool_noise(body)
+    has_call_noise = app_module.process_has_tool_call_noise(body)
+    final_text = app_module.visible_reply_text(body, hide_detail_fences=has_process_noise)
+    summary = app_module.process_summary_text(body)
+    title_summary = app_module.process_title_text(body)
+    assert rendered == rendering.process_turn_lines(
+        final_text,
+        has_process_noise=has_process_noise,
+        has_call_noise=has_call_noise,
+        fold_details=True,
+        collapse_whole=False,
+        collapsed_line=app_module.collapsed_process_line(marker, body, current=True),
+        speech_header_line=app_module.process_speech_header(marker, body),
+        summary_line=app_module.process_speech_summary_line(marker, body, summary)
+        if summary and summary != "执行中"
+        else "",
+        detail_line=app_module.process_detail_line(marker, body, current=True),
+        fallback_summary_line=app_module.process_speech_summary_line(marker, body, title_summary)
+        if title_summary and title_summary != "执行中"
+        else "",
+    )
+
+
 def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
     marker = "**LLM Running (Turn 7) ...**"
     body = (
@@ -696,6 +797,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape
     assert app_module.preferred_group_visible_reply_text is rendering.preferred_group_visible_reply_text
+    assert app_module.process_turn_lines is rendering.process_turn_lines
     assert app_module.boxed_user_lines is rendering.boxed_user_lines
     assert app_module.TURN_NO_RE is rendering.TURN_NO_RE
     assert app_module.process_turn_label is rendering.process_turn_label

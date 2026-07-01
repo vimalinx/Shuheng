@@ -586,6 +586,7 @@ visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
 visible_reply_has_section_shape = rendering_helpers.visible_reply_has_section_shape
 preferred_group_visible_reply_text = rendering_helpers.preferred_group_visible_reply_text
+process_turn_lines = rendering_helpers.process_turn_lines
 boxed_user_lines = rendering_helpers.boxed_user_lines
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
@@ -18599,33 +18600,26 @@ def append_process_turn(
     has_process_noise = process_has_tool_noise(body)
     has_call_noise = process_has_tool_call_noise(body)
     final_text = visible_reply_text(body, hide_detail_fences=has_process_noise)
-    if final_text:
-        if has_call_noise and fold_details:
-            final_text = close_unbalanced_markdown_fence(final_text)
-        if collapse_whole and has_process_noise:
-            rendered.append(final_text)
-            if fold_details:
-                rendered.append(collapsed_process_line(marker, body, current=current))
-            return
-        if has_call_noise:
-            rendered.append(process_speech_header(marker, body))
-        else:
-            append_process_summary_line(rendered, marker, body)
-        rendered.append(final_text)
-        if has_call_noise and fold_details:
-            rendered.append(process_detail_line(marker, body, current=current))
-        return
-    if collapse_whole and has_process_noise:
-        rendered.append(collapsed_process_line(marker, body, current=current))
-        return
-    summary = process_title_text(body)
-    if summary and summary != "执行中":
-        rendered.append(process_speech_summary_line(marker, body, summary))
-        if has_call_noise and fold_details:
-            rendered.append(process_detail_line(marker, body, current=current))
-        return
-    if has_process_noise:
-        rendered.append(collapsed_process_line(marker, body, current=current))
+    summary = process_summary_text(body)
+    title_summary = process_title_text(body)
+    rendered.extend(
+        rendering_helpers.process_turn_lines(
+            final_text,
+            has_process_noise=has_process_noise,
+            has_call_noise=has_call_noise,
+            fold_details=fold_details,
+            collapse_whole=collapse_whole,
+            collapsed_line=collapsed_process_line(marker, body, current=current),
+            speech_header_line=process_speech_header(marker, body),
+            summary_line=process_speech_summary_line(marker, body, summary)
+            if summary and summary != "执行中"
+            else "",
+            detail_line=process_detail_line(marker, body, current=current),
+            fallback_summary_line=process_speech_summary_line(marker, body, title_summary)
+            if title_summary and title_summary != "执行中"
+            else "",
+        )
+    )
 
 
 def visible_ask_user_text(body: str) -> str:

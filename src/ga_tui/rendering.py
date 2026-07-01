@@ -252,6 +252,50 @@ def preferred_group_visible_reply_text(visible_items: list[str], irc_replies: li
     return chosen
 
 
+def process_turn_lines(
+    final_text: str,
+    *,
+    has_process_noise: bool,
+    has_call_noise: bool,
+    fold_details: bool = True,
+    collapse_whole: bool = False,
+    collapsed_line: str = "",
+    speech_header_line: str = "",
+    summary_line: str = "",
+    detail_line: str = "",
+    fallback_summary_line: str = "",
+) -> list[str]:
+    if final_text:
+        visible_text = final_text
+        if has_call_noise and fold_details:
+            visible_text = close_unbalanced_markdown_fence(visible_text)
+        if collapse_whole and has_process_noise:
+            lines = [visible_text]
+            if fold_details and collapsed_line:
+                lines.append(collapsed_line)
+            return lines
+        lines: list[str] = []
+        if has_call_noise:
+            if speech_header_line:
+                lines.append(speech_header_line)
+        elif summary_line:
+            lines.append(summary_line)
+        lines.append(visible_text)
+        if has_call_noise and fold_details and detail_line:
+            lines.append(detail_line)
+        return lines
+    if collapse_whole and has_process_noise:
+        return [collapsed_line] if collapsed_line else []
+    if fallback_summary_line:
+        lines = [fallback_summary_line]
+        if has_call_noise and fold_details and detail_line:
+            lines.append(detail_line)
+        return lines
+    if has_process_noise and collapsed_line:
+        return [collapsed_line]
+    return []
+
+
 def boxed_user_lines(text: str, width: int) -> list[str]:
     inner_limit = max(8, width - 4)
     body = wrap_cells(text, inner_limit)

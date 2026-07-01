@@ -378,6 +378,7 @@ def assert_rendering_module_boundary() -> None:
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
         "preferred_group_visible_reply_text",
+        "process_turn_lines",
         "boxed_user_lines",
         "running_indicator",
         "running_indicator_cell_width",
@@ -639,6 +640,46 @@ def assert_rendering_module_boundary() -> None:
         ["Alice: hello", "Alice: hello", "Bob: already handled", ""],
     ) == "Final answer mentions Bob: already handled\n\n### IRC 回复\n- Alice: hello"
     assert rendering_mod.preferred_group_visible_reply_text([], ["Alice: hello"]) == "### IRC 回复\n- Alice: hello"
+    assert rendering_mod.process_turn_lines(
+        "```python\nprint('x')",
+        has_process_noise=True,
+        has_call_noise=True,
+        fold_details=True,
+        collapsed_line="collapsed",
+        speech_header_line="header",
+        detail_line="detail",
+    ) == ["header", "```python\nprint('x')\n```", "detail"]
+    assert rendering_mod.process_turn_lines(
+        "visible answer",
+        has_process_noise=True,
+        has_call_noise=False,
+        fold_details=True,
+        collapse_whole=True,
+        collapsed_line="collapsed",
+        summary_line="summary",
+    ) == ["visible answer", "collapsed"]
+    assert rendering_mod.process_turn_lines(
+        "visible answer",
+        has_process_noise=True,
+        has_call_noise=False,
+        fold_details=False,
+        collapse_whole=True,
+        collapsed_line="collapsed",
+        summary_line="summary",
+    ) == ["visible answer"]
+    assert rendering_mod.process_turn_lines(
+        "",
+        has_process_noise=True,
+        has_call_noise=True,
+        detail_line="detail",
+        fallback_summary_line="fallback summary",
+    ) == ["fallback summary", "detail"]
+    assert rendering_mod.process_turn_lines(
+        "",
+        has_process_noise=True,
+        has_call_noise=False,
+        collapsed_line="collapsed",
+    ) == ["collapsed"]
     group_turns = [
         ("**LLM Running (Turn 1) ...**", rich_visible_reply),
         ("**LLM Running (Turn 2) ...**", housekeeping_reply),
@@ -665,6 +706,24 @@ def assert_rendering_module_boundary() -> None:
     assert a.preferred_group_visible_reply(
         [("**LLM Running (Turn 3) ...**", irc_body)]
     ) == rendering_mod.preferred_group_visible_reply_text([], irc_replies)
+    rendered_process_turn: list[str] = []
+    a.append_process_turn(rendered_process_turn, process_marker, process_body, current=True)
+    process_summary = a.process_summary_text(process_body)
+    process_title = a.process_title_text(process_body)
+    assert rendered_process_turn == rendering_mod.process_turn_lines(
+        a.visible_reply_text(process_body, hide_detail_fences=a.process_has_tool_noise(process_body)),
+        has_process_noise=a.process_has_tool_noise(process_body),
+        has_call_noise=a.process_has_tool_call_noise(process_body),
+        collapsed_line=a.collapsed_process_line(process_marker, process_body, current=True),
+        speech_header_line=a.process_speech_header(process_marker, process_body),
+        summary_line=a.process_speech_summary_line(process_marker, process_body, process_summary)
+        if process_summary and process_summary != "执行中"
+        else "",
+        detail_line=a.process_detail_line(process_marker, process_body, current=True),
+        fallback_summary_line=a.process_speech_summary_line(process_marker, process_body, process_title)
+        if process_title and process_title != "执行中"
+        else "",
+    )
     latest_turn_text = (
         "LLM Running (Turn 1) ...\n"
         "Earlier answer\n"
@@ -761,6 +820,7 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
         "def preferred_group_visible_reply_text",
+        "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",
         "def is_table_separator",
