@@ -965,3 +965,40 @@ Unified persistent non-secret subagent direct chat around canonical Shuheng hist
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: App.py decomposition phases 0-4
+
+**Date**: 2026-07-01
+**Task**: App.py decomposition phases 0-4
+**Branch**: `main`
+
+### Summary
+
+Designed the app.py decomposition plan and completed the first extraction phases: shared UI/text helpers, history storage, Secret Vault storage, and governance storage helpers. Preserved app.py compatibility wrappers, added module-boundary policy gates, targeted tests, release/runtime smoke coverage, and verified built wheel/sdist artifacts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8c53eb0` | (see git log) |
+| `58189c2` | (see git log) |
+| `4b2cc7c` | (see git log) |
+| `49daddb` | (see git log) |
+| `0ba566c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

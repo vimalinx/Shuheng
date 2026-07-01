@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
-- **Last Active**: 2026-06-30
+- **Total Sessions**: 29
+- **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~967 | Active |
+| `journal-1.md` | ~1004 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-07-01 | App.py decomposition phases 0-4 | `8c53eb0`, `58189c2`, `4b2cc7c`, `49daddb`, `0ba566c` | `main` |
 | 28 | 2026-06-30 | Unify subagent history and release readiness hardening | `e7dec64`, `7ee3c8a`, `6b0fabc`, `ef07b54`, `81fdc84`, `775f0a8`, `616c228`, `cd2b73a`, `5ed97d7`, `338c639`, `a0026be`, `eb1c42b`, `1955434`, `56cfffd`, `5c59370`, `4445b8a`, `99a036d`, `1c5d5e7`, `1cd0b28`, `9ca29cc`, `a15fece`, `6571d9c`, `6afc343`, `d7f540e`, `873a0f5`, `818c2ce` | `main` |
 | 27 | 2026-06-29 | Fix direct subagent chat no-reply states | `a138398` | `main` |
 | 26 | 2026-06-29 | Open-source release readiness | `25e5684`, `cdba57e` | `main` |
