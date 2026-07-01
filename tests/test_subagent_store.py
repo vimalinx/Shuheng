@@ -50,6 +50,35 @@ def test_secret_home_and_sidebar_key_round_trip() -> None:
     assert app_module.secret_subagent_home is subagent_store.secret_subagent_home
 
 
+def test_subagent_identity_helpers_and_app_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "subagents"
+    (root / "researcher").mkdir(parents=True)
+    state = app_module.State(agent=None)
+    state.subagents = {
+        "researcher": app_module.SubAgentRuntime(agent_id="researcher", name="Researcher", home="/tmp/researcher"),
+        "tmp-researcher-234567890123": app_module.SubAgentRuntime(
+            agent_id="tmp-researcher-234567890123",
+            name="Researcher",
+            home="/tmp/researcher",
+        ),
+    }
+    monkeypatch.setattr(app_module, "SUBAGENTS_DIR", str(root))
+    monkeypatch.setattr(subagent_store.time, "time_ns", lambda: 1_234_567_890_123)
+
+    assert app_module.clean_subagent_id is subagent_store.clean_subagent_id
+    assert app_module.normalize_subagent_identity_text is subagent_store.normalize_subagent_identity_text
+    assert app_module.compact_identity_text is subagent_store.compact_identity_text
+    assert subagent_store.clean_subagent_id("Ａgent / 研究") == "agent"
+    assert subagent_store.normalize_subagent_identity_text("Agent：Code-Reviewer!") == "agent code reviewer"
+    assert subagent_store.compact_identity_text("Agent：Code-Reviewer!") == "agentcodereviewer"
+    assert subagent_store.unique_subagent_id("Researcher", subagents_dir=str(root)) == "researcher-2"
+    assert app_module.unique_subagent_id("Researcher") == "researcher-2"
+    assert subagent_store.unique_secret_subagent_id("Researcher", existing_ids=state.subagents) == "researcher-2"
+    assert app_module.unique_secret_subagent_id(state, "Researcher") == "researcher-2"
+    assert subagent_store.unique_runtime_subagent_id("Researcher", existing_ids=state.subagents) == "tmp-researcher-234567890123-2"
+    assert app_module.unique_runtime_subagent_id(state, "Researcher") == "tmp-researcher-234567890123-2"
+
+
 def test_subagent_new_chat_session_id_shape() -> None:
     session_id = subagent_store.subagent_new_chat_session_id()
 

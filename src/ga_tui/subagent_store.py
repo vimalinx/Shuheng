@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import re
 import time
+import unicodedata
+from collections.abc import Collection
 from typing import Any, Callable
 
 from .history_titles import compact_description, suggested_session_title
@@ -50,6 +52,56 @@ def subagent_home(agent_id: str, *, subagents_dir: str) -> str:
 
 def secret_subagent_home(agent_id: str) -> str:
     return f"secret://subagents/{safe_subagent_ref(agent_id)}"
+
+
+def clean_subagent_id(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text or "").strip().lower()
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"[^a-z0-9._-]+", "", text)
+    text = text.strip("._-")
+    return text[:40] or f"agent-{int(time.time())}"
+
+
+def normalize_subagent_identity_text(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text or "").lower()
+    text = re.sub(r"[#*_`>\[\](){}:：,，.。;；!?！？|/\\\"'“”‘’、\-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def compact_identity_text(text: str) -> str:
+    return re.sub(r"\s+", "", normalize_subagent_identity_text(text))
+
+
+def unique_subagent_id(name: str, *, subagents_dir: str) -> str:
+    base = clean_subagent_id(name)
+    candidate = base
+    counter = 2
+    while os.path.exists(subagent_home(candidate, subagents_dir=subagents_dir)):
+        candidate = f"{base}-{counter}"
+        counter += 1
+    return candidate
+
+
+def unique_secret_subagent_id(name: str, *, existing_ids: Collection[str]) -> str:
+    base = clean_subagent_id(name)
+    candidate = base
+    counter = 2
+    existing = set(existing_ids)
+    while candidate in existing:
+        candidate = f"{base}-{counter}"
+        counter += 1
+    return candidate
+
+
+def unique_runtime_subagent_id(name: str, *, existing_ids: Collection[str]) -> str:
+    base = "tmp-" + clean_subagent_id(name)
+    candidate = f"{base}-{time.time_ns() % 1_000_000_000_000}"
+    counter = 2
+    existing = set(existing_ids)
+    while candidate in existing:
+        candidate = f"{base}-{time.time_ns() % 1_000_000_000_000}-{counter}"
+        counter += 1
+    return candidate
 
 
 def subagent_meta_path(agent_id: str, *, subagents_dir: str) -> str:

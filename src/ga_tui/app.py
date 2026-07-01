@@ -9389,6 +9389,9 @@ def subagent_events_path(agent_id: str) -> str:
 subagent_new_chat_session_id = subagent_store_helpers.subagent_new_chat_session_id
 subagent_session_sidebar_key = subagent_store_helpers.subagent_session_sidebar_key
 subagent_session_from_sidebar_key = subagent_store_helpers.subagent_session_from_sidebar_key
+clean_subagent_id = subagent_store_helpers.clean_subagent_id
+normalize_subagent_identity_text = subagent_store_helpers.normalize_subagent_identity_text
+compact_identity_text = subagent_store_helpers.compact_identity_text
 
 
 def subagent_file_path(sub: SubAgentRuntime, filename: str) -> str:
@@ -9873,53 +9876,16 @@ def new_subagent_chat_session(state: State, sub: SubAgentRuntime) -> None:
     state.last_error = f"已新建子 agent 会话：{sub.name}"
 
 
-def clean_subagent_id(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text or "").strip().lower()
-    text = re.sub(r"\s+", "-", text)
-    text = re.sub(r"[^a-z0-9._-]+", "", text)
-    text = text.strip("._-")
-    return text[:40] or f"agent-{int(time.time())}"
-
-
-def normalize_subagent_identity_text(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text or "").lower()
-    text = re.sub(r"[#*_`>\[\](){}:：,，.。;；!?！？|/\\\"'“”‘’、\-]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def compact_identity_text(text: str) -> str:
-    return re.sub(r"\s+", "", normalize_subagent_identity_text(text))
-
-
 def unique_subagent_id(name: str) -> str:
-    base = clean_subagent_id(name)
-    candidate = base
-    counter = 2
-    while os.path.exists(subagent_home(candidate)):
-        candidate = f"{base}-{counter}"
-        counter += 1
-    return candidate
+    return subagent_store_helpers.unique_subagent_id(name, subagents_dir=SUBAGENTS_DIR)
 
 
 def unique_secret_subagent_id(state: State, name: str) -> str:
-    base = clean_subagent_id(name)
-    candidate = base
-    counter = 2
-    existing = set(state.subagents)
-    while candidate in existing:
-        candidate = f"{base}-{counter}"
-        counter += 1
-    return candidate
+    return subagent_store_helpers.unique_secret_subagent_id(name, existing_ids=state.subagents)
 
 
 def unique_runtime_subagent_id(state: State, name: str) -> str:
-    base = "tmp-" + clean_subagent_id(name)
-    candidate = f"{base}-{time.time_ns() % 1_000_000_000_000}"
-    counter = 2
-    while candidate in state.subagents:
-        candidate = f"{base}-{time.time_ns() % 1_000_000_000_000}-{counter}"
-        counter += 1
-    return candidate
+    return subagent_store_helpers.unique_runtime_subagent_id(name, existing_ids=state.subagents)
 
 
 def load_subagent_meta(agent_id: str) -> dict[str, Any]:

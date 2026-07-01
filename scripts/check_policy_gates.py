@@ -491,6 +491,12 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.is_scheduled_reports_session_key is subagent_store_mod.is_scheduled_reports_session_key
     assert a.is_home_session_key is subagent_store_mod.is_home_session_key
     assert a.secret_subagent_home is subagent_store_mod.secret_subagent_home
+    assert a.clean_subagent_id is subagent_store_mod.clean_subagent_id
+    assert a.normalize_subagent_identity_text is subagent_store_mod.normalize_subagent_identity_text
+    assert a.compact_identity_text is subagent_store_mod.compact_identity_text
+    assert subagent_store_mod.unique_subagent_id.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.unique_secret_subagent_id.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.unique_runtime_subagent_id.__module__ == "ga_tui.subagent_store"
     assert a.subagent_new_chat_session_id is subagent_store_mod.subagent_new_chat_session_id
     assert a.subagent_session_sidebar_key is subagent_store_mod.subagent_session_sidebar_key
     assert a.subagent_session_from_sidebar_key is subagent_store_mod.subagent_session_from_sidebar_key
@@ -518,12 +524,39 @@ def assert_subagent_store_module_boundary() -> None:
     assert sidebar_key == "subagent_session:ops-agent:chat-id-1"
     assert subagent_store_mod.subagent_session_from_sidebar_key(sidebar_key) == ("ops-agent", "chat-id-1")
     assert subagent_store_mod.secret_subagent_home("ops agent/中文") == "secret://subagents/ops-agent"
+    os.makedirs(os.path.join(root, "ops-agent"), exist_ok=True)
+    assert subagent_store_mod.clean_subagent_id("Ｏps Agent / 中文") == "ops-agent"
+    assert subagent_store_mod.normalize_subagent_identity_text("Ops：Code-Reviewer!") == "ops code reviewer"
+    assert subagent_store_mod.compact_identity_text("Ops：Code-Reviewer!") == "opscodereviewer"
+    assert subagent_store_mod.unique_subagent_id("Ops Agent", subagents_dir=root) == "ops-agent-2"
     meta = {
         "conversation_scope": subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE,
         "agent_id": "ops-agent",
         "subagent_chat_session_id": "chat-id-1",
     }
     sub = a.SubAgentRuntime(agent_id="ops-agent", name="Ops Agent", home="/tmp/ops-agent")
+    state = a.State(agent=None)
+    state.subagents = {
+        "ops-agent": sub,
+        "tmp-ops-agent-234567890123": a.SubAgentRuntime(
+            agent_id="tmp-ops-agent-234567890123",
+            name="Ops Agent",
+            home="/tmp/ops-agent",
+        ),
+    }
+    original_time_ns = subagent_store_mod.time.time_ns
+    original_root = a.SUBAGENTS_DIR
+    try:
+        subagent_store_mod.time.time_ns = lambda: 1_234_567_890_123
+        a.SUBAGENTS_DIR = root
+        assert subagent_store_mod.unique_secret_subagent_id("Ops Agent", existing_ids=state.subagents) == "ops-agent-2"
+        assert a.unique_secret_subagent_id(state, "Ops Agent") == "ops-agent-2"
+        assert subagent_store_mod.unique_runtime_subagent_id("Ops Agent", existing_ids=state.subagents) == "tmp-ops-agent-234567890123-2"
+        assert a.unique_runtime_subagent_id(state, "Ops Agent") == "tmp-ops-agent-234567890123-2"
+        assert a.unique_subagent_id("Ops Agent") == "ops-agent-2"
+    finally:
+        subagent_store_mod.time.time_ns = original_time_ns
+        a.SUBAGENTS_DIR = original_root
     assert subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent")
     assert subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent", "chat-id-1")
     assert not subagent_store_mod.subagent_chat_history_meta_matches(meta, "ops-agent", "other")
