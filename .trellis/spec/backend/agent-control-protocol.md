@@ -893,6 +893,122 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
     ...
 ```
 
+## Scenario: Command Completion Helper Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Goal 7 decomposes deterministic command-completion constants and
+  helper functions out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/commands.py`, compatibility aliases in `app.py`,
+  `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
+  `/workspaces` completion, completion insertion behavior, unit tests, and
+  policy gates.
+- Non-goal: This does not move command execution, `command_matches(...)`,
+  `subagent_completion_rows(...)`, `agent_command_matches(...)`,
+  `category_command_matches(...)`, `approval_command_matches(...)`, mutable
+  `State`, role-template lookup, pending approvals, history categories, input
+  event handling, Web Console, dashboard, rendering, runtime dispatch, storage
+  roots, Secret Vault behavior, ledgers, or artifacts.
+
+### 2. Signatures
+
+- Lower-level helper module: `src/ga_tui/commands.py`.
+- Compatibility aliases in `app.py`:
+  - `AGENT_SUBCOMMANDS`.
+  - `AGENT_SUBCOMMANDS_REQUIRING_AGENT`.
+  - `AGENT_SUBCOMMANDS_SEND_AFTER_AGENT`.
+  - `WORKSPACE_SUBCOMMANDS`.
+  - `completion_insert_text(candidate)`.
+  - `archived_command_matches(text)`.
+  - `workspace_command_matches(text)`.
+
+### 3. Contracts
+
+- `commands.py` must not import `ga_tui.app`, `.app`, `app`, curses, mutable
+  TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers,
+  Web Console, dashboard, runtime dispatch, input controller, Secret Vault,
+  governance stores, history stores, key/mouse handlers, or draw functions.
+- `commands.py` owns deterministic command-completion metadata and matching
+  over explicit text values.
+- `completion_insert_text(...)` returns the command unchanged for sendable
+  candidates and appends exactly one trailing space to non-sendable command
+  candidates after right-stripping the command.
+- `archived_command_matches(...)` completes only `/archived <prefix>` and
+  returns the existing `on`, `off`, and `toggle` rows.
+- `workspace_command_matches(...)` preserves the existing singular/plural root
+  behavior: `/workspaces` and `/workspaces ` are sendable list commands,
+  `/workspace ` opens subcommand completion, and only `list`, `current`, and
+  `refresh` subcommands are offered.
+- `app.py` remains the compatibility facade and the owner of stateful command
+  completion dispatch, subagent rows, role-template rows, category rows,
+  approval rows, command execution, input event handling, and runtime side
+  effects.
+
+### 4. Validation & Error Matrix
+
+- `commands.py` imports app/TUI/render/runtime/storage owners -> policy gate
+  fails.
+- App alias differs from module helper for the same input -> unit test or
+  policy gate fails.
+- `completion_insert_text(("/archived on", "", "显示归档", True))` ->
+  `"/archived on"`.
+- `completion_insert_text(("/workspace", "<cmd>", "...", False))` ->
+  `"/workspace "`.
+- `archived_command_matches("/archived t")` -> `[("/archived toggle", "",
+  "切换归档视图", True)]`.
+- `workspace_command_matches("/workspace r")` -> `[("/workspace refresh", "",
+  "刷新自动工作区索引", True)]`.
+- `workspace_command_matches("/workspaces ")` -> `[("/workspaces", "",
+  "列出项目工作区 provenance", True)]`.
+- `workspace_command_matches("/workspace refresh ")` -> `[]`.
+- `command_matches("/workspace r", state)` still delegates to the extracted
+  workspace helper before app-owned command dispatch continues.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `commands.py` owns pure `/archived` and `/workspace` completion
+  matching, while `app.py` keeps command routing and stateful completions.
+- Good: `/agent` option constants move to `commands.py`, while `app.py` still
+  owns subagent runtime row expansion and role-template completion.
+- Base: Future slices may move more command parsing only after state,
+  governance, history, rendering, and runtime dependencies are injectable.
+- Bad: `commands.py` imports `State` so it can inspect active subagents.
+- Bad: `commands.py` imports approvals or history metadata to complete dynamic
+  command rows.
+
+### 6. Tests Required
+
+- Unit tests must assert direct `completion_insert_text(...)`,
+  `archived_command_matches(...)`, and `workspace_command_matches(...)`
+  behavior plus app alias parity.
+- Unit tests must assert app-level `command_matches(...)` still returns the same
+  `/archived` and `/workspace` helper rows.
+- `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
+  helpers, `app.py` no longer defines the moved functions locally, and the new
+  module has no reverse dependency into app/TUI/render/runtime/storage owners.
+- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/commands.py
+  scripts/check_policy_gates.py tests/test_commands.py` must pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and
+  `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_commands.py -p
+  no:cacheprovider` must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# commands.py
+from ga_tui.app import State, pending_approvals
+```
+
+#### Correct
+
+```python
+# commands.py
+def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
+    ...
+```
+
 ## Scenario: Path Utility Module Boundary
 
 ### 1. Scope / Trigger

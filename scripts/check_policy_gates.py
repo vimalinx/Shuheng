@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ga_tui import app as a  # noqa: E402
 from ga_tui import agent_bridge as bridge  # noqa: E402
 from ga_tui import baseline as baseline_mod  # noqa: E402
+from ga_tui import commands as commands_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
 from ga_tui import context_packs as context_pack_mod  # noqa: E402
 from ga_tui import dashboard as dashboard_mod  # noqa: E402
@@ -402,6 +403,60 @@ def assert_input_controller_module_boundary() -> None:
         "COMMANDS",
     ):
         assert forbidden not in source, f"{input_controller_mod.__file__}: {forbidden}"
+
+
+def assert_commands_module_boundary() -> None:
+    for name in (
+        "AGENT_SUBCOMMANDS",
+        "AGENT_SUBCOMMANDS_REQUIRING_AGENT",
+        "AGENT_SUBCOMMANDS_SEND_AFTER_AGENT",
+        "WORKSPACE_SUBCOMMANDS",
+        "completion_insert_text",
+        "archived_command_matches",
+        "workspace_command_matches",
+    ):
+        assert getattr(a, name) is getattr(commands_mod, name), name
+    assert commands_mod.completion_insert_text(("/agent new", "<name>", "新建", False)) == "/agent new "
+    assert commands_mod.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
+    assert commands_mod.archived_command_matches("/archived t") == [
+        ("/archived toggle", "", "切换归档视图", True)
+    ]
+    assert commands_mod.workspace_command_matches("/workspace r") == [
+        ("/workspace refresh", "", "刷新自动工作区索引", True)
+    ]
+    assert a.command_matches("/archived o") == commands_mod.archived_command_matches("/archived o")
+    assert a.command_matches("/workspace c") == commands_mod.workspace_command_matches("/workspace c")
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    for moved_def in (
+        "def completion_insert_text",
+        "def archived_command_matches",
+        "def workspace_command_matches",
+    ):
+        assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
+    source = Path(commands_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "PanelItem",
+        "GatewayRequestHandler",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+        "input_controller",
+        "secret_vault",
+        "governance",
+        "history_store",
+        "draw_",
+        "handle_key",
+        "handle_mouse",
+    ):
+        assert forbidden not in source, f"{commands_mod.__file__}: {forbidden}"
 
 
 def assert_rendering_module_boundary() -> None:
@@ -9390,6 +9445,7 @@ def run_checks() -> None:
     assert_history_store_module_boundary()
     assert_history_title_policy_module_boundary()
     assert_input_controller_module_boundary()
+    assert_commands_module_boundary()
     assert_rendering_module_boundary()
     assert_path_utils_module_boundary()
     assert_subagent_store_module_boundary()
