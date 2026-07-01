@@ -13,6 +13,7 @@ class TestAppCompatibilityAliases:
         assert app_module.display_index_for_cell is input_controller.display_index_for_cell
         assert app_module.input_cursor_info is input_controller.input_cursor_info
         assert app_module.input_layout is input_controller.input_layout
+        assert app_module.normalize_pasted_text is input_controller.normalize_pasted_text
         assert app_module.MOUSE_BUTTON_STATES is input_controller.MOUSE_BUTTON_STATES
         assert app_module.mouse_button_mask_from_constants is input_controller.mouse_button_mask_from_constants
         assert app_module.mouse_modifier_mask_from_constants is input_controller.mouse_modifier_mask_from_constants
@@ -166,6 +167,18 @@ class TestInputLayout:
 
     def test_max_lines_is_at_least_one(self) -> None:
         assert input_controller.input_layout("abcd", 4, 0, 3) == (["… cd"], 0, 3)
+
+
+class TestPasteNormalization:
+    def test_collapses_newline_runs_and_surrounding_spaces(self) -> None:
+        assert input_controller.normalize_pasted_text(" alpha \n\t beta\r\n gamma ") == " alpha beta gamma "
+
+    def test_replaces_remaining_tabs_with_four_spaces(self) -> None:
+        assert input_controller.normalize_pasted_text("a\tb\nc\t\td") == "a    b c        d"
+
+    def test_app_alias_matches_input_controller_helper(self) -> None:
+        text = "one\n two\tthree"
+        assert app_module.normalize_pasted_text(text) == input_controller.normalize_pasted_text(text)
 
 
 class TestMouseMaskHelpers:

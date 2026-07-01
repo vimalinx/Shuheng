@@ -19582,6 +19582,7 @@ input_segments = input_controller_helpers.input_segments
 display_index_for_cell = input_controller_helpers.display_index_for_cell
 input_cursor_info = input_controller_helpers.input_cursor_info
 input_layout = input_controller_helpers.input_layout
+normalize_pasted_text = input_controller_helpers.normalize_pasted_text
 MOUSE_BUTTON_STATES = input_controller_helpers.MOUSE_BUTTON_STATES
 mouse_button_mask_from_constants = input_controller_helpers.mouse_button_mask_from_constants
 mouse_modifier_mask_from_constants = input_controller_helpers.mouse_modifier_mask_from_constants
@@ -25432,10 +25433,6 @@ def enable_mouse_drag() -> None:
 
 def disable_mouse_drag() -> None:
     tty_escape("\x1b[?1003l\x1b[?1002l")
-
-
-def normalize_pasted_text(text: str) -> str:
-    return re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text).replace("\t", "    ")
 
 
 def read_terminal_key(stdscr):

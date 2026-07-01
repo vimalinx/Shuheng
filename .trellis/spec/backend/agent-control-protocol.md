@@ -788,6 +788,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
   - `display_index_for_cell(display, start, end, target_x)`.
   - `input_cursor_info(text, width, cursor)`.
   - `input_layout(text, width, max_lines, cursor, prompt="> ")`.
+  - `normalize_pasted_text(text)`.
   - `mouse_button_mask_from_constants(button_no, constants)`.
   - `mouse_modifier_mask_from_constants(constants)`.
   - `mouse_known_bstate_mask_from_constants(constants, button_count=5)`.
@@ -810,6 +811,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Segment wrapping uses the same terminal-cell semantics as `text_utils.cell_width(...)`, including East Asian wide characters and zero-width combining marks.
 - `input_cursor_info(...)` returns `(display, segments, display_cursor, cursor_line, cursor_x)` and preserves the existing segment/cursor-line selection behavior.
 - `input_layout(...)` returns `(lines, cursor_y, cursor_x)`, clamps `max_lines` to at least one visible line, uses escaped-newline display text from `input_cursor_info(...)`, keeps the cursor segment visible when scrolled, prefixes the first hidden visible line with `"… "`, and computes cursor x with `cell_width(...)`.
+- `normalize_pasted_text(...)` collapses one or more CR/LF runs plus surrounding spaces/tabs into one literal space, replaces remaining tabs with four spaces, and must not inspect terminal, curses, or mutable paste state.
 - Mouse bitmask helpers in `input_controller.py` are deterministic over explicit integer constants. They must not read curses globals directly.
 - `mouse_button_mask_from_constants(...)` ORs the supported button state constants (`PRESSED`, `RELEASED`, `CLICKED`, `DOUBLE_CLICKED`, `TRIPLE_CLICKED`) for the requested button.
 - `mouse_modifier_mask_from_constants(...)`, `mouse_known_bstate_mask_from_constants(...)`, `mouse_auxiliary_or_unknown_event_from_constants(...)`, and `clean_button1_action_from_constants(...)` preserve the existing primary-button/modifier/auxiliary/unknown-bit filtering semantics over explicit constants.
@@ -826,6 +828,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Combining marks add no cell width when wrapping or computing cursor x.
 - Empty input still produces one empty segment.
 - `input_layout("abcdef", 4, 2, 5)` -> `(["… cd", "  ef"], 1, 3)`.
+- `normalize_pasted_text(" alpha \n\t beta\r\n gamma\t")` -> `" alpha beta gamma    "`.
 - `mouse_auxiliary_or_unknown_event_from_constants(primary_button_1 | modifier, constants)` -> `False`.
 - `mouse_auxiliary_or_unknown_event_from_constants(button_2, constants)` -> `True`.
 - `clean_button1_action_from_constants(button_1_clicked | modifier, button_1_clicked, constants)` -> `True`.
@@ -835,6 +838,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 - Good: `move_input_cursor_vertical(...)` stays in `app.py` and delegates display/raw conversion to `input_controller.py`.
 - Good: `input_layout(...)` lives in `input_controller.py` because it is pure text geometry and prompt layout, while `draw_main(...)` remains in `app.py` and calls the compatibility alias.
+- Good: `normalize_pasted_text(...)` lives in `input_controller.py`, while bracketed paste mode, paste buffer mutation, and `handle_key(...)` stay in `app.py`.
 - Good: mouse bitmask classification helpers live in `input_controller.py` over explicit constants, while `app.py` keeps curses constant lookup and `handle_mouse(...)`.
 - Base: Future slices may move more input handling only after command and rendering boundaries are stable.
 - Bad: `input_controller.py` imports `State` so it can mutate `state.input_cursor`.
@@ -844,6 +848,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 ### 6. Tests Required
 
 - Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, input layout line/cursor behavior, and `app.py` alias parity.
+- Unit tests must assert paste normalization preserves collapsed newline and tab-replacement behavior plus app alias parity.
 - Unit tests must assert direct mouse mask helper behavior over fake constants and `app.py` wrapper parity over curses constants.
 - `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.

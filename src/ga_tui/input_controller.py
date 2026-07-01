@@ -1,6 +1,7 @@
 """Pure terminal input cursor/display geometry helpers."""
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 try:
@@ -108,6 +109,10 @@ def input_layout(text: str, width: int, max_lines: int, cursor: int, prompt: str
             before = display[seg_start:display_cursor]
             cursor_x = cell_width(prefix) + cell_width(before)
     return lines or [prompt], cursor_y, cursor_x
+
+
+def normalize_pasted_text(text: str) -> str:
+    return re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text).replace("\t", "    ")
 
 
 def mouse_button_mask_from_constants(button_no: int, constants: Mapping[str, object]) -> int:
