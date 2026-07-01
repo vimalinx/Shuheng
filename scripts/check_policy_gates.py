@@ -492,6 +492,40 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.visible_reply_text(hidden_detail_body, hide_detail_fences=True) == "Final answer"
     assert rendering_mod.strip_standalone_dot_lines("A\n.\n3.14\n . \nB") == "A\n3.14\nB"
     assert rendering_mod.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
+    latest_turn_text = (
+        "LLM Running (Turn 1) ...\n"
+        "Earlier answer\n"
+        "LLM Running (Turn 2) ...\n"
+        "<summary>hidden</summary>\n"
+        "Latest answer\n"
+    )
+    assert rendering_mod.latest_visible_reply_text(latest_turn_text) == "Latest answer"
+    empty_latest_turn_text = (
+        "LLM Running (Turn 1) ...\n"
+        "Earlier answer\n"
+        "LLM Running (Turn 2) ...\n"
+        "<summary>hidden</summary>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n"
+        "{\"q\":\"needle\"}\n"
+        "````\n"
+        "`````\n"
+        "raw result hidden\n"
+        "`````\n"
+        "[Info] Final response to user.\n"
+        ".\n"
+    )
+    assert rendering_mod.latest_visible_reply_text(empty_latest_turn_text) == "Earlier answer"
+    fallback_noise_body = "Final answer\n`````\nraw result\n`````"
+    assert rendering_mod.latest_visible_reply_text(fallback_noise_body) == fallback_noise_body
+    assert rendering_mod.latest_visible_reply_text(
+        fallback_noise_body,
+        has_tool_noise=lambda _text: True,
+    ) == "Final answer"
+    assert a.latest_visible_reply_text(fallback_noise_body) == rendering_mod.latest_visible_reply_text(
+        fallback_noise_body,
+        has_tool_noise=a.process_has_tool_noise,
+    )
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(

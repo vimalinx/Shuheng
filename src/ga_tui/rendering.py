@@ -1,6 +1,7 @@
 """Curses-free rendering helper transforms for Shuheng."""
 from __future__ import annotations
 
+from collections.abc import Callable
 import re
 
 try:
@@ -65,6 +66,23 @@ def visible_reply_text(body: str, hide_detail_fences: bool = False) -> str:
         text = FINAL_RESPONSE_INFO_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return strip_standalone_dot_lines(text)
+
+
+def latest_visible_reply_text(text: str, has_tool_noise: Callable[[str], bool] | None = None) -> str:
+    body_text = text or ""
+    parts = split_top_level_turn_markers(body_text)
+    if len(parts) >= 3:
+        turns: list[tuple[str, str]] = []
+        for idx in range(1, len(parts), 2):
+            marker = parts[idx]
+            body = parts[idx + 1] if idx + 1 < len(parts) else ""
+            turns.append((marker, body))
+        for _marker, body in reversed(turns):
+            visible = visible_reply_text(body, hide_detail_fences=True).strip()
+            if visible:
+                return visible
+    hide_detail_fences = bool(has_tool_noise(body_text)) if has_tool_noise is not None else False
+    return visible_reply_text(body_text, hide_detail_fences=hide_detail_fences).strip()
 
 
 def process_preview(text: str) -> str:

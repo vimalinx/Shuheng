@@ -24347,18 +24347,7 @@ def consume_queue(state: State, stream_target: StreamTarget, task_id: int, dq: q
 
 
 def latest_visible_reply_text(text: str) -> str:
-    parts = split_top_level_turn_markers(text or "")
-    if len(parts) >= 3:
-        turns: list[tuple[str, str]] = []
-        for idx in range(1, len(parts), 2):
-            marker = parts[idx]
-            body = parts[idx + 1] if idx + 1 < len(parts) else ""
-            turns.append((marker, body))
-        for _marker, body in reversed(turns):
-            visible = visible_reply_text(body, hide_detail_fences=True).strip()
-            if visible:
-                return visible
-    return visible_reply_text(text or "", hide_detail_fences=process_has_tool_noise(text or "")).strip()
+    return rendering_helpers.latest_visible_reply_text(text, has_tool_noise=process_has_tool_noise)
 
 
 def subagent_result_notice_body(text: str, limit: int) -> str:

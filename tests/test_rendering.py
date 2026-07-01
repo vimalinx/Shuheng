@@ -279,6 +279,56 @@ def test_visible_reply_text_collapses_three_or_more_newlines() -> None:
     assert rendering.visible_reply_text("A\n\n\n\nB") == "A\n\nB"
 
 
+def test_latest_visible_reply_text_prefers_latest_nonempty_turn_body() -> None:
+    text = (
+        "LLM Running (Turn 1) ...\n"
+        "First answer\n"
+        "LLM Running (Turn 2) ...\n"
+        "<summary>hidden</summary>\n"
+        "Second answer\n"
+    )
+
+    assert rendering.latest_visible_reply_text(text) == "Second answer"
+
+
+def test_latest_visible_reply_text_falls_back_to_earlier_visible_turn() -> None:
+    text = (
+        "LLM Running (Turn 1) ...\n"
+        "Earlier visible answer\n"
+        "LLM Running (Turn 2) ...\n"
+        "<summary>hidden</summary>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n"
+        "{\"q\":\"needle\"}\n"
+        "````\n"
+        "`````\n"
+        "raw result hidden\n"
+        "`````\n"
+        "[Info] Final response to user.\n"
+        ".\n"
+    )
+
+    assert rendering.latest_visible_reply_text(text) == "Earlier visible answer"
+
+
+def test_latest_visible_reply_text_uses_injected_tool_noise_for_fallback() -> None:
+    body = "Final answer\n`````\nraw result\n`````"
+
+    assert rendering.latest_visible_reply_text(body) == body
+    assert rendering.latest_visible_reply_text(body, has_tool_noise=lambda _text: True) == "Final answer"
+    assert rendering.latest_visible_reply_text(body, has_tool_noise=lambda _text: False) == body
+
+
+def test_app_latest_visible_reply_wrapper_injects_app_tool_noise_predicate() -> None:
+    body = "Final answer\n`````\nraw result\n`````"
+
+    assert app_module.latest_visible_reply_text(body) == rendering.latest_visible_reply_text(
+        body,
+        has_tool_noise=app_module.process_has_tool_noise,
+    )
+    assert app_module.latest_visible_reply_text(body) == "Final answer"
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -314,6 +364,10 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_tool_output_blocks is rendering.strip_tool_output_blocks
     assert app_module.strip_standalone_dot_lines is rendering.strip_standalone_dot_lines
     assert app_module.visible_reply_text is rendering.visible_reply_text
+    assert app_module.latest_visible_reply_text("plain") == rendering.latest_visible_reply_text(
+        "plain",
+        has_tool_noise=app_module.process_has_tool_noise,
+    )
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line
