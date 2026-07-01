@@ -149,6 +149,101 @@ def test_process_summary_text_uses_thinking_for_legacy_process_only_summary() ->
     assert rendering.process_summary_text("no summary here") == ""
 
 
+def test_process_line_format_helpers_render_expected_strings() -> None:
+    marker = "**LLM Running (Turn 7) ...**"
+
+    assert rendering.process_turn_label(marker) == "Turn 7"
+    assert rendering.process_turn_label("no marker") == "Turn"
+    assert rendering.process_turn_no(marker, 99) == 7
+    assert rendering.process_turn_no("no marker", 99) == 99
+    assert rendering.process_tool_suffix([]) == ""
+    assert rendering.process_tool_suffix(["web.search", "irc", "todo", "code"]) == " · tool: web.search, irc, todo +1"
+    assert rendering.collapsed_process_line_text(marker, "整理结果", ["web.search"], True) == (
+        "▸ 过程 Turn 7: 整理结果 · tool: web.search (正在执行)"
+    )
+    assert rendering.process_detail_line_text(marker, "整理结果", ["web.search"], False) == (
+        "▸ 细节 Turn 7: 整理结果 · tool: web.search (已折叠)"
+    )
+    assert rendering.process_speech_header_text(marker, ["web.search"]) == "· 过程 Turn 7 · tool: web.search"
+    assert rendering.process_speech_summary_line_text(marker, "整理结果", ["web.search"]) == (
+        "· 过程 Turn 7: 整理结果 · tool: web.search"
+    )
+    assert rendering.expanded_process_header_text(marker, "整理结果", ["web.search"], True) == (
+        "▾ 过程 Turn 7: 整理结果 · tool: web.search (正在等待用户输入)"
+    )
+    assert rendering.process_group_header_text("G2", "整理结果 / 查询资料", ["web.search", "irc"], False, True) == (
+        "▾ 过程组 G2: 整理结果 / 查询资料 · tool: web.search, irc (已展开，点击展开/收起)"
+    )
+    assert rendering.collapsed_process_child_line_text("G2T7", "▸ 过程 Turn 7: 整理结果 (已折叠)") == (
+        "  ▸ 过程 G2T7 Turn 7: 整理结果 (已折叠)"
+    )
+    assert rendering.expanded_process_child_header_text("G2T7", "▾ 过程 Turn 7: 整理结果 (已展开)") == (
+        "  ▾ 过程 G2T7 Turn 7: 整理结果 (已展开)"
+    )
+
+
+def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
+    marker = "**LLM Running (Turn 7) ...**"
+    body = (
+        "<summary>整理结果</summary>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n{}\n````\n"
+        "<tool_use>{\"name\":\"irc\"}</tool_use>\n"
+    )
+    tools = app_module.process_tools(body)
+
+    assert app_module.collapsed_process_line(marker, body, True) == rendering.collapsed_process_line_text(
+        marker,
+        app_module.process_title_text(body),
+        tools,
+        True,
+    )
+    assert app_module.process_detail_line(marker, body, False) == rendering.process_detail_line_text(
+        marker,
+        app_module.process_summary_text(body),
+        tools,
+        False,
+    )
+    assert app_module.process_speech_header(marker, body) == rendering.process_speech_header_text(marker, tools)
+    assert app_module.process_speech_summary_line(marker, body, "人工摘要") == rendering.process_speech_summary_line_text(
+        marker,
+        "人工摘要",
+        tools,
+    )
+    assert app_module.expanded_process_header(marker, body, True) == rendering.expanded_process_header_text(
+        marker,
+        app_module.process_summary_text(body),
+        tools,
+        True,
+    )
+    assert app_module.process_turn_no(marker, 99) == rendering.process_turn_no(marker, 99)
+    assert app_module.collapsed_process_child_line("G2T7", marker, body, False) == rendering.collapsed_process_child_line_text(
+        "G2T7",
+        app_module.collapsed_process_line(marker, body, False),
+    )
+    assert app_module.expanded_process_child_header("G2T7", marker, body, False) == rendering.expanded_process_child_header_text(
+        "G2T7",
+        app_module.expanded_process_header(marker, body, False),
+    )
+
+
+def test_app_process_group_header_wrapper_preserves_summary_and_tool_selection() -> None:
+    turns = [
+        (
+            "**LLM Running (Turn 1) ...**",
+            "<summary>查询资料</summary>\n🛠️ Tool: `web.search` 📥 args:\n````text\n{}\n````",
+        ),
+        (
+            "**LLM Running (Turn 2) ...**",
+            "<summary>整理结果</summary>\n🛠️ Tool: `irc` 📥 args:\n````text\n{}\n````",
+        ),
+    ]
+
+    assert app_module.process_group_header("G4", turns, current=False, expanded=False) == (
+        "▸ 过程组 G4: 查询资料 / 整理结果 · tool: web.search, irc (已折叠，点击展开/收起)"
+    )
+
+
 def test_strip_meta_blocks_removes_process_metadata() -> None:
     assert rendering.strip_meta_blocks("before <summary>hidden</summary> after") == "before  after"
     assert rendering.strip_meta_blocks("<thinking>hidden</thinking>\nvisible") == "visible"
@@ -389,6 +484,18 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape
+    assert app_module.TURN_NO_RE is rendering.TURN_NO_RE
+    assert app_module.process_turn_label is rendering.process_turn_label
+    assert app_module.process_tool_suffix is rendering.process_tool_suffix
+    assert app_module.process_turn_no is rendering.process_turn_no
+    assert app_module.collapsed_process_line_text is rendering.collapsed_process_line_text
+    assert app_module.process_detail_line_text is rendering.process_detail_line_text
+    assert app_module.process_speech_header_text is rendering.process_speech_header_text
+    assert app_module.process_speech_summary_line_text is rendering.process_speech_summary_line_text
+    assert app_module.expanded_process_header_text is rendering.expanded_process_header_text
+    assert app_module.process_group_header_text is rendering.process_group_header_text
+    assert app_module.collapsed_process_child_line_text is rendering.collapsed_process_child_line_text
+    assert app_module.expanded_process_child_header_text is rendering.expanded_process_child_header_text
     assert app_module.latest_visible_reply_text("plain") == rendering.latest_visible_reply_text(
         "plain",
         has_tool_noise=app_module.process_has_tool_noise,

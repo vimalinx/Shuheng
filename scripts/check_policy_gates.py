@@ -340,6 +340,18 @@ def assert_rendering_module_boundary() -> None:
         "strip_meta_blocks",
         "process_preview",
         "process_summary_text",
+        "TURN_NO_RE",
+        "process_turn_label",
+        "process_tool_suffix",
+        "process_turn_no",
+        "collapsed_process_line_text",
+        "process_detail_line_text",
+        "process_speech_header_text",
+        "process_speech_summary_line_text",
+        "expanded_process_header_text",
+        "process_group_header_text",
+        "collapsed_process_child_line_text",
+        "expanded_process_child_header_text",
         "LINE_NUMBERED_FILE_RE",
         "FENCE_BOUNDARY_RE",
         "next_nonblank_line",
@@ -438,6 +450,59 @@ def assert_rendering_module_boundary() -> None:
     ) == "实际过程"
     assert rendering_mod.process_summary_text("<summary>OMP 思考</summary><thinking>具体分析</thinking>") == "具体分析"
     assert rendering_mod.process_summary_text("plain body") == ""
+    process_marker = "**LLM Running (Turn 12) ...**"
+    process_body = (
+        "<summary>整理过程</summary>\n"
+        "🛠️ Tool: `web.search` 📥 args:\n"
+        "````text\n{}\n````\n"
+        "<tool_use>{\"name\":\"irc\"}</tool_use>\n"
+    )
+    process_tools = a.process_tools(process_body)
+    assert rendering_mod.process_turn_label(process_marker) == "Turn 12"
+    assert rendering_mod.process_turn_label("missing") == "Turn"
+    assert rendering_mod.process_turn_no(process_marker, 3) == 12
+    assert rendering_mod.process_turn_no("missing", 3) == 3
+    assert rendering_mod.process_tool_suffix(["web.search", "irc", "todo", "code"]) == " · tool: web.search, irc, todo +1"
+    assert a.collapsed_process_line(process_marker, process_body, True) == rendering_mod.collapsed_process_line_text(
+        process_marker,
+        a.process_title_text(process_body),
+        process_tools,
+        True,
+    )
+    assert a.process_detail_line(process_marker, process_body, False) == rendering_mod.process_detail_line_text(
+        process_marker,
+        a.process_summary_text(process_body),
+        process_tools,
+        False,
+    )
+    assert a.process_speech_header(process_marker, process_body) == rendering_mod.process_speech_header_text(
+        process_marker,
+        process_tools,
+    )
+    assert a.process_speech_summary_line(process_marker, process_body, "人工摘要") == (
+        rendering_mod.process_speech_summary_line_text(process_marker, "人工摘要", process_tools)
+    )
+    assert a.expanded_process_header(process_marker, process_body, True) == rendering_mod.expanded_process_header_text(
+        process_marker,
+        a.process_summary_text(process_body),
+        process_tools,
+        True,
+    )
+    assert a.process_group_header("G6", [(process_marker, process_body)], False, False) == (
+        "▸ 过程组 G6: 整理过程 · tool: web.search, irc (已折叠，点击展开/收起)"
+    )
+    assert a.collapsed_process_child_line("G6T12", process_marker, process_body, False) == (
+        rendering_mod.collapsed_process_child_line_text(
+            "G6T12",
+            a.collapsed_process_line(process_marker, process_body, False),
+        )
+    )
+    assert a.expanded_process_child_header("G6T12", process_marker, process_body, False) == (
+        rendering_mod.expanded_process_child_header_text(
+            "G6T12",
+            a.expanded_process_header(process_marker, process_body, False),
+        )
+    )
     assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
@@ -557,6 +622,7 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_substantive",
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
+        "def process_turn_no",
     ):
         assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
     source = Path(rendering_mod.__file__).read_text(encoding="utf-8")

@@ -530,7 +530,7 @@ SUBAGENT_RESULT_META_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
-TURN_NO_RE = re.compile(r"Turn\s+(\d+)")
+TURN_NO_RE = rendering_helpers.TURN_NO_RE
 LINE_NUMBERED_FILE_RE = rendering_helpers.LINE_NUMBERED_FILE_RE
 META_BLOCK_RE = history_title_policy.META_BLOCK_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
@@ -583,6 +583,17 @@ visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_house
 visible_reply_has_section_shape = rendering_helpers.visible_reply_has_section_shape
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
+process_turn_label = rendering_helpers.process_turn_label
+process_tool_suffix = rendering_helpers.process_tool_suffix
+process_turn_no = rendering_helpers.process_turn_no
+collapsed_process_line_text = rendering_helpers.collapsed_process_line_text
+process_detail_line_text = rendering_helpers.process_detail_line_text
+process_speech_header_text = rendering_helpers.process_speech_header_text
+process_speech_summary_line_text = rendering_helpers.process_speech_summary_line_text
+expanded_process_header_text = rendering_helpers.expanded_process_header_text
+process_group_header_text = rendering_helpers.process_group_header_text
+collapsed_process_child_line_text = rendering_helpers.collapsed_process_child_line_text
+expanded_process_child_header_text = rendering_helpers.expanded_process_child_header_text
 next_nonblank_line = rendering_helpers.next_nonblank_line
 line_numbered_file_line = rendering_helpers.line_numbered_file_line
 stray_line_numbered_fence_close = rendering_helpers.stray_line_numbered_fence_close
@@ -18430,48 +18441,29 @@ def has_ask_user_tool(text: str) -> bool:
 
 
 def collapsed_process_line(marker: str, body: str, current: bool) -> str:
-    turn = TURN_NO_RE.search(marker or "")
-    turn_label = f"Turn {turn.group(1)}" if turn else "Turn"
-    tools = process_tools(body)
-    summary = process_title_text(body)
-    status = "正在执行" if current else "已折叠"
-    suffix = f" · tool: {', '.join(tools[:3])}" if tools else ""
-    if len(tools) > 3:
-        suffix += f" +{len(tools) - 3}"
-    return f"▸ 过程 {turn_label}: {summary}{suffix} ({status})"
+    return rendering_helpers.collapsed_process_line_text(
+        marker,
+        process_title_text(body),
+        process_tools(body),
+        current,
+    )
 
 
 def process_detail_line(marker: str, body: str, current: bool) -> str:
-    turn = TURN_NO_RE.search(marker or "")
-    turn_label = f"Turn {turn.group(1)}" if turn else "Turn"
-    tools = process_tools(body)
-    summary = process_summary_text(body)
-    title = f": {summary}" if summary else ""
-    suffix = f" · tool: {', '.join(tools[:3])}" if tools else ""
-    if len(tools) > 3:
-        suffix += f" +{len(tools) - 3}"
-    status = "正在执行" if current else "已折叠"
-    return f"▸ 细节 {turn_label}{title}{suffix} ({status})"
+    return rendering_helpers.process_detail_line_text(
+        marker,
+        process_summary_text(body),
+        process_tools(body),
+        current,
+    )
 
 
 def process_speech_header(marker: str, body: str) -> str:
-    turn = TURN_NO_RE.search(marker or "")
-    turn_label = f"Turn {turn.group(1)}" if turn else "Turn"
-    tools = process_tools(body)
-    suffix = f" · tool: {', '.join(tools[:3])}" if tools else ""
-    if len(tools) > 3:
-        suffix += f" +{len(tools) - 3}"
-    return f"· 过程 {turn_label}{suffix}"
+    return rendering_helpers.process_speech_header_text(marker, process_tools(body))
 
 
 def process_speech_summary_line(marker: str, body: str, summary: str) -> str:
-    turn = TURN_NO_RE.search(marker or "")
-    turn_label = f"Turn {turn.group(1)}" if turn else "Turn"
-    tools = process_tools(body)
-    suffix = f" · tool: {', '.join(tools[:3])}" if tools else ""
-    if len(tools) > 3:
-        suffix += f" +{len(tools) - 3}"
-    return f"· 过程 {turn_label}: {summary}{suffix}"
+    return rendering_helpers.process_speech_summary_line_text(marker, summary, process_tools(body))
 
 
 def append_process_summary_line(rendered: list[str], marker: str, body: str) -> bool:
@@ -18483,29 +18475,15 @@ def append_process_summary_line(rendered: list[str], marker: str, body: str) -> 
 
 
 def expanded_process_header(marker: str, body: str, current: bool) -> str:
-    turn = TURN_NO_RE.search(marker or "")
-    turn_label = f"Turn {turn.group(1)}" if turn else "Turn"
-    tools = process_tools(body)
-    summary = process_summary_text(body)
-    title = f": {summary}" if summary else ""
-    suffix = f" · tool: {', '.join(tools[:3])}" if tools else ""
-    status = "正在等待用户输入" if current else "已展开"
-    return f"▾ 过程 {turn_label}{title}{suffix} ({status})"
-
-
-def process_turn_no(marker: str, fallback: int) -> int:
-    turn = TURN_NO_RE.search(marker or "")
-    if turn:
-        try:
-            return int(turn.group(1))
-        except ValueError:
-            pass
-    return fallback
+    return rendering_helpers.expanded_process_header_text(
+        marker,
+        process_summary_text(body),
+        process_tools(body),
+        current,
+    )
 
 
 def process_group_header(label: str, turns: list[tuple[str, str]], current: bool, expanded: bool) -> str:
-    icon = "▾" if expanded else "▸"
-    status = "正在执行" if current else ("已展开" if expanded else "已折叠")
     tool_names: list[str] = []
     summaries: list[str] = []
     for _marker, body in turns:
@@ -18519,19 +18497,18 @@ def process_group_header(label: str, turns: list[tuple[str, str]], current: bool
                 break
         if len(tool_names) >= 3:
             break
-    suffix = f" · tool: {', '.join(tool_names)}" if tool_names else ""
     title = compact_description(" / ".join(summaries), 120) if summaries else f"{len(turns)} 条过程"
-    return f"{icon} 过程组 {label}: {title}{suffix} ({status}，点击展开/收起)"
+    return rendering_helpers.process_group_header_text(label, title, tool_names, current, expanded)
 
 
 def collapsed_process_child_line(label: str, marker: str, body: str, current: bool) -> str:
     raw = collapsed_process_line(marker, body, current=current)
-    return "  " + raw.replace("▸ 过程 ", f"▸ 过程 {label} ", 1)
+    return rendering_helpers.collapsed_process_child_line_text(label, raw)
 
 
 def expanded_process_child_header(label: str, marker: str, body: str, current: bool) -> str:
     raw = expanded_process_header(marker, body, current=current)
-    return "  " + raw.replace("▾ 过程 ", f"▾ 过程 {label} ", 1)
+    return rendering_helpers.expanded_process_child_header_text(label, raw)
 
 
 def process_child_detail(body: str, limit: int = 12000) -> str:

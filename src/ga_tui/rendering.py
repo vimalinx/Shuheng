@@ -19,6 +19,7 @@ SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
+TURN_NO_RE = re.compile(r"Turn\s+(\d+)")
 LINE_NUMBERED_FILE_RE = re.compile(r"^[ \t]*\d+\|")
 FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
 MARKDOWN_FENCE_BOUNDARY_RE = re.compile(r"^\s*(`{3,})(.*)$")
@@ -32,6 +33,71 @@ TOOL_HEADER_RE = history_title_policy.TOOL_HEADER_RE
 TOOL_CALL_BLOCK_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*\n`{4}text\n[\s\S]*?^`{4}\s*", re.IGNORECASE | re.MULTILINE)
 TOOL_RESULT_FENCE_RE = re.compile(r"^`{5}\s*\n[\s\S]*?^`{5}\s*$", re.MULTILINE)
 FINAL_RESPONSE_INFO_RE = re.compile(r"^\s*\[Info\]\s+Final response to user\.\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def process_turn_label(marker: str) -> str:
+    turn = TURN_NO_RE.search(marker or "")
+    return f"Turn {turn.group(1)}" if turn else "Turn"
+
+
+def process_tool_suffix(tools: list[str], limit: int = 3) -> str:
+    visible_tools = [tool for tool in tools if tool][:limit]
+    if not visible_tools:
+        return ""
+    suffix = f" · tool: {', '.join(visible_tools)}"
+    extra = len([tool for tool in tools if tool]) - len(visible_tools)
+    if extra > 0:
+        suffix += f" +{extra}"
+    return suffix
+
+
+def collapsed_process_line_text(marker: str, summary: str, tools: list[str], current: bool) -> str:
+    status = "正在执行" if current else "已折叠"
+    return f"▸ 过程 {process_turn_label(marker)}: {summary}{process_tool_suffix(tools)} ({status})"
+
+
+def process_detail_line_text(marker: str, summary: str, tools: list[str], current: bool) -> str:
+    title = f": {summary}" if summary else ""
+    status = "正在执行" if current else "已折叠"
+    return f"▸ 细节 {process_turn_label(marker)}{title}{process_tool_suffix(tools)} ({status})"
+
+
+def process_speech_header_text(marker: str, tools: list[str]) -> str:
+    return f"· 过程 {process_turn_label(marker)}{process_tool_suffix(tools)}"
+
+
+def process_speech_summary_line_text(marker: str, summary: str, tools: list[str]) -> str:
+    return f"· 过程 {process_turn_label(marker)}: {summary}{process_tool_suffix(tools)}"
+
+
+def expanded_process_header_text(marker: str, summary: str, tools: list[str], current: bool) -> str:
+    title = f": {summary}" if summary else ""
+    status = "正在等待用户输入" if current else "已展开"
+    return f"▾ 过程 {process_turn_label(marker)}{title}{process_tool_suffix(tools)} ({status})"
+
+
+def process_turn_no(marker: str, fallback: int) -> int:
+    turn = TURN_NO_RE.search(marker or "")
+    if turn:
+        try:
+            return int(turn.group(1))
+        except ValueError:
+            pass
+    return fallback
+
+
+def process_group_header_text(label: str, title: str, tools: list[str], current: bool, expanded: bool) -> str:
+    icon = "▾" if expanded else "▸"
+    status = "正在执行" if current else ("已展开" if expanded else "已折叠")
+    return f"{icon} 过程组 {label}: {title}{process_tool_suffix(tools)} ({status}，点击展开/收起)"
+
+
+def collapsed_process_child_line_text(label: str, raw_line: str) -> str:
+    return "  " + raw_line.replace("▸ 过程 ", f"▸ 过程 {label} ", 1)
+
+
+def expanded_process_child_header_text(label: str, raw_line: str) -> str:
+    return "  " + raw_line.replace("▾ 过程 ", f"▾ 过程 {label} ", 1)
 
 
 def strip_meta_blocks(text: str) -> str:
