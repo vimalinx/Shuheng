@@ -13,6 +13,30 @@ class TestAppCompatibilityAliases:
         assert app_module.display_index_for_cell is input_controller.display_index_for_cell
         assert app_module.input_cursor_info is input_controller.input_cursor_info
         assert app_module.input_layout is input_controller.input_layout
+        assert app_module.MOUSE_BUTTON_STATES is input_controller.MOUSE_BUTTON_STATES
+        assert app_module.mouse_button_mask_from_constants is input_controller.mouse_button_mask_from_constants
+        assert app_module.mouse_modifier_mask_from_constants is input_controller.mouse_modifier_mask_from_constants
+        assert app_module.mouse_known_bstate_mask_from_constants is input_controller.mouse_known_bstate_mask_from_constants
+        assert (
+            app_module.mouse_auxiliary_or_unknown_event_from_constants
+            is input_controller.mouse_auxiliary_or_unknown_event_from_constants
+        )
+        assert app_module.clean_button1_action_from_constants is input_controller.clean_button1_action_from_constants
+
+    def test_mouse_helpers_keep_app_curses_wrapper_parity(self) -> None:
+        constants = app_module._mouse_curses_constants()
+        assert app_module.mouse_button_mask(1) == input_controller.mouse_button_mask_from_constants(1, constants)
+        assert app_module.mouse_modifier_mask() == input_controller.mouse_modifier_mask_from_constants(constants)
+        assert app_module.mouse_known_bstate_mask() == input_controller.mouse_known_bstate_mask_from_constants(constants)
+        sample_bstate = app_module.mouse_button_mask(1) | app_module.mouse_modifier_mask()
+        allowed = int(getattr(app_module.curses, "BUTTON1_CLICKED", 0) or 0)
+        assert app_module.mouse_auxiliary_or_unknown_event(
+            sample_bstate
+        ) == input_controller.mouse_auxiliary_or_unknown_event_from_constants(sample_bstate, constants)
+        assert app_module.clean_button1_action(
+            sample_bstate,
+            allowed,
+        ) == input_controller.clean_button1_action_from_constants(sample_bstate, allowed, constants)
 
 
 class TestCursorMapping:
@@ -142,3 +166,54 @@ class TestInputLayout:
 
     def test_max_lines_is_at_least_one(self) -> None:
         assert input_controller.input_layout("abcd", 4, 0, 3) == (["… cd"], 0, 3)
+
+
+class TestMouseMaskHelpers:
+    CONSTANTS = {
+        "BUTTON1_PRESSED": 1 << 0,
+        "BUTTON1_RELEASED": 1 << 1,
+        "BUTTON1_CLICKED": 1 << 2,
+        "BUTTON1_DOUBLE_CLICKED": 1 << 3,
+        "BUTTON1_TRIPLE_CLICKED": 1 << 4,
+        "BUTTON2_CLICKED": 1 << 5,
+        "BUTTON3_CLICKED": 1 << 6,
+        "REPORT_MOUSE_POSITION": 1 << 7,
+        "BUTTON_SHIFT": 1 << 8,
+        "BUTTON_CTRL": 1 << 9,
+        "BUTTON_ALT": 1 << 10,
+    }
+
+    def test_button_modifier_and_known_masks_use_explicit_constants(self) -> None:
+        button1 = sum(1 << bit for bit in range(5))
+        assert input_controller.mouse_button_mask_from_constants(1, self.CONSTANTS) == button1
+        assert input_controller.mouse_button_mask_from_constants(2, self.CONSTANTS) == 1 << 5
+        assert input_controller.mouse_modifier_mask_from_constants(self.CONSTANTS) == (1 << 8) | (1 << 9) | (1 << 10)
+        assert input_controller.mouse_known_bstate_mask_from_constants(self.CONSTANTS, button_count=3) == (
+            button1 | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10)
+        )
+
+    def test_auxiliary_or_unknown_event_detects_non_primary_and_unknown_bits(self) -> None:
+        primary_with_modifier = self.CONSTANTS["BUTTON1_CLICKED"] | self.CONSTANTS["BUTTON_SHIFT"]
+        assert not input_controller.mouse_auxiliary_or_unknown_event_from_constants(primary_with_modifier, self.CONSTANTS)
+        assert input_controller.mouse_auxiliary_or_unknown_event_from_constants(
+            self.CONSTANTS["BUTTON2_CLICKED"],
+            self.CONSTANTS,
+        )
+        assert input_controller.mouse_auxiliary_or_unknown_event_from_constants(1 << 30, self.CONSTANTS)
+
+    def test_clean_button1_action_allows_only_requested_primary_action_and_modifiers(self) -> None:
+        clicked = self.CONSTANTS["BUTTON1_CLICKED"]
+        shifted_clicked = clicked | self.CONSTANTS["BUTTON_SHIFT"]
+        assert input_controller.clean_button1_action_from_constants(clicked, clicked, self.CONSTANTS)
+        assert input_controller.clean_button1_action_from_constants(shifted_clicked, clicked, self.CONSTANTS)
+        assert not input_controller.clean_button1_action_from_constants(
+            self.CONSTANTS["BUTTON1_PRESSED"],
+            clicked,
+            self.CONSTANTS,
+        )
+        assert not input_controller.clean_button1_action_from_constants(
+            clicked | self.CONSTANTS["BUTTON2_CLICKED"],
+            clicked,
+            self.CONSTANTS,
+        )
+        assert not input_controller.clean_button1_action_from_constants(clicked | (1 << 30), clicked, self.CONSTANTS)

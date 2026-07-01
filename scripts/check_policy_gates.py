@@ -286,8 +286,14 @@ def assert_input_controller_module_boundary() -> None:
         "display_index_for_cell",
         "input_cursor_info",
         "input_layout",
+        "mouse_button_mask_from_constants",
+        "mouse_modifier_mask_from_constants",
+        "mouse_known_bstate_mask_from_constants",
+        "mouse_auxiliary_or_unknown_event_from_constants",
+        "clean_button1_action_from_constants",
     ):
         assert getattr(a, name) is getattr(input_controller_mod, name), name
+    assert a.MOUSE_BUTTON_STATES is input_controller_mod.MOUSE_BUTTON_STATES
     assert input_controller_mod.raw_cursor_to_display("a\nb", 2) == 3
     assert input_controller_mod.display_cursor_to_raw("a\nb", 2) == 2
     assert input_controller_mod.display_cursor_to_raw("a\nb", 3) == 2
@@ -308,6 +314,38 @@ def assert_input_controller_module_boundary() -> None:
         2,
     )
     assert input_controller_mod.input_layout("abcdef", 4, 2, 5) == (["… cd", "  ef"], 1, 3)
+    mouse_constants = {
+        "BUTTON1_PRESSED": 1 << 0,
+        "BUTTON1_RELEASED": 1 << 1,
+        "BUTTON1_CLICKED": 1 << 2,
+        "BUTTON2_CLICKED": 1 << 3,
+        "REPORT_MOUSE_POSITION": 1 << 4,
+        "BUTTON_SHIFT": 1 << 5,
+    }
+    button1_mask = (1 << 0) | (1 << 1) | (1 << 2)
+    assert input_controller_mod.mouse_button_mask_from_constants(1, mouse_constants) == button1_mask
+    assert input_controller_mod.mouse_modifier_mask_from_constants(mouse_constants) == 1 << 5
+    assert input_controller_mod.mouse_known_bstate_mask_from_constants(mouse_constants, button_count=2) == (
+        button1_mask | (1 << 3) | (1 << 4) | (1 << 5)
+    )
+    assert not input_controller_mod.mouse_auxiliary_or_unknown_event_from_constants(
+        (1 << 2) | (1 << 5),
+        mouse_constants,
+        button_count=2,
+    )
+    assert input_controller_mod.mouse_auxiliary_or_unknown_event_from_constants(
+        1 << 3,
+        mouse_constants,
+        button_count=2,
+    )
+    assert input_controller_mod.clean_button1_action_from_constants((1 << 2) | (1 << 5), 1 << 2, mouse_constants)
+    assert not input_controller_mod.clean_button1_action_from_constants((1 << 2) | (1 << 3), 1 << 2, mouse_constants)
+    curses_mouse_constants = a._mouse_curses_constants()
+    assert a.mouse_button_mask(1) == input_controller_mod.mouse_button_mask_from_constants(1, curses_mouse_constants)
+    assert a.mouse_modifier_mask() == input_controller_mod.mouse_modifier_mask_from_constants(curses_mouse_constants)
+    assert a.mouse_known_bstate_mask() == input_controller_mod.mouse_known_bstate_mask_from_constants(
+        curses_mouse_constants
+    )
     source = Path(input_controller_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "ga_tui.app",

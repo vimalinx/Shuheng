@@ -1,10 +1,21 @@
 """Pure terminal input cursor/display geometry helpers."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 try:
     from .text_utils import cell_width
 except Exception:
     from text_utils import cell_width  # type: ignore
+
+MOUSE_BUTTON_STATES = ("PRESSED", "RELEASED", "CLICKED", "DOUBLE_CLICKED", "TRIPLE_CLICKED")
+
+
+def _mouse_constant(constants: Mapping[str, object], name: str) -> int:
+    try:
+        return int(constants.get(name, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def raw_cursor_to_display(text: str, cursor: int) -> int:
@@ -97,3 +108,55 @@ def input_layout(text: str, width: int, max_lines: int, cursor: int, prompt: str
             before = display[seg_start:display_cursor]
             cursor_x = cell_width(prefix) + cell_width(before)
     return lines or [prompt], cursor_y, cursor_x
+
+
+def mouse_button_mask_from_constants(button_no: int, constants: Mapping[str, object]) -> int:
+    total = 0
+    for state in MOUSE_BUTTON_STATES:
+        total |= _mouse_constant(constants, f"BUTTON{int(button_no or 0)}_{state}")
+    return total
+
+
+def mouse_modifier_mask_from_constants(constants: Mapping[str, object]) -> int:
+    return (
+        _mouse_constant(constants, "BUTTON_SHIFT")
+        | _mouse_constant(constants, "BUTTON_CTRL")
+        | _mouse_constant(constants, "BUTTON_ALT")
+    )
+
+
+def mouse_known_bstate_mask_from_constants(constants: Mapping[str, object], button_count: int = 5) -> int:
+    known = _mouse_constant(constants, "REPORT_MOUSE_POSITION") | mouse_modifier_mask_from_constants(constants)
+    for button_no in range(1, max(0, int(button_count or 0)) + 1):
+        known |= mouse_button_mask_from_constants(button_no, constants)
+    return known
+
+
+def mouse_auxiliary_or_unknown_event_from_constants(
+    bstate: int,
+    constants: Mapping[str, object],
+    button_count: int = 5,
+) -> bool:
+    bstate = int(bstate or 0)
+    auxiliary = 0
+    for button_no in range(2, max(1, int(button_count or 0)) + 1):
+        auxiliary |= mouse_button_mask_from_constants(button_no, constants)
+    known = mouse_known_bstate_mask_from_constants(constants, button_count=button_count)
+    return bool((bstate & auxiliary) or (bstate & ~known))
+
+
+def clean_button1_action_from_constants(
+    bstate: int,
+    allowed_button1_mask: int,
+    constants: Mapping[str, object],
+    button_count: int = 5,
+) -> bool:
+    bstate = int(bstate or 0)
+    allowed_button1_mask = int(allowed_button1_mask or 0)
+    if not allowed_button1_mask or not (bstate & allowed_button1_mask):
+        return False
+    if mouse_auxiliary_or_unknown_event_from_constants(bstate, constants, button_count=button_count):
+        return False
+    disallowed_button1 = mouse_button_mask_from_constants(1, constants) & ~allowed_button1_mask
+    allowed = allowed_button1_mask | mouse_modifier_mask_from_constants(constants)
+    return not (bstate & disallowed_button1) and not (bstate & ~allowed)

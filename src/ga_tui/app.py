@@ -19582,6 +19582,12 @@ input_segments = input_controller_helpers.input_segments
 display_index_for_cell = input_controller_helpers.display_index_for_cell
 input_cursor_info = input_controller_helpers.input_cursor_info
 input_layout = input_controller_helpers.input_layout
+MOUSE_BUTTON_STATES = input_controller_helpers.MOUSE_BUTTON_STATES
+mouse_button_mask_from_constants = input_controller_helpers.mouse_button_mask_from_constants
+mouse_modifier_mask_from_constants = input_controller_helpers.mouse_modifier_mask_from_constants
+mouse_known_bstate_mask_from_constants = input_controller_helpers.mouse_known_bstate_mask_from_constants
+mouse_auxiliary_or_unknown_event_from_constants = input_controller_helpers.mouse_auxiliary_or_unknown_event_from_constants
+clean_button1_action_from_constants = input_controller_helpers.clean_button1_action_from_constants
 
 
 def move_input_cursor_vertical(state: State, width: int, direction: int) -> bool:
@@ -24872,49 +24878,31 @@ def mouse_in_session_popup(state: State, mx: int, my: int) -> bool:
     return x0 <= mx < x0 + w and y0 <= my < y0 + h
 
 
-MOUSE_BUTTON_STATES = ("PRESSED", "RELEASED", "CLICKED", "DOUBLE_CLICKED", "TRIPLE_CLICKED")
+def _mouse_curses_constants() -> dict[str, int]:
+    names = ["REPORT_MOUSE_POSITION", "BUTTON_SHIFT", "BUTTON_CTRL", "BUTTON_ALT"]
+    for button_no in range(1, 6):
+        names.extend(f"BUTTON{button_no}_{state}" for state in MOUSE_BUTTON_STATES)
+    return {name: int(getattr(curses, name, 0) or 0) for name in names}
 
 
 def mouse_button_mask(button_no: int) -> int:
-    total = 0
-    for state in MOUSE_BUTTON_STATES:
-        total |= int(getattr(curses, f"BUTTON{button_no}_{state}", 0) or 0)
-    return total
+    return mouse_button_mask_from_constants(button_no, _mouse_curses_constants())
 
 
 def mouse_modifier_mask() -> int:
-    return (
-        int(getattr(curses, "BUTTON_SHIFT", 0) or 0)
-        | int(getattr(curses, "BUTTON_CTRL", 0) or 0)
-        | int(getattr(curses, "BUTTON_ALT", 0) or 0)
-    )
+    return mouse_modifier_mask_from_constants(_mouse_curses_constants())
 
 
 def mouse_known_bstate_mask() -> int:
-    known = int(getattr(curses, "REPORT_MOUSE_POSITION", 0) or 0) | mouse_modifier_mask()
-    for button_no in range(1, 6):
-        known |= mouse_button_mask(button_no)
-    return known
+    return mouse_known_bstate_mask_from_constants(_mouse_curses_constants())
 
 
 def mouse_auxiliary_or_unknown_event(bstate: int) -> bool:
-    bstate = int(bstate or 0)
-    auxiliary = 0
-    for button_no in range(2, 6):
-        auxiliary |= mouse_button_mask(button_no)
-    return bool((bstate & auxiliary) or (bstate & ~mouse_known_bstate_mask()))
+    return mouse_auxiliary_or_unknown_event_from_constants(bstate, _mouse_curses_constants())
 
 
 def clean_button1_action(bstate: int, allowed_button1_mask: int) -> bool:
-    bstate = int(bstate or 0)
-    allowed_button1_mask = int(allowed_button1_mask or 0)
-    if not allowed_button1_mask or not (bstate & allowed_button1_mask):
-        return False
-    if mouse_auxiliary_or_unknown_event(bstate):
-        return False
-    disallowed_button1 = mouse_button_mask(1) & ~allowed_button1_mask
-    allowed = allowed_button1_mask | mouse_modifier_mask()
-    return not (bstate & disallowed_button1) and not (bstate & ~allowed)
+    return clean_button1_action_from_constants(bstate, allowed_button1_mask, _mouse_curses_constants())
 
 
 def toggle_process_at_line(state: State, line_idx: int) -> bool:
