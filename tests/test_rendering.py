@@ -154,6 +154,58 @@ def test_strip_meta_blocks_removes_process_metadata() -> None:
     assert rendering.strip_meta_blocks("<thinking>hidden</thinking>\nvisible") == "visible"
 
 
+def test_split_top_level_turn_markers_handles_empty_and_top_level_turns() -> None:
+    assert rendering.split_top_level_turn_markers("") == [""]
+
+    text = (
+        "preamble\n"
+        "LLM Running (Turn 1) ...\n"
+        "first body\n"
+        "LLM Running (Turn 2) ...\n"
+        "second body\n"
+    )
+
+    assert rendering.split_top_level_turn_markers(text) == [
+        "preamble\n",
+        "LLM Running (Turn 1) ...",
+        "\nfirst body\n",
+        "LLM Running (Turn 2) ...",
+        "\nsecond body\n",
+    ]
+
+
+def test_split_top_level_turn_markers_treats_fenced_markers_as_content() -> None:
+    text = (
+        "before\n"
+        "```text\n"
+        "LLM Running (Turn 99) ...\n"
+        "```\n"
+        "LLM Running (Turn 1) ...\n"
+        "real body\n"
+    )
+
+    assert rendering.split_top_level_turn_markers(text) == [
+        "before\n```text\nLLM Running (Turn 99) ...\n```\n",
+        "LLM Running (Turn 1) ...",
+        "\nreal body\n",
+    ]
+
+
+def test_stray_line_numbered_fence_close_does_not_swallow_next_turn_marker() -> None:
+    marker = "LLM Running (Turn 1) ...\n"
+
+    assert rendering.line_numbered_file_line("  42| print('x')\n")
+    assert rendering.next_nonblank_line(["\n", "  \n", marker], 0) == marker
+    assert rendering.stray_line_numbered_fence_close("```\n", "42| print('x')\n", marker)
+
+    text = "1| file output\n```\nLLM Running (Turn 1) ...\nbody\n"
+    assert rendering.split_top_level_turn_markers(text) == [
+        "1| file output\n```\n",
+        "LLM Running (Turn 1) ...",
+        "\nbody\n",
+    ]
+
+
 def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     state = app_module.State(agent=None)
     state.selection_start = (4, 5)
@@ -176,6 +228,12 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.strip_meta_blocks is rendering.strip_meta_blocks
     assert app_module.process_preview is rendering.process_preview
     assert app_module.process_summary_text is rendering.process_summary_text
+    assert app_module.LINE_NUMBERED_FILE_RE is rendering.LINE_NUMBERED_FILE_RE
+    assert app_module.FENCE_BOUNDARY_RE is rendering.FENCE_BOUNDARY_RE
+    assert app_module.next_nonblank_line is rendering.next_nonblank_line
+    assert app_module.line_numbered_file_line is rendering.line_numbered_file_line
+    assert app_module.stray_line_numbered_fence_close is rendering.stray_line_numbered_fence_close
+    assert app_module.split_top_level_turn_markers is rendering.split_top_level_turn_markers
     assert app_module.running_indicator is rendering.running_indicator
     assert app_module.running_indicator_cell_width is rendering.running_indicator_cell_width
     assert app_module.render_running_indicator_line is rendering.render_running_indicator_line

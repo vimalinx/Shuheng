@@ -17,6 +17,9 @@ SelectionPoint = tuple[int, int]
 SelectionPoints = tuple[SelectionPoint, SelectionPoint]
 RUN_FRAMES = ("[=     ]", "[==    ]", "[ ===  ]", "[  === ]", "[    ==]", "[     =]")
 SUMMARY_RE = history_title_policy.SUMMARY_RE
+TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
+LINE_NUMBERED_FILE_RE = re.compile(r"^[ \t]*\d+\|")
+FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
 META_BLOCK_RE = history_title_policy.META_BLOCK_RE
 DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
@@ -58,6 +61,69 @@ def process_summary_text(text: str) -> str:
         if thinking:
             return history_title_policy.compact_description(thinking[-1].strip(" \t\r\n\"'“”‘’"), 220)
     return summary
+
+
+def next_nonblank_line(lines: list[str], start: int) -> str:
+    for line in lines[start:]:
+        if line.strip():
+            return line
+    return ""
+
+
+def line_numbered_file_line(line: str) -> bool:
+    return bool(LINE_NUMBERED_FILE_RE.match(line or ""))
+
+
+def stray_line_numbered_fence_close(line: str, previous_nonblank: str, next_nonblank: str) -> bool:
+    boundary = FENCE_BOUNDARY_RE.match(line)
+    return bool(
+        boundary
+        and not boundary.group(2).strip()
+        and line_numbered_file_line(previous_nonblank)
+        and TURN_MARKER_RE.match(next_nonblank)
+    )
+
+
+def split_top_level_turn_markers(text: str) -> list[str]:
+    """Split restored turns while treating fenced tool/file output as opaque data."""
+    if not text:
+        return [""]
+    parts: list[str] = []
+    last = 0
+    offset = 0
+    fence_ticks = ""
+    previous_nonblank = ""
+    lines = text.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
+        if fence_ticks:
+            boundary = FENCE_BOUNDARY_RE.match(line)
+            if boundary and len(boundary.group(1)) >= len(fence_ticks) and not boundary.group(2).strip():
+                fence_ticks = ""
+            if line.strip():
+                previous_nonblank = line
+            offset += len(line)
+            continue
+
+        marker = TURN_MARKER_RE.match(line)
+        if marker:
+            start = offset + marker.start(1)
+            end = offset + marker.end(1)
+            parts.append(text[last:start])
+            parts.append(text[start:end])
+            last = end
+        else:
+            boundary = FENCE_BOUNDARY_RE.match(line)
+            if boundary and not stray_line_numbered_fence_close(
+                line,
+                previous_nonblank,
+                next_nonblank_line(lines, idx + 1),
+            ):
+                fence_ticks = boundary.group(1)
+        if line.strip():
+            previous_nonblank = line
+        offset += len(line)
+    parts.append(text[last:])
+    return parts
 
 
 def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[str]) -> set[str]:

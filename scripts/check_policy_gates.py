@@ -340,6 +340,12 @@ def assert_rendering_module_boundary() -> None:
         "strip_meta_blocks",
         "process_preview",
         "process_summary_text",
+        "LINE_NUMBERED_FILE_RE",
+        "FENCE_BOUNDARY_RE",
+        "next_nonblank_line",
+        "line_numbered_file_line",
+        "stray_line_numbered_fence_close",
+        "split_top_level_turn_markers",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -423,6 +429,25 @@ def assert_rendering_module_boundary() -> None:
     assert rendering_mod.process_summary_text("<summary>OMP 思考</summary><thinking>具体分析</thinking>") == "具体分析"
     assert rendering_mod.process_summary_text("plain body") == ""
     assert rendering_mod.strip_meta_blocks("a <summary>b</summary> c") == "a  c"
+    marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
+    assert rendering_mod.split_top_level_turn_markers(marker_text) == [
+        "intro\n",
+        "LLM Running (Turn 1) ...",
+        "\nbody\n",
+        "LLM Running (Turn 2) ...",
+        "\nnext\n",
+    ]
+    fenced_marker = "```text\nLLM Running (Turn 99) ...\n```\nLLM Running (Turn 1) ...\nbody\n"
+    assert rendering_mod.split_top_level_turn_markers(fenced_marker) == [
+        "```text\nLLM Running (Turn 99) ...\n```\n",
+        "LLM Running (Turn 1) ...",
+        "\nbody\n",
+    ]
+    assert rendering_mod.stray_line_numbered_fence_close(
+        "```\n",
+        "7| file.py\n",
+        "LLM Running (Turn 1) ...\n",
+    )
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(

@@ -531,7 +531,7 @@ SUBAGENT_RESULT_META_LABEL_RE = re.compile(
 )
 TURN_MARKER_RE = history_title_policy.TURN_MARKER_RE
 TURN_NO_RE = re.compile(r"Turn\s+(\d+)")
-LINE_NUMBERED_FILE_RE = re.compile(r"^[ \t]*\d+\|")
+LINE_NUMBERED_FILE_RE = rendering_helpers.LINE_NUMBERED_FILE_RE
 META_BLOCK_RE = history_title_policy.META_BLOCK_RE
 THINKING_BLOCK_RE = re.compile(r"<(?:thinking|think)>\s*([\s\S]*?)\s*</(?:thinking|think)>", re.IGNORECASE)
 TOOL_CALL_RE = re.compile(r"🛠️\s*Tool:\s*`([^`]+)`")
@@ -548,7 +548,7 @@ PROCESS_TURN_TOGGLE_RE = re.compile(r"过程\s+(G\d+T\d+)")
 SUBAGENT_META_TOGGLE_RE = re.compile(r"元信息\s+(S[0-9a-f]{8})")
 LONG_FENCE_RE = re.compile(r"`{4,5}[^\n]*\n[\s\S]*?\n`{4,5}", re.MULTILINE)
 DETAIL_FENCE_RE = history_title_policy.DETAIL_FENCE_RE
-FENCE_BOUNDARY_RE = re.compile(r"^[ \t]*(`{3,})(.*)$")
+FENCE_BOUNDARY_RE = rendering_helpers.FENCE_BOUNDARY_RE
 PROMPT_BLOCK_WITH_TIME_RE = re.compile(r"^=== Prompt ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
 RESPONSE_BLOCK_WITH_TIME_RE = re.compile(r"^=== Response ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
 SUBAGENT_MEMORY_RE = re.compile(r"<ga[-_]subagent[-_]memory>\s*([\s\S]*?)\s*</ga[-_]subagent[-_]memory>", re.IGNORECASE)
@@ -577,6 +577,10 @@ message_render_cache_key = rendering_helpers.message_render_cache_key
 strip_meta_blocks = rendering_helpers.strip_meta_blocks
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
+next_nonblank_line = rendering_helpers.next_nonblank_line
+line_numbered_file_line = rendering_helpers.line_numbered_file_line
+stray_line_numbered_fence_close = rendering_helpers.stray_line_numbered_fence_close
+split_top_level_turn_markers = rendering_helpers.split_top_level_turn_markers
 running_indicator = rendering_helpers.running_indicator
 running_indicator_cell_width = rendering_helpers.running_indicator_cell_width
 render_running_indicator_line = rendering_helpers.render_running_indicator_line
@@ -17815,69 +17819,6 @@ def restore_backend_and_recent_messages(agent: Any, path: str) -> tuple[list[Mes
     if subagent_context:
         inject_orchestrator_notice(agent, subagent_context)
     return messages, restore_msg, loaded_rounds, total_rounds, history_message_count
-
-
-def next_nonblank_line(lines: list[str], start: int) -> str:
-    for line in lines[start:]:
-        if line.strip():
-            return line
-    return ""
-
-
-def line_numbered_file_line(line: str) -> bool:
-    return bool(LINE_NUMBERED_FILE_RE.match(line or ""))
-
-
-def stray_line_numbered_fence_close(line: str, previous_nonblank: str, next_nonblank: str) -> bool:
-    boundary = FENCE_BOUNDARY_RE.match(line)
-    return bool(
-        boundary
-        and not boundary.group(2).strip()
-        and line_numbered_file_line(previous_nonblank)
-        and TURN_MARKER_RE.match(next_nonblank)
-    )
-
-
-def split_top_level_turn_markers(text: str) -> list[str]:
-    """Split restored turns while treating fenced tool/file output as opaque data."""
-    if not text:
-        return [""]
-    parts: list[str] = []
-    last = 0
-    offset = 0
-    fence_ticks = ""
-    previous_nonblank = ""
-    lines = text.splitlines(keepends=True)
-    for idx, line in enumerate(lines):
-        if fence_ticks:
-            boundary = FENCE_BOUNDARY_RE.match(line)
-            if boundary and len(boundary.group(1)) >= len(fence_ticks) and not boundary.group(2).strip():
-                fence_ticks = ""
-            if line.strip():
-                previous_nonblank = line
-            offset += len(line)
-            continue
-
-        marker = TURN_MARKER_RE.match(line)
-        if marker:
-            start = offset + marker.start(1)
-            end = offset + marker.end(1)
-            parts.append(text[last:start])
-            parts.append(text[start:end])
-            last = end
-        else:
-            boundary = FENCE_BOUNDARY_RE.match(line)
-            if boundary and not stray_line_numbered_fence_close(
-                line,
-                previous_nonblank,
-                next_nonblank_line(lines, idx + 1),
-            ):
-                fence_ticks = boundary.group(1)
-        if line.strip():
-            previous_nonblank = line
-        offset += len(line)
-    parts.append(text[last:])
-    return parts
 
 
 def process_title_text(text: str) -> str:
