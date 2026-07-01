@@ -32,6 +32,36 @@ def test_render_running_indicator_line_uses_prefix_cells() -> None:
     assert rendering.render_running_indicator_line(line, 0) == "   [=     ] running..."
 
 
+def test_boxed_user_lines_preserves_min_width_empty_and_wrapping() -> None:
+    assert rendering.boxed_user_lines("hi", 20) == [
+        "┌──────────┐",
+        "│ hi       │",
+        "└──────────┘",
+    ]
+    assert rendering.boxed_user_lines("", 4) == [
+        "┌──────────┐",
+        "│          │",
+        "└──────────┘",
+    ]
+    assert rendering.boxed_user_lines("abcdefghij", 10) == [
+        "┌──────────┐",
+        "│ abcdefgh │",
+        "│ ij       │",
+        "└──────────┘",
+    ]
+
+
+def test_boxed_user_lines_pads_wide_text_by_cells() -> None:
+    lines = rendering.boxed_user_lines("中文abc", 8)
+
+    assert lines == [
+        "┌──────────┐",
+        "│ 中文abc  │",
+        "└──────────┘",
+    ]
+    assert len({rendering.cell_width(line) for line in lines}) == 1
+
+
 def test_char_index_for_cell_handles_ascii_wide_and_combining_text() -> None:
     assert rendering.char_index_for_cell("abc", -4) == 0
     assert rendering.char_index_for_cell("abc", 0) == 0
@@ -620,6 +650,7 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape
     assert app_module.preferred_group_visible_reply_text is rendering.preferred_group_visible_reply_text
+    assert app_module.boxed_user_lines is rendering.boxed_user_lines
     assert app_module.TURN_NO_RE is rendering.TURN_NO_RE
     assert app_module.process_turn_label is rendering.process_turn_label
     assert app_module.process_tool_suffix is rendering.process_tool_suffix

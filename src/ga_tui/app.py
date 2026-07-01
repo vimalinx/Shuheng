@@ -582,6 +582,7 @@ visible_reply_is_substantive = rendering_helpers.visible_reply_is_substantive
 visible_reply_is_housekeeping_summary = rendering_helpers.visible_reply_is_housekeeping_summary
 visible_reply_has_section_shape = rendering_helpers.visible_reply_has_section_shape
 preferred_group_visible_reply_text = rendering_helpers.preferred_group_visible_reply_text
+boxed_user_lines = rendering_helpers.boxed_user_lines
 process_preview = rendering_helpers.process_preview
 process_summary_text = rendering_helpers.process_summary_text
 process_turn_label = rendering_helpers.process_turn_label
@@ -18771,17 +18772,6 @@ def render_assistant_text(
                     if summary and summary != "执行中":
                         rendered.append(process_speech_summary_line(marker, body, summary))
     return "\n".join(line for line in rendered if line.strip()).strip()
-
-
-def boxed_user_lines(text: str, width: int) -> list[str]:
-    inner_limit = max(8, width - 4)
-    body = wrap_cells(text, inner_limit)
-    if not body:
-        body = [""]
-    inner_width = min(inner_limit, max(8, *(cell_width(line) for line in body)))
-    top = "┌" + "─" * (inner_width + 2) + "┐"
-    bottom = "└" + "─" * (inner_width + 2) + "┘"
-    return [top, *("│ " + pad_cells(line, inner_width) + " │" for line in body), bottom]
 
 
 def strip_inline_markdown(text: str) -> str:

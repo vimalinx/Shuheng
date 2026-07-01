@@ -6,11 +6,11 @@ import re
 
 try:
     from . import history_titles as history_title_policy
-    from .text_utils import cell_width, clean_text, compact_title
+    from .text_utils import cell_width, clean_text, compact_title, pad_cells, wrap_cells
     from .ui_types import RenderLine
 except Exception:
     import history_titles as history_title_policy  # type: ignore
-    from text_utils import cell_width, clean_text, compact_title  # type: ignore
+    from text_utils import cell_width, clean_text, compact_title, pad_cells, wrap_cells  # type: ignore
     from ui_types import RenderLine  # type: ignore
 
 
@@ -241,6 +241,17 @@ def preferred_group_visible_reply_text(visible_items: list[str], irc_replies: li
         reply_block = "### IRC 回复\n" + "\n".join(f"- {reply}" for reply in unique_irc_replies)
         chosen = (chosen.rstrip() + "\n\n" + reply_block).strip() if chosen else reply_block
     return chosen
+
+
+def boxed_user_lines(text: str, width: int) -> list[str]:
+    inner_limit = max(8, width - 4)
+    body = wrap_cells(text, inner_limit)
+    if not body:
+        body = [""]
+    inner_width = min(inner_limit, max(8, *(cell_width(line) for line in body)))
+    top = "┌" + "─" * (inner_width + 2) + "┐"
+    bottom = "└" + "─" * (inner_width + 2) + "┘"
+    return [top, *("│ " + pad_cells(line, inner_width) + " │" for line in body), bottom]
 
 
 def latest_visible_reply_text(text: str, has_tool_noise: Callable[[str], bool] | None = None) -> str:

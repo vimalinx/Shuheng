@@ -374,6 +374,7 @@ def assert_rendering_module_boundary() -> None:
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
         "preferred_group_visible_reply_text",
+        "boxed_user_lines",
         "running_indicator",
         "running_indicator_cell_width",
         "render_running_indicator_line",
@@ -688,6 +689,30 @@ def assert_rendering_module_boundary() -> None:
         fallback_noise_body,
         has_tool_noise=a.process_has_tool_noise,
     )
+    assert rendering_mod.boxed_user_lines("hi", 20) == [
+        "┌──────────┐",
+        "│ hi       │",
+        "└──────────┘",
+    ]
+    assert rendering_mod.boxed_user_lines("", 4) == [
+        "┌──────────┐",
+        "│          │",
+        "└──────────┘",
+    ]
+    wrapped_user_lines = rendering_mod.boxed_user_lines("abcdefghij", 10)
+    assert wrapped_user_lines == [
+        "┌──────────┐",
+        "│ abcdefgh │",
+        "│ ij       │",
+        "└──────────┘",
+    ]
+    wide_user_lines = rendering_mod.boxed_user_lines("中文abc", 8)
+    assert wide_user_lines == [
+        "┌──────────┐",
+        "│ 中文abc  │",
+        "└──────────┘",
+    ]
+    assert len({rendering_mod.cell_width(line) for line in wide_user_lines}) == 1
     assert rendering_mod.running_indicator(0) == "[=     ] running..."
     assert rendering_mod.running_indicator(len(rendering_mod.RUN_FRAMES)) == "[=     ] running..."
     assert rendering_mod.running_indicator_cell_width() == max(
@@ -708,6 +733,7 @@ def assert_rendering_module_boundary() -> None:
         "def visible_reply_is_housekeeping_summary",
         "def visible_reply_has_section_shape",
         "def preferred_group_visible_reply_text",
+        "def boxed_user_lines",
         "def process_turn_no",
         "def process_child_detail_text",
         "def process_has_tool_call_noise_text",
