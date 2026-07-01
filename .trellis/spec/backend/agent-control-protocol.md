@@ -774,9 +774,9 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Pure terminal input cursor/display conversion helpers are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, vertical cursor movement callers, policy gates, and input-controller unit tests.
-- Non-goal: This does not move `move_input_cursor_vertical(...)`, `input_layout(...)`, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
+- Trigger: Pure terminal input cursor/display conversion and prompt-layout helpers are moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, policy gates, and input-controller unit tests.
+- Non-goal: This does not move `move_input_cursor_vertical(...)`, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
 
 ### 2. Signatures
 
@@ -787,6 +787,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
   - `input_segments(text, width)`.
   - `display_index_for_cell(display, start, end, target_x)`.
   - `input_cursor_info(text, width, cursor)`.
+  - `input_layout(text, width, max_lines, cursor, prompt="> ")`.
 
 ### 3. Contracts
 
@@ -797,7 +798,8 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Display cursor positions clamp to non-negative values and map escaped newline positions back to the matching raw newline boundary.
 - Segment wrapping uses the same terminal-cell semantics as `text_utils.cell_width(...)`, including East Asian wide characters and zero-width combining marks.
 - `input_cursor_info(...)` returns `(display, segments, display_cursor, cursor_line, cursor_x)` and preserves the existing segment/cursor-line selection behavior.
-- `app.py` remains the compatibility facade and the owner of mutable input state, dirty marking, prompt layout, vertical cursor mutation, keyboard/mouse dispatch, command routing, rendering, and runtime side effects.
+- `input_layout(...)` returns `(lines, cursor_y, cursor_x)`, clamps `max_lines` to at least one visible line, uses escaped-newline display text from `input_cursor_info(...)`, keeps the cursor segment visible when scrolled, prefixes the first hidden visible line with `"… "`, and computes cursor x with `cell_width(...)`.
+- `app.py` remains the compatibility facade and the owner of mutable input state, dirty marking, vertical cursor mutation, keyboard/mouse dispatch, command routing, rendering, and runtime side effects.
 
 ### 4. Validation & Error Matrix
 
@@ -808,18 +810,19 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - East Asian wide text wraps at cell boundaries, not Python string length boundaries.
 - Combining marks add no cell width when wrapping or computing cursor x.
 - Empty input still produces one empty segment.
+- `input_layout("abcdef", 4, 2, 5)` -> `(["… cd", "  ef"], 1, 3)`.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `move_input_cursor_vertical(...)` stays in `app.py` and delegates display/raw conversion to `input_controller.py`.
-- Good: `input_layout(...)` stays in `app.py` because it combines pure geometry with prompt layout used by the TUI renderer.
+- Good: `input_layout(...)` lives in `input_controller.py` because it is pure text geometry and prompt layout, while `draw_main(...)` remains in `app.py` and calls the compatibility alias.
 - Base: Future slices may move more input handling only after command and rendering boundaries are stable.
 - Bad: `input_controller.py` imports `State` so it can mutate `state.input_cursor`.
 - Bad: `input_controller.py` calls command completion, Web Console, dashboard, or curses draw helpers.
 
 ### 6. Tests Required
 
-- Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, and `app.py` alias parity.
+- Unit tests must assert newline display mapping, raw/display cursor round trips, segment wrapping, East Asian width handling, combining-mark handling, display-index lookup, cursor info, input layout line/cursor behavior, and `app.py` alias parity.
 - `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider` must pass.

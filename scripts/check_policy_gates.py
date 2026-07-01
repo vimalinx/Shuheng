@@ -284,6 +284,7 @@ def assert_input_controller_module_boundary() -> None:
         "input_segments",
         "display_index_for_cell",
         "input_cursor_info",
+        "input_layout",
     ):
         assert getattr(a, name) is getattr(input_controller_mod, name), name
     assert input_controller_mod.raw_cursor_to_display("a\nb", 2) == 3
@@ -305,6 +306,7 @@ def assert_input_controller_module_boundary() -> None:
         1,
         2,
     )
+    assert input_controller_mod.input_layout("abcdef", 4, 2, 5) == (["… cd", "  ef"], 1, 3)
     source = Path(input_controller_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "ga_tui.app",

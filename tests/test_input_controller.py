@@ -12,6 +12,7 @@ class TestAppCompatibilityAliases:
         assert app_module.input_segments is input_controller.input_segments
         assert app_module.display_index_for_cell is input_controller.display_index_for_cell
         assert app_module.input_cursor_info is input_controller.input_cursor_info
+        assert app_module.input_layout is input_controller.input_layout
 
 
 class TestCursorMapping:
@@ -115,3 +116,29 @@ class TestInputCursorInfo:
             0,
             3,
         )
+
+
+class TestInputLayout:
+    def test_simple_unwrapped_layout(self) -> None:
+        assert input_controller.input_layout("abc", 10, 3, 2) == (["> abc"], 0, 4)
+
+    def test_wrapped_layout_uses_prompt_width_for_continuations(self) -> None:
+        assert input_controller.input_layout("abcd", 4, 3, 3) == (["> ab", "  cd"], 1, 3)
+
+    def test_scrolled_layout_keeps_cursor_line_visible(self) -> None:
+        assert input_controller.input_layout("abcdef", 4, 2, 5) == (["… cd", "  ef"], 1, 3)
+
+    def test_hidden_first_visible_line_uses_ellipsis_prefix(self) -> None:
+        assert input_controller.input_layout("abcdef", 4, 2, 3) == (["… cd", "  ef"], 0, 3)
+
+    def test_custom_prompt_controls_initial_cursor_x(self) -> None:
+        assert input_controller.input_layout("abc", 10, 2, 1, "secret> ") == (["secret> abc"], 0, 9)
+
+    def test_newline_layout_uses_escaped_display_text(self) -> None:
+        assert input_controller.input_layout("a\nb", 4, 3, 3) == (["> a\\", "  nb"], 1, 4)
+
+    def test_wide_and_combining_text_cursor_x_uses_cell_width(self) -> None:
+        assert input_controller.input_layout("e\u0301枢", 4, 2, 3) == (["> e\u0301", "  枢"], 1, 4)
+
+    def test_max_lines_is_at_least_one(self) -> None:
+        assert input_controller.input_layout("abcd", 4, 0, 3) == (["… cd"], 0, 3)

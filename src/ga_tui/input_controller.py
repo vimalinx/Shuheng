@@ -75,3 +75,25 @@ def input_cursor_info(text: str, width: int, cursor: int) -> tuple[str, list[tup
     _segment, seg_start, _seg_end = segments[cursor_line]
     cursor_x = cell_width(display[seg_start:display_cursor])
     return display, segments, display_cursor, cursor_line, cursor_x
+
+
+def input_layout(text: str, width: int, max_lines: int, cursor: int, prompt: str = "> ") -> tuple[list[str], int, int]:
+    max_lines = max(1, max_lines)
+    display, segments, display_cursor, cursor_line, _cursor_x = input_cursor_info(text, width, cursor)
+    first = 0
+    if len(segments) > max_lines:
+        first = max(0, min(cursor_line, len(segments) - max_lines))
+    visible = segments[first:first + max_lines]
+    lines: list[str] = []
+    cursor_y = max(0, cursor_line - first)
+    cursor_x = cell_width(prompt)
+    for idx, (segment, seg_start, _seg_end) in enumerate(visible):
+        actual_idx = first + idx
+        prefix = prompt if actual_idx == 0 else " " * cell_width(prompt)
+        if first > 0 and idx == 0:
+            prefix = "… "
+        lines.append(prefix + segment)
+        if actual_idx == cursor_line:
+            before = display[seg_start:display_cursor]
+            cursor_x = cell_width(prefix) + cell_width(before)
+    return lines or [prompt], cursor_y, cursor_x

@@ -20280,6 +20280,7 @@ display_cursor_to_raw = input_controller_helpers.display_cursor_to_raw
 input_segments = input_controller_helpers.input_segments
 display_index_for_cell = input_controller_helpers.display_index_for_cell
 input_cursor_info = input_controller_helpers.input_cursor_info
+input_layout = input_controller_helpers.input_layout
 
 
 def move_input_cursor_vertical(state: State, width: int, direction: int) -> bool:
@@ -20297,29 +20298,6 @@ def move_input_cursor_vertical(state: State, width: int, direction: int) -> bool
     clamp_input_cursor(state)
     mark_dirty(state)
     return True
-
-
-def input_layout(text: str, width: int, max_lines: int, cursor: int, prompt: str = "> ") -> tuple[list[str], int, int]:
-    max_lines = max(1, max_lines)
-    display, segments, display_cursor, cursor_line, _cursor_x = input_cursor_info(text, width, cursor)
-    first = 0
-    if len(segments) > max_lines:
-        first = max(0, min(cursor_line, len(segments) - max_lines))
-    visible = segments[first:first + max_lines]
-    lines: list[str] = []
-    cursor_y = max(0, cursor_line - first)
-    cursor_x = cell_width(prompt)
-    for idx, (segment, seg_start, _seg_end) in enumerate(visible):
-        actual_idx = first + idx
-        prefix = prompt if actual_idx == 0 else " " * cell_width(prompt)
-        if first > 0 and idx == 0:
-            prefix = "… "
-        lines.append(prefix + segment)
-        if actual_idx == cursor_line:
-            before = display[seg_start:display_cursor]
-            cursor_x = cell_width(prefix) + cell_width(before)
-    return lines or [prompt], cursor_y, cursor_x
-
 
 def draw_text_with_selection(stdscr, y: int, x: int, text: str, width: int, attr: int, selection: Optional[tuple[int, int]]) -> None:
     if selection is None:
