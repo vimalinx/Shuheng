@@ -563,7 +563,7 @@ S01 修复左栏历史会话标题
 
 ### 1. Scope / Trigger
 
-- Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, or dashboard cache-signature helpers are moved out of `src/ga_tui/app.py`.
+- Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, dashboard cache-signature helpers, or pure status-card string layout helpers are moved out of `src/ga_tui/app.py`.
 - Applies to: `src/ga_tui/dashboard.py`, compatibility aliases in `src/ga_tui/app.py`, `dashboard.update` normalization, main/persistent-agent home rendering inputs, policy gates, and dashboard helper unit tests.
 - Non-goal: This does not move `State` or `SubAgentRuntime` projections, curses `RenderLine` home rendering, status-card drawing, session/history restore, ledger reads, scheduler reads, approval/action dispatch, or Web Console payloads.
 
@@ -578,6 +578,13 @@ S01 修复左栏历史会话标题
   - `normalize_dashboard_sections(raw_sections)`.
   - `normalize_dashboard_spec_payload(control, source, target)`.
   - `dashboard_cache_signature(raw)`.
+  - `status_card_header_line(title, card_width)`.
+  - `status_card_divider_line(title, card_width)`.
+  - `status_card_content_line(text, card_width)`.
+  - `status_card_footer_line(card_width)`.
+  - `status_card_metric_rows(items, inner_width)`.
+  - `status_card_metric_header(metrics)`.
+  - `status_card_detail_rows(items, inner_width)`.
 
 ### 3. Contracts
 
@@ -588,6 +595,8 @@ S01 修复左栏历史会话标题
 - `normalize_dashboard_spec_payload(...)` returns `dashboard.v1` with `updated_at`, `source`, `target`, `provenance.task_id`, `provenance.artifact_refs`, `sections`, and optional `status_narrative`, `todos`, and `markdown`.
 - `normalize_dashboard_spec_payload(...)` keeps at most 20 todo items, bounds todo text to 180 characters, and keeps at most 12 non-empty artifact refs in provenance.
 - `dashboard_cache_signature(...)` returns stable sorted compact JSON for serializable values, `""` for falsey values, and a safe string fallback for non-serializable values.
+- Status-card helpers in `dashboard.py` return only strings or lists of strings. They may use lower-level text/cell helpers, but must not allocate `RenderLine`, call `cp(...)`, import curses, read `State`, inspect subagents, or query ledgers.
+- `append_status_card(...)`, `append_home_action_panel(...)`, `append_home_section(...)`, and home-line functions remain in `app.py` until rendering types and curses attrs are separated.
 
 ### 4. Validation & Error Matrix
 
@@ -597,6 +606,8 @@ S01 修复左栏历史会话标题
 - Section title, markdown, status, todos, or payload markdown exceed bounds -> normalized output is truncated.
 - Non-dict nested payload -> helper treats the top-level control as the dashboard payload.
 - Non-serializable dashboard cache input -> returns `str(raw)` instead of raising.
+- Status-card title, metric, or detail values exceed available width -> helpers truncate, wrap, or pad with terminal-cell-aware helpers instead of emitting ragged rows.
+- Empty metric or detail inputs -> helpers return readable `暂无指标` or `暂无详情` fallback rows.
 
 ### 5. Good/Base/Bad Cases
 
@@ -604,12 +615,13 @@ S01 修复左栏历史会话标题
 - Good: Home rendering keeps using `dashboard_sections_for_main(...)` and `dashboard_sections_for_subagent(...)` from `app.py`, with default sections imported from `ga_tui.dashboard`.
 - Base: `dashboard_status_for_subagent(...)` stays in `app.py` because it reads `SubAgentRuntime` fields.
 - Base: `main_home_lines_uncached(...)` and `subagent_home_lines_uncached(...)` stay in `app.py` because they construct `RenderLine` values and read ledgers/live state.
+- Base: `append_status_card(...)` stays in `app.py` because it constructs `RenderLine` values and attaches curses attributes; it may call pure status-card line helpers from `dashboard.py`.
 - Bad: `dashboard.py` imports `State` so it can decide default status text.
 - Bad: `dashboard.py` calls `latest_task_records(...)`, `pending_approvals(...)`, or curses draw helpers.
 
 ### 6. Tests Required
 
-- Unit tests must assert section normalization, payload normalization, cache signature behavior, and `app.py` wrapper parity.
+- Unit tests must assert section normalization, payload normalization, cache signature behavior, status-card line/layout helpers, and `app.py` wrapper parity.
 - `scripts/check_policy_gates.py` must assert `dashboard.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway, runtime-dispatch, or home-rendering dependencies.
 - `python3 -m py_compile src/ga_tui/app.py src/ga_tui/dashboard.py scripts/check_policy_gates.py tests/test_dashboard.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_dashboard.py -p no:cacheprovider` must pass.

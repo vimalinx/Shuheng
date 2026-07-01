@@ -720,6 +720,13 @@ def assert_dashboard_module_boundary() -> None:
         "normalize_dashboard_sections",
         "normalize_dashboard_spec_payload",
         "dashboard_cache_signature",
+        "status_card_header_line",
+        "status_card_divider_line",
+        "status_card_content_line",
+        "status_card_footer_line",
+        "status_card_metric_rows",
+        "status_card_metric_header",
+        "status_card_detail_rows",
     ):
         assert getattr(a, name) is getattr(dashboard_mod, name), name
 
@@ -755,6 +762,13 @@ def assert_dashboard_module_boundary() -> None:
     }, payload
     assert payload["todos"] == ["check boundary", "ship"], payload
     assert dashboard_mod.dashboard_cache_signature({"b": 2, "a": 1}) == '{"a":1,"b":2}'
+    assert dashboard_mod.status_card_header_line("Main", 18) == "╭─ Main ─────────╮"
+    assert dashboard_mod.status_card_content_line("ok", 18) == "│ ok             │"
+    assert dashboard_mod.status_card_footer_line(18) == "╰────────────────╯"
+    metric_rows = dashboard_mod.status_card_metric_rows([("状态", "ready"), ("任务", "2")], 44)
+    assert metric_rows and "状态 ready" in metric_rows[0], metric_rows
+    assert dashboard_mod.status_card_metric_header([("状态", "ready"), ("", "")]) == "核心指标（1 项）"
+    assert dashboard_mod.status_card_detail_rows([], 16) == ["暂无详情"]
 
     source = Path(dashboard_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -772,6 +786,11 @@ def assert_dashboard_module_boundary() -> None:
         "process_ui_queue",
         "start_subagent_task",
         "decide_approval",
+        "append_status_card",
+        "append_home_action_panel",
+        "append_home_section",
+        "latest_task_records",
+        "pending_approvals",
     ):
         assert forbidden not in source, f"{dashboard_mod.__file__}: {forbidden}"
 

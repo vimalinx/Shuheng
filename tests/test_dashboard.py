@@ -73,6 +73,44 @@ def test_dashboard_cache_signature_is_stable_and_safe() -> None:
     assert dashboard.dashboard_cache_signature(Unserializable()) == "unserializable-dashboard"
 
 
+def test_status_card_line_helpers_preserve_box_layout() -> None:
+    assert dashboard.status_card_header_line("Main", 18) == "╭─ Main ─────────╮"
+    assert dashboard.status_card_divider_line("Details", 18) == "├─ Details ──────┤"
+    assert dashboard.status_card_content_line("ok", 18) == "│ ok             │"
+    assert dashboard.status_card_footer_line(18) == "╰────────────────╯"
+    assert dashboard.status_card_header_line("T" * 100, 12).startswith("╭─ TTTTTTT")
+
+
+def test_status_card_metric_helpers_layout_and_fallbacks() -> None:
+    metrics = [
+        ("状态", "running"),
+        ("任务", "3"),
+        ("审批", "1"),
+        ("", ""),
+    ]
+
+    assert dashboard.status_card_metric_header(metrics) == "核心指标（3 项）"
+    rows = dashboard.status_card_metric_rows(metrics, 44)
+
+    assert len(rows) == 2
+    assert "状态 running" in rows[0]
+    assert " │ " in rows[0]
+    assert "审批 1" in rows[1]
+    assert dashboard.status_card_metric_rows([], 44) == ["暂无指标"]
+
+
+def test_status_card_detail_helpers_wrap_and_fallback() -> None:
+    rows = dashboard.status_card_detail_rows([
+        ("ID", "agent-1"),
+        ("Notes", "abcdefghijklmno"),
+    ], 16)
+
+    assert rows[0] == "ID      agent-1"
+    assert rows[1].startswith("Notes")
+    assert rows[2].startswith("       ")
+    assert dashboard.status_card_detail_rows([], 16) == ["暂无详情"]
+
+
 def test_app_dashboard_wrappers_match_module() -> None:
     assert app_module.SUPPORTED_DASHBOARD_SECTIONS is dashboard.SUPPORTED_DASHBOARD_SECTIONS
     assert app_module.DEFAULT_DASHBOARD_SECTIONS is dashboard.DEFAULT_DASHBOARD_SECTIONS
@@ -81,3 +119,10 @@ def test_app_dashboard_wrappers_match_module() -> None:
     assert app_module.normalize_dashboard_sections is dashboard.normalize_dashboard_sections
     assert app_module.normalize_dashboard_spec_payload is dashboard.normalize_dashboard_spec_payload
     assert app_module.dashboard_cache_signature is dashboard.dashboard_cache_signature
+    assert app_module.status_card_header_line is dashboard.status_card_header_line
+    assert app_module.status_card_divider_line is dashboard.status_card_divider_line
+    assert app_module.status_card_content_line is dashboard.status_card_content_line
+    assert app_module.status_card_footer_line is dashboard.status_card_footer_line
+    assert app_module.status_card_metric_rows is dashboard.status_card_metric_rows
+    assert app_module.status_card_metric_header is dashboard.status_card_metric_header
+    assert app_module.status_card_detail_rows is dashboard.status_card_detail_rows
