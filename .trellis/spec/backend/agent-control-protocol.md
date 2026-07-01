@@ -2612,6 +2612,87 @@ subagent A writes memory/subagents/A/user_profile.md -> only A sees the user pro
 normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/memory/user_profile.md -> main and subagent context packs share the same L1_user_profile refs.
 ```
 
+## Scenario: Context Pack Helper Module Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng context-pack, memory-hydration, context-layer, prompt-formatting, or context-ref-formatting helper logic is moved out of `src/ga_tui/app.py`.
+- Applies to: `src/ga_tui/context_packs.py`, compatibility wrappers in `src/ga_tui/app.py`, `build_context_pack()`, `memory_context_get`, OMP runtime context/ref prompts, policy gates, and unit tests.
+- Non-goal: This does not move runtime dispatch, Web Console action routing, dashboard rendering, command handlers, storage-root selection, or context-pack artifact writing out of `app.py` unless a later task defines those boundaries explicitly.
+
+### 2. Signatures
+
+- Lower-level module: `src/ga_tui/context_packs.py`.
+- Compatibility wrappers in `app.py`:
+  - `compact_nonempty_lines(text, limit=12, width=220)`.
+  - `memory_hydration_pack(...)`.
+  - `context_layers_for_task(...)`.
+  - `indent_text(text, prefix)`.
+  - `format_context_pack_for_prompt(pack)`.
+  - `format_context_ref_for_prompt(pack, context_ref)`.
+- Explicit module inputs include task ids, role/security context, profile/memory text, shared profile payloads, layered memory payloads, workspace context payloads, recent task/progress/trace/artifact rows, agent profile/memory refs, and default permission profile.
+
+### 3. Contracts
+
+- `context_packs.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
+- `context_packs.py` owns pure shaping of memory hydration rows, L0-L8 context layers, context-pack prompt text, context-ref prompt text, and small text formatting helpers that can operate from explicit inputs.
+- `app.py` remains the compatibility facade and passes mutable runtime facts explicitly: shared user profile, Shuheng layered memory, workspace context, agent profile/memory refs, progress/task/artifact/trace rows, permission defaults, and security context.
+- `build_context_pack()` still owns runtime orchestration, Secret Vault context-pack writes, normal context-pack artifact writes, and artifact index updates until a separate artifact-writer boundary exists.
+- Context formatting must keep final-reply, deictic-reference, persistent-agent-request, dedicated-skill-scope, permission-profile, memory-hydration, workspace-provenance, and recent-artifact-ref sections semantically equivalent to the previous app-layer behavior.
+- `context_layers_for_task(...)` must prefer progress ledger rows for `L5_progress_ledger` and fall back to task rows only when no progress rows are provided.
+- Raw traces remain reference-only in `L8_raw_trace`; trace payloads, raw logs, Secret plaintext, and unbounded tool output must not be inlined.
+
+### 4. Validation & Error Matrix
+
+- `context_packs.py` imports `ga_tui.app` or `curses` -> policy gate fails.
+- `app.py` formatter wrapper produces different prompt text from `context_packs.py` for the same pack and default permission profile -> policy gate fails.
+- `memory_hydration_pack(...)` omits `user.shared-profile`, `shuheng.layered-memory`, or `project.agent-harness` -> unit test or policy gate fails.
+- Workspace context is included -> hydration uses `workspace.project-provenance` as secondary provenance, not primary memory ownership.
+- Recent progress rows are provided -> `L5_progress_ledger.items` uses compact progress summaries.
+- Recent trace rows are provided -> only trace refs appear in `L8_raw_trace`; payloads stay excluded.
+- OMP receives a context ref after the first full context pack -> prompt contains `context_pack_ref` and does not repeat the full context pack body.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `app.format_context_pack_for_prompt(pack)` delegates to `context_packs.format_context_pack_for_prompt(pack, default_permission_profile=PERMISSION_PROFILE_STANDARD)` and returns identical text.
+- Good: `context_packs.context_layers_for_task(...)` receives explicit recent progress/artifact/trace rows and returns L0-L8 without reading app globals.
+- Base: `build_context_pack()` still writes the context-pack artifact through app-owned artifact paths because mutable path retargeting remains in the app facade.
+- Bad: `context_packs.py` imports `State` so it can read `state.current_title` directly.
+- Bad: `context_packs.py` opens `AGENT_TRACES_PATH` directly and inlines raw trace payloads.
+- Bad: A test imports only `ga_tui.app` and never verifies the extracted module boundary.
+
+### 6. Tests Required
+
+- `scripts/check_policy_gates.py` must assert `context_packs.py` has no reverse app/UI dependency and that app wrappers preserve formatter parity.
+- Tests must assert `compact_nonempty_lines(...)`, `memory_hydration_pack(...)`, `context_layers_for_task(...)`, `format_context_pack_for_prompt(...)`, and `format_context_ref_for_prompt(...)` work directly from `context_packs.py`.
+- Tests must assert memory hydration includes shared profile, layered memory, agent harness, subagent profile/memory, optional workspace provenance, and agent-mail refs.
+- Tests must assert L0-L8 layer keys are returned, progress rows populate L5 when present, artifacts stay as refs, and raw trace payloads stay excluded.
+- Release verification must keep `python3 scripts/check_policy_gates.py`, Ruff, pytest, compileall, build, wheel smoke, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+from ga_tui.app import State
+
+def context_layers_for_task(state: State, sub):
+    traces = read_jsonl(AGENT_TRACES_PATH)
+    return {"L8_raw_trace": {"payloads": traces}}
+```
+
+#### Correct
+
+```python
+def context_layers_for_task(*, recent_traces, active_session):
+    return {
+        "L8_raw_trace": {
+            "included": False,
+            "trace_refs": [row["trace_id"] for row in recent_traces if row.get("trace_id")],
+        }
+    }
+```
+
 ## Scenario: Temporary Non-Persistent Main Sessions
 
 ### 1. Scope / Trigger

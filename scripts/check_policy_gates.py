@@ -28,6 +28,7 @@ from ga_tui import app as a  # noqa: E402
 from ga_tui import agent_bridge as bridge  # noqa: E402
 from ga_tui import baseline as baseline_mod  # noqa: E402
 from ga_tui import control_protocol as cp  # noqa: E402
+from ga_tui import context_packs as context_pack_mod  # noqa: E402
 from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
 from ga_tui import genericagent_provider as gap  # noqa: E402
 from ga_tui import governance as governance_mod  # noqa: E402
@@ -367,6 +368,138 @@ def assert_governance_module_boundary() -> None:
         a.AGENT_PROGRESS_LEDGER_PATH = old_progress
         a.AGENT_LOCKS_PATH = old_locks
         a.AGENT_TASK_LEDGER_PATH = old_tasks
+
+
+def assert_context_pack_module_boundary() -> None:
+    assert a.compact_nonempty_lines("# skip\nalpha\n\nbeta") == context_pack_mod.compact_nonempty_lines(
+        "# skip\nalpha\n\nbeta"
+    )
+    sample_pack = {
+        "task_id": "task_context_boundary",
+        "for_agent": {"id": "agent-boundary", "name": "Boundary Agent", "role": "researcher"},
+        "objective": "Verify context-pack boundary",
+        "permission_profile": "",
+        "budget": {"max_tokens": 1200, "max_tool_calls": 4, "max_wall_clock_seconds": 30},
+        "permissions": {"permission_profile": "", "write_policy": "none", "tools_allowed": ["repo.read"]},
+        "output_contract": ["summary", "artifact_refs"],
+        "task": {
+            "boundaries": ["Do not mutate app state"],
+            "success_criteria": ["Wrapper parity is preserved"],
+            "stop_condition": "Return findings",
+        },
+        "source_policy": {
+            "allowed_sources": ["task_brief", "artifact_index.refs"],
+            "forbidden_sources": ["secrets"],
+            "artifact_policy": "Use refs.",
+        },
+        "layered_memory": {"prompt": "Layered memory prompt", "refs": ["memory://layered"]},
+        "shared_user_profile": {"text": "Shared user profile", "refs": ["memory://profile"]},
+        "memory_pack": {
+            "included": [{"scope": "user.shared-profile", "items": ["Shared user profile"]}],
+            "excluded": [{"scope": "secrets", "reason": "approval required"}],
+        },
+        "workspace_context": {"included": False, "reason": "No workspace"},
+        "layers": {
+            "L7_artifacts": {
+                "items": [
+                    {
+                        "uri": "artifact://context_packs/agent-boundary/task_context_boundary.json",
+                        "hash": "sha256:abc",
+                        "source_task_id": "task_context_boundary",
+                    }
+                ]
+            }
+        },
+        "skill_pack": {
+            "included": [
+                {
+                    "name": "boundary-skill",
+                    "ref": "boundary-skill",
+                    "resolved": True,
+                    "summary": "Boundary only",
+                    "body": "Use only for this agent.",
+                }
+            ]
+        },
+        "profile_excerpt": "Profile excerpt",
+        "memory_excerpt": "Memory excerpt",
+    }
+    assert a.indent_text("a\n\nb", "  ") == context_pack_mod.indent_text("a\n\nb", "  ")
+    assert a.format_context_pack_for_prompt(sample_pack) == context_pack_mod.format_context_pack_for_prompt(
+        sample_pack,
+        default_permission_profile=a.PERMISSION_PROFILE_STANDARD,
+    )
+    assert a.format_context_ref_for_prompt(
+        sample_pack,
+        "artifact://context_packs/agent-boundary/task_context_boundary.json",
+    ) == context_pack_mod.format_context_ref_for_prompt(
+        sample_pack,
+        "artifact://context_packs/agent-boundary/task_context_boundary.json",
+        default_permission_profile=a.PERMISSION_PROFILE_STANDARD,
+    )
+    memory_pack = context_pack_mod.memory_hydration_pack(
+        task_id="task_context_boundary",
+        profile="Profile line",
+        memory="Memory line",
+        recent_mail=[{"message_id": "msg1", "intent": "delegate", "status": "done", "task_id": "task1"}],
+        shared_profile={"profile_description": "Shared", "refs": ["memory://profile"]},
+        layered_memory={"items": ["Layer item"], "refs": ["memory://layered"]},
+        workspace_context={"included": False, "reason": "No workspace"},
+        agent_profile_ref="agent://profile",
+        agent_memory_ref="agent://memory",
+        memory_pack_id="mempack_boundary",
+    )
+    scopes = {row["scope"] for row in memory_pack["included"]}
+    assert {"user.shared-profile", "shuheng.layered-memory", "project.agent-harness"} <= scopes, memory_pack
+    layers = context_pack_mod.context_layers_for_task(
+        role="researcher",
+        security_context="standard",
+        objective="Verify context-pack boundary",
+        profile="Profile line",
+        memory="Memory line",
+        task_contract={"success_criteria": ["Wrapper parity"]},
+        memory_pack=memory_pack,
+        source_policy={"allowed_sources": ["task_brief"]},
+        shared_profile={"profile_description": "Shared", "refs": ["memory://profile"]},
+        layered_memory={"refs": ["memory://layered"]},
+        workspace_context={"included": False},
+        recent_tasks=[{"task_id": "task1", "status": "working", "objective": "Task one"}],
+        recent_progress=[{"task_id": "task1", "status": "completed", "summary": "Progress one"}],
+        recent_traces=[{"trace_id": "trace1", "payload": {"raw": "not included"}}],
+        recent_artifacts=[{"uri": "artifact://x", "hash": "sha256:x", "source_task_id": "task1"}],
+        active_session="main",
+        subagent_status="idle",
+    )
+    assert set(layers) == {
+        "L0_system_constitution",
+        "L1_user_profile",
+        "L2_project_memory",
+        "L3_task_brief",
+        "L4_plan_ledger",
+        "L5_progress_ledger",
+        "L6_working_notes",
+        "L7_artifacts",
+        "L8_raw_trace",
+    }
+    assert layers["L5_progress_ledger"]["items"][0].startswith("task1: completed"), layers["L5_progress_ledger"]
+    assert layers["L8_raw_trace"]["included"] is False, layers["L8_raw_trace"]
+    assert "payload" not in layers["L8_raw_trace"], layers["L8_raw_trace"]
+
+    source = Path(context_pack_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "PanelItem",
+        "RenderLine",
+        "draw_",
+        "format_approvals",
+    ):
+        assert forbidden not in source, f"{context_pack_mod.__file__}: {forbidden}"
 
 
 def assert_ledger_store_module_boundary() -> None:
@@ -7152,6 +7285,7 @@ def run_checks() -> None:
     assert_history_store_module_boundary()
     assert_secret_vault_module_boundary()
     assert_governance_module_boundary()
+    assert_context_pack_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
