@@ -566,6 +566,9 @@ PASTE_END = "\x1b[201~"
 RUN_FRAMES = rendering_helpers.RUN_FRAMES
 char_index_for_cell = rendering_helpers.char_index_for_cell
 scoped_subagent_meta_keys = rendering_helpers.scoped_subagent_meta_keys
+process_group_scope_key = rendering_helpers.process_group_scope_key
+process_turn_scope_key = rendering_helpers.process_turn_scope_key
+subagent_meta_scope_key = rendering_helpers.subagent_meta_scope_key
 message_cache_signature = rendering_helpers.message_cache_signature
 message_render_cache_key = rendering_helpers.message_render_cache_key
 strip_meta_blocks = rendering_helpers.strip_meta_blocks
@@ -15663,17 +15666,15 @@ def display_scope_key(state: State) -> str:
 
 
 def process_group_key(state: State, label: str) -> str:
-    return f"{display_scope_key(state)}:{label}"
+    return process_group_scope_key(display_scope_key(state), label)
 
 
 def process_turn_key(state: State, label: str) -> str:
-    group = re.match(r"^(G\d+)T\d+$", label or "")
-    prefix = group.group(1) if group else ""
-    return f"{display_scope_key(state)}:{prefix}:{label}"
+    return process_turn_scope_key(display_scope_key(state), label)
 
 
 def subagent_meta_key(state: State, label: str) -> str:
-    return f"{display_scope_key(state)}:submeta:{label}"
+    return subagent_meta_scope_key(display_scope_key(state), label)
 
 
 def current_interaction_payload(state: State) -> Optional[dict[str, Any]]:

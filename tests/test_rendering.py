@@ -828,6 +828,13 @@ def test_scoped_subagent_meta_keys_filters_only_current_scope() -> None:
     assert rendering.scoped_subagent_meta_keys("missing", expanded) == set()
 
 
+def test_process_scope_key_helpers_preserve_legacy_key_shapes() -> None:
+    assert rendering.process_group_scope_key("session:main", "G2") == "session:main:G2"
+    assert rendering.process_turn_scope_key("session:main", "G2T7") == "session:main:G2:G2T7"
+    assert rendering.process_turn_scope_key("session:main", "Turn7") == "session:main::Turn7"
+    assert rendering.subagent_meta_scope_key("session:main", "S1234abcd") == "session:main:submeta:S1234abcd"
+
+
 def test_message_cache_signature_tracks_identity_role_length_and_done() -> None:
     msg = Message("assistant", "streaming body", done=False)
     same_text = Message("assistant", "streaming body", done=False)
@@ -1545,10 +1552,26 @@ def test_app_selection_wrappers_delegate_to_rendering_helpers() -> None:
     )
 
 
+def test_app_process_scope_key_wrappers_inject_display_scope() -> None:
+    state = app_module.State(agent=None)
+    scope = app_module.display_scope_key(state)
+
+    assert app_module.process_group_key(state, "G2") == rendering.process_group_scope_key(scope, "G2")
+    assert app_module.process_turn_key(state, "G2T7") == rendering.process_turn_scope_key(scope, "G2T7")
+    assert app_module.process_turn_key(state, "Turn7") == rendering.process_turn_scope_key(scope, "Turn7")
+    assert app_module.subagent_meta_key(state, "S1234abcd") == rendering.subagent_meta_scope_key(
+        scope,
+        "S1234abcd",
+    )
+
+
 def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.RUN_FRAMES is rendering.RUN_FRAMES
     assert app_module.char_index_for_cell is rendering.char_index_for_cell
     assert app_module.scoped_subagent_meta_keys is rendering.scoped_subagent_meta_keys
+    assert app_module.process_group_scope_key is rendering.process_group_scope_key
+    assert app_module.process_turn_scope_key is rendering.process_turn_scope_key
+    assert app_module.subagent_meta_scope_key is rendering.subagent_meta_scope_key
     assert app_module.message_cache_signature is rendering.message_cache_signature
     assert app_module.message_render_cache_key is rendering.message_render_cache_key
     assert app_module.strip_meta_blocks is rendering.strip_meta_blocks

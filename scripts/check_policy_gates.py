@@ -336,6 +336,9 @@ def assert_rendering_module_boundary() -> None:
         "RUN_FRAMES",
         "char_index_for_cell",
         "scoped_subagent_meta_keys",
+        "process_group_scope_key",
+        "process_turn_scope_key",
+        "subagent_meta_scope_key",
         "message_cache_signature",
         "message_render_cache_key",
         "strip_meta_blocks",
@@ -449,6 +452,19 @@ def assert_rendering_module_boundary() -> None:
     }
     assert rendering_mod.scoped_subagent_meta_keys("", expanded_meta) == expanded_meta
     assert rendering_mod.scoped_subagent_meta_keys("scope-boundary", expanded_meta) == {"agent-a", "agent-b"}
+    assert rendering_mod.process_group_scope_key("scope-boundary", "G2") == "scope-boundary:G2"
+    assert rendering_mod.process_turn_scope_key("scope-boundary", "G2T7") == "scope-boundary:G2:G2T7"
+    assert rendering_mod.process_turn_scope_key("scope-boundary", "Turn7") == "scope-boundary::Turn7"
+    assert rendering_mod.subagent_meta_scope_key("scope-boundary", "S1234abcd") == "scope-boundary:submeta:S1234abcd"
+    scope_state = a.State(agent=None)
+    scope_key = a.display_scope_key(scope_state)
+    assert a.process_group_key(scope_state, "G2") == rendering_mod.process_group_scope_key(scope_key, "G2")
+    assert a.process_turn_key(scope_state, "G2T7") == rendering_mod.process_turn_scope_key(scope_key, "G2T7")
+    assert a.process_turn_key(scope_state, "Turn7") == rendering_mod.process_turn_scope_key(scope_key, "Turn7")
+    assert a.subagent_meta_key(scope_state, "S1234abcd") == rendering_mod.subagent_meta_scope_key(
+        scope_key,
+        "S1234abcd",
+    )
     msg = a.Message("assistant", "boundary streaming", done=False)
     same_text_msg = a.Message("assistant", "boundary streaming", done=False)
     assert rendering_mod.message_cache_signature([msg]) == (
@@ -1302,6 +1318,9 @@ def assert_rendering_module_boundary() -> None:
         "def compose_request_user_input_answer",
         "def interaction_input_prompt_text",
         "def interaction_footer_text",
+        "def process_group_scope_key",
+        "def process_turn_scope_key",
+        "def subagent_meta_scope_key",
         "def process_title_text_from_parts",
         "def process_display_summary_text",
         "def process_summary_append_lines",

@@ -1075,6 +1075,20 @@ def scoped_subagent_meta_keys(process_scope: str, expanded_subagent_meta: set[st
     return scoped_subagent_meta
 
 
+def process_group_scope_key(display_scope: str, label: str) -> str:
+    return f"{display_scope}:{label}"
+
+
+def process_turn_scope_key(display_scope: str, label: str) -> str:
+    group = re.match(r"^(G\d+)T\d+$", label or "")
+    prefix = group.group(1) if group else ""
+    return f"{display_scope}:{prefix}:{label}"
+
+
+def subagent_meta_scope_key(display_scope: str, label: str) -> str:
+    return f"{display_scope}:submeta:{label}"
+
+
 def message_cache_signature(messages: list[object]) -> tuple[tuple[int, str, int, bool], ...]:
     return tuple(
         (
