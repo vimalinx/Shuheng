@@ -400,6 +400,9 @@ def assert_rendering_module_boundary() -> None:
         "visible_reply_text",
         "sanitize_interaction_candidates",
         "render_interaction_card",
+        "interaction_answer_from_text",
+        "compose_request_user_input_answer",
+        "interaction_input_prompt_text",
         "visible_reply_is_substantive",
         "visible_reply_is_housekeeping_summary",
         "visible_reply_has_section_shape",
@@ -900,7 +903,40 @@ def assert_rendering_module_boundary() -> None:
         "│ request_user_input 会在底部显示独立 qN> 输入口，逐题记录后统一发送。\n"
         "╰─"
     )
+    answer_candidates = ["1) 批准并执行", "2) 拒绝", "3) 稍后处理"]
+    assert rendering_mod.interaction_answer_from_text("2", answer_candidates, selected=0) == "拒绝"
+    assert rendering_mod.interaction_answer_from_text("手动回答", answer_candidates, selected=0) == "手动回答"
+    assert rendering_mod.interaction_answer_from_text("", answer_candidates, selected=2) == "稍后处理"
+    assert rendering_mod.interaction_answer_from_text("", answer_candidates, selected=99) == "稍后处理"
+    answer_payload = {
+        "questions": [
+            {"header": "范围", "question": "要处理哪些文件？"},
+            {"header": "确认", "question": "确认"},
+            {"question": "是否提交？"},
+        ]
+    }
+    assert rendering_mod.compose_request_user_input_answer(answer_payload, ["全部", "是"]) == (
+        "1. 范围: 要处理哪些文件？\n"
+        "答案：全部\n\n"
+        "2. 确认\n"
+        "答案：是\n\n"
+        "3. 问题 3: 是否提交？\n"
+        "答案："
+    )
+    assert rendering_mod.interaction_input_prompt_text(False) == "> "
+    assert rendering_mod.interaction_input_prompt_text(True, is_approval=True) == "approval> "
+    assert rendering_mod.interaction_input_prompt_text(True, current_question_index=1) == "q2> "
+    assert rendering_mod.interaction_input_prompt_text(True) == "? "
     assert a.render_interaction_card({}) == rendering_mod.render_interaction_card({})
+    assert a.compose_request_user_input_answer is rendering_mod.compose_request_user_input_answer
+    payload = {"candidates": answer_candidates, "_selection": 2}
+    assert a.interaction_answer_from_input(payload, "") == rendering_mod.interaction_answer_from_text(
+        "",
+        answer_candidates,
+        selected=2,
+    )
+    assert a.interaction_input_prompt({"tool": "approval", "approval_id": "appr_policy"}) == "approval> "
+    assert a.interaction_input_prompt({"questions": [{"question": "A"}, {"question": "B"}], "_current": 1}) == "q2> "
     assert rendering_mod.visible_reply_is_substantive("完整答复。" * 40)
     assert rendering_mod.visible_reply_is_substantive("# 结论\n" + ("结构化内容。" * 14))
     assert not rendering_mod.visible_reply_is_substantive("短答复")
@@ -1184,6 +1220,9 @@ def assert_rendering_module_boundary() -> None:
         "def preferred_group_visible_reply_text",
         "def sanitize_interaction_candidates",
         "def render_interaction_card",
+        "def interaction_answer_from_text",
+        "def compose_request_user_input_answer",
+        "def interaction_input_prompt_text",
         "def process_turn_lines",
         "def boxed_user_lines",
         "def strip_inline_markdown",

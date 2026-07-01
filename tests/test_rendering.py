@@ -126,6 +126,46 @@ def test_interaction_card_formats_request_user_input_and_fallback() -> None:
     )
 
 
+def test_interaction_answer_helpers_preserve_candidate_and_prompt_behavior() -> None:
+    candidates = ["1) 批准并执行", "2) 拒绝", "3) 稍后处理"]
+
+    assert rendering.interaction_answer_from_text("2", candidates, selected=0) == "拒绝"
+    assert rendering.interaction_answer_from_text("手动回答", candidates, selected=0) == "手动回答"
+    assert rendering.interaction_answer_from_text("", candidates, selected=2) == "稍后处理"
+    assert rendering.interaction_answer_from_text("", candidates, selected=99) == "稍后处理"
+    assert rendering.interaction_answer_from_text("", [], selected=0) == ""
+    assert rendering.interaction_input_prompt_text(False) == "> "
+    assert rendering.interaction_input_prompt_text(True, is_approval=True) == "approval> "
+    assert rendering.interaction_input_prompt_text(True, current_question_index=1) == "q2> "
+    assert rendering.interaction_input_prompt_text(True) == "? "
+
+    payload = {"candidates": candidates, "_selection": 2}
+    assert app_module.interaction_answer_from_input(payload, "") == "稍后处理"
+    assert app_module.interaction_answer_from_input(payload, "1") == "批准并执行"
+    assert app_module.interaction_input_prompt({"tool": "approval", "approval_id": "appr_test"}) == "approval> "
+    assert app_module.interaction_input_prompt({"questions": [{"question": "A"}, {"question": "B"}], "_current": 1}) == "q2> "
+
+
+def test_compose_request_user_input_answer_formats_questions() -> None:
+    payload = {
+        "questions": [
+            {"header": "范围", "question": "要处理哪些文件？"},
+            {"header": "确认", "question": "确认"},
+            {"question": "是否提交？"},
+        ]
+    }
+
+    assert rendering.compose_request_user_input_answer(payload, ["全部", "是"]) == (
+        "1. 范围: 要处理哪些文件？\n"
+        "答案：全部\n\n"
+        "2. 确认\n"
+        "答案：是\n\n"
+        "3. 问题 3: 是否提交？\n"
+        "答案："
+    )
+    assert app_module.compose_request_user_input_answer is rendering.compose_request_user_input_answer
+
+
 def test_is_table_separator_detects_markdown_alignment_rows() -> None:
     assert rendering.is_table_separator(["---", ":---", "---:", ":---:"])
     assert rendering.is_table_separator([" --- ", " :---: "])
@@ -1447,6 +1487,9 @@ def test_app_rendering_wrappers_match_module() -> None:
     assert app_module.visible_reply_text is rendering.visible_reply_text
     assert app_module.sanitize_interaction_candidates is rendering.sanitize_interaction_candidates
     assert app_module.render_interaction_card is rendering.render_interaction_card
+    assert app_module.interaction_answer_from_text is rendering.interaction_answer_from_text
+    assert app_module.compose_request_user_input_answer is rendering.compose_request_user_input_answer
+    assert app_module.interaction_input_prompt_text is rendering.interaction_input_prompt_text
     assert app_module.visible_reply_is_substantive is rendering.visible_reply_is_substantive
     assert app_module.visible_reply_is_housekeeping_summary is rendering.visible_reply_is_housekeeping_summary
     assert app_module.visible_reply_has_section_shape is rendering.visible_reply_has_section_shape

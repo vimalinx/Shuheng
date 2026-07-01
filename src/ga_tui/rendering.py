@@ -125,6 +125,53 @@ def render_interaction_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def interaction_answer_from_text(text: str, candidates: Any, selected: int = 0) -> str:
+    stripped = str(text or "").strip()
+    cleaned_candidates = sanitize_interaction_candidates(candidates)
+    if cleaned_candidates and re.fullmatch(r"\d+", stripped):
+        idx = int(stripped) - 1
+        if 0 <= idx < len(cleaned_candidates):
+            return cleaned_candidates[idx]
+    if stripped:
+        return stripped
+    if cleaned_candidates:
+        selected = max(0, min(int(selected or 0), len(cleaned_candidates) - 1))
+        return cleaned_candidates[selected]
+    return ""
+
+
+def _interaction_questions(payload: Any) -> list[dict[str, Any]]:
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    return [q for q in questions if isinstance(q, dict)] if isinstance(questions, list) else []
+
+
+def compose_request_user_input_answer(payload: dict[str, Any], answers: list[str]) -> str:
+    questions = _interaction_questions(payload)
+    lines: list[str] = []
+    for idx, question in enumerate(questions):
+        label = str(question.get("header") or f"问题 {idx + 1}").strip()
+        q_text = str(question.get("question") or "").strip()
+        answer = answers[idx] if idx < len(answers) else ""
+        title = f"{label}: {q_text}" if q_text and q_text != label else label
+        lines.append(f"{idx + 1}. {title}\n答案：{answer}")
+    return "\n\n".join(lines).strip()
+
+
+def interaction_input_prompt_text(
+    has_payload: bool,
+    *,
+    is_approval: bool = False,
+    current_question_index: int | None = None,
+) -> str:
+    if not has_payload:
+        return "> "
+    if is_approval:
+        return "approval> "
+    if current_question_index is not None:
+        return f"q{max(0, int(current_question_index)) + 1}> "
+    return "? "
+
+
 def process_turn_label(marker: str) -> str:
     turn = TURN_NO_RE.search(marker or "")
     return f"Turn {turn.group(1)}" if turn else "Turn"

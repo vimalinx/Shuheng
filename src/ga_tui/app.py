@@ -574,6 +574,9 @@ strip_standalone_dot_lines = rendering_helpers.strip_standalone_dot_lines
 strip_inline_markdown = rendering_helpers.strip_inline_markdown
 sanitize_interaction_candidates = rendering_helpers.sanitize_interaction_candidates
 render_interaction_card = rendering_helpers.render_interaction_card
+interaction_answer_from_text = rendering_helpers.interaction_answer_from_text
+compose_request_user_input_answer = rendering_helpers.compose_request_user_input_answer
+interaction_input_prompt_text = rendering_helpers.interaction_input_prompt_text
 parse_subagent_result_notice = rendering_helpers.parse_subagent_result_notice
 subagent_result_metadata_separator = rendering_helpers.subagent_result_metadata_separator
 subagent_result_metadata_label = rendering_helpers.subagent_result_metadata_label
@@ -18289,27 +18292,8 @@ def move_interaction_selection(state: State, direction: int) -> bool:
 def interaction_answer_from_input(payload: dict[str, Any], text: str) -> str:
     stripped = text.strip()
     candidates = interaction_current_candidates(payload)
-    if candidates and re.fullmatch(r"\d+", stripped):
-        idx = int(stripped) - 1
-        if 0 <= idx < len(candidates):
-            return candidates[idx]
-    if stripped:
-        return stripped
-    if candidates:
-        return candidates[interaction_selection(payload)]
-    return ""
-
-
-def compose_request_user_input_answer(payload: dict[str, Any], answers: list[str]) -> str:
-    questions = interaction_questions(payload)
-    lines: list[str] = []
-    for idx, question in enumerate(questions):
-        label = str(question.get("header") or f"问题 {idx + 1}").strip()
-        q_text = str(question.get("question") or "").strip()
-        answer = answers[idx] if idx < len(answers) else ""
-        title = f"{label}: {q_text}" if q_text and q_text != label else label
-        lines.append(f"{idx + 1}. {title}\n答案：{answer}")
-    return "\n\n".join(lines).strip()
+    selected = interaction_selection(payload) if candidates and not stripped else int(payload.get("_selection", 0) or 0)
+    return interaction_answer_from_text(text, candidates, selected)
 
 
 def accept_interaction_input(state: State, text: str) -> Optional[str]:
@@ -18380,14 +18364,13 @@ def accept_subagent_interaction_input(state: State, sub: SubAgentRuntime, text: 
 
 
 def interaction_input_prompt(payload: Optional[dict[str, Any]]) -> str:
-    if not payload:
-        return "> "
-    if is_approval_interaction(payload):
-        return "approval> "
     questions = interaction_questions(payload)
-    if questions:
-        return f"q{interaction_current_index(payload) + 1}> "
-    return "? "
+    current_idx = interaction_current_index(payload) if payload and questions else None
+    return interaction_input_prompt_text(
+        bool(payload),
+        is_approval=is_approval_interaction(payload),
+        current_question_index=current_idx,
+    )
 
 
 def resolve_interaction_answer(state: State, text: str) -> str:
