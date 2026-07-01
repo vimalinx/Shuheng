@@ -1048,6 +1048,75 @@ from ga_tui.app import TEMP_SUBAGENTS_DIR, artifact_path_from_uri
 governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
 ```
 
+## Scenario: Governance Checkpoint Recovery Helper Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: `app.py` decomposition moves checkpoint/recovery read-model helpers into `governance.py`.
+- Applies to: checkpoint-history lookup, recovery-history lookup, recovery-plan-history lookup, checkpoint id lookup, latest-checkpoint selection, checkpoint snapshot reads, and replay-step shaping.
+- Non-goal: This does not move checkpoint writes, recovery-plan writes, recovery records, recovery action execution, policy approval queuing, subagent runtime mutation, panel rendering, command handlers, Web Console payloads, or storage-root behavior.
+
+### 2. Signatures
+
+- `governance.checkpoint_history(checkpoint_index_path, task_id) -> list[dict]`
+- `governance.recovery_history(recovery_path, task_id) -> list[dict]`
+- `governance.recovery_plan_history(recovery_plans_path, task_id) -> list[dict]`
+- `governance.checkpoint_index_by_id(checkpoint_index_path, checkpoint_id) -> dict`
+- `governance.latest_checkpoint_for_task(checkpoint_index_path, task_id) -> dict`
+- `governance.read_checkpoint_snapshot(checkpoint) -> dict`
+- `governance.recovery_replay_steps(action) -> list[dict]`
+- `app.py` keeps compatibility wrappers for the old names and injects `AGENT_CHECKPOINT_INDEX_PATH`, `AGENT_RECOVERY_PATH`, and `AGENT_RECOVERY_PLANS_PATH`.
+
+### 3. Contracts
+
+- `governance.py` may read already-selected JSONL store paths and checkpoint snapshot files, but must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, or draw functions.
+- Checkpoint/recovery history helpers filter rows by exact `task_id` and preserve row order from the source ledger.
+- `checkpoint_index_by_id(...)` returns the latest matching row by reverse ledger scan, or `{}` when no row exists.
+- `latest_checkpoint_for_task(...)` uses existing row timestamp ordering and returns `{}` when a task has no checkpoint.
+- `read_checkpoint_snapshot(...)` returns only dictionary JSON payloads; missing path, unreadable file, invalid JSON, or non-dict JSON returns `{}`.
+- `recovery_replay_steps(...)` preserves the existing replay-step contract for `retry`, `cancelled`, `failed`, and `release_lock`, with an explicit `manual_review` fallback for unknown actions.
+- `app.py` remains the owner of checkpoint creation, recovery-plan artifact creation, recovery action execution, policy approval gates, single-writer release, subagent runtime mutation, panel projection, command routing, and current mutable storage roots.
+
+### 4. Validation & Error Matrix
+
+- Two checkpoint rows for a task -> `checkpoint_history(...)` returns both in ledger order.
+- Multiple checkpoints with timestamps -> `latest_checkpoint_for_task(...)` returns the newest row.
+- Unknown checkpoint id -> `{}`.
+- Bad checkpoint snapshot path, invalid JSON, or JSON list -> `{}`.
+- Recovery rows for multiple tasks -> only exact task rows are returned.
+- `retry` replay steps include restart/link replacement steps.
+- Unknown recovery action -> final step is `manual_review`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `recovery_panel_items(...)` stays in `app.py` but delegates checkpoint/recovery row lookup through compatibility wrappers.
+- Base: `append_recovery_plan(...)` still lives in `app.py` because it creates artifacts, reads app-owned task rows, and records policy state.
+- Bad: `governance.py` imports `State` or subagent runtime classes to decide whether a recovery is live.
+- Bad: `governance.py` queues approvals or mutates task/subagent runtime state during a read-model lookup.
+
+### 6. Tests Required
+
+- Unit tests must assert direct governance helper behavior for checkpoint histories, recovery histories, latest checkpoint selection, snapshot-read error handling, replay-step shaping, and app wrapper parity under retargeted paths.
+- `scripts/check_policy_gates.py` must assert the expanded governance boundary and wrapper parity.
+- `python3 scripts/check_policy_gates.py`, `python3 -m pytest -q -p no:cacheprovider`, `python3 -m compileall -q src scripts`, `git diff --check`, and release smoke gates must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# governance.py
+from ga_tui.app import State, AGENT_CHECKPOINT_INDEX_PATH
+```
+
+#### Correct
+
+```python
+# app.py
+def latest_checkpoint_for_task(task_id):
+    return governance.latest_checkpoint_for_task(AGENT_CHECKPOINT_INDEX_PATH, task_id)
+```
+
 ## Scenario: Secret Vault Value Helper Boundary
 
 ### 1. Scope / Trigger

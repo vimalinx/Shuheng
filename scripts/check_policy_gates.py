@@ -768,6 +768,33 @@ def assert_governance_module_boundary() -> None:
         "kind": "subagent_task",
         "artifact_refs": [subagent_artifact_ref],
     })
+    checkpoint_index_path = tempfile.NamedTemporaryFile(delete=False).name
+    recovery_path = tempfile.NamedTemporaryFile(delete=False).name
+    recovery_plans_path = tempfile.NamedTemporaryFile(delete=False).name
+    checkpoint_snapshot_path = tempfile.NamedTemporaryFile(delete=False, suffix=".json").name
+    Path(checkpoint_snapshot_path).write_text(json.dumps({"task": {"task_id": "task_boundary"}}), encoding="utf-8")
+    ledgers.append_jsonl(checkpoint_index_path, {
+        "checkpoint_id": "ckpt_boundary_old",
+        "task_id": "task_boundary",
+        "timestamp": "2026-07-01T00:00:01",
+        "path": checkpoint_snapshot_path,
+    })
+    ledgers.append_jsonl(checkpoint_index_path, {
+        "checkpoint_id": "ckpt_boundary_latest",
+        "task_id": "task_boundary",
+        "timestamp": "2026-07-01T00:00:03",
+        "path": checkpoint_snapshot_path,
+    })
+    ledgers.append_jsonl(recovery_path, {"recovery_id": "recovery_boundary", "task_id": "task_boundary"})
+    ledgers.append_jsonl(recovery_plans_path, {"recovery_plan_id": "recoveryplan_boundary", "task_id": "task_boundary"})
+    assert len(governance_mod.checkpoint_history(checkpoint_index_path, "task_boundary")) == 2
+    assert governance_mod.checkpoint_index_by_id(checkpoint_index_path, "ckpt_boundary_old")["task_id"] == "task_boundary"
+    assert governance_mod.latest_checkpoint_for_task(checkpoint_index_path, "task_boundary")["checkpoint_id"] == "ckpt_boundary_latest"
+    assert governance_mod.read_checkpoint_snapshot({"path": checkpoint_snapshot_path})["task"]["task_id"] == "task_boundary"
+    assert governance_mod.recovery_history(recovery_path, "task_boundary")[0]["recovery_id"] == "recovery_boundary"
+    assert governance_mod.recovery_plan_history(recovery_plans_path, "task_boundary")[0]["recovery_plan_id"] == "recoveryplan_boundary"
+    assert governance_mod.recovery_replay_steps("retry")[-1]["step"] == "link_replacement_task"
+    assert governance_mod.recovery_replay_steps("unknown")[-1]["step"] == "manual_review"
 
     source = Path(governance_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -792,6 +819,9 @@ def assert_governance_module_boundary() -> None:
     old_progress = a.AGENT_PROGRESS_LEDGER_PATH
     old_locks = a.AGENT_LOCKS_PATH
     old_tasks = a.AGENT_TASK_LEDGER_PATH
+    old_checkpoints = a.AGENT_CHECKPOINT_INDEX_PATH
+    old_recovery = a.AGENT_RECOVERY_PATH
+    old_recovery_plans = a.AGENT_RECOVERY_PLANS_PATH
     old_subagents = a.SUBAGENTS_DIR
     old_temp_subagents = a.TEMP_SUBAGENTS_DIR
     try:
@@ -801,6 +831,9 @@ def assert_governance_module_boundary() -> None:
         a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(harness, "progress.jsonl")
         a.AGENT_LOCKS_PATH = os.path.join(harness, "locks.json")
         a.AGENT_TASK_LEDGER_PATH = os.path.join(harness, "tasks.jsonl")
+        a.AGENT_CHECKPOINT_INDEX_PATH = checkpoint_index_path
+        a.AGENT_RECOVERY_PATH = recovery_path
+        a.AGENT_RECOVERY_PLANS_PATH = recovery_plans_path
         a.SUBAGENTS_DIR = os.path.join(root, "subagents")
         a.TEMP_SUBAGENTS_DIR = os.path.join(root, "temp-subagents")
         artifact_ref = a.write_harness_artifact("boundary", "result", "body", source_task_id="task_boundary")
@@ -829,6 +862,12 @@ def assert_governance_module_boundary() -> None:
         assert a.acquire_single_writer_lock(sub, "task_boundary", "write")[0]
         assert a.current_writer_lock()["agent_id"] == "coder-boundary"
         assert a.release_single_writer_lock("task_boundary")
+        assert a.latest_checkpoint_for_task("task_boundary")["checkpoint_id"] == "ckpt_boundary_latest"
+        assert a.checkpoint_index_by_id("ckpt_boundary_old")["task_id"] == "task_boundary"
+        assert a.read_checkpoint_snapshot({"path": checkpoint_snapshot_path})["task"]["task_id"] == "task_boundary"
+        assert a.recovery_history("task_boundary")[0]["recovery_id"] == "recovery_boundary"
+        assert a.recovery_plan_history("task_boundary")[0]["recovery_plan_id"] == "recoveryplan_boundary"
+        assert a.recovery_replay_steps("release_lock")[-1]["step"] == "release_owned_writer_lock"
     finally:
         a.AGENT_HARNESS_DIR = old_harness
         a.AGENT_ARTIFACTS_DIR = old_artifacts_dir
@@ -836,6 +875,9 @@ def assert_governance_module_boundary() -> None:
         a.AGENT_PROGRESS_LEDGER_PATH = old_progress
         a.AGENT_LOCKS_PATH = old_locks
         a.AGENT_TASK_LEDGER_PATH = old_tasks
+        a.AGENT_CHECKPOINT_INDEX_PATH = old_checkpoints
+        a.AGENT_RECOVERY_PATH = old_recovery
+        a.AGENT_RECOVERY_PLANS_PATH = old_recovery_plans
         a.SUBAGENTS_DIR = old_subagents
         a.TEMP_SUBAGENTS_DIR = old_temp_subagents
 

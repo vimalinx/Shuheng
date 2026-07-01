@@ -260,6 +260,85 @@ def row_timestamp(row: dict[str, Any]) -> float:
     return parse_iso_timestamp(str(row.get("timestamp") or "")) or float(row.get("ts") or 0.0)
 
 
+def checkpoint_history(checkpoint_index_path: str, task_id: str) -> list[dict[str, Any]]:
+    task_id = str(task_id or "")
+    return [
+        row for row in ledger_store.read_jsonl(checkpoint_index_path)
+        if str(row.get("task_id") or "") == task_id
+    ]
+
+
+def recovery_history(recovery_path: str, task_id: str) -> list[dict[str, Any]]:
+    task_id = str(task_id or "")
+    return [
+        row for row in ledger_store.read_jsonl(recovery_path)
+        if str(row.get("task_id") or "") == task_id
+    ]
+
+
+def recovery_plan_history(recovery_plans_path: str, task_id: str) -> list[dict[str, Any]]:
+    task_id = str(task_id or "")
+    return [
+        row for row in ledger_store.read_jsonl(recovery_plans_path)
+        if str(row.get("task_id") or "") == task_id
+    ]
+
+
+def checkpoint_index_by_id(checkpoint_index_path: str, checkpoint_id: str) -> dict[str, Any]:
+    checkpoint_id = str(checkpoint_id or "")
+    for row in reversed(ledger_store.read_jsonl(checkpoint_index_path)):
+        if str(row.get("checkpoint_id") or "") == checkpoint_id:
+            return row
+    return {}
+
+
+def latest_checkpoint_for_task(checkpoint_index_path: str, task_id: str) -> dict[str, Any]:
+    rows = checkpoint_history(checkpoint_index_path, task_id)
+    if not rows:
+        return {}
+    return sorted(rows, key=row_timestamp)[-1]
+
+
+def read_checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    path = str(checkpoint.get("path") or "")
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def recovery_replay_steps(action: str) -> list[dict[str, Any]]:
+    action = str(action or "")
+    common = [
+        {"step": "validate_checkpoint_hash", "description": "Verify source checkpoint hash before using it as recovery input."},
+        {"step": "hydrate_checkpoint_context", "description": "Read task, agent snapshot, audit refs, recovery history, and single-writer lock from checkpoint."},
+        {"step": "evaluate_policy_gate", "description": "Apply program-level recovery policy before any state-changing action."},
+    ]
+    action_steps = {
+        "retry": [
+            {"step": "mark_original_superseded", "description": "Mark the stale task as superseded by a replacement task."},
+            {"step": "restart_assigned_agent", "description": "Re-delegate the checkpoint objective to the original assigned subagent."},
+            {"step": "link_replacement_task", "description": "Store replacement task id and checkpoint refs in recovery records."},
+        ],
+        "cancelled": [
+            {"step": "abort_runtime_if_present", "description": "Abort active runtime if the task is still attached to a live subagent."},
+            {"step": "mark_task_cancelled", "description": "Append a cancelled task ledger row and release owned writer lock."},
+        ],
+        "failed": [
+            {"step": "abort_runtime_if_present", "description": "Abort active runtime if possible."},
+            {"step": "mark_task_failed", "description": "Append a failed task ledger row and release owned writer lock."},
+        ],
+        "release_lock": [
+            {"step": "release_owned_writer_lock", "description": "Release single-writer lock only if the checkpoint task owns it."},
+        ],
+    }
+    return common + action_steps.get(action, [{"step": "manual_review", "description": f"Unknown recovery action {action}; require manual review."}])
+
+
 def subagent_result_artifact_ref(refs: Any) -> str:
     if not isinstance(refs, list):
         return ""

@@ -4822,73 +4822,31 @@ def collect_task_audit_refs(task_id: str) -> dict[str, list[str]]:
 
 
 def checkpoint_history(task_id: str) -> list[dict[str, Any]]:
-    task_id = str(task_id or "")
-    return [row for row in read_jsonl(AGENT_CHECKPOINT_INDEX_PATH) if str(row.get("task_id") or "") == task_id]
+    return governance_store.checkpoint_history(AGENT_CHECKPOINT_INDEX_PATH, task_id)
 
 
 def recovery_history(task_id: str) -> list[dict[str, Any]]:
-    task_id = str(task_id or "")
-    return [row for row in read_jsonl(AGENT_RECOVERY_PATH) if str(row.get("task_id") or "") == task_id]
+    return governance_store.recovery_history(AGENT_RECOVERY_PATH, task_id)
 
 
 def recovery_plan_history(task_id: str) -> list[dict[str, Any]]:
-    task_id = str(task_id or "")
-    return [row for row in read_jsonl(AGENT_RECOVERY_PLANS_PATH) if str(row.get("task_id") or "") == task_id]
+    return governance_store.recovery_plan_history(AGENT_RECOVERY_PLANS_PATH, task_id)
 
 
 def checkpoint_index_by_id(checkpoint_id: str) -> dict[str, Any]:
-    checkpoint_id = str(checkpoint_id or "")
-    for row in reversed(read_jsonl(AGENT_CHECKPOINT_INDEX_PATH)):
-        if str(row.get("checkpoint_id") or "") == checkpoint_id:
-            return row
-    return {}
+    return governance_store.checkpoint_index_by_id(AGENT_CHECKPOINT_INDEX_PATH, checkpoint_id)
 
 
 def latest_checkpoint_for_task(task_id: str) -> dict[str, Any]:
-    rows = checkpoint_history(task_id)
-    if not rows:
-        return {}
-    return sorted(rows, key=row_timestamp)[-1]
+    return governance_store.latest_checkpoint_for_task(AGENT_CHECKPOINT_INDEX_PATH, task_id)
 
 
 def read_checkpoint_snapshot(checkpoint: dict[str, Any]) -> dict[str, Any]:
-    path = str(checkpoint.get("path") or "")
-    if not path:
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return governance_store.read_checkpoint_snapshot(checkpoint)
 
 
 def recovery_replay_steps(action: str) -> list[dict[str, Any]]:
-    action = str(action or "")
-    common = [
-        {"step": "validate_checkpoint_hash", "description": "Verify source checkpoint hash before using it as recovery input."},
-        {"step": "hydrate_checkpoint_context", "description": "Read task, agent snapshot, audit refs, recovery history, and single-writer lock from checkpoint."},
-        {"step": "evaluate_policy_gate", "description": "Apply program-level recovery policy before any state-changing action."},
-    ]
-    action_steps = {
-        "retry": [
-            {"step": "mark_original_superseded", "description": "Mark the stale task as superseded by a replacement task."},
-            {"step": "restart_assigned_agent", "description": "Re-delegate the checkpoint objective to the original assigned subagent."},
-            {"step": "link_replacement_task", "description": "Store replacement task id and checkpoint refs in recovery records."},
-        ],
-        "cancelled": [
-            {"step": "abort_runtime_if_present", "description": "Abort active runtime if the task is still attached to a live subagent."},
-            {"step": "mark_task_cancelled", "description": "Append a cancelled task ledger row and release owned writer lock."},
-        ],
-        "failed": [
-            {"step": "abort_runtime_if_present", "description": "Abort active runtime if possible."},
-            {"step": "mark_task_failed", "description": "Append a failed task ledger row and release owned writer lock."},
-        ],
-        "release_lock": [
-            {"step": "release_owned_writer_lock", "description": "Release single-writer lock only if the checkpoint task owns it."},
-        ],
-    }
-    return common + action_steps.get(action, [{"step": "manual_review", "description": f"Unknown recovery action {action}; require manual review."}])
+    return governance_store.recovery_replay_steps(action)
 
 
 def append_recovery_plan(

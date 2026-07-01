@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ga_tui import app as app_module
 from ga_tui import governance
-from ga_tui.ledger_store import read_jsonl
+from ga_tui.ledger_store import append_jsonl, read_jsonl
 from ga_tui.ui_types import PolicyDecision, SubAgentRuntime
 
 
@@ -90,6 +90,72 @@ def test_subagent_result_task_row_helpers(tmp_path: Path, monkeypatch) -> None:
         "assigned_agent": "agent-coder",
         "artifact_refs": [artifact_ref],
     })
+
+
+def test_checkpoint_recovery_read_model_helpers(tmp_path: Path, monkeypatch) -> None:
+    checkpoint_index_path = str(tmp_path / "checkpoints.jsonl")
+    recovery_path = str(tmp_path / "recovery.jsonl")
+    recovery_plans_path = str(tmp_path / "recovery_plans.jsonl")
+    snapshot_old = tmp_path / "snapshot-old.json"
+    snapshot_new = tmp_path / "snapshot-new.json"
+    snapshot_bad = tmp_path / "snapshot-bad.json"
+    snapshot_list = tmp_path / "snapshot-list.json"
+    snapshot_old.write_text(json.dumps({"task": {"task_id": "task_a"}, "status": "working"}), encoding="utf-8")
+    snapshot_new.write_text(json.dumps({"task": {"task_id": "task_a"}, "status": "failed"}), encoding="utf-8")
+    snapshot_bad.write_text("{bad json", encoding="utf-8")
+    snapshot_list.write_text("[]", encoding="utf-8")
+
+    append_jsonl(checkpoint_index_path, {
+        "checkpoint_id": "ckpt_old",
+        "task_id": "task_a",
+        "timestamp": "2026-07-01T00:00:01",
+        "path": str(snapshot_old),
+    })
+    append_jsonl(checkpoint_index_path, {
+        "checkpoint_id": "ckpt_latest",
+        "task_id": "task_a",
+        "timestamp": "2026-07-01T00:00:05",
+        "path": str(snapshot_new),
+    })
+    append_jsonl(checkpoint_index_path, {
+        "checkpoint_id": "ckpt_other",
+        "task_id": "task_b",
+        "timestamp": "2026-07-01T00:00:09",
+        "path": str(snapshot_new),
+    })
+    append_jsonl(recovery_path, {"recovery_id": "recovery_a", "task_id": "task_a", "action": "retry"})
+    append_jsonl(recovery_path, {"recovery_id": "recovery_b", "task_id": "task_b", "action": "failed"})
+    append_jsonl(recovery_plans_path, {"recovery_plan_id": "recoveryplan_a", "task_id": "task_a"})
+    append_jsonl(recovery_plans_path, {"recovery_plan_id": "recoveryplan_b", "task_id": "task_b"})
+
+    history = governance.checkpoint_history(checkpoint_index_path, "task_a")
+    assert [row["checkpoint_id"] for row in history] == ["ckpt_old", "ckpt_latest"]
+    assert governance.checkpoint_index_by_id(checkpoint_index_path, "ckpt_latest")["task_id"] == "task_a"
+    assert governance.checkpoint_index_by_id(checkpoint_index_path, "missing") == {}
+    assert governance.latest_checkpoint_for_task(checkpoint_index_path, "task_a")["checkpoint_id"] == "ckpt_latest"
+    assert governance.latest_checkpoint_for_task(checkpoint_index_path, "missing") == {}
+    assert governance.recovery_history(recovery_path, "task_a")[0]["recovery_id"] == "recovery_a"
+    assert governance.recovery_plan_history(recovery_plans_path, "task_a")[0]["recovery_plan_id"] == "recoveryplan_a"
+    assert governance.read_checkpoint_snapshot({"path": str(snapshot_new)})["status"] == "failed"
+    assert governance.read_checkpoint_snapshot({"path": str(snapshot_bad)}) == {}
+    assert governance.read_checkpoint_snapshot({"path": str(snapshot_list)}) == {}
+    assert governance.read_checkpoint_snapshot({}) == {}
+
+    retry_steps = governance.recovery_replay_steps("retry")
+    assert retry_steps[0]["step"] == "validate_checkpoint_hash"
+    assert any(step["step"] == "restart_assigned_agent" for step in retry_steps)
+    assert governance.recovery_replay_steps("unknown")[-1]["step"] == "manual_review"
+
+    monkeypatch.setattr(app_module, "AGENT_CHECKPOINT_INDEX_PATH", checkpoint_index_path)
+    monkeypatch.setattr(app_module, "AGENT_RECOVERY_PATH", recovery_path)
+    monkeypatch.setattr(app_module, "AGENT_RECOVERY_PLANS_PATH", recovery_plans_path)
+    assert app_module.checkpoint_history("task_a") == history
+    assert app_module.latest_checkpoint_for_task("task_a")["checkpoint_id"] == "ckpt_latest"
+    assert app_module.checkpoint_index_by_id("ckpt_old")["path"] == str(snapshot_old)
+    assert app_module.recovery_history("task_a")[0]["recovery_id"] == "recovery_a"
+    assert app_module.recovery_plan_history("task_a")[0]["recovery_plan_id"] == "recoveryplan_a"
+    assert app_module.read_checkpoint_snapshot({"path": str(snapshot_old)})["status"] == "working"
+    assert app_module.recovery_replay_steps("release_lock")[-1]["step"] == "release_owned_writer_lock"
 
 
 def test_progress_approval_artifact_and_trace_round_trip(tmp_path: Path) -> None:
