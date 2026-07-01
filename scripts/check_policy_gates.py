@@ -355,6 +355,10 @@ def assert_rendering_module_boundary() -> None:
         "subagent_result_metadata_detail_lines",
         "subagent_result_notice_body_text",
         "format_subagent_result_notice_text",
+        "subagent_result_reply_excerpt_text",
+        "subagent_result_context_confidence",
+        "format_subagent_result_context_update_text",
+        "bounded_subagent_context_updates",
         "is_table_separator",
         "split_table_row",
         "table_layout_lines",
@@ -679,6 +683,64 @@ def assert_rendering_module_boundary() -> None:
         "task_123",
         "artifact://subagent-results/report.md",
         notice_body,
+    )
+    rendered_context_body = "可见回复\n\n---\nConfidence: **高**"
+    reply, context_metadata = rendering_mod.subagent_result_reply_excerpt_text(rendered_context_body, 80)
+    assert reply == "可见回复"
+    assert context_metadata == ["Confidence: **高**"]
+    assert rendering_mod.subagent_result_context_confidence(context_metadata) == "高"
+    assert rendering_mod.format_subagent_result_context_update_text(
+        name="研究员",
+        agent_id="agent-research",
+        bus_task_id="task_123",
+        artifact_ref="artifact://subagent-results/report.md",
+        reply=reply,
+        session_key_value="model_responses_boundary.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+        confidence="高",
+    ) == (
+        "Subagent result available in current session context:\n"
+        "- session_key: model_responses_boundary.txt\n"
+        "- subagent: 研究员 (agent-research)\n"
+        "- task_id: task_123\n"
+        "- status: completed\n"
+        "- role: researcher\n"
+        "- parent_task_id: task_parent\n"
+        "- plan_id: plan_root\n"
+        "- artifact_ref: artifact://subagent-results/report.md\n"
+        "- confidence: 高\n"
+        "- instruction: Use this scoped current-session result directly for follow-up status questions; do not search historical session logs unless the user asks for archives.\n"
+        "\n"
+        "Reply excerpt:\n"
+        "可见回复"
+    )
+    assert rendering_mod.bounded_subagent_context_updates(["old", "dup", "new", "dup"], 2, 100) == "dup\n\nnew"
+    app_context_rendered = a.render_subagent_result_body(rendered_context_body, fold_process=True)
+    app_reply, app_context_metadata = rendering_mod.subagent_result_reply_excerpt_text(app_context_rendered, 80)
+    assert a.subagent_result_reply_excerpt(rendered_context_body, 80) == (app_reply, app_context_metadata)
+    assert a.format_subagent_result_context_update(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        rendered_context_body,
+        session_key_value="model_responses_boundary.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+    ) == rendering_mod.format_subagent_result_context_update_text(
+        name="研究员",
+        agent_id="agent-research",
+        bus_task_id="task_123",
+        artifact_ref="artifact://subagent-results/report.md",
+        reply=app_reply,
+        session_key_value="model_responses_boundary.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+        confidence=rendering_mod.subagent_result_context_confidence(app_context_metadata),
     )
     marker_text = "intro\nLLM Running (Turn 1) ...\nbody\nLLM Running (Turn 2) ...\nnext\n"
     assert rendering_mod.split_top_level_turn_markers(marker_text) == [
@@ -1033,6 +1095,10 @@ def assert_rendering_module_boundary() -> None:
         "def subagent_result_metadata_detail_lines",
         "def subagent_result_notice_body_text",
         "def format_subagent_result_notice_text",
+        "def subagent_result_reply_excerpt_text",
+        "def subagent_result_context_confidence",
+        "def format_subagent_result_context_update_text",
+        "def bounded_subagent_context_updates",
         "def is_table_separator",
         "def split_table_row",
         "def table_layout_lines",

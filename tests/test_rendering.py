@@ -394,6 +394,129 @@ def test_app_subagent_result_notice_format_wrappers_delegate_to_rendering_helper
     )
 
 
+def test_subagent_result_context_update_helpers_shape_excerpt_confidence_and_budget() -> None:
+    rendered = (
+        "可见回复正文\n"
+        "\n"
+        "---\n"
+        "Findings:\n"
+        "1. 发现一\n"
+        "Confidence: **高**\n"
+    )
+    excerpt, metadata_lines = rendering.subagent_result_reply_excerpt_text(rendered, 80)
+
+    assert excerpt == "可见回复正文"
+    assert metadata_lines == ["Findings:", "1. 发现一", "Confidence: **高**"]
+    assert rendering.subagent_result_reply_excerpt_text("abcdef", 3) == (
+        "abc\n...（回复过长，完整内容见 artifact）",
+        [],
+    )
+    assert rendering.subagent_result_reply_excerpt_text("", 80) == ("(empty result)", [])
+    assert rendering.subagent_result_context_confidence(metadata_lines) == "高"
+    assert rendering.subagent_result_context_confidence(["Risks: 无"]) == ""
+
+    update = rendering.format_subagent_result_context_update_text(
+        name="研究员",
+        agent_id="agent-research",
+        bus_task_id="task_123",
+        artifact_ref="artifact://subagent-results/report.md",
+        reply=excerpt,
+        session_key_value="model_responses_1.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+        confidence="高",
+    )
+    assert update == (
+        "Subagent result available in current session context:\n"
+        "- session_key: model_responses_1.txt\n"
+        "- subagent: 研究员 (agent-research)\n"
+        "- task_id: task_123\n"
+        "- status: completed\n"
+        "- role: researcher\n"
+        "- parent_task_id: task_parent\n"
+        "- plan_id: plan_root\n"
+        "- artifact_ref: artifact://subagent-results/report.md\n"
+        "- confidence: 高\n"
+        "- instruction: Use this scoped current-session result directly for follow-up status questions; do not search historical session logs unless the user asks for archives.\n"
+        "\n"
+        "Reply excerpt:\n"
+        "可见回复正文"
+    )
+    assert rendering.bounded_subagent_context_updates(
+        ["old", "duplicate", "middle", "duplicate", "new"],
+        3,
+        100,
+    ) == "duplicate\n\nmiddle\n\nnew"
+    assert rendering.bounded_subagent_context_updates(
+        ["first", "second-long", "third"],
+        3,
+        len("third") + 2 + 1,
+    ) == "third"
+
+
+def test_app_subagent_result_context_update_wrappers_delegate_to_rendering_helpers() -> None:
+    body = "可见回复正文\n\n---\nConfidence: **高**"
+    rendered = app_module.render_subagent_result_body(body, fold_process=True)
+    reply, metadata_lines = rendering.subagent_result_reply_excerpt_text(
+        rendered,
+        app_module.SUBAGENT_CONTEXT_REPLY_LIMIT,
+    )
+
+    assert app_module.subagent_result_reply_excerpt(body) == (reply, metadata_lines)
+    assert app_module.format_subagent_result_context_update(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        body,
+        session_key_value="model_responses_1.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+    ) == rendering.format_subagent_result_context_update_text(
+        name="研究员",
+        agent_id="agent-research",
+        bus_task_id="task_123",
+        artifact_ref="artifact://subagent-results/report.md",
+        reply=reply,
+        session_key_value="model_responses_1.txt",
+        parent_task_id="task_parent",
+        plan_id="plan_root",
+        role="researcher",
+        confidence=rendering.subagent_result_context_confidence(metadata_lines),
+    )
+
+    notice = app_module.format_subagent_result_notice_parts(
+        "研究员",
+        "agent-research",
+        "task_123",
+        "artifact://subagent-results/report.md",
+        body,
+    )
+    assert "Subagent result available in current session context" in app_module.subagent_result_context_update_from_notice(
+        notice,
+        session_key_value="model_responses_1.txt",
+    )
+
+    messages = [
+        app_module.Message("system", notice),
+        app_module.Message("assistant", "ignored"),
+        app_module.Message("system", notice),
+    ]
+    updates = [
+        app_module.subagent_result_context_update_from_notice(notice, session_key_value="model_responses_1.txt"),
+        app_module.subagent_result_context_update_from_notice(notice, session_key_value="model_responses_1.txt"),
+    ]
+    assert app_module.subagent_context_updates_from_messages(messages, "/tmp/model_responses_1.txt") == (
+        rendering.bounded_subagent_context_updates(
+            updates,
+            app_module.SUBAGENT_CONTEXT_UPDATE_LIMIT,
+            app_module.SUBAGENT_CONTEXT_TOTAL_LIMIT,
+        )
+    )
+
+
 def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
     for name in (
         "SUBAGENT_RESULT_HEADER_RE",
@@ -411,6 +534,10 @@ def test_app_subagent_result_notice_helpers_are_rendering_aliases() -> None:
         "subagent_result_metadata_detail_lines",
         "subagent_result_notice_body_text",
         "format_subagent_result_notice_text",
+        "subagent_result_reply_excerpt_text",
+        "subagent_result_context_confidence",
+        "format_subagent_result_context_update_text",
+        "bounded_subagent_context_updates",
     ):
         assert getattr(app_module, name) is getattr(rendering, name), name
 

@@ -408,6 +408,86 @@ def format_subagent_result_notice_text(
     )
 
 
+def subagent_result_reply_excerpt_text(rendered: str, limit: int) -> tuple[str, list[str]]:
+    rendered = clean_text(rendered).strip() or "(empty result)"
+    reply, metadata_lines = split_subagent_result_reply_and_metadata(rendered)
+    excerpt = clean_text(reply or rendered).strip() or "(empty result)"
+    if len(excerpt) > limit:
+        excerpt = excerpt[:limit].rstrip() + "\n...（回复过长，完整内容见 artifact）"
+    return excerpt, metadata_lines
+
+
+def subagent_result_context_confidence(metadata_lines: list[str]) -> str:
+    for label, value in subagent_result_metadata_entries(metadata_lines):
+        if label == "Confidence":
+            return truncate_cells(strip_inline_markdown(value).strip("* -"), 80)
+    return ""
+
+
+def format_subagent_result_context_update_text(
+    *,
+    name: str,
+    agent_id: str,
+    bus_task_id: str,
+    artifact_ref: str,
+    reply: str,
+    session_key_value: str = "",
+    parent_task_id: str = "",
+    plan_id: str = "",
+    role: str = "",
+    confidence: str = "",
+) -> str:
+    lines = [
+        "Subagent result available in current session context:",
+        f"- session_key: {session_key_value or 'current'}",
+        f"- subagent: {name or agent_id or 'subagent'} ({agent_id or '-'})",
+        f"- task_id: {bus_task_id or '-'}",
+        "- status: completed",
+    ]
+    if role:
+        lines.append(f"- role: {role}")
+    if parent_task_id:
+        lines.append(f"- parent_task_id: {parent_task_id}")
+    if plan_id:
+        lines.append(f"- plan_id: {plan_id}")
+    if artifact_ref:
+        lines.append(f"- artifact_ref: {artifact_ref}")
+    if confidence:
+        lines.append(f"- confidence: {confidence}")
+    lines.extend([
+        "- instruction: Use this scoped current-session result directly for follow-up status questions; do not search historical session logs unless the user asks for archives.",
+        "",
+        "Reply excerpt:",
+        reply,
+    ])
+    return "\n".join(lines).strip()
+
+
+def bounded_subagent_context_updates(updates: list[str], update_limit: int, total_limit: int) -> str:
+    unique_updates: list[str] = []
+    seen: set[str] = set()
+    for update in updates:
+        if not update:
+            continue
+        key = hashlib.sha256(update.encode("utf-8", errors="ignore")).hexdigest()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_updates.append(update)
+
+    selected: list[str] = []
+    total = 0
+    for update in reversed(unique_updates):
+        if len(selected) >= update_limit:
+            break
+        cost = len(update) + 2
+        if selected and total + cost > total_limit:
+            break
+        selected.append(update)
+        total += cost
+    return "\n\n".join(reversed(selected))
+
+
 def is_table_separator(cells: list[str]) -> bool:
     return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
 

@@ -585,6 +585,10 @@ subagent_meta_label = rendering_helpers.subagent_meta_label
 subagent_result_metadata_detail_lines = rendering_helpers.subagent_result_metadata_detail_lines
 subagent_result_notice_body_text = rendering_helpers.subagent_result_notice_body_text
 format_subagent_result_notice_text = rendering_helpers.format_subagent_result_notice_text
+subagent_result_reply_excerpt_text = rendering_helpers.subagent_result_reply_excerpt_text
+subagent_result_context_confidence = rendering_helpers.subagent_result_context_confidence
+format_subagent_result_context_update_text = rendering_helpers.format_subagent_result_context_update_text
+bounded_subagent_context_updates = rendering_helpers.bounded_subagent_context_updates
 is_table_separator = rendering_helpers.is_table_separator
 split_table_row = rendering_helpers.split_table_row
 table_layout_lines = rendering_helpers.table_layout_lines
@@ -18819,11 +18823,7 @@ def render_subagent_result_body(text: str, fold_process: bool) -> str:
 
 def subagent_result_reply_excerpt(text: str, limit: int = SUBAGENT_CONTEXT_REPLY_LIMIT) -> tuple[str, list[str]]:
     rendered = render_subagent_result_body(text, fold_process=True)
-    reply, metadata_lines = split_subagent_result_reply_and_metadata(rendered)
-    excerpt = clean_text(reply or rendered).strip() or "(empty result)"
-    if len(excerpt) > limit:
-        excerpt = excerpt[:limit].rstrip() + "\n...（回复过长，完整内容见 artifact）"
-    return excerpt, metadata_lines
+    return subagent_result_reply_excerpt_text(rendered, limit)
 
 
 def format_subagent_result_context_update(
@@ -18845,35 +18845,19 @@ def format_subagent_result_context_update(
     plan_id = plan_id or str(parent_row.get("parent_task_id") or "")
     role = role or str(task_row.get("role") or task_row.get("assigned_role") or "")
     reply, metadata_lines = subagent_result_reply_excerpt(text)
-    confidence = ""
-    for label, value in subagent_result_metadata_entries(metadata_lines):
-        if label == "Confidence":
-            confidence = truncate_cells(strip_inline_markdown(value).strip("* -"), 80)
-            break
-    lines = [
-        "Subagent result available in current session context:",
-        f"- session_key: {session_key_value or 'current'}",
-        f"- subagent: {name or agent_id or 'subagent'} ({agent_id or '-'})",
-        f"- task_id: {bus_task_id or '-'}",
-        "- status: completed",
-    ]
-    if role:
-        lines.append(f"- role: {role}")
-    if parent_task_id:
-        lines.append(f"- parent_task_id: {parent_task_id}")
-    if plan_id:
-        lines.append(f"- plan_id: {plan_id}")
-    if artifact_ref:
-        lines.append(f"- artifact_ref: {artifact_ref}")
-    if confidence:
-        lines.append(f"- confidence: {confidence}")
-    lines.extend([
-        "- instruction: Use this scoped current-session result directly for follow-up status questions; do not search historical session logs unless the user asks for archives.",
-        "",
-        "Reply excerpt:",
-        reply,
-    ])
-    return "\n".join(lines).strip()
+    confidence = subagent_result_context_confidence(metadata_lines)
+    return format_subagent_result_context_update_text(
+        name=name,
+        agent_id=agent_id,
+        bus_task_id=bus_task_id,
+        artifact_ref=artifact_ref,
+        reply=reply,
+        session_key_value=session_key_value,
+        parent_task_id=parent_task_id,
+        plan_id=plan_id,
+        role=role,
+        confidence=confidence,
+    )
 
 
 def subagent_result_context_update_from_notice(text: str, *, session_key_value: str = "") -> str:
@@ -18893,29 +18877,14 @@ def subagent_result_context_update_from_notice(text: str, *, session_key_value: 
 def subagent_context_updates_from_messages(messages: list[Message], path: str = "") -> str:
     session_key_value = session_key(path) if path else ""
     updates: list[str] = []
-    seen: set[str] = set()
     for msg in messages:
         if msg.role != "system":
             continue
         update = subagent_result_context_update_from_notice(msg.content, session_key_value=session_key_value)
         if not update:
             continue
-        key = hashlib.sha256(update.encode("utf-8", errors="ignore")).hexdigest()
-        if key in seen:
-            continue
-        seen.add(key)
         updates.append(update)
-    selected: list[str] = []
-    total = 0
-    for update in reversed(updates):
-        if len(selected) >= SUBAGENT_CONTEXT_UPDATE_LIMIT:
-            break
-        cost = len(update) + 2
-        if selected and total + cost > SUBAGENT_CONTEXT_TOTAL_LIMIT:
-            break
-        selected.append(update)
-        total += cost
-    return "\n\n".join(reversed(selected))
+    return bounded_subagent_context_updates(updates, SUBAGENT_CONTEXT_UPDATE_LIMIT, SUBAGENT_CONTEXT_TOTAL_LIMIT)
 
 
 def subagent_result_metadata_detail_blocks(notice: dict[str, str], metadata_lines: list[str], width: int) -> list[RenderLine]:
