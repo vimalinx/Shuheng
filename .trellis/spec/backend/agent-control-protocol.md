@@ -2513,7 +2513,7 @@ token panel -> OMP get_state.contextUsage
 
 - Hidden block: `<ga-control>{...}</ga-control>`
 - Fenced block: ````ga-control`
-- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, and v2-to-internal-action coercion.
+- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, control-result continuation helper parsing/formatting, and v2-to-internal-action coercion.
 - Execution module: `src/ga_tui/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
 - Batch envelope:
 
@@ -2556,7 +2556,7 @@ token panel -> OMP get_state.contextUsage
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
 - `install_tui_control_hint()` must replace any previous GenericAgent-TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
-- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
+- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `control_result_continuation_*()` helpers, `control_explicitly_requests_continuation()`, `format_control_result_continuation_prompt()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
 - `src/ga_tui/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
 
 ### 4. Validation & Error Matrix
@@ -3470,6 +3470,7 @@ append_trace(task_id, "runtime_task_requested", payload=event_payload)
 - Continuation prompt block: `[GA TUI Control Result Continuation] ... [/GA TUI Control Result Continuation]`.
 - State counters: per-signature `auto_control_continue_attempts`, session cap `auto_control_continue_count`.
 - Structured continuation fields: `continue_after`, `next_action_required`, `requires_continuation`, `workflow_state`, `orchestrator_state`, and `next_action`.
+- Pure helper ownership: `control_protocol.py` owns continuation action/state constants, result signatures, metadata discovery, explicit-continuation predicates, continuation-needed predicates, and prompt text formatting over explicit inputs.
 
 ### 3. Contracts
 
@@ -3479,6 +3480,7 @@ append_trace(task_id, "runtime_task_requested", payload=event_payload)
 - Controls that already delegated child work, such as `delegate.create`, must not trigger this fallback because the next event should be the subagent result.
 - If an executable task plan exists, `maybe_queue_orchestrator_plan_continuation()` remains the primary mechanism and this fallback does not run.
 - New user-started main tasks reset the control-continuation counters.
+- `app.py` remains the Orchestrator owner for `maybe_queue_orchestrator_control_continuation(...)`, state gating, per-signature/session counters, blocked-system messages, and `start_main_agent_task(...)` side effects.
 
 ### 4. Validation & Error Matrix
 

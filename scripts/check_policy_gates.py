@@ -7817,9 +7817,21 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert a.lifecycle_is_persistent is cp.lifecycle_is_persistent
     assert a.subagent_control_persistence_intent is cp.subagent_control_persistence_intent
     assert a.subagent_control_force_new_intent is cp.subagent_control_force_new_intent
+    assert a.CONTROL_CONTINUATION_ACTIONS is cp.CONTROL_CONTINUATION_ACTIONS
+    assert a.STRUCTURED_CONTINUATION_STATES is cp.STRUCTURED_CONTINUATION_STATES
+    assert a.control_result_continuation_signature is cp.control_result_continuation_signature
+    assert a.control_continuation_metadata is cp.control_continuation_metadata
+    assert a.control_explicitly_requests_continuation is cp.control_explicitly_requests_continuation
+    assert a.control_result_continuation_needed is cp.control_result_continuation_needed
+    assert a.format_control_result_continuation_prompt is cp.format_control_result_continuation_prompt
     assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
+    assert cp.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
+    assert cp.control_continuation_metadata.__module__ == "ga_tui.control_protocol"
+    assert cp.control_explicitly_requests_continuation.__module__ == "ga_tui.control_protocol"
+    assert cp.control_result_continuation_needed.__module__ == "ga_tui.control_protocol"
+    assert cp.format_control_result_continuation_prompt.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent({"persistent": True}, "", "", "", "") == (True, False)
     assert cp.subagent_control_persistence_intent({"temporary": True}, "", "", "", "") == (False, True)
     assert cp.subagent_control_persistence_intent({}, "persistent", "durable", "长期", "profile") == (False, True)
@@ -7827,10 +7839,34 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert cp.subagent_control_force_new_intent({"reuse_existing": "no"}, "", "", "", "")
     assert cp.subagent_control_force_new_intent({"reuse_policy": "no-reuse"}, "", "", "", "")
     assert not cp.subagent_control_force_new_intent({}, "new", "force_new", "separate", "never", "do not reuse")
+    continuation_control = {
+        "action": "agent_create",
+        "_ga_control_envelope": {"workflow": {"workflow_state": "in-progress"}},
+    }
+    assert cp.control_explicitly_requests_continuation(continuation_control)
+    assert cp.control_result_continuation_needed("", [continuation_control])
+    assert not cp.control_result_continuation_needed("visible prose says continue", [{"action": "agent_create"}])
+    assert not cp.control_result_continuation_needed("", [{"action": "agent_run", "continue_after": True}])
+    continuation_prompt = cp.format_control_result_continuation_prompt(
+        reason="policy-gate",
+        control_results=["- agent_create Worker: ok"],
+        original_text='visible <ga-control>{"schema_version":"ga-control.v2","actions":[]}</ga-control>',
+    )
+    assert "Control results:" in continuation_prompt
+    assert "- agent_create Worker: ok" in continuation_prompt
+    assert "Continue the user-approved workflow yourself" in continuation_prompt
+    assert "schema_version" not in continuation_prompt
     assert "curses" not in cp.__dict__
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "def subagent_control_persistence_intent(" not in app_source
     assert "def subagent_control_force_new_intent(" not in app_source
+    assert "def control_result_continuation_signature(" not in app_source
+    assert "def control_continuation_metadata(" not in app_source
+    assert "def control_explicitly_requests_continuation(" not in app_source
+    assert "def control_result_continuation_needed(" not in app_source
+    assert "def format_control_result_continuation_prompt(" not in app_source
+    assert "CONTROL_CONTINUATION_ACTIONS = {" not in app_source
+    assert "STRUCTURED_CONTINUATION_STATES = {" not in app_source
     existing = a.create_subagent(
         state,
         "Obsidiam知识库管家",

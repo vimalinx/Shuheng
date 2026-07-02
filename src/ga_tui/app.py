@@ -52,9 +52,11 @@ try:
     )
     from .control_protocol import (
         AGENT_TASK_SCHEMA,
+        CONTROL_CONTINUATION_ACTIONS,
         CURRENT_TUI_CONTROL_ACTIONS,
         GA_CONTROL_SCHEMA,
         SESSION_V2_TO_EXECUTION_ACTION,
+        STRUCTURED_CONTINUATION_STATES,
         TUI_CONTROL_FENCE_RE,
         TUI_CONTROL_JSON_FENCE_RE,
         TUI_CONTROL_RE,
@@ -65,7 +67,11 @@ try:
         agenttask_target_selector,
         agenttask_work_order,
         coerce_ga_control_action,
+        control_continuation_metadata,
+        control_explicitly_requests_continuation,
         control_falsey,
+        control_result_continuation_needed,
+        control_result_continuation_signature,
         control_truthy,
         controls_from_json_payload,
         controls_from_json_text,
@@ -73,6 +79,7 @@ try:
         extract_tui_controls,
         force_new_from_v2,
         format_agenttask_worker_prompt,
+        format_control_result_continuation_prompt,
         known_tui_control,
         lifecycle_is_persistent,
         load_ga_control_json_text,
@@ -173,9 +180,11 @@ except Exception:
     )
     from control_protocol import (  # type: ignore
         AGENT_TASK_SCHEMA,
+        CONTROL_CONTINUATION_ACTIONS,
         CURRENT_TUI_CONTROL_ACTIONS,
         GA_CONTROL_SCHEMA,
         SESSION_V2_TO_EXECUTION_ACTION,
+        STRUCTURED_CONTINUATION_STATES,
         TUI_CONTROL_FENCE_RE,
         TUI_CONTROL_JSON_FENCE_RE,
         TUI_CONTROL_RE,
@@ -186,7 +195,11 @@ except Exception:
         agenttask_target_selector,
         agenttask_work_order,
         coerce_ga_control_action,
+        control_continuation_metadata,
+        control_explicitly_requests_continuation,
         control_falsey,
+        control_result_continuation_needed,
+        control_result_continuation_signature,
         control_truthy,
         controls_from_json_payload,
         controls_from_json_text,
@@ -194,6 +207,7 @@ except Exception:
         extract_tui_controls,
         force_new_from_v2,
         format_agenttask_worker_prompt,
+        format_control_result_continuation_prompt,
         known_tui_control,
         lifecycle_is_persistent,
         load_ga_control_json_text,
@@ -8913,104 +8927,6 @@ def maybe_queue_orchestrator_plan_continuation(state: State, reason: str) -> boo
     )
     prompt = format_plan_continuation_prompt(state, reason=reason, unfinished_rows=unfinished_rows)
     return start_main_agent_task(state, prompt, source="ga-tui:auto_plan_continue", clear_history=False)
-
-
-CONTROL_CONTINUATION_ACTIONS = {
-    "subagent_create",
-    "agent_create",
-    "create_subagent",
-    "new_subagent",
-    "subagent_profile",
-    "subagent_role",
-    "subagent_model",
-    "task_plan",
-    "task_update",
-    "task_start",
-}
-
-STRUCTURED_CONTINUATION_STATES = {
-    "in_progress",
-    "running",
-    "continuing",
-    "needs_next_action",
-    "needs_followup",
-    "partial",
-    "unfinished",
-}
-
-
-def control_result_continuation_signature(text: str, control_results: list[str]) -> str:
-    payload = "\n".join([strip_tui_controls(text), *control_results])
-    digest = hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
-    return digest[:16]
-
-
-def control_continuation_metadata(control: dict[str, Any]) -> list[dict[str, Any]]:
-    candidates = [control]
-    envelope = control.get("_ga_control_envelope")
-    if isinstance(envelope, dict):
-        candidates.append(envelope)
-    for key in ("workflow", "orchestration", "continuation"):
-        value = control.get(key)
-        if isinstance(value, dict):
-            candidates.append(value)
-        if isinstance(envelope, dict) and isinstance(envelope.get(key), dict):
-            candidates.append(envelope[key])
-    return candidates
-
-
-def control_explicitly_requests_continuation(control: dict[str, Any]) -> bool:
-    for item in control_continuation_metadata(control):
-        for key in ("continue_after", "next_action_required", "requires_continuation"):
-            if key in item and control_truthy(item.get(key)):
-                return True
-        state = str(item.get("workflow_state") or item.get("orchestrator_state") or item.get("state") or "").strip().lower().replace("-", "_")
-        if state in STRUCTURED_CONTINUATION_STATES:
-            return True
-        next_action = item.get("next_action")
-        if isinstance(next_action, dict) and next_action:
-            return True
-        if isinstance(next_action, str) and next_action.strip():
-            return True
-    return False
-
-
-def control_result_continuation_needed(text: str, controls: list[dict[str, Any]]) -> bool:
-    del text
-    if not controls:
-        return False
-    if not any(control_explicitly_requests_continuation(control) for control in controls):
-        return False
-    actions = {str(control.get("action") or "").strip().lower().replace("-", "_") for control in controls}
-    if actions & {"subagent_ask", "subagent_run", "subagent_input", "agent_ask", "agent_run"}:
-        return False
-    return bool(actions & CONTROL_CONTINUATION_ACTIONS)
-
-
-def format_control_result_continuation_prompt(
-    *,
-    reason: str,
-    control_results: list[str],
-    original_text: str,
-) -> str:
-    visible = truncate_cells(strip_tui_controls(original_text).strip(), 1200)
-    lines = [
-        "[GA TUI Control Result Continuation]",
-        f"Reason: {reason}",
-        "",
-        "The previous turn executed real TUI controls and explicitly requested continuation via structured control metadata.",
-        "Continue the user-approved workflow yourself; do not ask the user to confirm the already-approved next step.",
-        "Use TUI query tools if needed, then emit the next hidden <ga-control> block for delegation, task updates, configuration, or blocker reporting.",
-        "If the prior visible plan was only natural language and no task ledger exists, first create or update the task ledger before continuing.",
-        "Do not repeat controls that already succeeded.",
-        "",
-        "Control results:",
-        *control_results,
-    ]
-    if visible:
-        lines += ["", "Previous visible text:", visible]
-    lines.append("[/GA TUI Control Result Continuation]")
-    return "\n".join(lines)
 
 
 def maybe_queue_orchestrator_control_continuation(
