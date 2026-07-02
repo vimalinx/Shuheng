@@ -17,6 +17,7 @@ def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> Non
     assert app_module.format_agent_control_result is control_protocol.format_agent_control_result
     assert app_module.agenttask_payload_from_prompt is control_protocol.agenttask_payload_from_prompt
     assert app_module.policy_relevant_subagent_prompt_text is control_protocol.policy_relevant_subagent_prompt_text
+    assert app_module.explicit_policy_action_for_subagent_task is control_protocol.explicit_policy_action_for_subagent_task
     assert control_protocol.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
@@ -24,6 +25,7 @@ def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> Non
     assert control_protocol.format_agent_control_result.__module__ == "ga_tui.control_protocol"
     assert control_protocol.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
     assert control_protocol.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
+    assert control_protocol.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
 
 
 def test_subagent_control_persistence_intent_explicit_lifecycle_flags() -> None:
@@ -222,3 +224,61 @@ def test_agenttask_prompt_envelope_helpers_fallback_for_missing_invalid_or_empty
         }
     )
     assert control_protocol.policy_relevant_subagent_prompt_text(empty_objective) == empty_objective
+
+
+def test_explicit_policy_action_for_subagent_task_reads_envelope_fields_in_order() -> None:
+    helper = control_protocol.explicit_policy_action_for_subagent_task
+
+    assert helper("plain prompt") == ""
+    assert helper("[GA TUI AgentTask Envelope v2]\nnot json\n[/GA TUI AgentTask Envelope v2]") == ""
+
+    top_level = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "policy_action": "Deploy-Service",
+            "approval_required_for": "access_secret",
+            "approval": {"policy_action": "publish"},
+            "capability_contract": {"policy_action": "repo_write"},
+        }
+    )
+    assert helper(top_level) == "deploy_service"
+
+    top_level_list = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "policy_action": ["", "ignored"],
+            "approval_required_for": ["Spend-Money", "deploy"],
+        }
+    )
+    assert helper(top_level_list) == "spend_money"
+
+    nested_approval = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "approval": {"policy_action": "External-Send"},
+            "capability_contract": {"policy_action": "repo_write"},
+        }
+    )
+    assert helper(nested_approval) == "external_send"
+
+    nested_approval_list = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "approval": {"approval_required_for": ["Delete-File"]},
+            "capability_contract": {"policy_action": "repo_write"},
+        }
+    )
+    assert helper(nested_approval_list) == "delete_file"
+
+    capability_contract = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "capability_contract": {"policy_action": "Modify-Permission-Policy"},
+        }
+    )
+    assert helper(capability_contract) == "modify_permission_policy"

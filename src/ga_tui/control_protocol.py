@@ -376,6 +376,28 @@ def policy_relevant_subagent_prompt_text(prompt: str) -> str:
     return objective or (prompt or "")
 
 
+def explicit_policy_action_for_subagent_task(prompt: str) -> str:
+    payload = agenttask_payload_from_prompt(prompt)
+    if not payload:
+        return ""
+    approval = payload.get("approval") if isinstance(payload.get("approval"), dict) else {}
+    capability_contract = payload.get("capability_contract") if isinstance(payload.get("capability_contract"), dict) else {}
+    for value in (
+        payload.get("policy_action"),
+        payload.get("approval_required_for"),
+        approval.get("policy_action"),
+        approval.get("approval_required_for"),
+        capability_contract.get("policy_action"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower().replace("-", "_")
+        if isinstance(value, list) and value:
+            first = str(value[0] or "").strip()
+            if first:
+                return first.lower().replace("-", "_")
+    return ""
+
+
 def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any]]:
     action = normalized_control_action(control)
     common = {

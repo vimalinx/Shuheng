@@ -77,6 +77,7 @@ try:
         controls_from_json_payload,
         controls_from_json_text,
         execution_control_from_v2,
+        explicit_policy_action_for_subagent_task,
         extract_tui_controls,
         force_new_from_v2,
         format_agent_control_result,
@@ -208,6 +209,7 @@ except Exception:
         controls_from_json_payload,
         controls_from_json_text,
         execution_control_from_v2,
+        explicit_policy_action_for_subagent_task,
         extract_tui_controls,
         force_new_from_v2,
         format_agent_control_result,
@@ -4577,28 +4579,6 @@ def subagent_task_schema_kwargs(
         "non_goals": list(contract.get("non_goals") or []),
         "success_criteria": list(contract.get("success_criteria") or []),
     }
-
-
-def explicit_policy_action_for_subagent_task(prompt: str) -> str:
-    payload = agenttask_payload_from_prompt(prompt)
-    if not payload:
-        return ""
-    approval = payload.get("approval") if isinstance(payload.get("approval"), dict) else {}
-    capability_contract = payload.get("capability_contract") if isinstance(payload.get("capability_contract"), dict) else {}
-    for value in (
-        payload.get("policy_action"),
-        payload.get("approval_required_for"),
-        approval.get("policy_action"),
-        approval.get("approval_required_for"),
-        capability_contract.get("policy_action"),
-    ):
-        if isinstance(value, str) and value.strip():
-            return value.strip().lower().replace("-", "_")
-        if isinstance(value, list) and value:
-            first = str(value[0] or "").strip()
-            if first:
-                return first.lower().replace("-", "_")
-    return ""
 
 
 def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> str:

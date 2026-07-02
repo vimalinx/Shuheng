@@ -7827,6 +7827,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert a.format_agent_control_result is cp.format_agent_control_result
     assert a.agenttask_payload_from_prompt is cp.agenttask_payload_from_prompt
     assert a.policy_relevant_subagent_prompt_text is cp.policy_relevant_subagent_prompt_text
+    assert a.explicit_policy_action_for_subagent_task is cp.explicit_policy_action_for_subagent_task
     assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
@@ -7838,6 +7839,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert cp.format_agent_control_result.__module__ == "ga_tui.control_protocol"
     assert cp.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
     assert cp.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
+    assert cp.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent({"persistent": True}, "", "", "", "") == (True, False)
     assert cp.subagent_control_persistence_intent({"temporary": True}, "", "", "", "") == (False, True)
     assert cp.subagent_control_persistence_intent({}, "persistent", "durable", "长期", "profile") == (False, True)
@@ -7875,8 +7877,17 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     )
     assert cp.agenttask_payload_from_prompt(agenttask_prompt)["work_order"]["objective"] == "bounded objective"
     assert cp.policy_relevant_subagent_prompt_text(agenttask_prompt) == "bounded objective"
+    explicit_policy_prompt = cp.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "approval": {"approval_required_for": ["Deploy-Service"]},
+        }
+    )
+    assert cp.explicit_policy_action_for_subagent_task(explicit_policy_prompt) == "deploy_service"
     assert cp.agenttask_payload_from_prompt("not an envelope") == {}
     assert cp.policy_relevant_subagent_prompt_text("not an envelope") == "not an envelope"
+    assert cp.explicit_policy_action_for_subagent_task("not an envelope") == ""
     assert "curses" not in cp.__dict__
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "def subagent_control_persistence_intent(" not in app_source
@@ -7889,6 +7900,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "def format_agent_control_result(" not in app_source
     assert "def agenttask_payload_from_prompt(" not in app_source
     assert "def policy_relevant_subagent_prompt_text(" not in app_source
+    assert "def explicit_policy_action_for_subagent_task(" not in app_source
     assert "CONTROL_CONTINUATION_ACTIONS = {" not in app_source
     assert "STRUCTURED_CONTINUATION_STATES = {" not in app_source
     existing = a.create_subagent(
