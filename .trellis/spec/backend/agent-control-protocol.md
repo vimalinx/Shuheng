@@ -901,8 +901,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   helper functions out of `src/ga_tui/app.py`.
 - Applies to: `src/ga_tui/commands.py`, compatibility aliases in `app.py`,
   `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
-  `/workspaces` completion, top-level visible command prefix matching,
-  completion insertion behavior, unit tests, and policy gates.
+  `/workspaces` completion, `/filter` / `/collapse` / `/expand` category
+  command row shaping over explicit category counts, top-level visible command
+  prefix matching, completion insertion behavior, unit tests, and policy gates.
 - Non-goal: This does not move command execution, `command_matches(...)`,
   `subagent_completion_rows(...)`, `agent_command_matches(...)`,
   `category_command_matches(...)`, `approval_command_matches(...)`, mutable
@@ -921,6 +922,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   - `AgentCommandCompletionDecision`.
   - `completion_insert_text(candidate)`.
   - `top_level_command_matches(text, candidates)`.
+  - `category_command_completion_rows(text, category_counts)`.
   - `agent_command_completion_decision(text)`.
   - `archived_command_matches(text)`.
   - `workspace_command_matches(text)`.
@@ -938,6 +940,14 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `COMMANDS`, invent hidden aliases, inspect `State`, or route specialized
   dynamic command families. Non-slash input and stripped input containing a
   space return no matches; matching is case-insensitive.
+- `category_command_completion_rows(...)` owns only deterministic row shaping
+  for `/filter`, `/collapse`, and `/expand` over an explicitly supplied ordered
+  iterable of `(label, count)` pairs. It may add the static `/filter off`,
+  `/collapse all`, and `/expand all` rows and may prefix-filter labels
+  case-insensitively. It must not inspect `State`, session history, session
+  metadata, category registries, or category sort policy. `app.py` remains
+  responsible for collecting category counts from history and applying
+  `category_sort_key(...)` before delegating to the helper.
 - `agent_command_completion_decision(...)` owns pure `/agent` input
   classification. It may return static rows, a subagent-completion request, a
   role-template-completion request, or no match, but it must not inspect
@@ -970,6 +980,14 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `[("/model", "", "...", True)]`.
 - `top_level_command_matches("/ll", [("/model", "", "...", True)])` -> `[]`.
 - `top_level_command_matches("/model extra", candidates)` -> `[]`.
+- `category_command_completion_rows("/filter ", [("Work", 2)])` ->
+  `[("/filter off", "", "关闭分类筛选", True), ("/filter Work", "", "2 个会话",
+  True)]`.
+- `category_command_completion_rows("/collapse w", [("Work", 2)])` ->
+  `[("/collapse Work", "", "2 个会话", True)]`.
+- `category_command_completion_rows("/expand ", [("Work", 2)])` ->
+  `[("/expand all", "", "全部分类", True), ("/expand Work", "", "2 个会话",
+  True)]`.
 - `archived_command_matches("/archived t")` -> `[("/archived toggle", "",
   "切换归档视图", True)]`.
 - `workspace_command_matches("/workspace r")` -> `[("/workspace refresh", "",
@@ -1003,6 +1021,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - Good: `commands.py` owns `top_level_command_matches(...)` over injected
   candidates, while `app.py` keeps the visible `COMMANDS` catalog and the
   specialized dynamic routing order.
+- Good: `commands.py` owns category command row shaping over injected
+  `(label, count)` pairs, while `app.py` keeps history/category metadata
+  ownership and sorting.
 - Base: Future slices may move more command parsing only after state,
   governance, history, rendering, and runtime dependencies are injectable.
 - Bad: `commands.py` imports `State` so it can inspect active subagents.
@@ -1019,6 +1040,11 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `/archived` and `/workspace` helper rows, and that the final static fallback
   routes `/mo` through the extracted helper without exposing `/llm` or
   `/models` hidden aliases.
+- Unit tests must assert direct `category_command_completion_rows(...)`
+  behavior for static rows, prefix filtering, count descriptions, and
+  non-matching input. App-level tests must assert `category_command_matches(...)`
+  still derives counts from `State.history` / session metadata and delegates row
+  shaping without moving history ownership into `commands.py`.
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
   helpers, `app.py` no longer defines the moved functions locally, and the new
   module has no reverse dependency into app/TUI/render/runtime/storage owners.

@@ -83,6 +83,29 @@ def top_level_command_matches(text: str, candidates: Iterable[CommandCandidate])
     return [candidate for candidate in candidates if candidate[0].lower().startswith(stripped_l)]
 
 
+def category_command_completion_rows(
+    text: str,
+    category_counts: Iterable[tuple[str, int]],
+) -> list[CommandCandidate]:
+    raw = text or ""
+    match = re.match(r"^/(filter|collapse|expand)\s+(.*)$", raw, re.I)
+    if not match:
+        return []
+    cmd = match.group(1).lower()
+    prefix = (match.group(2) or "").strip().lower()
+    rows: list[CommandCandidate] = []
+    if cmd == "filter" and "off".startswith(prefix):
+        rows.append(("/filter off", "", "关闭分类筛选", True))
+    if cmd in {"collapse", "expand"} and "all".startswith(prefix):
+        rows.append((f"/{cmd} all", "", "全部分类", True))
+    for label, count in category_counts:
+        label_text = str(label)
+        if prefix and not label_text.lower().startswith(prefix):
+            continue
+        rows.append((f"/{cmd} {label_text}", "", f"{int(count)} 个会话", True))
+    return rows
+
+
 def agent_command_completion_decision(text: str) -> AgentCommandCompletionDecision:
     raw = text or ""
     if not re.match(r"^/agent(?:\s|$)", raw):

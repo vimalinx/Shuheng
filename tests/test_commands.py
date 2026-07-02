@@ -12,6 +12,7 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.WORKSPACE_SUBCOMMANDS is commands.WORKSPACE_SUBCOMMANDS
     assert app_module.completion_insert_text is commands.completion_insert_text
     assert app_module.top_level_command_matches is commands.top_level_command_matches
+    assert app_module.category_command_completion_rows is commands.category_command_completion_rows
     assert app_module.AgentCommandCompletionDecision is commands.AgentCommandCompletionDecision
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
     assert app_module.archived_command_matches is commands.archived_command_matches
@@ -54,6 +55,32 @@ def test_top_level_command_matches_do_not_invent_hidden_aliases() -> None:
         "/ll",
         [*visible_candidates, ("/llm", "", "隐藏兼容别名", True)],
     ) == [("/llm", "", "隐藏兼容别名", True)]
+
+
+def test_category_command_completion_rows_use_explicit_category_counts() -> None:
+    category_counts = [("Work", 2), ("Personal", 1)]
+
+    assert commands.category_command_completion_rows("/filter ", category_counts) == [
+        ("/filter off", "", "关闭分类筛选", True),
+        ("/filter Work", "", "2 个会话", True),
+        ("/filter Personal", "", "1 个会话", True),
+    ]
+    assert commands.category_command_completion_rows("/filter o", category_counts) == [
+        ("/filter off", "", "关闭分类筛选", True),
+    ]
+    assert commands.category_command_completion_rows("/filter w", category_counts) == [
+        ("/filter Work", "", "2 个会话", True),
+    ]
+    assert commands.category_command_completion_rows("/collapse ", category_counts) == [
+        ("/collapse all", "", "全部分类", True),
+        ("/collapse Work", "", "2 个会话", True),
+        ("/collapse Personal", "", "1 个会话", True),
+    ]
+    assert commands.category_command_completion_rows("/expand p", category_counts) == [
+        ("/expand Personal", "", "1 个会话", True),
+    ]
+    assert commands.category_command_completion_rows("/filter", category_counts) == []
+    assert commands.category_command_completion_rows("/category ", category_counts) == []
 
 
 def test_archived_command_matches_filter_by_prefix() -> None:
@@ -154,6 +181,37 @@ def test_workspace_command_matches_filter_subcommands_and_reject_extra_args() ->
 def test_app_command_matches_still_uses_extracted_workspace_and_archived_helpers() -> None:
     assert app_module.command_matches("/archived t") == commands.archived_command_matches("/archived t")
     assert app_module.command_matches("/workspace r") == commands.workspace_command_matches("/workspace r")
+
+
+def test_app_category_command_matches_keeps_history_owned_counts_and_sorting() -> None:
+    state = app_module.State(agent=None)
+    alpha_path = "/tmp/shuheng-alpha.jsonl"
+    beta_path = "/tmp/shuheng-beta.jsonl"
+    beta_two_path = "/tmp/shuheng-beta-two.jsonl"
+    state.history = [
+        (beta_path, 20.0, "", 1),
+        (alpha_path, 10.0, "", 1),
+        (beta_two_path, 30.0, "", 1),
+    ]
+    state.session_meta = {
+        app_module.session_key(alpha_path): {"category": "Alpha"},
+        app_module.session_key(beta_path): {"category": "Beta"},
+        app_module.session_key(beta_two_path): {"category": "Beta"},
+    }
+
+    assert app_module.category_command_matches("/filter ", state) == [
+        ("/filter off", "", "关闭分类筛选", True),
+        ("/filter Alpha", "", "1 个会话", True),
+        ("/filter Beta", "", "2 个会话", True),
+    ]
+    assert app_module.category_command_matches("/collapse b", state) == [
+        ("/collapse Beta", "", "2 个会话", True),
+    ]
+    assert app_module.command_matches("/expand a", state) == [
+        ("/expand all", "", "全部分类", True),
+        ("/expand Alpha", "", "1 个会话", True),
+    ]
+    assert app_module.category_command_matches("/filter ", None) == []
 
 
 def test_app_command_matches_uses_top_level_helper_for_static_fallback() -> None:

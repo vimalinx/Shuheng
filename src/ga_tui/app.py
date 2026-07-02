@@ -15187,6 +15187,7 @@ WORKSPACE_SUBCOMMANDS = command_helpers.WORKSPACE_SUBCOMMANDS
 AgentCommandCompletionDecision = command_helpers.AgentCommandCompletionDecision
 completion_insert_text = command_helpers.completion_insert_text
 top_level_command_matches = command_helpers.top_level_command_matches
+category_command_completion_rows = command_helpers.category_command_completion_rows
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
 
 
@@ -15229,17 +15230,8 @@ def agent_command_matches(text: str, state: Optional[State]) -> list[tuple[str, 
 
 
 def category_command_matches(text: str, state: Optional[State]) -> list[tuple[str, str, str, bool]]:
-    raw = text or ""
-    match = re.match(r"^/(filter|collapse|expand)\s+(.*)$", raw, re.I)
-    if not match or state is None:
+    if state is None:
         return []
-    cmd = match.group(1).lower()
-    prefix = (match.group(2) or "").strip().lower()
-    rows: list[tuple[str, str, str, bool]] = []
-    if cmd == "filter" and "off".startswith(prefix):
-        rows.append(("/filter off", "", "关闭分类筛选", True))
-    if cmd in {"collapse", "expand"} and "all".startswith(prefix):
-        rows.append((f"/{cmd} all", "", "全部分类", True))
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     for path, _mtime, _first, _rounds in state.history:
@@ -15247,13 +15239,11 @@ def category_command_matches(text: str, state: Optional[State]) -> list[tuple[st
         key = category_key(label)
         labels[key] = label
         counts[key] = counts.get(key, 0) + 1
-    for key in sorted(labels, key=lambda item: category_sort_key(labels[item])):
-        label = labels[key]
-        count = counts.get(key, 0)
-        if prefix and not label.lower().startswith(prefix):
-            continue
-        rows.append((f"/{cmd} {label}", "", f"{count} 个会话", True))
-    return rows
+    category_counts = [
+        (labels[key], counts.get(key, 0))
+        for key in sorted(labels, key=lambda item: category_sort_key(labels[item]))
+    ]
+    return category_command_completion_rows(text, category_counts)
 
 
 archived_command_matches = command_helpers.archived_command_matches

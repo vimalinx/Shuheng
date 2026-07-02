@@ -414,6 +414,7 @@ def assert_commands_module_boundary() -> None:
         "AgentCommandCompletionDecision",
         "completion_insert_text",
         "top_level_command_matches",
+        "category_command_completion_rows",
         "agent_command_completion_decision",
         "archived_command_matches",
         "workspace_command_matches",
@@ -449,6 +450,20 @@ def assert_commands_module_boundary() -> None:
     ]
     assert commands_mod.top_level_command_matches("/model extra", command_candidates) == []
     assert commands_mod.top_level_command_matches("/ll", command_candidates) == []
+    category_counts = [("Work", 2), ("Personal", 1)]
+    assert commands_mod.category_command_completion_rows("/filter ", category_counts) == [
+        ("/filter off", "", "关闭分类筛选", True),
+        ("/filter Work", "", "2 个会话", True),
+        ("/filter Personal", "", "1 个会话", True),
+    ]
+    assert commands_mod.category_command_completion_rows("/collapse p", category_counts) == [
+        ("/collapse Personal", "", "1 个会话", True)
+    ]
+    assert commands_mod.category_command_completion_rows("/expand ", category_counts) == [
+        ("/expand all", "", "全部分类", True),
+        ("/expand Work", "", "2 个会话", True),
+        ("/expand Personal", "", "1 个会话", True),
+    ]
     assert commands_mod.archived_command_matches("/archived t") == [
         ("/archived toggle", "", "切换归档视图", True)
     ]
@@ -470,6 +485,20 @@ def assert_commands_module_boundary() -> None:
     ]
     assert a.command_matches("/archived o") == commands_mod.archived_command_matches("/archived o")
     assert a.command_matches("/workspace c") == commands_mod.workspace_command_matches("/workspace c")
+    category_state = a.State(agent=None)
+    alpha_path = "/tmp/policy-command-alpha.jsonl"
+    beta_path = "/tmp/policy-command-beta.jsonl"
+    category_state.history = [
+        (beta_path, 20.0, "", 1),
+        (alpha_path, 10.0, "", 1),
+    ]
+    category_state.session_meta = {
+        a.session_key(alpha_path): {"category": "Alpha"},
+        a.session_key(beta_path): {"category": "Beta"},
+    }
+    assert a.command_matches("/filter a", category_state) == [
+        ("/filter Alpha", "", "1 个会话", True)
+    ]
     assert a.command_matches("/MO") == commands_mod.top_level_command_matches("/MO", a.COMMANDS)
     assert [cmd for cmd, _args, _desc, _sendable in a.command_matches("/mo")] == ["/model"]
     assert a.command_matches("/ll") == []
@@ -479,6 +508,7 @@ def assert_commands_module_boundary() -> None:
         "def agent_command_completion_decision",
         "def completion_insert_text",
         "def top_level_command_matches",
+        "def category_command_completion_rows",
         "def archived_command_matches",
         "def workspace_command_matches",
     ):
