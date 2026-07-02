@@ -78,6 +78,7 @@ try:
         execution_control_from_v2,
         extract_tui_controls,
         force_new_from_v2,
+        format_agent_control_result,
         format_agenttask_worker_prompt,
         format_control_result_continuation_prompt,
         known_tui_control,
@@ -206,6 +207,7 @@ except Exception:
         execution_control_from_v2,
         extract_tui_controls,
         force_new_from_v2,
+        format_agent_control_result,
         format_agenttask_worker_prompt,
         format_control_result_continuation_prompt,
         known_tui_control,
@@ -14968,14 +14970,6 @@ def apply_dashboard_control(state: State, action: str, target: str, value: str, 
     append_subagent_event(sub, "dashboard.update", "dashboard.v1 updated", state=state)
     mark_dirty(state)
     return f"已更新代理主页声明：{sub.name}"
-
-
-def format_agent_control_result(action: str, target: str, result: str) -> str:
-    action_label = (action or "control").strip() or "control"
-    target_label = (target or "").strip()
-    if target_label and target_label not in {"current", "now", "selected"}:
-        action_label = f"{action_label} {target_label}"
-    return f"- {action_label}: {truncate_cells(result, 260)}"
 
 
 def apply_tui_controls_from_text(state: State, text: str, source: str = "agent", default_target: str = "current") -> list[str]:

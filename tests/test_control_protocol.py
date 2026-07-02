@@ -14,10 +14,12 @@ def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> Non
     assert app_module.control_explicitly_requests_continuation is control_protocol.control_explicitly_requests_continuation
     assert app_module.control_result_continuation_needed is control_protocol.control_result_continuation_needed
     assert app_module.format_control_result_continuation_prompt is control_protocol.format_control_result_continuation_prompt
+    assert app_module.format_agent_control_result is control_protocol.format_agent_control_result
     assert control_protocol.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
     assert control_protocol.format_control_result_continuation_prompt.__module__ == "ga_tui.control_protocol"
+    assert control_protocol.format_agent_control_result.__module__ == "ga_tui.control_protocol"
 
 
 def test_subagent_control_persistence_intent_explicit_lifecycle_flags() -> None:
@@ -145,3 +147,19 @@ def test_control_result_signature_and_prompt_formatting_strip_controls() -> None
     assert "visible before" in prompt
     assert "schema_version" not in prompt
     assert prompt.endswith("[/GA TUI Control Result Continuation]")
+
+
+def test_format_agent_control_result_preserves_labels_and_truncation() -> None:
+    helper = control_protocol.format_agent_control_result
+
+    assert helper("agent_create", "Worker", "ok") == "- agent_create Worker: ok"
+    assert helper("agent_create", "current", "ok") == "- agent_create: ok"
+    assert helper("agent_create", "now", "ok") == "- agent_create: ok"
+    assert helper("agent_create", "selected", "ok") == "- agent_create: ok"
+    assert helper("", "", "fallback") == "- control: fallback"
+
+    long_result = "x" * 400
+    formatted = helper("task_update", "", long_result)
+    assert formatted.startswith("- task_update: ")
+    assert len(formatted) < len("- task_update: " + long_result)
+    assert formatted.endswith("…")

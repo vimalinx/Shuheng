@@ -299,6 +299,14 @@ def format_control_result_continuation_prompt(
     return "\n".join(lines)
 
 
+def format_agent_control_result(action: str, target: str, result: str) -> str:
+    action_label = (action or "control").strip() or "control"
+    target_label = (target or "").strip()
+    if target_label and target_label not in {"current", "now", "selected"}:
+        action_label = f"{action_label} {target_label}"
+    return f"- {action_label}: {truncate_cells(result, 260)}"
+
+
 def agenttask_objective(control: dict[str, Any]) -> str:
     work_order = agenttask_work_order(control)
     return str(
