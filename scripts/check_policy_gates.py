@@ -41,6 +41,7 @@ from ga_tui import integration as integ  # noqa: E402
 from ga_tui import ledger_store as ledgers  # noqa: E402
 from ga_tui import ohmypi_provider as omp  # noqa: E402
 from ga_tui import path_utils as path_utils_mod  # noqa: E402
+from ga_tui import plugins as plugins_mod  # noqa: E402
 from ga_tui import release_readiness as rr  # noqa: E402
 from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
 from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
@@ -65,6 +66,8 @@ def retarget_harness(root: str) -> None:
     a.SHUHENG_WORKSPACES_DIR = os.path.join(root, "workspaces")
     a.SHUHENG_WORKSPACE_STATE_PATH = os.path.join(a.SHUHENG_WORKSPACES_DIR, "active.json")
     a.SHUHENG_SKILLS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "skills")
+    a.SHUHENG_PLUGINS_DIR = os.path.join(root, "plugins")
+    a.clear_plugin_registry_cache()
     a.L4_RAW_SESSIONS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "L4_raw_sessions")
     a.SESSION_TRASH_DIR = os.path.join(a.MODEL_RESPONSES_DIR, ".trash")
     a.configure_frontend_history_storage()
@@ -112,6 +115,7 @@ def retarget_harness(root: str) -> None:
     os.makedirs(a.TEMP_SUBAGENTS_DIR, exist_ok=True)
     os.makedirs(a.SHUHENG_WORKSPACES_DIR, exist_ok=True)
     os.makedirs(a.SHUHENG_SKILLS_DIR, exist_ok=True)
+    os.makedirs(a.SHUHENG_PLUGINS_DIR, exist_ok=True)
     a.configure_scheduler_runtime(
         schedules_path=a.AGENT_SCHEDULES_PATH,
         runs_path=a.AGENT_SCHEDULE_RUNS_PATH,
@@ -1953,6 +1957,9 @@ def assert_subagent_store_module_boundary() -> None:
         "Other Skill",
     ]
     assert subagent_store_mod.normalize_subagent_skill_refs(
+        "plugin://research-pack/skills/source-review skill://plugin://research-pack/skills/source-review"
+    ) == ["plugin://research-pack/skills/source-review"]
+    assert subagent_store_mod.normalize_subagent_skill_refs(
         [{"ref": "alpha"}, {"name": "beta"}, {"skill": "gamma"}, {"path": "delta"}, {"ref": "ALPHA"}],
         limit=3,
     ) == ["alpha", "beta", "gamma"]
@@ -2085,6 +2092,45 @@ def assert_subagent_store_module_boundary() -> None:
         "runtime_dispatch",
     ):
         assert forbidden not in source, f"{subagent_store_mod.__file__}: {forbidden}"
+
+
+def assert_plugins_module_boundary() -> None:
+    assert a.PluginRegistry is plugins_mod.PluginRegistry
+    assert a.discover_plugins is plugins_mod.discover_plugins
+    assert a.format_plugin_info is plugins_mod.format_plugin_info
+    assert a.format_plugin_list is plugins_mod.format_plugin_list
+    assert a.is_plugin_skill_ref is plugins_mod.is_plugin_skill_ref
+    assert a.plugin_agent_template_for_ref is plugins_mod.plugin_agent_template_for_ref
+    assert a.plugin_registry_fingerprint is plugins_mod.plugin_registry_fingerprint
+    assert a.plugin_roots is plugins_mod.plugin_roots
+    assert a.plugin_skill_display_name is plugins_mod.plugin_skill_display_name
+    assert a.plugin_skill_file_for_ref is plugins_mod.plugin_skill_file_for_ref
+    assert a.plugin_skill_ref_from_token is plugins_mod.plugin_skill_ref_from_token
+    assert plugins_mod.plugin_skill_ref("research-pack", "source-review") == "plugin://research-pack/skills/source-review"
+    assert plugins_mod.plugin_skill_ref_from_token("research-pack/source-review") == "plugin://research-pack/skills/source-review"
+    assert plugins_mod.plugin_skill_ref_from_token("research-pack/skills/source-review") == "plugin://research-pack/skills/source-review"
+    assert plugins_mod.parse_plugin_agent_template_ref("research-pack/evidence-researcher") == (
+        "research-pack",
+        "evidence-researcher",
+    )
+    source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "ga_tui.app",
+        "from .app",
+        "import app",
+        "import curses",
+        "from curses",
+        "State",
+        "SubAgentRuntime",
+        "RenderLine",
+        "secret_vault",
+        "web_console",
+        "dashboard",
+        "runtime_dispatch",
+        "GenericAgent",
+        "GenericAgentHandler",
+    ):
+        assert forbidden not in source, f"{plugins_mod.__file__}: {forbidden}"
 
 
 def assert_secret_vault_module_boundary() -> None:
@@ -8368,6 +8414,157 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert persisted.get("skill_refs") == [], persisted
 
 
+def assert_declarative_plugins_are_agent_scoped() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
+    retarget_harness(root)
+    plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
+    skill_dir = plugin_root / "skills" / "source-review"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    unique_marker = "UNIQUE_PLUGIN_SKILL_MARKER_FOR_TARGET_AGENT_ONLY"
+    skill_dir.joinpath("SKILL.md").write_text(
+        "\n".join([
+            "---",
+            "name: source-review",
+            "description: Plugin source review SOP.",
+            "---",
+            "# Source Review",
+            "",
+            f"Only the target subagent should see {unique_marker}.",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    workflow_dir = plugin_root / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    workflow_dir.joinpath("compare-sources.md").write_text("# Compare Sources\n", encoding="utf-8")
+    outside_file = Path(root, "outside-plugin-skill.md")
+    outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
+    outside_file.write_text(outside_marker, encoding="utf-8")
+    plugin_root.joinpath("plugin.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.plugin.v1",
+                "id": "research-pack",
+                "name": "Research Pack",
+                "version": "0.1.0",
+                "description": "Reusable research agents and SOPs.",
+                "contributes": {
+                    "skills": [
+                        {
+                            "id": "source-review",
+                            "name": "Source Review",
+                            "description": "Plugin source review SOP.",
+                            "path": "skills/source-review/SKILL.md",
+                        },
+                        {
+                            "id": "outside",
+                            "name": "Outside",
+                            "path": "../outside-plugin-skill.md",
+                        },
+                    ],
+                    "agent_templates": [
+                        {
+                            "id": "evidence-researcher",
+                            "name": "Evidence Researcher",
+                            "description": "Researcher from a declarative plugin template.",
+                            "role": "researcher",
+                            "profile": "Collect evidence without writing files.",
+                            "skills": ["source-review"],
+                        }
+                    ],
+                    "workflows": [
+                        {"id": "compare-sources", "path": "workflows/compare-sources.md"}
+                    ],
+                },
+                "permissions": {
+                    "requested_tools": ["read", "web"],
+                    "write_policy": "approved_only",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    a.clear_plugin_registry_cache()
+    registry = a.user_plugin_registry(force=True)
+    plugin_ref = "plugin://research-pack/skills/source-review"
+    outside_ref = "plugin://research-pack/skills/outside"
+    assert "research-pack" in registry.plugins, registry
+    assert any("inside the plugin root" in issue.message for issue in registry.issues), registry.issues
+    assert a.plugin_skill_file_for_ref(plugin_ref, registry).endswith("skills/source-review/SKILL.md")
+    assert a.subagent_skill_file_for_ref(plugin_ref).endswith("skills/source-review/SKILL.md")
+    assert a.subagent_skill_file_for_ref(outside_ref) == ""
+    assert a.plugin_skill_ref_from_token("research-pack/source-review") == plugin_ref
+    assert "Research Pack" in a.format_plugin_list(registry), a.format_plugin_list(registry)
+    assert "Plugin source review SOP" in a.format_plugin_info("research-pack", registry)
+    assert "/plugins" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
+    assert "/plugin" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
+    assert "plugin" in {cmd for cmd, _args, _desc, _sendable in a.AGENT_SUBCOMMANDS}
+
+    state = a.State(agent=ContextFakeAgent())
+    state.running = True
+    skilled = a.create_subagent(
+        state,
+        "Plugin Scoped Agent",
+        "Owns the plugin SOP and should be the only agent hydrated with it.",
+        role="researcher",
+        persistent=True,
+    )
+    plain = a.create_subagent(
+        state,
+        "Plugin Plain Agent",
+        "Has no plugin skill and must not receive plugin SOP instructions.",
+        role="researcher",
+        persistent=True,
+    )
+
+    assert a.handle_plugin_command(state, "/plugins") is True
+    assert "research-pack" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_plugin_command(state, "/plugin info research-pack") is True
+    assert plugin_ref in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_plugin_command(state, "/plugin template research-pack/evidence-researcher") is True
+    assert "plugin://research-pack/agents/evidence-researcher" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_plugin_command(state, "/plugin create research-pack/evidence-researcher Evidence Plugin Agent") is True
+    templated = a.resolve_subagent(state, "Evidence Plugin Agent")
+    assert templated is not None, state.subagents
+    assert templated.role == "researcher", templated
+    assert a.role_write_policy(templated.role) == "none", templated
+    assert a.normalize_subagent_skill_refs(templated.skill_refs) == [plugin_ref], templated.skill_refs
+    assert "approved_only" not in a.subagent_prompt_block(templated), a.subagent_prompt_block(templated)
+
+    assert a.handle_subagent_command(state, f"/agent plugin add {skilled.agent_id} research-pack/source-review") is True
+    assert a.normalize_subagent_skill_refs(skilled.skill_refs) == [plugin_ref], skilled.skill_refs
+    assert a.normalize_subagent_skill_refs(plain.skill_refs) == [], plain.skill_refs
+    assert "插件 skill" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_subagent_command(state, f"/agent plugin list {skilled.agent_id}") is True
+    assert plugin_ref in state.messages[-1].content and "Plugin source review SOP" in state.messages[-1].content, state.messages[-1].content
+
+    target_pack, _target_ref = a.build_context_pack(state, skilled, "Use plugin SOP", "task_plugin_target")
+    plain_pack, _plain_ref = a.build_context_pack(state, plain, "Do not use plugin SOP", "task_plugin_plain")
+    target_prompt = a.format_context_pack_for_prompt(target_pack)
+    plain_prompt = a.format_context_pack_for_prompt(plain_pack)
+    assert target_pack["skill_refs"] == [plugin_ref], target_pack
+    assert target_pack["skill_pack"]["included"][0]["resolved"] is True, target_pack
+    assert unique_marker in target_prompt, target_prompt
+    assert plain_pack["skill_refs"] == [], plain_pack
+    assert unique_marker not in plain_prompt, plain_prompt
+    assert unique_marker in a.build_subagent_direct_chat_prompt(state, skilled, "hello")[0]
+    assert unique_marker not in a.build_subagent_direct_chat_prompt(state, plain, "hello")[0]
+
+    a.set_subagent_skill_refs(state, plain, ["custom-sop", plugin_ref], mode="replace")
+    assert a.handle_subagent_command(state, f"/agent plugin clear {plain.agent_id}") is True
+    assert a.normalize_subagent_skill_refs(plain.skill_refs) == ["custom-sop"], plain.skill_refs
+    a.set_subagent_skill_refs(state, plain, [outside_ref], mode="replace")
+    outside_pack, _outside_ref = a.build_context_pack(state, plain, "Reject outside plugin skill", "task_plugin_outside")
+    outside_prompt = a.format_context_pack_for_prompt(outside_pack)
+    assert outside_pack["skill_pack"]["included"][0]["resolved"] is False, outside_pack
+    assert outside_marker not in outside_prompt, outside_prompt
+
+    assert a.handle_subagent_command(state, f"/agent plugin remove {skilled.agent_id} {plugin_ref}") is True
+    assert a.normalize_subagent_skill_refs(skilled.skill_refs) == [], skilled.skill_refs
+
+
 def assert_persistent_agent_dashboard_home_pages() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
     retarget_harness(root)
@@ -9693,6 +9890,7 @@ def run_checks() -> None:
     assert_rendering_module_boundary()
     assert_path_utils_module_boundary()
     assert_subagent_store_module_boundary()
+    assert_plugins_module_boundary()
     assert_secret_vault_module_boundary()
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()
@@ -9760,6 +9958,7 @@ def run_checks() -> None:
     assert_running_main_input_is_queued_and_interruptible()
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
     assert_subagent_dedicated_skills_are_agent_scoped()
+    assert_declarative_plugins_are_agent_scoped()
     assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()
     assert_tui_query_tools_expose_dashboard_state()

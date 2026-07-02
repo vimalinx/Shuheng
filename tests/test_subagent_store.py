@@ -117,6 +117,9 @@ def test_subagent_skill_ref_normalization_and_app_alias() -> None:
         "Other Skill",
     ]
     assert subagent_store.normalize_subagent_skill_refs(
+        "plugin://research-pack/skills/source-review skill://plugin://research-pack/skills/source-review",
+    ) == ["plugin://research-pack/skills/source-review"]
+    assert subagent_store.normalize_subagent_skill_refs(
         [
             {"ref": "alpha"},
             {"name": "beta"},

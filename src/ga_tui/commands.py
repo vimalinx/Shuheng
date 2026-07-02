@@ -28,6 +28,7 @@ AGENT_SUBCOMMANDS: list[CommandCandidate] = [
     ("settings", "<agent>", "打开 agent 详细设置", False),
     ("model", "<agent> [model|inherit]", "设置 agent 默认模型", False),
     ("skill", "<agent> [add|remove|set|clear|list] [skill-ref ...]", "配置 agent 专属 skill", False),
+    ("plugin", "<agent> [add|remove|set|clear|list] [plugin-skill-ref ...]", "配置 agent 专属插件 skill", False),
     ("templates", "", "列出角色模板", True),
     ("ask", "<agent> <prompt>", "让子 agent 执行任务", False),
     ("run", "<agent> <prompt>", "ask 的别名", False),
@@ -56,11 +57,12 @@ AGENT_SUBCOMMANDS_REQUIRING_AGENT = {
     "settings",
     "model",
     "skill",
+    "plugin",
     "info",
     "stop",
     "delete",
 }
-AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "skill", "stop", "delete"}
+AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "skill", "plugin", "stop", "delete"}
 AGENT_SUBCOMMAND_NAMES = {cmd for cmd, _args, _desc, _sendable in AGENT_SUBCOMMANDS}
 WORKSPACE_SUBCOMMANDS: list[CommandCandidate] = [
     ("list", "", "列出工作区", True),

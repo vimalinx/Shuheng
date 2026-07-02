@@ -2115,6 +2115,97 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 /agent skill add agent-research custom-sop -> only agent-research context_pack.skill_pack includes custom-sop
 ```
 
+## Scenario: Declarative User Plugins
+
+### 1. Scope / Trigger
+
+- Trigger: Users need local plugin packages that can contribute reusable subagent skills, agent templates, workflow metadata, and read-only registry information without granting executable plugin code.
+- Applies to: local `plugin.json` discovery, `plugin://<plugin-id>/skills/<skill-id>` skill refs, `/plugins`, `/plugin info <plugin-id>`, `/plugin template <plugin-id>/<template-id>`, `/plugin create <plugin-id>/<template-id> [agent-name]`, `/agent plugin ...`, subagent `skill_refs`, context pack construction, subagent prompt installation, policy gates, and registry/query metadata.
+- Non-goal: This does not add remote marketplace install, arbitrary Python/JS execution, plugin-native tools, hidden side effects, cross-machine sync, or a replacement for the existing per-agent dedicated skill system.
+
+### 2. Signatures
+
+- Plugin root: `SHUHENG_PLUGINS_DIR == os.path.join(SHUHENG_HOME, "plugins")`.
+- Manifest file: `<plugin-root>/<plugin-id>/plugin.json`.
+- Manifest schema version: `shuheng.plugin.v1`.
+- Skill ref shape: `plugin://<plugin-id>/skills/<skill-id>`.
+- Agent template ref shape: `plugin://<plugin-id>/agents/<template-id>`, with `<plugin-id>/<template-id>` accepted as a TUI shorthand.
+- Public TUI commands:
+  - `/plugins`
+  - `/plugin info <plugin-id>`
+  - `/plugin template <plugin-id>/<template-id>`
+  - `/plugin create <plugin-id>/<template-id> [agent-name]`
+  - `/agent plugin add <agent> <plugin-skill-ref ...>`
+  - `/agent plugin remove <agent> <plugin-skill-ref ...>`
+  - `/agent plugin list <agent>`
+  - `/agent plugin <agent> add|remove|set|clear|list <plugin-skill-ref ...>`
+- Registry owner module: `plugins.py`.
+- Orchestrator wrappers: `user_plugin_roots()`, `user_plugin_registry(...)`, `handle_plugin_command(...)`, `subagent_plugin_command_message(...)`, and `create_subagent_from_plugin_template(...)` in `app.py`.
+
+### 3. Contracts
+
+- MVP plugins are declarative local packages only. Reading `plugin.json` and manifest-declared local files is allowed; executing plugin code or registering plugin tools is forbidden in this scenario.
+- `plugins.py` owns pure manifest discovery, validation, stable ref parsing, plugin formatting, and manifest-declared path resolution. It must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, Web Console, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, or provider adapters.
+- Plugin skills are stored as ordinary subagent `skill_refs` using `plugin://<plugin-id>/skills/<skill-id>`. There is no separate `plugin_refs` persistence field in this MVP.
+- Plugin skill file resolution must go through the manifest. A `plugin://...` ref must not map directly to arbitrary filesystem paths or raw plugin directory guesses.
+- Manifest-declared skill and workflow paths must be relative paths that remain inside the plugin root. Absolute paths, `~` paths, and `..` escapes are validation issues and must not resolve.
+- Missing or invalid plugin refs stay visible in metadata and `/agent plugin list`, but they inject no body text into prompts.
+- Only the target subagent's context pack may include resolved plugin skill body text. The main Orchestrator and unrelated subagents must not receive plugin skill bodies unless they independently own the same `skill_refs`.
+- `/agent plugin ...` is an alias over the existing dedicated skill mechanism. It must preserve non-plugin dedicated skills when clearing plugin skills.
+- `/plugin create ...` must create subagents through the existing `create_subagent(...)` path and then set `skill_refs` through `set_subagent_skill_refs(...)`; it must not bypass role normalization, persistence selection, Secret Vault metadata handling, prompt installation, or policy gates.
+- Plugin manifest `permissions` are descriptive metadata in this scenario. They must not override role write policy, approval gates, Secret Vault isolation, single-writer locks, artifact provenance, task ledgers, or runtime dispatch permissions.
+- The app may cache plugin registry discovery by plugin-root/manifest fingerprint. Cache invalidation must not require a TUI repaint and must not read plugin skill body text globally.
+
+### 4. Validation & Error Matrix
+
+- Missing plugin root -> `/plugins` reports no plugins, no crash.
+- Invalid JSON manifest -> registry issue, plugin not loaded.
+- Wrong `schema_version` -> registry issue, plugin not loaded.
+- Invalid plugin id or contribution id -> registry issue, contribution not loaded.
+- Duplicate plugin id -> first discovered plugin wins, later duplicate is reported as ignored.
+- Skill path outside plugin root -> registry issue, `plugin_skill_file_for_ref(...) == ""`, no prompt body injection.
+- Missing skill file -> registry issue, ref remains visible, no prompt body injection.
+- `/plugin info <missing>` -> user-visible missing plugin message.
+- `/plugin create <missing>` -> user-visible missing template message, no subagent created.
+- `/agent plugin add <agent>` without plugin refs -> usage message, no metadata change.
+- `/agent plugin clear <agent>` -> removes only `plugin://...` refs and preserves ordinary dedicated skill refs.
+- Plugin permissions request `write_policy:"approved_only"` while template role is `researcher` -> resulting subagent still has researcher role policy; plugin permissions do not grant writes.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `~/.shuheng/plugins/research-pack/plugin.json` declares `source-review`, `/agent plugin add agent-research research-pack/source-review` persists `["plugin://research-pack/skills/source-review"]`, and only `agent-research` context packs contain the plugin SOP body.
+- Good: `/plugin create research-pack/evidence-researcher Evidence Agent` creates a normal subagent through the Orchestrator path with role normalization and plugin skill refs attached.
+- Base: `/plugins` lists valid plugins plus bounded validation issues for broken local packages.
+- Base: A manifest may declare workflows as metadata before workflow execution is implemented.
+- Bad: Scanning a plugin directory and loading every `SKILL.md` without manifest declaration.
+- Bad: Injecting all plugin README/SKILL body text into the main Orchestrator as global context.
+- Bad: Treating plugin `permissions` as runtime authorization that bypasses role policy, approval requirements, or Secret Vault isolation.
+
+### 6. Tests Required
+
+- `tests/test_plugins.py` must assert manifest discovery, stable ref parsing, path traversal rejection, missing-file validation, agent-template normalization, plugin list/info formatting, and default plugin root behavior.
+- `tests/test_subagent_store.py` must assert `normalize_subagent_skill_refs(...)` preserves `plugin://...` refs while keeping `skill://...` compatibility.
+- `scripts/check_policy_gates.py` must assert `plugins.py` is a pure registry module and does not import app/runtime/UI/governance owners.
+- `scripts/check_policy_gates.py` must create a temp local plugin, attach `plugin://research-pack/skills/source-review` to one subagent, and prove the plugin marker appears only in that target context pack and direct-chat prompt.
+- `scripts/check_policy_gates.py` must assert `/plugins`, `/plugin info`, `/plugin template`, `/plugin create`, and `/agent plugin add/remove/list/clear` work through existing governed paths.
+- `scripts/check_policy_gates.py` must assert a manifest-declared outside path does not resolve or inject.
+- `scripts/check_policy_gates.py` must assert plugin-declared permissions do not change role write policy.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, targeted pytest, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+Load every plugin file globally -> main Orchestrator and every subagent see all plugin SOP bodies
+```
+
+#### Correct
+
+```text
+/agent plugin add agent-research research-pack/source-review -> only agent-research context_pack.skill_pack includes plugin://research-pack/skills/source-review
+```
+
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger

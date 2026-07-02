@@ -112,6 +112,7 @@ try:
     from . import commands as command_helpers
     from . import path_utils
     from . import subagent_store as subagent_store_helpers
+    from . import plugins as plugin_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -245,6 +246,7 @@ except Exception:
     import commands as command_helpers  # type: ignore
     import path_utils  # type: ignore
     import subagent_store as subagent_store_helpers  # type: ignore
+    import plugins as plugin_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -371,6 +373,7 @@ SESSION_META_PATH = os.path.join(MODEL_RESPONSES_DIR, "session_meta.json")
 SHUHENG_WORKSPACES_DIR = os.path.join(SHUHENG_HOME, "workspaces")
 SHUHENG_WORKSPACE_STATE_PATH = os.path.join(SHUHENG_WORKSPACES_DIR, "active.json")
 SHUHENG_SKILLS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "skills")
+SHUHENG_PLUGINS_DIR = os.path.join(SHUHENG_HOME, "plugins")
 WORKSPACE_MANIFEST_FILENAME = "manifest.json"
 WORKSPACE_MEMORY_FILENAME = "memory.md"
 WORKSPACE_INDEX_FILENAME = "index.json"
@@ -696,6 +699,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/agents", "", "列出持久子 agent", True),
     ("/agent", "<cmd>", "管理/运行持久子 agent", False),
     ("/agent skill", "<cmd>", "给指定子 agent 配置专属 skill", False),
+    ("/plugins", "", "列出本地声明式插件", True),
+    ("/plugin", "<cmd>", "查看插件详情或创建插件 agent", False),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
@@ -941,6 +946,17 @@ def request_main_interrupt(state: State, prefix: str = "Ctrl+C") -> None:
 
 normalized_path = path_utils.normalized_path
 path_is_within = path_utils.path_is_within
+PluginRegistry = plugin_helpers.PluginRegistry
+discover_plugins = plugin_helpers.discover_plugins
+format_plugin_info = plugin_helpers.format_plugin_info
+format_plugin_list = plugin_helpers.format_plugin_list
+is_plugin_skill_ref = plugin_helpers.is_plugin_skill_ref
+plugin_agent_template_for_ref = plugin_helpers.plugin_agent_template_for_ref
+plugin_registry_fingerprint = plugin_helpers.plugin_registry_fingerprint
+plugin_roots = plugin_helpers.plugin_roots
+plugin_skill_display_name = plugin_helpers.plugin_skill_display_name
+plugin_skill_file_for_ref = plugin_helpers.plugin_skill_file_for_ref
+plugin_skill_ref_from_token = plugin_helpers.plugin_skill_ref_from_token
 
 
 def is_normal_session_log_path(path: str) -> bool:
@@ -9737,6 +9753,31 @@ def subagent_memory_text(sub: SubAgentRuntime) -> str:
     return read_text_file(subagent_memory_file(sub), "") if sub.persistent else ""
 
 
+_PLUGIN_REGISTRY_CACHE: tuple[Any, Any, PluginRegistry] | None = None
+
+
+def clear_plugin_registry_cache() -> None:
+    global _PLUGIN_REGISTRY_CACHE
+    _PLUGIN_REGISTRY_CACHE = None
+
+
+def user_plugin_roots() -> list[str]:
+    return plugin_roots(SHUHENG_PLUGINS_DIR)
+
+
+def user_plugin_registry(*, force: bool = False) -> PluginRegistry:
+    global _PLUGIN_REGISTRY_CACHE
+    roots = user_plugin_roots()
+    fingerprint = plugin_registry_fingerprint(roots)
+    if not force and _PLUGIN_REGISTRY_CACHE is not None:
+        cached_roots, cached_fingerprint, cached_registry = _PLUGIN_REGISTRY_CACHE
+        if cached_roots == tuple(roots) and cached_fingerprint == fingerprint:
+            return cached_registry
+    registry = discover_plugins(roots)
+    _PLUGIN_REGISTRY_CACHE = (tuple(roots), fingerprint, registry)
+    return registry
+
+
 def subagent_skill_roots() -> list[str]:
     raw_roots = [
         SHUHENG_SKILLS_DIR,
@@ -9762,6 +9803,8 @@ def subagent_skill_display_name(ref: str) -> str:
     text = str(ref or "").strip().removeprefix("skill://").strip()
     if not text:
         return ""
+    if is_plugin_skill_ref(text):
+        return plugin_skill_display_name(text, user_plugin_registry()) or text
     expanded = normalized_path(os.path.expanduser(text))
     if os.path.basename(expanded) == "SKILL.md":
         return os.path.basename(os.path.dirname(expanded)) or "SKILL.md"
@@ -9774,6 +9817,8 @@ def subagent_skill_file_for_ref(ref: str) -> str:
     text = str(ref or "").strip().removeprefix("skill://").strip()
     if not text:
         return ""
+    if is_plugin_skill_ref(text):
+        return plugin_skill_file_for_ref(text, user_plugin_registry())
     roots = subagent_skill_roots()
     expanded = normalized_path(os.path.expanduser(text))
     candidates: list[str] = []
@@ -9854,6 +9899,7 @@ def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
         "skill_refs": normalize_subagent_skill_refs(refs),
         "included": included,
         "roots": subagent_skill_roots(),
+        "plugin_roots": user_plugin_roots(),
     }
 
 
@@ -21598,6 +21644,135 @@ def subagent_skill_command_message(state: State, sub: SubAgentRuntime, action_na
     return msg
 
 
+def normalize_plugin_command_skill_refs(raw_refs: Any) -> list[str]:
+    refs: list[str] = []
+    for ref in normalize_subagent_skill_refs(raw_refs):
+        plugin_ref = plugin_skill_ref_from_token(ref)
+        if plugin_ref:
+            refs.append(plugin_ref)
+    return normalize_subagent_skill_refs(refs)
+
+
+def format_subagent_plugin_detail(sub: SubAgentRuntime) -> str:
+    refs = [ref for ref in normalize_subagent_skill_refs(sub.skill_refs) if is_plugin_skill_ref(ref)]
+    if not refs:
+        return f"{sub.name} 还没有插件 skill。\n用法：/agent plugin add {sub.agent_id} <plugin-skill-ref>"
+    pack = subagent_skill_pack_for_refs(refs)
+    lines = [f"{sub.name} 插件 skill："]
+    for idx, item in enumerate(pack.get("included") or [], 1):
+        status = "ok" if item.get("resolved") else "missing"
+        path = str(item.get("path") or "")
+        summary = str(item.get("summary") or "")
+        lines.append(f"- {idx}. {item.get('name') or item.get('ref')} · {status}")
+        lines.append(f"  ref: {item.get('ref')}")
+        if path:
+            lines.append(f"  path: {path}")
+        if summary:
+            lines.append(f"  summary: {summary}")
+    return "\n".join(lines)
+
+
+def subagent_plugin_command_message(state: State, sub: SubAgentRuntime, action_name: str, raw_refs: str = "") -> str:
+    action_name = (action_name or "list").strip().lower()
+    raw_refs = (raw_refs or "").strip()
+    if action_name in {"list", "show", "info"}:
+        return format_subagent_plugin_detail(sub)
+    current = normalize_subagent_skill_refs(sub.skill_refs)
+    non_plugin_refs = [ref for ref in current if not is_plugin_skill_ref(ref)]
+    if action_name == "clear":
+        _ok, _msg = set_subagent_skill_refs(state, sub, non_plugin_refs, mode="replace")
+        return f"已清空 {sub.name} 的插件 skill。"
+    incoming = normalize_plugin_command_skill_refs(raw_refs)
+    if not incoming:
+        return f"Usage: /agent plugin {action_name} {sub.agent_id} <plugin://plugin-id/skills/skill-id>"
+    if action_name in {"remove", "rm", "delete", "del"}:
+        _ok, _msg = set_subagent_skill_refs(state, sub, incoming, mode="remove")
+        return f"已从 {sub.name} 移除插件 skill：{format_subagent_skill_refs(incoming)}"
+    if action_name == "add":
+        _ok, _msg = set_subagent_skill_refs(state, sub, incoming, mode="add")
+        return f"已给 {sub.name} 添加插件 skill：{format_subagent_skill_refs(incoming)}"
+    merged = normalize_subagent_skill_refs([*non_plugin_refs, *incoming])
+    _ok, _msg = set_subagent_skill_refs(state, sub, merged, mode="replace")
+    return f"已设置 {sub.name} 插件 skill：{format_subagent_skill_refs(incoming)}"
+
+
+def create_subagent_from_plugin_template(
+    state: State,
+    template: plugin_helpers.PluginAgentTemplate,
+    name_override: str = "",
+) -> tuple[SubAgentRuntime, str]:
+    role, role_note = subagent_role_request(template.role)
+    name = (name_override or template.name or template.template_id).strip()
+    profile = template.profile or template.description or f"Plugin template: {template.ref}"
+    sub = create_subagent(state, name, profile, role=role, persistent=template.persistent)
+    if template.skill_refs:
+        set_subagent_skill_refs(state, sub, list(template.skill_refs), mode="replace")
+    if template.default_model:
+        sub.default_model = template.default_model
+        sub.updated_at = time.time()
+        save_subagent_meta(sub, state)
+        if sub.agent is not None:
+            install_subagent_prompt(sub.agent, sub)
+    note = f"\n{role_note}" if role_note else ""
+    skills = format_subagent_skill_refs(sub.skill_refs, empty="(none)")
+    message = (
+        f"已从插件模板创建子 agent：{sub.name} ({sub.agent_id})\n"
+        f"template: {template.ref}\n"
+        f"role: {sub.role}\n"
+        f"skills: {skills}{note}"
+    )
+    return sub, message
+
+
+def handle_plugin_command(state: State, text: str) -> bool:
+    raw = (text or "").strip()
+    if raw in {"/plugins", "/plugin", "/plugin list"}:
+        add_system(state, format_plugin_list(user_plugin_registry()))
+        return True
+    m_info = re.match(r"/plugins?\s+info\s+(\S+)\s*$", raw, re.I)
+    if m_info:
+        add_system(state, format_plugin_info(m_info.group(1), user_plugin_registry(force=True)))
+        return True
+    m_template = re.match(r"/plugin\s+template\s+(\S+)\s*$", raw, re.I)
+    if m_template:
+        template = plugin_agent_template_for_ref(m_template.group(1), user_plugin_registry(force=True))
+        if template is None:
+            add_system(state, f"找不到插件 agent 模板: {m_template.group(1)}")
+            return True
+        skills = ", ".join(template.skill_refs) if template.skill_refs else "(none)"
+        add_system(
+            state,
+            "\n".join([
+                f"template: {template.ref}",
+                f"name: {template.name}",
+                f"role: {template.role}",
+                f"persistent: {template.persistent}",
+                f"default_model: {template.default_model or '(global default)'}",
+                f"skills: {skills}",
+                f"description: {template.description or '(none)'}",
+            ]),
+        )
+        return True
+    m_create = re.match(r"/plugin\s+create\s+(\S+)(?:\s+([\s\S]+))?\s*$", raw, re.I)
+    if m_create:
+        template = plugin_agent_template_for_ref(m_create.group(1), user_plugin_registry(force=True))
+        if template is None:
+            add_system(state, f"找不到插件 agent 模板: {m_create.group(1)}")
+            return True
+        _sub, message = create_subagent_from_plugin_template(state, template, m_create.group(2) or "")
+        add_system(state, message)
+        return True
+    if raw.startswith("/plugin"):
+        add_system(
+            state,
+            "未知 /plugin 命令。\n"
+            "用法：/plugins、/plugin info <plugin-id>、/plugin template <plugin-id>/<template-id>、"
+            "/plugin create <plugin-id>/<template-id> [agent-name]",
+        )
+        return True
+    return False
+
+
 def handle_subagent_command(state: State, text: str) -> bool:
     raw = (text or "").strip()
     load_subagents(state)
@@ -21701,6 +21876,34 @@ def handle_subagent_command(state: State, text: str) -> bool:
             return True
         ok, msg = set_subagent_default_model(state, sub, model_name)
         add_system(state, msg)
+        return True
+
+    m_plugin_action = re.match(r"/agent\s+plugins?\s+(add|remove|rm|delete|del|set|clear|list)\s+(\S+)(?:\s+([\s\S]+))?$", raw, re.I)
+    if m_plugin_action:
+        action_name = m_plugin_action.group(1).lower()
+        sub = resolve_subagent(state, m_plugin_action.group(2))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_plugin_action.group(2)}")
+            return True
+        add_system(state, subagent_plugin_command_message(state, sub, action_name, m_plugin_action.group(3) or ""))
+        return True
+
+    m_plugin_target_action = re.match(r"/agent\s+plugins?\s+(\S+)\s+(add|remove|rm|delete|del|set|clear|list|show|info)(?:\s+([\s\S]+))?$", raw, re.I)
+    if m_plugin_target_action:
+        sub = resolve_subagent(state, m_plugin_target_action.group(1))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_plugin_target_action.group(1)}")
+            return True
+        add_system(state, subagent_plugin_command_message(state, sub, m_plugin_target_action.group(2), m_plugin_target_action.group(3) or ""))
+        return True
+
+    m_plugin_show = re.match(r"/agent\s+plugins?\s+(\S+)\s*$", raw, re.I)
+    if m_plugin_show:
+        sub = resolve_subagent(state, m_plugin_show.group(1))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_plugin_show.group(1)}")
+            return True
+        add_system(state, format_subagent_plugin_detail(sub))
         return True
 
     m_skill_action = re.match(r"/agent\s+skills?\s+(add|remove|rm|delete|del|set|clear|list)\s+(\S+)(?:\s+([\s\S]+))?$", raw, re.I)
@@ -22413,6 +22616,8 @@ def submit(state: State, text: str) -> None:
         add_system(state, switch_home_to_chat(state))
         return
     if handle_workspace_command(state, text):
+        return
+    if handle_plugin_command(state, text):
         return
     if handle_subagent_command(state, text):
         return
