@@ -1893,6 +1893,8 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.clean_subagent_id is subagent_store_mod.clean_subagent_id
     assert a.normalize_subagent_identity_text is subagent_store_mod.normalize_subagent_identity_text
     assert a.compact_identity_text is subagent_store_mod.compact_identity_text
+    assert a.subagent_control_alias_keys is subagent_store_mod.subagent_control_alias_keys
+    assert a.resolve_subagent_control_alias is subagent_store_mod.resolve_subagent_control_alias
     assert a.normalize_subagent_skill_refs is subagent_store_mod.normalize_subagent_skill_refs
     assert subagent_store_mod.parse_subagent_new_body.__module__ == "ga_tui.subagent_store"
     assert subagent_store_mod.unique_subagent_id.__module__ == "ga_tui.subagent_store"
@@ -1929,6 +1931,22 @@ def assert_subagent_store_module_boundary() -> None:
     assert subagent_store_mod.clean_subagent_id("Ｏps Agent / 中文") == "ops-agent"
     assert subagent_store_mod.normalize_subagent_identity_text("Ops：Code-Reviewer!") == "ops code reviewer"
     assert subagent_store_mod.compact_identity_text("Ops：Code-Reviewer!") == "opscodereviewer"
+    assert subagent_store_mod.subagent_control_alias_keys("", None, "current", "now", "selected") == []
+    assert subagent_store_mod.subagent_control_alias_keys("Ops：Code-Reviewer", "ops code reviewer") == [
+        "Ops：Code-Reviewer",
+        "ops：code-reviewer",
+        "opscodereviewer",
+        "ops code reviewer",
+    ]
+    alias_map = {"opscodereviewer": "ops-agent", "Worker": "worker-agent"}
+    assert subagent_store_mod.resolve_subagent_control_alias(alias_map, "Ops Code Reviewer") == "ops-agent"
+    assert subagent_store_mod.resolve_subagent_control_alias(alias_map, "Worker") == "worker-agent"
+    assert subagent_store_mod.resolve_subagent_control_alias(alias_map, "missing") == "missing"
+    registered: dict[str, str] = {}
+    alias_sub = a.SubAgentRuntime(agent_id="ops-agent", name="Ops：Code-Reviewer", home="/tmp/ops-agent")
+    a.register_subagent_control_aliases(registered, alias_sub, "Ops Code Reviewer")
+    assert registered["opscodereviewer"] == "ops-agent"
+    assert registered["ops-agent"] == "ops-agent"
     assert subagent_store_mod.unique_subagent_id("Ops Agent", subagents_dir=root) == "ops-agent-2"
     assert subagent_store_mod.normalize_subagent_skill_refs("skill://custom-sop, custom-sop\nOther Skill") == [
         "custom-sop",
@@ -2047,6 +2065,9 @@ def assert_subagent_store_module_boundary() -> None:
     assert not hasattr(subagent_store_mod, "write_subagent_chat_history_transcript")
     assert not hasattr(subagent_store_mod, "save_subagent_chat_messages_to_history")
     source = Path(subagent_store_mod.__file__).read_text(encoding="utf-8")
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "def subagent_control_alias_keys" not in app_source
+    assert "def resolve_subagent_control_alias" not in app_source
     for forbidden in (
         "ga_tui.app",
         "from .app",

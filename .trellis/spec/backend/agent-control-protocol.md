@@ -3640,6 +3640,8 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 - `SUBAGENTS_DIR` defaults to `~/.shuheng/memory/subagents`.
 - `TEMP_SUBAGENTS_DIR` defaults to `~/.shuheng/temp/subagents`.
 - Parameterized subagent store path helpers accept `SUBAGENTS_DIR` from `app.py`; the lower-level module must not import the app facade to discover storage roots.
+- Deterministic subagent control alias helpers live in `subagent_store.py`: `subagent_control_alias_keys(...)` shapes explicit target/name/id values, and `resolve_subagent_control_alias(alias_map, target)` resolves already-built alias maps without reading `State` or `SubAgentRuntime`.
+- `app.py` remains the Orchestrator owner for `register_subagent_control_aliases(...)`, `apply_subagent_control(...)`, runtime subagent resolution, state mutation, ledgers, approvals, artifacts, and dispatch side effects.
 - `SECRET_VAULT_DIR` defaults to `~/.shuheng/memory/secret_vault`.
 - OMP isolated runtime files default to `~/.shuheng/memory/agent_harness/runtime/ohmypi/agent`.
 - Legacy bootstrap marker: `~/.shuheng/.legacy_import.json`.

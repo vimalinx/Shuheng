@@ -72,6 +72,25 @@ def compact_identity_text(text: str) -> str:
     return re.sub(r"\s+", "", normalize_subagent_identity_text(text))
 
 
+def subagent_control_alias_keys(*values: Any) -> list[str]:
+    keys: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in {"current", "now", "selected"}:
+            continue
+        for key in (text, text.lower(), compact_identity_text(text)):
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+def resolve_subagent_control_alias(alias_map: dict[str, str], target: str) -> str:
+    for key in subagent_control_alias_keys(target):
+        if key in alias_map:
+            return alias_map[key]
+    return target
+
+
 def unique_subagent_id(name: str, *, subagents_dir: str) -> str:
     base = clean_subagent_id(name)
     candidate = base

@@ -9273,6 +9273,8 @@ subagent_session_from_sidebar_key = subagent_store_helpers.subagent_session_from
 clean_subagent_id = subagent_store_helpers.clean_subagent_id
 normalize_subagent_identity_text = subagent_store_helpers.normalize_subagent_identity_text
 compact_identity_text = subagent_store_helpers.compact_identity_text
+subagent_control_alias_keys = subagent_store_helpers.subagent_control_alias_keys
+resolve_subagent_control_alias = subagent_store_helpers.resolve_subagent_control_alias
 normalize_subagent_skill_refs = subagent_store_helpers.normalize_subagent_skill_refs
 
 
@@ -22272,30 +22274,11 @@ def subagent_control_force_new_intent(
     return reuse_policy in {"force_new", "never", "none", "no_reuse"}
 
 
-def subagent_control_alias_keys(*values: Any) -> list[str]:
-    keys: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in {"current", "now", "selected"}:
-            continue
-        for key in (text, text.lower(), compact_identity_text(text)):
-            if key and key not in keys:
-                keys.append(key)
-    return keys
-
-
 def register_subagent_control_aliases(alias_map: Optional[dict[str, str]], sub: SubAgentRuntime, *values: Any) -> None:
     if alias_map is None:
         return
     for key in subagent_control_alias_keys(*values, sub.agent_id, sub.name):
         alias_map[key] = sub.agent_id
-
-
-def resolve_subagent_control_alias(alias_map: dict[str, str], target: str) -> str:
-    for key in subagent_control_alias_keys(target):
-        if key in alias_map:
-            return alias_map[key]
-    return target
 
 
 def soft_delete_subagent(state: State, sub: SubAgentRuntime, *, source: str = "agent") -> str:

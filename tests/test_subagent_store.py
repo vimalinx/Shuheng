@@ -79,6 +79,35 @@ def test_subagent_identity_helpers_and_app_wrappers(tmp_path: Path, monkeypatch:
     assert app_module.unique_runtime_subagent_id(state, "Researcher") == "tmp-researcher-234567890123-2"
 
 
+def test_subagent_control_alias_helpers_and_app_wrapper() -> None:
+    sub = app_module.SubAgentRuntime(agent_id="ops-agent", name="Ops：Code-Reviewer", home="/tmp/ops-agent")
+
+    assert app_module.subagent_control_alias_keys is subagent_store.subagent_control_alias_keys
+    assert app_module.resolve_subagent_control_alias is subagent_store.resolve_subagent_control_alias
+    assert subagent_store.subagent_control_alias_keys("", None, "current", "now", "selected") == []
+    assert subagent_store.subagent_control_alias_keys("Ops：Code-Reviewer", "ops code reviewer") == [
+        "Ops：Code-Reviewer",
+        "ops：code-reviewer",
+        "opscodereviewer",
+        "ops code reviewer",
+    ]
+
+    alias_map = {"opscodereviewer": "ops-agent", "Worker": "worker-agent"}
+
+    assert subagent_store.resolve_subagent_control_alias(alias_map, "Ops Code Reviewer") == "ops-agent"
+    assert subagent_store.resolve_subagent_control_alias(alias_map, "Worker") == "worker-agent"
+    assert subagent_store.resolve_subagent_control_alias(alias_map, "missing") == "missing"
+
+    registered: dict[str, str] = {}
+    app_module.register_subagent_control_aliases(registered, sub, "Ops Code Reviewer")
+    app_module.register_subagent_control_aliases(None, sub, "ignored")
+
+    assert registered["Ops Code Reviewer"] == "ops-agent"
+    assert registered["opscodereviewer"] == "ops-agent"
+    assert registered["ops-agent"] == "ops-agent"
+    assert registered["Ops：Code-Reviewer"] == "ops-agent"
+
+
 def test_subagent_skill_ref_normalization_and_app_alias() -> None:
     long_ref = "x" * 221
 
