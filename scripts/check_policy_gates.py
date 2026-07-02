@@ -7828,6 +7828,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert a.agenttask_payload_from_prompt is cp.agenttask_payload_from_prompt
     assert a.policy_relevant_subagent_prompt_text is cp.policy_relevant_subagent_prompt_text
     assert a.explicit_policy_action_for_subagent_task is cp.explicit_policy_action_for_subagent_task
+    assert a.inferred_policy_action_for_subagent_task is cp.inferred_policy_action_for_subagent_task
     assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
@@ -7840,6 +7841,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert cp.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
     assert cp.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
     assert cp.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
+    assert cp.inferred_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
     assert cp.subagent_control_persistence_intent({"persistent": True}, "", "", "", "") == (True, False)
     assert cp.subagent_control_persistence_intent({"temporary": True}, "", "", "", "") == (False, True)
     assert cp.subagent_control_persistence_intent({}, "persistent", "durable", "长期", "profile") == (False, True)
@@ -7885,9 +7887,26 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
         }
     )
     assert cp.explicit_policy_action_for_subagent_task(explicit_policy_prompt) == "deploy_service"
+    assert cp.inferred_policy_action_for_subagent_task(explicit_policy_prompt, role="researcher", write_policy="none") == "deploy_service"
+    assert cp.inferred_policy_action_for_subagent_task("read the API key token", role="researcher", write_policy="none") == "access_secret"
+    assert cp.inferred_policy_action_for_subagent_task("buy credits and pay", role="researcher", write_policy="none") == "spend_money"
+    assert cp.inferred_policy_action_for_subagent_task("deploy release to production", role="researcher", write_policy="none") == "deploy"
+    assert cp.inferred_policy_action_for_subagent_task("send email to user", role="researcher", write_policy="none") == "external_send"
+    assert cp.inferred_policy_action_for_subagent_task("publish public post", role="researcher", write_policy="none") == "publish"
+    assert cp.inferred_policy_action_for_subagent_task("rm cache and delete file", role="researcher", write_policy="none") == "delete_file"
+    assert cp.inferred_policy_action_for_subagent_task("modify permission policy", role="researcher", write_policy="none") == "modify_permission_policy"
+    assert cp.inferred_policy_action_for_subagent_task("bulk batch update", role="researcher", write_policy="none") == "high_risk_batch_change"
+    assert cp.inferred_policy_action_for_subagent_task("sudo systemctl restart", role="ops", write_policy="none") == "long_running_privilege_escalation"
+    assert cp.inferred_policy_action_for_subagent_task("ordinary repo work", role="coder", write_policy="single_writer") == "repo_write"
+    assert cp.inferred_policy_action_for_subagent_task("summarize docs", role="researcher", write_policy="none") == "read_only"
+    assert a.infer_policy_action_for_subagent_task(
+        a.SubAgentRuntime(agent_id="coder-wrapper", name="Coder Wrapper", home=root, role="coder"),
+        "ordinary repo work",
+    ) == "repo_write"
     assert cp.agenttask_payload_from_prompt("not an envelope") == {}
     assert cp.policy_relevant_subagent_prompt_text("not an envelope") == "not an envelope"
     assert cp.explicit_policy_action_for_subagent_task("not an envelope") == ""
+    assert cp.inferred_policy_action_for_subagent_task("not an envelope", role="researcher", write_policy="none") == "read_only"
     assert "curses" not in cp.__dict__
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "def subagent_control_persistence_intent(" not in app_source
@@ -7901,6 +7920,8 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "def agenttask_payload_from_prompt(" not in app_source
     assert "def policy_relevant_subagent_prompt_text(" not in app_source
     assert "def explicit_policy_action_for_subagent_task(" not in app_source
+    assert "POLICY_ACTION_KEYWORD_CHECKS" not in app_source
+    assert "OPS_PRIVILEGED_OPERATION_TOKENS" not in app_source
     assert "CONTROL_CONTINUATION_ACTIONS = {" not in app_source
     assert "STRUCTURED_CONTINUATION_STATES = {" not in app_source
     existing = a.create_subagent(

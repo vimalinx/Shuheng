@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from typing import Any, Optional
 
 try:
@@ -21,6 +22,19 @@ TUI_GENERIC_CODE_FENCE_RE = re.compile(r"```[^\n`]*\n[\s\S]*?(?:^```[ \t]*(?:\n|
 
 GA_CONTROL_SCHEMA = "ga-control.v2"
 AGENT_TASK_SCHEMA = "agenttask.v2"
+
+POLICY_ACTION_KEYWORD_CHECKS = (
+    ("access_secret", ("api key", "apikey", "secret", "token", "credential", "password", "密码", "密钥", "凭据", "令牌")),
+    ("spend_money", ("buy", "purchase", "pay", "charge", "充值", "购买", "付款", "付费", "花钱")),
+    ("deploy", ("deploy", "release", "production", "上线", "部署", "发布服务", "生产环境")),
+    ("external_send", ("send email", "email.send", "发邮件", "私信", "发送给", "外发", "对外发送")),
+    ("publish", ("publish", "post", "发帖", "发布内容", "公开发布")),
+    ("delete_file", ("rm ", "delete file", "remove file", "删除文件", "删文件", "批量删除")),
+    ("modify_permission_policy", ("permission", "policy", "role", "权限", "策略", "审批门", "修改角色")),
+    ("high_risk_batch_change", ("bulk", "batch", "批量", "大规模")),
+)
+
+OPS_PRIVILEGED_OPERATION_TOKENS = ("sudo", "root", "systemctl", "pacman", "docker", "firewall", "ufw", "iptables", "内核", "服务", "重启")
 
 CURRENT_TUI_CONTROL_ACTIONS = {
     "session.pin",
@@ -396,6 +410,23 @@ def explicit_policy_action_for_subagent_task(prompt: str) -> str:
             if first:
                 return first.lower().replace("-", "_")
     return ""
+
+
+def inferred_policy_action_for_subagent_task(prompt: str, *, role: str = "", write_policy: str = "") -> str:
+    explicit_action = explicit_policy_action_for_subagent_task(prompt)
+    if explicit_action:
+        return explicit_action
+    text = unicodedata.normalize("NFKC", policy_relevant_subagent_prompt_text(prompt)).lower()
+    for action, tokens in POLICY_ACTION_KEYWORD_CHECKS:
+        if any(token in text for token in tokens):
+            return action
+    normalized_role = str(role or "").strip().lower().replace("-", "_")
+    normalized_write_policy = str(write_policy or "").strip().lower().replace("-", "_")
+    if normalized_role == "ops" and any(token in text for token in OPS_PRIVILEGED_OPERATION_TOKENS):
+        return "long_running_privilege_escalation"
+    if normalized_write_policy == "single_writer":
+        return "repo_write"
+    return "read_only"
 
 
 def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any]]:

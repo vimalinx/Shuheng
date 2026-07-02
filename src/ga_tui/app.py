@@ -83,6 +83,7 @@ try:
         format_agent_control_result,
         format_agenttask_worker_prompt,
         format_control_result_continuation_prompt,
+        inferred_policy_action_for_subagent_task,
         known_tui_control,
         lifecycle_is_persistent,
         load_ga_control_json_text,
@@ -215,6 +216,7 @@ except Exception:
         format_agent_control_result,
         format_agenttask_worker_prompt,
         format_control_result_continuation_prompt,
+        inferred_policy_action_for_subagent_task,
         known_tui_control,
         lifecycle_is_persistent,
         load_ga_control_json_text,
@@ -4582,29 +4584,12 @@ def subagent_task_schema_kwargs(
 
 
 def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> str:
-    explicit_action = explicit_policy_action_for_subagent_task(prompt)
-    if explicit_action:
-        return explicit_action
-    text = unicodedata.normalize("NFKC", policy_relevant_subagent_prompt_text(prompt)).lower()
-    checks = [
-        ("access_secret", ("api key", "apikey", "secret", "token", "credential", "password", "密码", "密钥", "凭据", "令牌")),
-        ("spend_money", ("buy", "purchase", "pay", "charge", "充值", "购买", "付款", "付费", "花钱")),
-        ("deploy", ("deploy", "release", "production", "上线", "部署", "发布服务", "生产环境")),
-        ("external_send", ("send email", "email.send", "发邮件", "私信", "发送给", "外发", "对外发送")),
-        ("publish", ("publish", "post", "发帖", "发布内容", "公开发布")),
-        ("delete_file", ("rm ", "delete file", "remove file", "删除文件", "删文件", "批量删除")),
-        ("modify_permission_policy", ("permission", "policy", "role", "权限", "策略", "审批门", "修改角色")),
-        ("high_risk_batch_change", ("bulk", "batch", "批量", "大规模")),
-    ]
-    for action, tokens in checks:
-        if any(token in text for token in tokens):
-            return action
     role = normalized_subagent_role(sub.role)
-    if role == "ops" and any(token in text for token in ("sudo", "root", "systemctl", "pacman", "docker", "firewall", "ufw", "iptables", "内核", "服务", "重启")):
-        return "long_running_privilege_escalation"
-    if role_write_policy(role) == "single_writer":
-        return "repo_write"
-    return "read_only"
+    return inferred_policy_action_for_subagent_task(
+        prompt,
+        role=role,
+        write_policy=role_write_policy(role),
+    )
 
 
 def policy_gate_for_subagent_task(
