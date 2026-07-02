@@ -160,6 +160,44 @@ def force_new_from_v2(control: dict[str, Any]) -> bool:
     return reuse_policy in {"force_new", "never", "none", "no_reuse"} or selector_policy in {"force_new", "never", "none", "no_reuse"}
 
 
+def subagent_control_persistence_intent(
+    control: dict[str, Any],
+    target: str,
+    value: str,
+    name: str,
+    profile: str,
+) -> tuple[bool, bool]:
+    del target, value, name, profile
+    persistent = lifecycle_is_persistent(control)
+    if persistent is not None:
+        return bool(persistent), not bool(persistent)
+    for key in ("temporary", "temp", "ephemeral", "session_only", "session_scoped"):
+        if key in control and control_truthy(control.get(key)):
+            return False, True
+    return False, True
+
+
+def subagent_control_force_new_intent(
+    control: dict[str, Any],
+    target: str,
+    value: str,
+    name: str,
+    profile: str,
+    context_text: str = "",
+) -> bool:
+    del target, value, name, profile, context_text
+    for key in ("force_new", "create_new", "fresh", "separate"):
+        if key in control and control_truthy(control.get(key)):
+            return True
+    for key in ("reuse", "reuse_existing", "allow_reuse", "dedupe"):
+        if key in control and control_falsey(control.get(key)):
+            return True
+    if "new" in control and isinstance(control.get("new"), (bool, int, float, str)) and control_truthy(control.get("new")):
+        return True
+    reuse_policy = str(control.get("reuse_policy") or "").strip().lower().replace("-", "_")
+    return reuse_policy in {"force_new", "never", "none", "no_reuse"}
+
+
 def agenttask_objective(control: dict[str, Any]) -> str:
     work_order = agenttask_work_order(control)
     return str(

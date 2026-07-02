@@ -2513,7 +2513,7 @@ token panel -> OMP get_state.contextUsage
 
 - Hidden block: `<ga-control>{...}</ga-control>`
 - Fenced block: ````ga-control`
-- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, and v2-to-internal-action coercion.
+- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, and v2-to-internal-action coercion.
 - Execution module: `src/ga_tui/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
 - Batch envelope:
 
@@ -2556,7 +2556,7 @@ token panel -> OMP get_state.contextUsage
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
 - `install_tui_control_hint()` must replace any previous GenericAgent-TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
-- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
+- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
 - `src/ga_tui/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
 
 ### 4. Validation & Error Matrix
@@ -3641,6 +3641,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 - `TEMP_SUBAGENTS_DIR` defaults to `~/.shuheng/temp/subagents`.
 - Parameterized subagent store path helpers accept `SUBAGENTS_DIR` from `app.py`; the lower-level module must not import the app facade to discover storage roots.
 - Deterministic subagent control alias helpers live in `subagent_store.py`: `subagent_control_alias_keys(...)` shapes explicit target/name/id values, and `resolve_subagent_control_alias(alias_map, target)` resolves already-built alias maps without reading `State` or `SubAgentRuntime`.
+- Deterministic subagent control lifecycle/reuse intent helpers live in `control_protocol.py`: `subagent_control_persistence_intent(...)` interprets only explicit structured lifecycle fields and defaults to ephemeral/session-scoped behavior, while `subagent_control_force_new_intent(...)` interprets only explicit force-new/reuse fields. They must not infer persistence or no-reuse from natural-language target, value, name, profile, or context text.
 - `app.py` remains the Orchestrator owner for `register_subagent_control_aliases(...)`, `apply_subagent_control(...)`, runtime subagent resolution, state mutation, ledgers, approvals, artifacts, and dispatch side effects.
 - `SECRET_VAULT_DIR` defaults to `~/.shuheng/memory/secret_vault`.
 - OMP isolated runtime files default to `~/.shuheng/memory/agent_harness/runtime/ohmypi/agent`.

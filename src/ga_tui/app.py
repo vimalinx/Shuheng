@@ -78,6 +78,8 @@ try:
         load_ga_control_json_text,
         normalized_control_action,
         repair_json_missing_tail,
+        subagent_control_force_new_intent,
+        subagent_control_persistence_intent,
         strip_tui_controls,
         tui_control_parse_errors,
     )
@@ -197,6 +199,8 @@ except Exception:
         load_ga_control_json_text,
         normalized_control_action,
         repair_json_missing_tail,
+        subagent_control_force_new_intent,
+        subagent_control_persistence_intent,
         strip_tui_controls,
         tui_control_parse_errors,
     )
@@ -22234,44 +22238,6 @@ def decide_approval(state: State, approval_id: str, approved: bool) -> str:
         return f"已批准并执行：{result}"
     clear_pending_approval_interaction(state, match_id)
     return f"已批准：{match_id}"
-
-
-def subagent_control_persistence_intent(
-    control: dict[str, Any],
-    target: str,
-    value: str,
-    name: str,
-    profile: str,
-) -> tuple[bool, bool]:
-    del target, value, name, profile
-    persistent = lifecycle_is_persistent(control)
-    if persistent is not None:
-        return bool(persistent), not bool(persistent)
-    for key in ("temporary", "temp", "ephemeral", "session_only", "session_scoped"):
-        if key in control and control_truthy(control.get(key)):
-            return False, True
-    return False, True
-
-
-def subagent_control_force_new_intent(
-    control: dict[str, Any],
-    target: str,
-    value: str,
-    name: str,
-    profile: str,
-    context_text: str = "",
-) -> bool:
-    del target, value, name, profile, context_text
-    for key in ("force_new", "create_new", "fresh", "separate"):
-        if key in control and control_truthy(control.get(key)):
-            return True
-    for key in ("reuse", "reuse_existing", "allow_reuse", "dedupe"):
-        if key in control and control_falsey(control.get(key)):
-            return True
-    if "new" in control and isinstance(control.get("new"), (bool, int, float, str)) and control_truthy(control.get("new")):
-        return True
-    reuse_policy = str(control.get("reuse_policy") or "").strip().lower().replace("-", "_")
-    return reuse_policy in {"force_new", "never", "none", "no_reuse"}
 
 
 def register_subagent_control_aliases(alias_map: Optional[dict[str, str]], sub: SubAgentRuntime, *values: Any) -> None:

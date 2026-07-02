@@ -7815,8 +7815,22 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert a.extract_tui_controls is cp.extract_tui_controls
     assert a.strip_tui_controls is cp.strip_tui_controls
     assert a.lifecycle_is_persistent is cp.lifecycle_is_persistent
+    assert a.subagent_control_persistence_intent is cp.subagent_control_persistence_intent
+    assert a.subagent_control_force_new_intent is cp.subagent_control_force_new_intent
     assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
+    assert cp.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
+    assert cp.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
+    assert cp.subagent_control_persistence_intent({"persistent": True}, "", "", "", "") == (True, False)
+    assert cp.subagent_control_persistence_intent({"temporary": True}, "", "", "", "") == (False, True)
+    assert cp.subagent_control_persistence_intent({}, "persistent", "durable", "长期", "profile") == (False, True)
+    assert cp.subagent_control_force_new_intent({"force_new": True}, "", "", "", "")
+    assert cp.subagent_control_force_new_intent({"reuse_existing": "no"}, "", "", "", "")
+    assert cp.subagent_control_force_new_intent({"reuse_policy": "no-reuse"}, "", "", "", "")
+    assert not cp.subagent_control_force_new_intent({}, "new", "force_new", "separate", "never", "do not reuse")
     assert "curses" not in cp.__dict__
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "def subagent_control_persistence_intent(" not in app_source
+    assert "def subagent_control_force_new_intent(" not in app_source
     existing = a.create_subagent(
         state,
         "Obsidiam知识库管家",
