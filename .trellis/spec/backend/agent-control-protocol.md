@@ -2120,7 +2120,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 1. Scope / Trigger
 
 - Trigger: Users need local plugin packages that can contribute reusable subagent skills, agent templates, workflow metadata, and read-only registry information without granting executable plugin code.
-- Applies to: local `plugin.json` discovery, `plugin://<plugin-id>/skills/<skill-id>` skill refs, `/plugins`, `/plugin info <plugin-id>`, `/plugin template <plugin-id>/<template-id>`, `/plugin create <plugin-id>/<template-id> [agent-name]`, `/agent plugin ...`, subagent `skill_refs`, context pack construction, subagent prompt installation, policy gates, and registry/query metadata.
+- Applies to: local `plugin.json` discovery, `plugin://<plugin-id>/skills/<skill-id>` skill refs, `/plugins`, the Plugins harness panel, `/plugin info <plugin-id>`, `/plugin template <plugin-id>/<template-id>`, `/plugin create <plugin-id>/<template-id> [agent-name]`, `/agent plugin ...`, subagent `skill_refs`, context pack construction, subagent prompt installation, policy gates, and registry/query metadata.
 - Non-goal: This does not add remote marketplace install, arbitrary Python/JS execution, plugin-native tools, hidden side effects, cross-machine sync, or a replacement for the existing per-agent dedicated skill system.
 
 ### 2. Signatures
@@ -2131,7 +2131,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - Skill ref shape: `plugin://<plugin-id>/skills/<skill-id>`.
 - Agent template ref shape: `plugin://<plugin-id>/agents/<template-id>`, with `<plugin-id>/<template-id>` accepted as a TUI shorthand.
 - Public TUI commands:
-  - `/plugins`
+  - `/plugins` opens the Plugins panel in the interactive curses Enter path.
   - `/plugin info <plugin-id>`
   - `/plugin template <plugin-id>/<template-id>`
   - `/plugin create <plugin-id>/<template-id> [agent-name]`
@@ -2141,6 +2141,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
   - `/agent plugin <agent> add|remove|set|clear|list <plugin-skill-ref ...>`
 - Registry owner module: `plugins.py`.
 - Orchestrator wrappers: `user_plugin_roots()`, `user_plugin_registry(...)`, `handle_plugin_command(...)`, `subagent_plugin_command_message(...)`, and `create_subagent_from_plugin_template(...)` in `app.py`.
+- Panel wrapper: `plugin_panel_items()` returns read-only `PanelItem` rows for `open_harness_panel(..., "plugins")`.
 
 ### 3. Contracts
 
@@ -2155,6 +2156,9 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `/plugin create ...` must create subagents through the existing `create_subagent(...)` path and then set `skill_refs` through `set_subagent_skill_refs(...)`; it must not bypass role normalization, persistence selection, Secret Vault metadata handling, prompt installation, or policy gates.
 - Plugin manifest `permissions` are descriptive metadata in this scenario. They must not override role write policy, approval gates, Secret Vault isolation, single-writer locks, artifact provenance, task ledgers, or runtime dispatch permissions.
 - The app may cache plugin registry discovery by plugin-root/manifest fingerprint. Cache invalidation must not require a TUI repaint and must not read plugin skill body text globally.
+- The interactive `/plugins` path must use the existing harness panel browser. Panel rows may show plugin metadata, manifest paths, declared contributions, command hints, and validation issues, but must not show plugin skill body text.
+- Non-interactive `/plugins` handling may continue to return bounded text via `format_plugin_list(...)`.
+- Secret Vault unlocked mode treats `/plugins` as a normal harness panel and blocks it until `/lock`, matching normal history/harness isolation.
 
 ### 4. Validation & Error Matrix
 
@@ -2166,6 +2170,8 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - Skill path outside plugin root -> registry issue, `plugin_skill_file_for_ref(...) == ""`, no prompt body injection.
 - Missing skill file -> registry issue, ref remains visible, no prompt body injection.
 - `/plugin info <missing>` -> user-visible missing plugin message.
+- `/plugins` in the curses input path -> opens `open_harness_panel(..., "plugins")`.
+- `/plugins` with no local plugin packages -> shows a useful empty-state panel row with plugin roots and expected package shape.
 - `/plugin create <missing>` -> user-visible missing template message, no subagent created.
 - `/agent plugin add <agent>` without plugin refs -> usage message, no metadata change.
 - `/agent plugin clear <agent>` -> removes only `plugin://...` refs and preserves ordinary dedicated skill refs.
@@ -2188,6 +2194,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `scripts/check_policy_gates.py` must assert `plugins.py` is a pure registry module and does not import app/runtime/UI/governance owners.
 - `scripts/check_policy_gates.py` must create a temp local plugin, attach `plugin://research-pack/skills/source-review` to one subagent, and prove the plugin marker appears only in that target context pack and direct-chat prompt.
 - `scripts/check_policy_gates.py` must assert `/plugins`, `/plugin info`, `/plugin template`, `/plugin create`, and `/agent plugin add/remove/list/clear` work through existing governed paths.
+- `scripts/check_policy_gates.py` must assert the Plugins panel route is registered in the Enter path and `plugin_panel_items(...)` exposes plugin metadata and validation issue rows without plugin skill body text.
 - `scripts/check_policy_gates.py` must assert a manifest-declared outside path does not resolve or inject.
 - `scripts/check_policy_gates.py` must assert plugin-declared permissions do not change role write policy.
 - Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, targeted pytest, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.

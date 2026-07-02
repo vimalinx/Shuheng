@@ -4380,7 +4380,7 @@ def secret_status_text(state: State) -> str:
 
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
-    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/continue", "/sessions",
+    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/continue", "/sessions",
     "/workspace", "/workspaces",
     "/temp",
 }
@@ -20441,6 +20441,129 @@ def gateway_panel_items(state: State) -> list[PanelItem]:
     return items
 
 
+def plugin_panel_items() -> list[PanelItem]:
+    registry = user_plugin_registry()
+    roots = user_plugin_roots()
+    items: list[PanelItem] = []
+    issues_by_plugin: dict[str, list[plugin_helpers.PluginIssue]] = {}
+    for issue in registry.issues:
+        issues_by_plugin.setdefault(issue.plugin_id, []).append(issue)
+    for plugin_id in sorted(registry.plugins):
+        plugin = registry.plugins[plugin_id]
+        plugin_issues = issues_by_plugin.get(plugin.plugin_id, [])
+        detail_lines = [
+            f"Plugin: {plugin.plugin_id}",
+            f"Name: {plugin.name}",
+            f"Version: {plugin.version or '-'}",
+            f"Status: {'warning' if plugin_issues else 'ok'}",
+            f"Root: {plugin.root}",
+            f"Manifest: {plugin.manifest_path}",
+            f"Description: {plugin.description or '-'}",
+            "",
+            "Skills:",
+        ]
+        for skill in plugin.skills:
+            status = "ok" if skill.exists else "missing"
+            detail_lines.append(f"- {skill.ref} · {skill.name} · {status}")
+            detail_lines.append(f"  path: {skill.path}")
+            if skill.description:
+                detail_lines.append(f"  description: {skill.description}")
+        if not plugin.skills:
+            detail_lines.append("- (none)")
+        detail_lines += ["", "Agent Templates:"]
+        for template in plugin.agent_templates:
+            lifecycle = "persistent" if template.persistent else "temporary"
+            skills = ", ".join(template.skill_refs) if template.skill_refs else "(none)"
+            detail_lines.append(f"- {template.ref} · {template.name} · role:{template.role} · {lifecycle}")
+            detail_lines.append(f"  skills: {skills}")
+            if template.description:
+                detail_lines.append(f"  description: {template.description}")
+        if not plugin.agent_templates:
+            detail_lines.append("- (none)")
+        detail_lines += ["", "Workflows:"]
+        for workflow in plugin.workflows:
+            status = "ok" if workflow.exists else "missing"
+            detail_lines.append(f"- {workflow.ref} · {workflow.name} · {status}")
+            detail_lines.append(f"  path: {workflow.path}")
+            if workflow.description:
+                detail_lines.append(f"  description: {workflow.description}")
+        if not plugin.workflows:
+            detail_lines.append("- (none)")
+        detail_lines += [
+            "",
+            "Declared Permissions (metadata only):",
+            json.dumps(plugin.permissions or {}, ensure_ascii=False, indent=2, sort_keys=True),
+            "",
+            "Commands:",
+            f"- /plugin info {plugin.plugin_id}",
+        ]
+        for template in plugin.agent_templates[:5]:
+            detail_lines.append(f"- /plugin create {plugin.plugin_id}/{template.template_id} [agent-name]")
+        for skill in plugin.skills[:5]:
+            detail_lines.append(f"- /agent plugin add <agent> {skill.ref}")
+        if plugin_issues:
+            detail_lines += ["", "Validation Issues:"]
+            for issue in plugin_issues:
+                detail_lines.append(f"- {issue.message}")
+        status = "warning" if plugin_issues else "ok"
+        items.append(PanelItem(
+            key=plugin.plugin_id,
+            title=f"{plugin.name} · {plugin.plugin_id}",
+            subtitle=f"{status} · skills:{len(plugin.skills)} templates:{len(plugin.agent_templates)} workflows:{len(plugin.workflows)}",
+            detail="\n".join(detail_lines),
+            status=status,
+            path=plugin.root,
+            payload={
+                "plugin_id": plugin.plugin_id,
+                "manifest_path": plugin.manifest_path,
+                "root": plugin.root,
+                "skills": [skill.ref for skill in plugin.skills],
+                "agent_templates": [template.ref for template in plugin.agent_templates],
+                "workflows": [workflow.ref for workflow in plugin.workflows],
+                "issue_count": len(plugin_issues),
+            },
+        ))
+    for index, issue in enumerate(registry.issues, 1):
+        if issue.plugin_id in registry.plugins:
+            continue
+        items.append(PanelItem(
+            key=f"issue-{index}",
+            title=f"Validation issue · {issue.plugin_id}",
+            subtitle=issue.message,
+            detail="\n".join([
+                f"Plugin: {issue.plugin_id}",
+                f"Manifest: {issue.manifest_path}",
+                f"Issue: {issue.message}",
+                "",
+                "This package is visible for diagnosis but is not loaded as an executable plugin.",
+            ]),
+            status="warning",
+            path=issue.manifest_path,
+            payload={"plugin_id": issue.plugin_id, "manifest_path": issue.manifest_path, "message": issue.message},
+        ))
+    if not items:
+        items.append(PanelItem(
+            key="no-plugins",
+            title="No plugins found",
+            subtitle=", ".join(roots) if roots else "-",
+            detail="\n".join([
+                "No declarative plugins were found.",
+                "",
+                "Plugin roots:",
+                *[f"- {root}" for root in roots],
+                "",
+                "Expected package shape:",
+                "<plugin-id>/plugin.json",
+                "<plugin-id>/skills/<skill-id>/SKILL.md",
+                "",
+                "Use /plugin info <plugin-id> after adding a plugin package.",
+            ]),
+            status="empty",
+            payload={"roots": roots},
+        ))
+    return items
+
+
 def draw_panel_browser(
     stdscr,
     state: State,
@@ -20521,6 +20644,8 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
             return "A2A / MCP Gateway", gateway_panel_items(state), "r 重建 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "baseline":
             return "Architecture Baseline", baseline_panel_items(state), "r 重新生成报告  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+        if panel == "plugins":
+            return "Plugins", plugin_panel_items(), "r 刷新插件 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         return "Harness", [], "Esc/q 关闭"
 
     try:
@@ -20569,6 +20694,9 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
                 if panel == "gateway":
                     ensure_gateway_registry(state)
                     message = "Gateway registry 已重建。"
+                elif panel == "plugins":
+                    clear_plugin_registry_cache()
+                    message = "Plugin registry 已刷新。"
                 else:
                     message = "已刷新。"
                 detail_scroll = 0
@@ -25186,7 +25314,7 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
-        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/baseline"}:
+        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
             open_harness_panel(stdscr, state, panel)

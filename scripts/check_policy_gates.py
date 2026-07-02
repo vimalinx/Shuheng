@@ -8417,6 +8417,9 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
 def assert_declarative_plugins_are_agent_scoped() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
     retarget_harness(root)
+    empty_items = a.plugin_panel_items()
+    assert len(empty_items) == 1 and empty_items[0].key == "no-plugins", empty_items
+    assert a.SHUHENG_PLUGINS_DIR in empty_items[0].detail, empty_items[0].detail
     plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
     skill_dir = plugin_root / "skills" / "source-review"
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -8486,6 +8489,9 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         ),
         encoding="utf-8",
     )
+    bad_plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "bad-pack")
+    bad_plugin_root.mkdir(parents=True, exist_ok=True)
+    bad_plugin_root.joinpath("plugin.json").write_text("{not valid json", encoding="utf-8")
     a.clear_plugin_registry_cache()
     registry = a.user_plugin_registry(force=True)
     plugin_ref = "plugin://research-pack/skills/source-review"
@@ -8501,6 +8507,18 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "/plugins" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/plugin" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "plugin" in {cmd for cmd, _args, _desc, _sendable in a.AGENT_SUBCOMMANDS}
+    assert "/plugins" in a.SECRET_BLOCKED_NORMAL_COMMANDS
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert 'if panel == "plugins"' in app_source, app_source
+    assert '"/plugins"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
+    panel_items = a.plugin_panel_items()
+    plugin_item = next(item for item in panel_items if item.key == "research-pack")
+    assert plugin_item.status == "warning", plugin_item
+    assert "Plugin source review SOP" in plugin_item.detail, plugin_item.detail
+    assert "inside the plugin root" in plugin_item.detail, plugin_item.detail
+    assert unique_marker not in plugin_item.detail, plugin_item.detail
+    issue_items = [item for item in panel_items if item.status == "warning" and item.key != "research-pack"]
+    assert any("not valid JSON" in item.detail for item in issue_items), panel_items
 
     state = a.State(agent=ContextFakeAgent())
     state.running = True
