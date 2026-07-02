@@ -417,6 +417,7 @@ def assert_commands_module_boundary() -> None:
         "category_command_completion_rows",
         "approval_command_completion_rows",
         "agent_command_completion_decision",
+        "subagent_settings_target_from_command",
         "archived_command_matches",
         "workspace_command_matches",
     ):
@@ -438,6 +439,10 @@ def assert_commands_module_boundary() -> None:
         role_base="/agent role worker ",
     )
     assert commands_mod.agent_command_completion_decision("/agent role worker re extra").kind == "none"
+    assert commands_mod.subagent_settings_target_from_command("/agent settings worker") == "worker"
+    assert commands_mod.subagent_settings_target_from_command("/AGENT MODEL Worker-2") == "Worker-2"
+    assert commands_mod.subagent_settings_target_from_command("/agent detail worker extra") == ""
+    assert a.subagent_settings_target_from_command("/agent prefs worker") == "worker"
     assert commands_mod.completion_insert_text(("/agent new", "<name>", "新建", False)) == "/agent new "
     assert commands_mod.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
     command_candidates = [
@@ -541,6 +546,7 @@ def assert_commands_module_boundary() -> None:
         "def approval_command_completion_rows",
         "def archived_command_matches",
         "def workspace_command_matches",
+        "def subagent_settings_target_from_command",
     ):
         assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
     source = Path(commands_mod.__file__).read_text(encoding="utf-8")

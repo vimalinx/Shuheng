@@ -16,6 +16,7 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.approval_command_completion_rows is commands.approval_command_completion_rows
     assert app_module.AgentCommandCompletionDecision is commands.AgentCommandCompletionDecision
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
+    assert app_module.subagent_settings_target_from_command is commands.subagent_settings_target_from_command
     assert app_module.archived_command_matches is commands.archived_command_matches
     assert app_module.workspace_command_matches is commands.workspace_command_matches
 
@@ -173,6 +174,21 @@ def test_agent_command_completion_decision_dynamic_requests() -> None:
         role_base="/agent role worker ",
     )
     assert commands.agent_command_completion_decision("/agent role worker re extra").kind == "none"
+
+
+def test_subagent_settings_target_from_command_extracts_single_targets() -> None:
+    for alias in ("settings", "setting", "config", "detail", "details", "prefs"):
+        assert commands.subagent_settings_target_from_command(f"/agent {alias} alpha") == "alpha"
+
+    assert commands.subagent_settings_target_from_command("  /AGENT SETTINGS Alpha-01  ") == "Alpha-01"
+    assert commands.subagent_settings_target_from_command("/agent model beta") == "beta"
+    assert commands.subagent_settings_target_from_command("/AGENT MODEL Beta-02") == "Beta-02"
+    assert commands.subagent_settings_target_from_command("/agent settings alpha extra") == ""
+    assert commands.subagent_settings_target_from_command("/agent model beta extra") == ""
+    assert commands.subagent_settings_target_from_command("/agent settings ") == ""
+    assert commands.subagent_settings_target_from_command("/agent info alpha") == ""
+    assert commands.subagent_settings_target_from_command("agent settings alpha") == ""
+    assert app_module.subagent_settings_target_from_command("/agent prefs worker") == "worker"
 
 
 def test_workspace_command_matches_support_singular_and_plural_roots() -> None:

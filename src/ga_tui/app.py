@@ -15190,6 +15190,7 @@ top_level_command_matches = command_helpers.top_level_command_matches
 category_command_completion_rows = command_helpers.category_command_completion_rows
 approval_command_completion_rows = command_helpers.approval_command_completion_rows
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
+subagent_settings_target_from_command = command_helpers.subagent_settings_target_from_command
 
 
 def subagent_completion_rows(state: Optional[State], prefix: str, subcmd: str) -> list[tuple[str, str, str, bool]]:
@@ -21695,15 +21696,6 @@ def open_subagent_settings(stdscr, state: State, sub: SubAgentRuntime) -> None:
         stdscr.timeout(old_timeout)
         state.last_error = final_message
         mark_dirty(state)
-
-
-def subagent_settings_target_from_command(text: str) -> str:
-    raw = (text or "").strip()
-    match = re.match(r"/agent\s+(?:settings|setting|config|detail|details|prefs)\s+(\S+)\s*$", raw, re.I)
-    if match:
-        return match.group(1)
-    match = re.match(r"/agent\s+model\s+(\S+)\s*$", raw, re.I)
-    return match.group(1) if match else ""
 
 
 def parse_subagent_new_body(body: str) -> tuple[str, str, str, bool, str]:

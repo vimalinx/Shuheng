@@ -903,9 +903,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
   `/workspaces` completion, `/filter` / `/collapse` / `/expand` category
   command row shaping over explicit category counts, `/approve` / `/reject`
-  command row shaping over explicit approval candidates, top-level visible
-  command prefix matching, completion insertion behavior, unit tests, and
-  policy gates.
+  command row shaping over explicit approval candidates, `/agent settings|model`
+  target extraction, top-level visible command prefix matching, completion
+  insertion behavior, unit tests, and policy gates.
 - Non-goal: This does not move command execution, `command_matches(...)`,
   `subagent_completion_rows(...)`, `agent_command_matches(...)`,
   `category_command_matches(...)`, `approval_command_matches(...)`, mutable
@@ -927,6 +927,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   - `category_command_completion_rows(text, category_counts)`.
   - `approval_command_completion_rows(text, approval_candidates)`.
   - `agent_command_completion_decision(text)`.
+  - `subagent_settings_target_from_command(text)`.
   - `archived_command_matches(text)`.
   - `workspace_command_matches(text)`.
 
@@ -963,6 +964,12 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   classification. It may return static rows, a subagent-completion request, a
   role-template-completion request, or no match, but it must not inspect
   current subagent state or role templates.
+- `subagent_settings_target_from_command(...)` owns only deterministic target
+  extraction for `/agent settings|setting|config|detail|details|prefs <agent>`
+  and `/agent model <agent>`. It returns the single non-space target token or
+  `""` for non-matching input, missing targets, or extra trailing tokens. It
+  must not inspect `State`, resolve subagents, open modals, set models, mutate
+  runtime state, or execute commands.
 - `completion_insert_text(...)` returns the command unchanged for sendable
   candidates and appends exactly one trailing space to non-sendable command
   candidates after right-stripping the command.
@@ -1018,6 +1025,11 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   completion request with base `/agent role worker ` and role prefix `re`.
 - `agent_command_completion_decision("/agent role worker re extra")` -> no
   match.
+- `subagent_settings_target_from_command("/agent settings worker")` ->
+  `"worker"`.
+- `subagent_settings_target_from_command("/AGENT MODEL Worker-2")` ->
+  `"Worker-2"`.
+- `subagent_settings_target_from_command("/agent detail worker extra")` -> `""`.
 - `command_matches("/workspace r", state)` still delegates to the extracted
   workspace helper before app-owned command dispatch continues.
 - `command_matches("/mo", state)` still delegates the final static fallback to
@@ -1033,6 +1045,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - Good: `/agent` completion parsing returns a neutral decision object from
   `commands.py`; `app.py` then expands that decision using `State.subagents`
   and `ROLE_TEMPLATES`.
+- Good: `/agent settings|model` target extraction moves to `commands.py`, while
+  `app.py` still owns subagent resolution, modal opening, model setting,
+  input/key handling, and error display.
 - Good: `commands.py` owns `top_level_command_matches(...)` over injected
   candidates, while `app.py` keeps the visible `COMMANDS` catalog and the
   specialized dynamic routing order.
@@ -1069,6 +1084,10 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `approval_command_matches(...)` still derives candidates from
   `pending_approvals(state)`, applies app-owned summary truncation, and delegates
   row shaping without moving approval ownership into `commands.py`.
+- Unit tests must assert direct `subagent_settings_target_from_command(...)`
+  behavior for settings aliases, model command targets, case-insensitive command
+  words, surrounding whitespace, extra trailing tokens, and non-matching input,
+  plus app alias parity.
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
   helpers, `app.py` no longer defines the moved functions locally, and the new
   module has no reverse dependency into app/TUI/render/runtime/storage owners.

@@ -177,6 +177,15 @@ def agent_command_completion_decision(text: str) -> AgentCommandCompletionDecisi
     return AgentCommandCompletionDecision("subagent", subcmd=subcmd, agent_prefix=agent_prefix)
 
 
+def subagent_settings_target_from_command(text: str) -> str:
+    raw = (text or "").strip()
+    match = re.match(r"/agent\s+(?:settings|setting|config|detail|details|prefs)\s+(\S+)\s*$", raw, re.I)
+    if match:
+        return match.group(1)
+    match = re.match(r"/agent\s+model\s+(\S+)\s*$", raw, re.I)
+    return match.group(1) if match else ""
+
+
 def archived_command_matches(text: str) -> list[CommandCandidate]:
     raw = text or ""
     match = re.match(r"^/archived\s+(.*)$", raw, re.I)
