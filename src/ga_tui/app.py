@@ -61,6 +61,7 @@ try:
         TUI_CONTROL_JSON_FENCE_RE,
         TUI_CONTROL_RE,
         action_schema_valid,
+        agenttask_payload_from_prompt,
         agenttask_contract,
         agenttask_objective,
         agenttask_routing,
@@ -85,6 +86,7 @@ try:
         lifecycle_is_persistent,
         load_ga_control_json_text,
         normalized_control_action,
+        policy_relevant_subagent_prompt_text,
         repair_json_missing_tail,
         subagent_control_force_new_intent,
         subagent_control_persistence_intent,
@@ -190,6 +192,7 @@ except Exception:
         TUI_CONTROL_JSON_FENCE_RE,
         TUI_CONTROL_RE,
         action_schema_valid,
+        agenttask_payload_from_prompt,
         agenttask_contract,
         agenttask_objective,
         agenttask_routing,
@@ -214,6 +217,7 @@ except Exception:
         lifecycle_is_persistent,
         load_ga_control_json_text,
         normalized_control_action,
+        policy_relevant_subagent_prompt_text,
         repair_json_missing_tail,
         subagent_control_force_new_intent,
         subagent_control_persistence_intent,
@@ -4573,38 +4577,6 @@ def subagent_task_schema_kwargs(
         "non_goals": list(contract.get("non_goals") or []),
         "success_criteria": list(contract.get("success_criteria") or []),
     }
-
-
-def policy_relevant_subagent_prompt_text(prompt: str) -> str:
-    marker_start = "[GA TUI AgentTask Envelope v2]"
-    marker_end = "[/GA TUI AgentTask Envelope v2]"
-    text = prompt or ""
-    if marker_start not in text or marker_end not in text:
-        return text
-    raw = text.split(marker_start, 1)[1].split(marker_end, 1)[0].strip()
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        return text
-    if not isinstance(payload, dict):
-        return text
-    work_order = payload.get("work_order") if isinstance(payload.get("work_order"), dict) else {}
-    objective = str(work_order.get("objective") or payload.get("objective") or "").strip()
-    return objective or text
-
-
-def agenttask_payload_from_prompt(prompt: str) -> dict[str, Any]:
-    marker_start = "[GA TUI AgentTask Envelope v2]"
-    marker_end = "[/GA TUI AgentTask Envelope v2]"
-    text = prompt or ""
-    if marker_start not in text or marker_end not in text:
-        return {}
-    raw = text.split(marker_start, 1)[1].split(marker_end, 1)[0].strip()
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def explicit_policy_action_for_subagent_task(prompt: str) -> str:

@@ -353,6 +353,29 @@ def format_agenttask_worker_prompt(control: dict[str, Any]) -> str:
     return "\n".join(str(item) for item in sections).strip()
 
 
+def agenttask_payload_from_prompt(prompt: str) -> dict[str, Any]:
+    marker_start = "[GA TUI AgentTask Envelope v2]"
+    marker_end = "[/GA TUI AgentTask Envelope v2]"
+    text = prompt or ""
+    if marker_start not in text or marker_end not in text:
+        return {}
+    raw = text.split(marker_start, 1)[1].split(marker_end, 1)[0].strip()
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def policy_relevant_subagent_prompt_text(prompt: str) -> str:
+    payload = agenttask_payload_from_prompt(prompt)
+    if not payload:
+        return prompt or ""
+    work_order = payload.get("work_order") if isinstance(payload.get("work_order"), dict) else {}
+    objective = str(work_order.get("objective") or payload.get("objective") or "").strip()
+    return objective or (prompt or "")
+
+
 def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any]]:
     action = normalized_control_action(control)
     common = {

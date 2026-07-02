@@ -15,11 +15,15 @@ def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> Non
     assert app_module.control_result_continuation_needed is control_protocol.control_result_continuation_needed
     assert app_module.format_control_result_continuation_prompt is control_protocol.format_control_result_continuation_prompt
     assert app_module.format_agent_control_result is control_protocol.format_agent_control_result
+    assert app_module.agenttask_payload_from_prompt is control_protocol.agenttask_payload_from_prompt
+    assert app_module.policy_relevant_subagent_prompt_text is control_protocol.policy_relevant_subagent_prompt_text
     assert control_protocol.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
     assert control_protocol.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
     assert control_protocol.format_control_result_continuation_prompt.__module__ == "ga_tui.control_protocol"
     assert control_protocol.format_agent_control_result.__module__ == "ga_tui.control_protocol"
+    assert control_protocol.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
+    assert control_protocol.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
 
 
 def test_subagent_control_persistence_intent_explicit_lifecycle_flags() -> None:
@@ -163,3 +167,58 @@ def test_format_agent_control_result_preserves_labels_and_truncation() -> None:
     assert formatted.startswith("- task_update: ")
     assert len(formatted) < len("- task_update: " + long_result)
     assert formatted.endswith("…")
+
+
+def test_agenttask_prompt_envelope_helpers_parse_payload_and_policy_text() -> None:
+    prompt = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "objective": "top-level objective",
+            "work_order": {
+                "objective": "work order objective",
+                "success_criteria": ["done"],
+            },
+            "output_contract": {"required_sections": ["result"]},
+        }
+    )
+
+    payload = control_protocol.agenttask_payload_from_prompt(prompt)
+
+    assert payload["schema_version"] == "agenttask.v2"
+    assert payload["work_order"]["objective"] == "work order objective"
+    assert control_protocol.policy_relevant_subagent_prompt_text(prompt) == "work order objective"
+
+
+def test_agenttask_prompt_envelope_helpers_fallback_for_missing_invalid_or_empty_objective() -> None:
+    plain = "plain prompt"
+    assert control_protocol.agenttask_payload_from_prompt(plain) == {}
+    assert control_protocol.policy_relevant_subagent_prompt_text(plain) == plain
+
+    invalid = "[GA TUI AgentTask Envelope v2]\nnot json\n[/GA TUI AgentTask Envelope v2]"
+    assert control_protocol.agenttask_payload_from_prompt(invalid) == {}
+    assert control_protocol.policy_relevant_subagent_prompt_text(invalid) == invalid
+
+    non_object = "[GA TUI AgentTask Envelope v2]\n[]\n[/GA TUI AgentTask Envelope v2]"
+    assert control_protocol.agenttask_payload_from_prompt(non_object) == {}
+    assert control_protocol.policy_relevant_subagent_prompt_text(non_object) == non_object
+
+    top_level = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "objective": "top-level objective",
+            "work_order": {},
+        }
+    )
+    assert control_protocol.policy_relevant_subagent_prompt_text(top_level) == "top-level objective"
+
+    empty_objective = control_protocol.format_agenttask_worker_prompt(
+        {
+            "schema_version": "agenttask.v2",
+            "action": "delegate.create",
+            "objective": "",
+            "work_order": {},
+        }
+    )
+    assert control_protocol.policy_relevant_subagent_prompt_text(empty_objective) == empty_objective
