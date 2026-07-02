@@ -2513,7 +2513,7 @@ token panel -> OMP get_state.contextUsage
 
 - Hidden block: `<ga-control>{...}</ga-control>`
 - Fenced block: ````ga-control`
-- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, AgentTask prompt envelope parsing, AgentTask explicit policy-action extraction, control-result line formatting, control-result continuation helper parsing/formatting, and v2-to-internal-action coercion.
+- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, AgentTask prompt envelope parsing, AgentTask explicit and inferred policy-action extraction, control-result line formatting, control-result continuation helper parsing/formatting, and v2-to-internal-action coercion.
 - Execution module: `src/ga_tui/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
 - Batch envelope:
 
@@ -2658,6 +2658,112 @@ token panel -> OMP get_state.contextUsage
     "schema_validation": "strict"
   }
 }
+```
+
+## Scenario: AgentTask Policy Action Source Of Truth
+
+### 1. Scope / Trigger
+
+- Trigger: AgentTask prompt envelope parsing or subagent-task policy-action inference is changed, moved, or extended.
+- Applies to: `src/ga_tui/control_protocol.py`, the compatibility wrapper `infer_policy_action_for_subagent_task(sub, prompt)` in `src/ga_tui/app.py`, `policy_gate_for_subagent_task(...)`, Secret subagent dispatch, scheduled subagent dispatch, tests, and policy gates.
+- Non-goal: This does not move policy decisions, approval queueing, ledgers, runtime dispatch, `SubAgentRuntime`, role template lookup, Secret Vault behavior, mutable `State`, artifacts, storage roots, dashboard, rendering, or command execution out of `app.py`.
+
+### 2. Signatures
+
+- `control_protocol.agenttask_payload_from_prompt(prompt: str) -> dict[str, Any]`
+- `control_protocol.policy_relevant_subagent_prompt_text(prompt: str) -> str`
+- `control_protocol.explicit_policy_action_for_subagent_task(prompt: str) -> str`
+- `control_protocol.inferred_policy_action_for_subagent_task(prompt: str, *, role: str = "", write_policy: str = "") -> str`
+- `app.infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> str`
+- `app.policy_gate_for_subagent_task(sub: SubAgentRuntime, prompt: str, *, source: str, bus_task_id: str, parent_task_id: str = "", task_title: str = "", queue_if_required: bool = True) -> PolicyDecision`
+
+### 3. Contracts
+
+- `agenttask_payload_from_prompt(...)` only parses the generated `[GA TUI AgentTask Envelope v2]` block and returns `{}` for missing, invalid, or non-object payloads.
+- `policy_relevant_subagent_prompt_text(...)` must use only `work_order.objective`, then top-level `objective`, then the original prompt. Capability text, `tools_forbidden`, tool names, boundaries, non-goals, and examples are not policy-source text.
+- `explicit_policy_action_for_subagent_task(...)` has higher precedence than text inference. It checks fields in this order: top-level `policy_action`, top-level `approval_required_for`, `approval.policy_action`, `approval.approval_required_for`, and `capability_contract.policy_action`.
+- Explicit string values are stripped, lowercased, and hyphen-normalized to underscores. Explicit list values use the first non-empty item only.
+- `inferred_policy_action_for_subagent_task(...)` owns the deterministic keyword and role/write-policy inference table. It accepts only explicit facts from the app facade: prompt, normalized role, and role write policy.
+- Inference order is fixed: explicit action -> policy-relevant objective text keywords -> ops privileged-operation tokens -> `write_policy=="single_writer"` repo-write fallback -> `read_only`.
+- `app.infer_policy_action_for_subagent_task(...)` may only derive `role = normalized_subagent_role(sub.role)` and `write_policy = role_write_policy(role)` before delegating to `control_protocol.inferred_policy_action_for_subagent_task(...)`.
+- `policy_gate_for_subagent_task(...)` remains app-owned because it creates `PolicyDecision` payloads, queues approvals, references subagent identity, writes gate metadata, and owns Orchestrator side effects.
+- `src/ga_tui/control_protocol.py` must remain a restricted protocol module: no curses, no `State`, no `SubAgentRuntime`, no ledger stores, no approval queue writes, no runtime dispatch, no Secret Vault storage, no dashboard/rendering/command ownership.
+
+### 4. Validation & Error Matrix
+
+- Missing AgentTask envelope -> payload `{}`, policy text is the original prompt, explicit action is `""`.
+- Invalid AgentTask JSON -> payload `{}`, policy text is the original prompt, explicit action is `""`.
+- AgentTask envelope contains `work_order.objective:"read docs"` and `capability_contract.tools_forbidden:["deploy","email.send"]` -> inferred action is `read_only`, not `deploy` or `external_send`.
+- AgentTask envelope contains `policy_action:"Deploy-Service"` -> inferred action is `deploy_service` even if objective contains unrelated secret-like words.
+- AgentTask envelope contains `approval_required_for:["", "ignored"]` and nested approval policy -> first non-empty field in the documented field order wins.
+- Prompt text contains `api key`, `secret`, `token`, `credential`, `password`, `密码`, `密钥`, `凭据`, or `令牌` in the policy-relevant objective -> inferred action is `access_secret`.
+- Prompt text contains deploy/release/production, payment, external-send, publish, delete-file, permission-policy, or high-risk-batch tokens in the policy-relevant objective -> inferred action follows the current keyword table in `control_protocol.py`.
+- Role is `ops` and policy-relevant text contains `sudo`, `root`, `systemctl`, `pacman`, `docker`, `firewall`, `ufw`, `iptables`, `内核`, `服务`, or `重启` -> inferred action is `long_running_privilege_escalation`.
+- Role write policy is `single_writer` and no earlier action matched -> inferred action is `repo_write`.
+- Role write policy is not `single_writer` and no earlier action matched -> inferred action is `read_only`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A generated AgentTask delegate has `work_order.objective:"read local docs and summarize"` plus `tools_forbidden:["deploy","email.send"]`; policy inference returns `read_only` because forbidden capabilities are not the requested operation.
+- Good: A generated AgentTask delegate explicitly sets `approval.policy_action:"deploy"`; policy inference returns `deploy` before reading objective text.
+- Good: An ops subagent receives objective text `sudo systemctl restart service`; policy inference returns `long_running_privilege_escalation` and the app-owned policy gate decides whether approval is required.
+- Base: A coder subagent receives ordinary implementation work with no risky tokens; inference returns `repo_write` from `write_policy:"single_writer"`.
+- Base: A researcher subagent receives ordinary summarization work with no risky tokens; inference returns `read_only`.
+- Bad: `app.py` keeps a second keyword table for `api key`, `deploy`, `publish`, or `sudo`, causing policy drift from `control_protocol.py`.
+- Bad: `control_protocol.py` imports `SubAgentRuntime` or `State` so it can inspect role templates directly.
+- Bad: Policy inference scans `capability_contract.tools_forbidden` and treats a safety boundary as a requested risky action.
+
+### 6. Tests Required
+
+- `tests/test_control_protocol.py` must assert app alias parity for `agenttask_payload_from_prompt(...)`, `policy_relevant_subagent_prompt_text(...)`, `explicit_policy_action_for_subagent_task(...)`, and `inferred_policy_action_for_subagent_task(...)`.
+- `tests/test_control_protocol.py` must cover missing/invalid/non-object envelope fallback, `work_order.objective` precedence, top-level objective fallback, and empty-objective fallback.
+- `tests/test_control_protocol.py` must cover explicit policy-action field order, string normalization, list handling, and explicit-over-text precedence.
+- `tests/test_control_protocol.py` must cover inferred actions for access-secret, spend-money, deploy, external-send, publish, delete-file, modify-permission-policy, high-risk batch, ops privileged operations, single-writer repo-write fallback, and read-only fallback.
+- `tests/test_control_protocol.py` must include a case where `tools_forbidden:["deploy","email.send"]` does not trigger deployment or external-send approval when the objective is read-only.
+- `tests/test_control_protocol.py` must assert `app.infer_policy_action_for_subagent_task(...)` delegates through role/write-policy facts for representative coder, ops, researcher, and read-only prompts.
+- `scripts/check_policy_gates.py` must assert `inferred_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"` and `app.inferred_policy_action_for_subagent_task is control_protocol.inferred_policy_action_for_subagent_task`.
+- `scripts/check_policy_gates.py` must assert app-local duplicate keyword-table ownership is absent, including `POLICY_ACTION_KEYWORD_CHECKS` and `OPS_PRIVILEGED_OPERATION_TOKENS`.
+- `scripts/check_policy_gates.py` must keep the protocol module no-curses/no-runtime-class boundary green.
+- Targeted verification for this boundary is `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`, `python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`, and `python3 scripts/check_policy_gates.py`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# app.py
+def infer_policy_action_for_subagent_task(sub, prompt):
+    text = policy_relevant_subagent_prompt_text(prompt).lower()
+    if "deploy" in text or "api key" in text:
+        ...
+```
+
+#### Correct
+
+```python
+# app.py
+def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> str:
+    role = normalized_subagent_role(sub.role)
+    return inferred_policy_action_for_subagent_task(
+        prompt,
+        role=role,
+        write_policy=role_write_policy(role),
+    )
+```
+
+#### Wrong
+
+```python
+# control_protocol.py
+from ga_tui.app import SubAgentRuntime, role_write_policy
+```
+
+#### Correct
+
+```python
+# control_protocol.py
+def inferred_policy_action_for_subagent_task(prompt: str, *, role: str = "", write_policy: str = "") -> str:
+    ...
 ```
 
 ## Scenario: Temporary Subagent Owner Fallback
