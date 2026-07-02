@@ -106,6 +106,25 @@ def category_command_completion_rows(
     return rows
 
 
+def approval_command_completion_rows(
+    text: str,
+    approval_candidates: Iterable[tuple[str, str]],
+) -> list[CommandCandidate]:
+    raw = text or ""
+    match = re.match(r"^/(approve|reject)\s+(.*)$", raw, re.I)
+    if not match:
+        return []
+    cmd = match.group(1).lower()
+    prefix = (match.group(2) or "").strip()
+    rows: list[CommandCandidate] = []
+    for approval_id, summary in approval_candidates:
+        approval_text = str(approval_id)
+        if prefix and not approval_text.startswith(prefix):
+            continue
+        rows.append((f"/{cmd} {approval_text}", "", str(summary), True))
+    return rows
+
+
 def agent_command_completion_decision(text: str) -> AgentCommandCompletionDecision:
     raw = text or ""
     if not re.match(r"^/agent(?:\s|$)", raw):

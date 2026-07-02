@@ -415,6 +415,7 @@ def assert_commands_module_boundary() -> None:
         "completion_insert_text",
         "top_level_command_matches",
         "category_command_completion_rows",
+        "approval_command_completion_rows",
         "agent_command_completion_decision",
         "archived_command_matches",
         "workspace_command_matches",
@@ -464,6 +465,17 @@ def assert_commands_module_boundary() -> None:
         ("/expand Work", "", "2 个会话", True),
         ("/expand Personal", "", "1 个会话", True),
     ]
+    approval_candidates = [("apr-001", "Allow file edit"), ("APR-002", "Allow command")]
+    assert commands_mod.approval_command_completion_rows("/approve ", approval_candidates) == [
+        ("/approve apr-001", "", "Allow file edit", True),
+        ("/approve APR-002", "", "Allow command", True),
+    ]
+    assert commands_mod.approval_command_completion_rows("/reject apr", approval_candidates) == [
+        ("/reject apr-001", "", "Allow file edit", True)
+    ]
+    assert commands_mod.approval_command_completion_rows("/reject APR", approval_candidates) == [
+        ("/reject APR-002", "", "Allow command", True)
+    ]
     assert commands_mod.archived_command_matches("/archived t") == [
         ("/archived toggle", "", "切换归档视图", True)
     ]
@@ -499,6 +511,23 @@ def assert_commands_module_boundary() -> None:
     assert a.command_matches("/filter a", category_state) == [
         ("/filter Alpha", "", "1 个会话", True)
     ]
+    original_pending_approvals = a.pending_approvals
+    def fake_pending_approvals(state=None):
+        return [
+            {"approval_id": "apr-001", "summary": "Allow file edit"},
+            {"approval_id": "APR-002", "summary": "Allow command"},
+        ]
+
+    try:
+        a.pending_approvals = fake_pending_approvals
+        assert a.command_matches("/approve apr", a.State(agent=None)) == [
+            ("/approve apr-001", "", "Allow file edit", True)
+        ]
+        assert a.command_matches("/reject APR", a.State(agent=None)) == [
+            ("/reject APR-002", "", "Allow command", True)
+        ]
+    finally:
+        a.pending_approvals = original_pending_approvals
     assert a.command_matches("/MO") == commands_mod.top_level_command_matches("/MO", a.COMMANDS)
     assert [cmd for cmd, _args, _desc, _sendable in a.command_matches("/mo")] == ["/model"]
     assert a.command_matches("/ll") == []
@@ -509,6 +538,7 @@ def assert_commands_module_boundary() -> None:
         "def completion_insert_text",
         "def top_level_command_matches",
         "def category_command_completion_rows",
+        "def approval_command_completion_rows",
         "def archived_command_matches",
         "def workspace_command_matches",
     ):

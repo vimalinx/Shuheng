@@ -15188,6 +15188,7 @@ AgentCommandCompletionDecision = command_helpers.AgentCommandCompletionDecision
 completion_insert_text = command_helpers.completion_insert_text
 top_level_command_matches = command_helpers.top_level_command_matches
 category_command_completion_rows = command_helpers.category_command_completion_rows
+approval_command_completion_rows = command_helpers.approval_command_completion_rows
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
 
 
@@ -15251,18 +15252,16 @@ workspace_command_matches = command_helpers.workspace_command_matches
 
 
 def approval_command_matches(text: str, state: Optional[State] = None) -> list[tuple[str, str, str, bool]]:
-    match = re.match(r"^/(approve|reject)\s+(.*)$", text or "", re.I)
-    if not match:
+    if not re.match(r"^/(approve|reject)\s+", text or "", re.I):
         return []
-    cmd = match.group(1).lower()
-    prefix = (match.group(2) or "").strip()
-    rows: list[tuple[str, str, str, bool]] = []
-    for row in pending_approvals(state):
-        approval_id = str(row.get("approval_id") or "")
-        if prefix and not approval_id.startswith(prefix):
-            continue
-        rows.append((f"/{cmd} {approval_id}", "", truncate_cells(str(row.get("summary") or ""), 70), True))
-    return rows
+    approval_candidates = [
+        (
+            str(row.get("approval_id") or ""),
+            truncate_cells(str(row.get("summary") or ""), 70),
+        )
+        for row in pending_approvals(state)
+    ]
+    return approval_command_completion_rows(text, approval_candidates)
 
 
 def command_matches(text: str, state: Optional[State] = None) -> list[tuple[str, str, str, bool]]:

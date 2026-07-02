@@ -13,6 +13,7 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.completion_insert_text is commands.completion_insert_text
     assert app_module.top_level_command_matches is commands.top_level_command_matches
     assert app_module.category_command_completion_rows is commands.category_command_completion_rows
+    assert app_module.approval_command_completion_rows is commands.approval_command_completion_rows
     assert app_module.AgentCommandCompletionDecision is commands.AgentCommandCompletionDecision
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
     assert app_module.archived_command_matches is commands.archived_command_matches
@@ -81,6 +82,26 @@ def test_category_command_completion_rows_use_explicit_category_counts() -> None
     ]
     assert commands.category_command_completion_rows("/filter", category_counts) == []
     assert commands.category_command_completion_rows("/category ", category_counts) == []
+
+
+def test_approval_command_completion_rows_use_explicit_approval_candidates() -> None:
+    approval_candidates = [
+        ("apr-001", "Allow file edit"),
+        ("APR-002", "Allow command"),
+    ]
+
+    assert commands.approval_command_completion_rows("/approve ", approval_candidates) == [
+        ("/approve apr-001", "", "Allow file edit", True),
+        ("/approve APR-002", "", "Allow command", True),
+    ]
+    assert commands.approval_command_completion_rows("/reject apr", approval_candidates) == [
+        ("/reject apr-001", "", "Allow file edit", True),
+    ]
+    assert commands.approval_command_completion_rows("/reject APR", approval_candidates) == [
+        ("/reject APR-002", "", "Allow command", True),
+    ]
+    assert commands.approval_command_completion_rows("/approve missing", approval_candidates) == []
+    assert commands.approval_command_completion_rows("/approval ", approval_candidates) == []
 
 
 def test_archived_command_matches_filter_by_prefix() -> None:
@@ -212,6 +233,31 @@ def test_app_category_command_matches_keeps_history_owned_counts_and_sorting() -
         ("/expand Alpha", "", "1 个会话", True),
     ]
     assert app_module.category_command_matches("/filter ", None) == []
+
+
+def test_app_approval_command_matches_keeps_pending_approvals_owned_by_app(monkeypatch) -> None:
+    long_summary = "总结" * 80
+    state = app_module.State(agent=None)
+    approval_rows = [
+        {"approval_id": "apr-001", "summary": long_summary},
+        {"approval_id": "APR-002", "summary": "Allow command"},
+    ]
+    pending_calls = []
+
+    def fake_pending_approvals(supplied_state=None):
+        pending_calls.append(supplied_state)
+        return approval_rows
+
+    monkeypatch.setattr(app_module, "pending_approvals", fake_pending_approvals)
+
+    assert app_module.approval_command_matches("/approve apr", state) == [
+        ("/approve apr-001", "", app_module.truncate_cells(long_summary, 70), True),
+    ]
+    assert app_module.command_matches("/reject APR", state) == [
+        ("/reject APR-002", "", "Allow command", True),
+    ]
+    assert app_module.approval_command_matches("/approval ", state) == []
+    assert pending_calls == [state, state]
 
 
 def test_app_command_matches_uses_top_level_helper_for_static_fallback() -> None:

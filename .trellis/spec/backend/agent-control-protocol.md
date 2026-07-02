@@ -902,8 +902,10 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - Applies to: `src/ga_tui/commands.py`, compatibility aliases in `app.py`,
   `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
   `/workspaces` completion, `/filter` / `/collapse` / `/expand` category
-  command row shaping over explicit category counts, top-level visible command
-  prefix matching, completion insertion behavior, unit tests, and policy gates.
+  command row shaping over explicit category counts, `/approve` / `/reject`
+  command row shaping over explicit approval candidates, top-level visible
+  command prefix matching, completion insertion behavior, unit tests, and
+  policy gates.
 - Non-goal: This does not move command execution, `command_matches(...)`,
   `subagent_completion_rows(...)`, `agent_command_matches(...)`,
   `category_command_matches(...)`, `approval_command_matches(...)`, mutable
@@ -923,6 +925,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   - `completion_insert_text(candidate)`.
   - `top_level_command_matches(text, candidates)`.
   - `category_command_completion_rows(text, category_counts)`.
+  - `approval_command_completion_rows(text, approval_candidates)`.
   - `agent_command_completion_decision(text)`.
   - `archived_command_matches(text)`.
   - `workspace_command_matches(text)`.
@@ -948,6 +951,14 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   metadata, category registries, or category sort policy. `app.py` remains
   responsible for collecting category counts from history and applying
   `category_sort_key(...)` before delegating to the helper.
+- `approval_command_completion_rows(...)` owns only deterministic row shaping
+  for `/approve` and `/reject` over an explicitly supplied iterable of
+  `(approval_id, summary)` pairs. Prefix filtering remains
+  `approval_id.startswith(prefix)` and therefore case-sensitive. It must not
+  inspect `State`, pending approval ledgers, policy decisions, governance
+  stores, or summary truncation policy. `app.py` remains responsible for
+  calling `pending_approvals(state)` and applying `truncate_cells(..., 70)`
+  before delegating to the helper.
 - `agent_command_completion_decision(...)` owns pure `/agent` input
   classification. It may return static rows, a subagent-completion request, a
   role-template-completion request, or no match, but it must not inspect
@@ -988,6 +999,10 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - `category_command_completion_rows("/expand ", [("Work", 2)])` ->
   `[("/expand all", "", "全部分类", True), ("/expand Work", "", "2 个会话",
   True)]`.
+- `approval_command_completion_rows("/approve ", [("apr-001", "Allow")])` ->
+  `[("/approve apr-001", "", "Allow", True)]`.
+- `approval_command_completion_rows("/reject APR", [("apr-001", "a"),
+  ("APR-002", "b")])` -> `[("/reject APR-002", "", "b", True)]`.
 - `archived_command_matches("/archived t")` -> `[("/archived toggle", "",
   "切换归档视图", True)]`.
 - `workspace_command_matches("/workspace r")` -> `[("/workspace refresh", "",
@@ -1024,6 +1039,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - Good: `commands.py` owns category command row shaping over injected
   `(label, count)` pairs, while `app.py` keeps history/category metadata
   ownership and sorting.
+- Good: `commands.py` owns approval command row shaping over injected
+  `(approval_id, summary)` pairs, while `app.py` keeps approval ledger access,
+  pending approval policy, and summary truncation ownership.
 - Base: Future slices may move more command parsing only after state,
   governance, history, rendering, and runtime dependencies are injectable.
 - Bad: `commands.py` imports `State` so it can inspect active subagents.
@@ -1045,6 +1063,12 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   non-matching input. App-level tests must assert `category_command_matches(...)`
   still derives counts from `State.history` / session metadata and delegates row
   shaping without moving history ownership into `commands.py`.
+- Unit tests must assert direct `approval_command_completion_rows(...)`
+  behavior for approve/reject row shaping, case-sensitive id prefix filtering,
+  and non-matching input. App-level tests must assert
+  `approval_command_matches(...)` still derives candidates from
+  `pending_approvals(state)`, applies app-owned summary truncation, and delegates
+  row shaping without moving approval ownership into `commands.py`.
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
   helpers, `app.py` no longer defines the moved functions locally, and the new
   module has no reverse dependency into app/TUI/render/runtime/storage owners.
