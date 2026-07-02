@@ -901,8 +901,8 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   helper functions out of `src/ga_tui/app.py`.
 - Applies to: `src/ga_tui/commands.py`, compatibility aliases in `app.py`,
   `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
-  `/workspaces` completion, completion insertion behavior, unit tests, and
-  policy gates.
+  `/workspaces` completion, top-level visible command prefix matching,
+  completion insertion behavior, unit tests, and policy gates.
 - Non-goal: This does not move command execution, `command_matches(...)`,
   `subagent_completion_rows(...)`, `agent_command_matches(...)`,
   `category_command_matches(...)`, `approval_command_matches(...)`, mutable
@@ -920,6 +920,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   - `WORKSPACE_SUBCOMMANDS`.
   - `AgentCommandCompletionDecision`.
   - `completion_insert_text(candidate)`.
+  - `top_level_command_matches(text, candidates)`.
   - `agent_command_completion_decision(text)`.
   - `archived_command_matches(text)`.
   - `workspace_command_matches(text)`.
@@ -932,6 +933,11 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   governance stores, history stores, key/mouse handlers, or draw functions.
 - `commands.py` owns deterministic command-completion metadata and matching
   over explicit text values.
+- `top_level_command_matches(...)` owns only the static fallback prefix match
+  over an explicitly supplied visible command catalog. It must not own
+  `COMMANDS`, invent hidden aliases, inspect `State`, or route specialized
+  dynamic command families. Non-slash input and stripped input containing a
+  space return no matches; matching is case-insensitive.
 - `agent_command_completion_decision(...)` owns pure `/agent` input
   classification. It may return static rows, a subagent-completion request, a
   role-template-completion request, or no match, but it must not inspect
@@ -960,6 +966,10 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `"/archived on"`.
 - `completion_insert_text(("/workspace", "<cmd>", "...", False))` ->
   `"/workspace "`.
+- `top_level_command_matches("/mo", [("/model", "", "...", True)])` ->
+  `[("/model", "", "...", True)]`.
+- `top_level_command_matches("/ll", [("/model", "", "...", True)])` -> `[]`.
+- `top_level_command_matches("/model extra", candidates)` -> `[]`.
 - `archived_command_matches("/archived t")` -> `[("/archived toggle", "",
   "切换归档视图", True)]`.
 - `workspace_command_matches("/workspace r")` -> `[("/workspace refresh", "",
@@ -977,6 +987,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   match.
 - `command_matches("/workspace r", state)` still delegates to the extracted
   workspace helper before app-owned command dispatch continues.
+- `command_matches("/mo", state)` still delegates the final static fallback to
+  the extracted top-level helper using app-owned `COMMANDS`, while `/ll` and
+  `/models` remain hidden alias non-completions.
 
 ### 5. Good/Base/Bad Cases
 
@@ -987,6 +1000,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - Good: `/agent` completion parsing returns a neutral decision object from
   `commands.py`; `app.py` then expands that decision using `State.subagents`
   and `ROLE_TEMPLATES`.
+- Good: `commands.py` owns `top_level_command_matches(...)` over injected
+  candidates, while `app.py` keeps the visible `COMMANDS` catalog and the
+  specialized dynamic routing order.
 - Base: Future slices may move more command parsing only after state,
   governance, history, rendering, and runtime dependencies are injectable.
 - Bad: `commands.py` imports `State` so it can inspect active subagents.
@@ -997,9 +1013,12 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 - Unit tests must assert direct `agent_command_completion_decision(...)`,
   `completion_insert_text(...)`, `archived_command_matches(...)`, and
-  `workspace_command_matches(...)` behavior plus app alias parity.
+  `workspace_command_matches(...)` behavior plus top-level command prefix
+  matching and app alias parity.
 - Unit tests must assert app-level `command_matches(...)` still returns the same
-  `/archived` and `/workspace` helper rows.
+  `/archived` and `/workspace` helper rows, and that the final static fallback
+  routes `/mo` through the extracted helper without exposing `/llm` or
+  `/models` hidden aliases.
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
   helpers, `app.py` no longer defines the moved functions locally, and the new
   module has no reverse dependency into app/TUI/render/runtime/storage owners.

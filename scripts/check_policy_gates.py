@@ -413,6 +413,7 @@ def assert_commands_module_boundary() -> None:
         "WORKSPACE_SUBCOMMANDS",
         "AgentCommandCompletionDecision",
         "completion_insert_text",
+        "top_level_command_matches",
         "agent_command_completion_decision",
         "archived_command_matches",
         "workspace_command_matches",
@@ -437,6 +438,17 @@ def assert_commands_module_boundary() -> None:
     assert commands_mod.agent_command_completion_decision("/agent role worker re extra").kind == "none"
     assert commands_mod.completion_insert_text(("/agent new", "<name>", "新建", False)) == "/agent new "
     assert commands_mod.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
+    command_candidates = [
+        ("/model", "", "管理模型", True),
+        ("/memory", "", "记忆", True),
+        ("/help", "", "帮助", True),
+    ]
+    assert commands_mod.top_level_command_matches("model", command_candidates) == []
+    assert commands_mod.top_level_command_matches("/MO", command_candidates) == [
+        ("/model", "", "管理模型", True)
+    ]
+    assert commands_mod.top_level_command_matches("/model extra", command_candidates) == []
+    assert commands_mod.top_level_command_matches("/ll", command_candidates) == []
     assert commands_mod.archived_command_matches("/archived t") == [
         ("/archived toggle", "", "切换归档视图", True)
     ]
@@ -458,10 +470,15 @@ def assert_commands_module_boundary() -> None:
     ]
     assert a.command_matches("/archived o") == commands_mod.archived_command_matches("/archived o")
     assert a.command_matches("/workspace c") == commands_mod.workspace_command_matches("/workspace c")
+    assert a.command_matches("/MO") == commands_mod.top_level_command_matches("/MO", a.COMMANDS)
+    assert [cmd for cmd, _args, _desc, _sendable in a.command_matches("/mo")] == ["/model"]
+    assert a.command_matches("/ll") == []
+    assert a.command_matches("/models") == []
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for moved_def in (
         "def agent_command_completion_decision",
         "def completion_insert_text",
+        "def top_level_command_matches",
         "def archived_command_matches",
         "def workspace_command_matches",
     ):

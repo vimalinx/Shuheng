@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -71,6 +72,15 @@ WORKSPACE_SUBCOMMANDS: list[CommandCandidate] = [
 def completion_insert_text(candidate: CommandCandidate) -> str:
     cmd, _args, _desc, sendable = candidate
     return cmd if sendable else cmd.rstrip() + " "
+
+
+def top_level_command_matches(text: str, candidates: Iterable[CommandCandidate]) -> list[CommandCandidate]:
+    raw = text or ""
+    stripped = raw.strip()
+    if not stripped.startswith("/") or " " in stripped:
+        return []
+    stripped_l = stripped.lower()
+    return [candidate for candidate in candidates if candidate[0].lower().startswith(stripped_l)]
 
 
 def agent_command_completion_decision(text: str) -> AgentCommandCompletionDecision:

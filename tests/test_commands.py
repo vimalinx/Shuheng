@@ -11,6 +11,7 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.AGENT_SUBCOMMANDS_SEND_AFTER_AGENT is commands.AGENT_SUBCOMMANDS_SEND_AFTER_AGENT
     assert app_module.WORKSPACE_SUBCOMMANDS is commands.WORKSPACE_SUBCOMMANDS
     assert app_module.completion_insert_text is commands.completion_insert_text
+    assert app_module.top_level_command_matches is commands.top_level_command_matches
     assert app_module.AgentCommandCompletionDecision is commands.AgentCommandCompletionDecision
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
     assert app_module.archived_command_matches is commands.archived_command_matches
@@ -21,6 +22,38 @@ def test_completion_insert_text_preserves_sendable_behavior() -> None:
     assert commands.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
     assert commands.completion_insert_text(("/workspace", "<cmd>", "查看项目工作区 provenance", False)) == "/workspace "
     assert commands.completion_insert_text(("/agent new ", "", "新建", False)) == "/agent new "
+
+
+def test_top_level_command_matches_filter_visible_candidates() -> None:
+    candidates = [
+        ("/model", "", "管理模型", True),
+        ("/memory", "", "记忆", True),
+        ("/help", "", "帮助", True),
+    ]
+
+    assert commands.top_level_command_matches("model", candidates) == []
+    assert commands.top_level_command_matches("/MO", candidates) == [("/model", "", "管理模型", True)]
+    assert commands.top_level_command_matches("/m", candidates) == [
+        ("/model", "", "管理模型", True),
+        ("/memory", "", "记忆", True),
+    ]
+    assert commands.top_level_command_matches("/model extra", candidates) == []
+    assert commands.top_level_command_matches("/unknown", candidates) == []
+
+
+def test_top_level_command_matches_do_not_invent_hidden_aliases() -> None:
+    visible_candidates = [
+        ("/model", "", "管理模型", True),
+        ("/help", "", "帮助", True),
+    ]
+
+    assert commands.top_level_command_matches("/mo", visible_candidates) == [("/model", "", "管理模型", True)]
+    assert commands.top_level_command_matches("/ll", visible_candidates) == []
+    assert commands.top_level_command_matches("/models", visible_candidates) == []
+    assert commands.top_level_command_matches(
+        "/ll",
+        [*visible_candidates, ("/llm", "", "隐藏兼容别名", True)],
+    ) == [("/llm", "", "隐藏兼容别名", True)]
 
 
 def test_archived_command_matches_filter_by_prefix() -> None:
@@ -121,6 +154,15 @@ def test_workspace_command_matches_filter_subcommands_and_reject_extra_args() ->
 def test_app_command_matches_still_uses_extracted_workspace_and_archived_helpers() -> None:
     assert app_module.command_matches("/archived t") == commands.archived_command_matches("/archived t")
     assert app_module.command_matches("/workspace r") == commands.workspace_command_matches("/workspace r")
+
+
+def test_app_command_matches_uses_top_level_helper_for_static_fallback() -> None:
+    assert app_module.command_matches("model") == []
+    assert app_module.command_matches("/MO") == commands.top_level_command_matches("/MO", app_module.COMMANDS)
+    assert [cmd for cmd, _args, _desc, _sendable in app_module.command_matches("/mo")] == ["/model"]
+    assert app_module.command_matches("/model extra") == []
+    assert app_module.command_matches("/ll") == []
+    assert app_module.command_matches("/models") == []
 
 
 def test_app_agent_command_matches_expands_dynamic_decisions() -> None:

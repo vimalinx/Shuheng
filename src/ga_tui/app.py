@@ -15186,6 +15186,7 @@ AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = command_helpers.AGENT_SUBCOMMANDS_SEND_AFTE
 WORKSPACE_SUBCOMMANDS = command_helpers.WORKSPACE_SUBCOMMANDS
 AgentCommandCompletionDecision = command_helpers.AgentCommandCompletionDecision
 completion_insert_text = command_helpers.completion_insert_text
+top_level_command_matches = command_helpers.top_level_command_matches
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
 
 
@@ -15289,10 +15290,7 @@ def command_matches(text: str, state: Optional[State] = None) -> list[tuple[str,
         return archived_command_matches(raw)
     if re.match(r"^/(?:approve|reject)\s", raw, re.I):
         return approval_command_matches(raw, state)
-    if " " in stripped:
-        return []
-    stripped_l = stripped.lower()
-    return [cmd for cmd in COMMANDS if cmd[0].lower().startswith(stripped_l)]
+    return top_level_command_matches(stripped, COMMANDS)
 
 
 def clamp_command_index(state: State, matches: list[tuple[str, str, str, bool]]) -> None:
