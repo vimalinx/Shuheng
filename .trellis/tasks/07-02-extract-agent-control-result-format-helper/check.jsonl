@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend verification conventions and quality gate expectations."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Expected module boundary, compatibility alias, and policy-gate checks for control protocol helpers."}

@@ -1002,3 +1002,36 @@ Designed the app.py decomposition plan and completed the first extraction phases
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: Add workflow registry dry-run
+
+**Date**: 2026-07-03
+**Task**: Add workflow registry dry-run
+**Branch**: `main`
+
+### Summary
+
+Added declarative workflow parsing, /workflows panel, /workflow info and dry-run commands, policy gates, tests, and backend spec contract without adding a workflow runner.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d8c3316` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
