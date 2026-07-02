@@ -411,11 +411,30 @@ def assert_commands_module_boundary() -> None:
         "AGENT_SUBCOMMANDS_REQUIRING_AGENT",
         "AGENT_SUBCOMMANDS_SEND_AFTER_AGENT",
         "WORKSPACE_SUBCOMMANDS",
+        "AgentCommandCompletionDecision",
         "completion_insert_text",
+        "agent_command_completion_decision",
         "archived_command_matches",
         "workspace_command_matches",
     ):
         assert getattr(a, name) is getattr(commands_mod, name), name
+    assert commands_mod.agent_command_completion_decision("/agent") == commands_mod.AgentCommandCompletionDecision(
+        "rows",
+        (("/agent", "<cmd>", "管理/运行持久子 agent", False),),
+    )
+    assert commands_mod.agent_command_completion_decision("/agent ask worker") == commands_mod.AgentCommandCompletionDecision(
+        "subagent",
+        subcmd="ask",
+        agent_prefix="worker",
+    )
+    assert commands_mod.agent_command_completion_decision("/agent role worker re") == commands_mod.AgentCommandCompletionDecision(
+        "role",
+        subcmd="role",
+        role_agent="worker",
+        role_prefix="re",
+        role_base="/agent role worker ",
+    )
+    assert commands_mod.agent_command_completion_decision("/agent role worker re extra").kind == "none"
     assert commands_mod.completion_insert_text(("/agent new", "<name>", "新建", False)) == "/agent new "
     assert commands_mod.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
     assert commands_mod.archived_command_matches("/archived t") == [
@@ -424,10 +443,24 @@ def assert_commands_module_boundary() -> None:
     assert commands_mod.workspace_command_matches("/workspace r") == [
         ("/workspace refresh", "", "刷新自动工作区索引", True)
     ]
+    command_state = a.State(agent=None)
+    command_state.subagents["worker"] = a.SubAgentRuntime(
+        agent_id="worker",
+        name="Worker Agent",
+        home="/tmp/worker",
+        status="idle",
+    )
+    assert a.agent_command_matches("/agent ask worker", command_state) == [
+        ("/agent ask worker", "<prompt>", "Worker Agent · idle", False)
+    ]
+    assert a.agent_command_matches("/agent role worker ver", command_state) == [
+        ("/agent role worker verifier", "", a.ROLE_TEMPLATES["verifier"]["description"], True)
+    ]
     assert a.command_matches("/archived o") == commands_mod.archived_command_matches("/archived o")
     assert a.command_matches("/workspace c") == commands_mod.workspace_command_matches("/workspace c")
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for moved_def in (
+        "def agent_command_completion_decision",
         "def completion_insert_text",
         "def archived_command_matches",
         "def workspace_command_matches",

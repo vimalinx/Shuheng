@@ -15184,7 +15184,9 @@ AGENT_SUBCOMMANDS = command_helpers.AGENT_SUBCOMMANDS
 AGENT_SUBCOMMANDS_REQUIRING_AGENT = command_helpers.AGENT_SUBCOMMANDS_REQUIRING_AGENT
 AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = command_helpers.AGENT_SUBCOMMANDS_SEND_AFTER_AGENT
 WORKSPACE_SUBCOMMANDS = command_helpers.WORKSPACE_SUBCOMMANDS
+AgentCommandCompletionDecision = command_helpers.AgentCommandCompletionDecision
 completion_insert_text = command_helpers.completion_insert_text
+agent_command_completion_decision = command_helpers.agent_command_completion_decision
 
 
 def subagent_completion_rows(state: Optional[State], prefix: str, subcmd: str) -> list[tuple[str, str, str, bool]]:
@@ -15211,42 +15213,18 @@ def subagent_completion_rows(state: Optional[State], prefix: str, subcmd: str) -
 
 
 def agent_command_matches(text: str, state: Optional[State]) -> list[tuple[str, str, str, bool]]:
-    raw = text or ""
-    if not re.match(r"^/agent(?:\s|$)", raw):
-        return []
-    if raw == "/agent":
-        return [("/agent", "<cmd>", "管理/运行持久子 agent", False)]
-    rest = raw[len("/agent"):].lstrip()
-    if not rest:
-        return [(f"/agent {cmd}", args, desc, sendable) for cmd, args, desc, sendable in AGENT_SUBCOMMANDS]
-    parts = rest.split()
-    trailing_space = raw.endswith(" ")
-    sub_prefix = parts[0] if parts else ""
-    if len(parts) == 1 and not trailing_space:
+    decision = agent_command_completion_decision(text)
+    if decision.kind == "rows":
+        return list(decision.rows)
+    if decision.kind == "role":
         return [
-            (f"/agent {cmd}", args, desc, sendable)
-            for cmd, args, desc, sendable in AGENT_SUBCOMMANDS
-            if cmd.startswith(sub_prefix.lower())
-        ]
-    subcmd = sub_prefix.lower()
-    if subcmd not in {cmd for cmd, _args, _desc, _sendable in AGENT_SUBCOMMANDS}:
-        return []
-    if subcmd not in AGENT_SUBCOMMANDS_REQUIRING_AGENT:
-        return []
-    agent_prefix = ""
-    if len(parts) >= 2:
-        agent_prefix = parts[1]
-    if subcmd == "role" and (len(parts) >= 3 or (len(parts) == 2 and trailing_space)):
-        role_prefix = parts[2].lower() if len(parts) >= 3 else ""
-        base = f"/agent role {parts[1]} "
-        return [
-            (base + role, "", str(template.get("description") or ""), True)
+            (decision.role_base + role, "", str(template.get("description") or ""), True)
             for role, template in ROLE_TEMPLATES.items()
-            if not role_prefix or role.startswith(role_prefix)
+            if not decision.role_prefix or role.startswith(decision.role_prefix)
         ]
-    if len(parts) > 2 or (len(parts) == 2 and trailing_space and subcmd not in AGENT_SUBCOMMANDS_SEND_AFTER_AGENT):
-        return []
-    return subagent_completion_rows(state, agent_prefix, subcmd)
+    if decision.kind == "subagent":
+        return subagent_completion_rows(state, decision.agent_prefix, decision.subcmd)
+    return []
 
 
 def category_command_matches(text: str, state: Optional[State]) -> list[tuple[str, str, str, bool]]:

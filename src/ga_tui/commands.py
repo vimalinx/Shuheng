@@ -2,8 +2,22 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import Literal
 
 CommandCandidate = tuple[str, str, str, bool]
+AgentCommandCompletionKind = Literal["none", "rows", "subagent", "role"]
+
+
+@dataclass(frozen=True)
+class AgentCommandCompletionDecision:
+    kind: AgentCommandCompletionKind
+    rows: tuple[CommandCandidate, ...] = ()
+    subcmd: str = ""
+    agent_prefix: str = ""
+    role_agent: str = ""
+    role_prefix: str = ""
+    role_base: str = ""
 
 
 AGENT_SUBCOMMANDS: list[CommandCandidate] = [
@@ -46,6 +60,7 @@ AGENT_SUBCOMMANDS_REQUIRING_AGENT = {
     "delete",
 }
 AGENT_SUBCOMMANDS_SEND_AFTER_AGENT = {"memory", "profile", "info", "settings", "model", "skill", "stop", "delete"}
+AGENT_SUBCOMMAND_NAMES = {cmd for cmd, _args, _desc, _sendable in AGENT_SUBCOMMANDS}
 WORKSPACE_SUBCOMMANDS: list[CommandCandidate] = [
     ("list", "", "列出工作区", True),
     ("current", "", "显示自动推断的当前工作区", True),
@@ -56,6 +71,58 @@ WORKSPACE_SUBCOMMANDS: list[CommandCandidate] = [
 def completion_insert_text(candidate: CommandCandidate) -> str:
     cmd, _args, _desc, sendable = candidate
     return cmd if sendable else cmd.rstrip() + " "
+
+
+def agent_command_completion_decision(text: str) -> AgentCommandCompletionDecision:
+    raw = text or ""
+    if not re.match(r"^/agent(?:\s|$)", raw):
+        return AgentCommandCompletionDecision("none")
+    if raw == "/agent":
+        return AgentCommandCompletionDecision(
+            "rows",
+            (("/agent", "<cmd>", "管理/运行持久子 agent", False),),
+        )
+    rest = raw[len("/agent"):].lstrip()
+    if not rest:
+        return AgentCommandCompletionDecision(
+            "rows",
+            tuple((f"/agent {cmd}", args, desc, sendable) for cmd, args, desc, sendable in AGENT_SUBCOMMANDS),
+        )
+    parts = rest.split()
+    trailing_space = raw.endswith(" ")
+    sub_prefix = parts[0] if parts else ""
+    if len(parts) == 1 and not trailing_space:
+        sub_prefix_l = sub_prefix.lower()
+        return AgentCommandCompletionDecision(
+            "rows",
+            tuple(
+                (f"/agent {cmd}", args, desc, sendable)
+                for cmd, args, desc, sendable in AGENT_SUBCOMMANDS
+                if cmd.startswith(sub_prefix_l)
+            ),
+        )
+    subcmd = sub_prefix.lower()
+    if subcmd not in AGENT_SUBCOMMAND_NAMES:
+        return AgentCommandCompletionDecision("none")
+    if subcmd not in AGENT_SUBCOMMANDS_REQUIRING_AGENT:
+        return AgentCommandCompletionDecision("none")
+    agent_prefix = parts[1] if len(parts) >= 2 else ""
+    if subcmd == "role":
+        if len(parts) > 3 or (len(parts) == 3 and trailing_space):
+            return AgentCommandCompletionDecision("none")
+        if len(parts) >= 3 or (len(parts) == 2 and trailing_space):
+            role_agent = parts[1]
+            role_prefix = parts[2].lower() if len(parts) >= 3 else ""
+            return AgentCommandCompletionDecision(
+                "role",
+                subcmd=subcmd,
+                role_agent=role_agent,
+                role_prefix=role_prefix,
+                role_base=f"/agent role {role_agent} ",
+            )
+    if len(parts) > 2 or (len(parts) == 2 and trailing_space and subcmd not in AGENT_SUBCOMMANDS_SEND_AFTER_AGENT):
+        return AgentCommandCompletionDecision("none")
+    return AgentCommandCompletionDecision("subagent", subcmd=subcmd, agent_prefix=agent_prefix)
 
 
 def archived_command_matches(text: str) -> list[CommandCandidate]:

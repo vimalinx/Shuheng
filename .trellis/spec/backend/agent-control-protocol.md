@@ -918,7 +918,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   - `AGENT_SUBCOMMANDS_REQUIRING_AGENT`.
   - `AGENT_SUBCOMMANDS_SEND_AFTER_AGENT`.
   - `WORKSPACE_SUBCOMMANDS`.
+  - `AgentCommandCompletionDecision`.
   - `completion_insert_text(candidate)`.
+  - `agent_command_completion_decision(text)`.
   - `archived_command_matches(text)`.
   - `workspace_command_matches(text)`.
 
@@ -930,6 +932,10 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   governance stores, history stores, key/mouse handlers, or draw functions.
 - `commands.py` owns deterministic command-completion metadata and matching
   over explicit text values.
+- `agent_command_completion_decision(...)` owns pure `/agent` input
+  classification. It may return static rows, a subagent-completion request, a
+  role-template-completion request, or no match, but it must not inspect
+  current subagent state or role templates.
 - `completion_insert_text(...)` returns the command unchanged for sendable
   candidates and appends exactly one trailing space to non-sendable command
   candidates after right-stripping the command.
@@ -961,6 +967,14 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - `workspace_command_matches("/workspaces ")` -> `[("/workspaces", "",
   "列出项目工作区 provenance", True)]`.
 - `workspace_command_matches("/workspace refresh ")` -> `[]`.
+- `agent_command_completion_decision("/agent")` -> rows containing the
+  sendable `/agent` command root.
+- `agent_command_completion_decision("/agent ask worker")` -> a pure subagent
+  completion request for subcommand `ask` and agent prefix `worker`.
+- `agent_command_completion_decision("/agent role worker re")` -> a pure role
+  completion request with base `/agent role worker ` and role prefix `re`.
+- `agent_command_completion_decision("/agent role worker re extra")` -> no
+  match.
 - `command_matches("/workspace r", state)` still delegates to the extracted
   workspace helper before app-owned command dispatch continues.
 
@@ -970,6 +984,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   matching, while `app.py` keeps command routing and stateful completions.
 - Good: `/agent` option constants move to `commands.py`, while `app.py` still
   owns subagent runtime row expansion and role-template completion.
+- Good: `/agent` completion parsing returns a neutral decision object from
+  `commands.py`; `app.py` then expands that decision using `State.subagents`
+  and `ROLE_TEMPLATES`.
 - Base: Future slices may move more command parsing only after state,
   governance, history, rendering, and runtime dependencies are injectable.
 - Bad: `commands.py` imports `State` so it can inspect active subagents.
@@ -978,9 +995,9 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 ### 6. Tests Required
 
-- Unit tests must assert direct `completion_insert_text(...)`,
-  `archived_command_matches(...)`, and `workspace_command_matches(...)`
-  behavior plus app alias parity.
+- Unit tests must assert direct `agent_command_completion_decision(...)`,
+  `completion_insert_text(...)`, `archived_command_matches(...)`, and
+  `workspace_command_matches(...)` behavior plus app alias parity.
 - Unit tests must assert app-level `command_matches(...)` still returns the same
   `/archived` and `/workspace` helper rows.
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
