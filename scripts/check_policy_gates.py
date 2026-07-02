@@ -8439,7 +8439,47 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     )
     workflow_dir = plugin_root / "workflows"
     workflow_dir.mkdir(parents=True, exist_ok=True)
-    workflow_dir.joinpath("compare-sources.md").write_text("# Compare Sources\n", encoding="utf-8")
+    workflow_marker = "WORKFLOW_DRY_RUN_MARKER_FOR_DECLARATIVE_PLAN_ONLY"
+    workflow_dir.joinpath("compare-sources.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "compare-sources",
+                "name": "Compare Sources",
+                "description": "Compare source evidence without executing from the registry.",
+                "inputs": {
+                    "topic": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Research topic.",
+                    }
+                },
+                "permissions": {"writes": "none", "network": "metadata_only"},
+                "steps": [
+                    {
+                        "id": "plan",
+                        "type": "prompt",
+                        "prompt": f"Plan source comparison. {workflow_marker}",
+                    },
+                    {
+                        "id": "review",
+                        "type": "agent_task",
+                        "agent": "plugin://research-pack/agents/evidence-researcher",
+                        "depends_on": ["plan"],
+                        "prompt": "Review source quality.",
+                    },
+                    {
+                        "id": "summarize",
+                        "type": "artifact_summary",
+                        "depends_on": ["review"],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     outside_file = Path(root, "outside-plugin-skill.md")
     outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
     outside_file.write_text(outside_marker, encoding="utf-8")
@@ -8476,7 +8516,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
                         }
                     ],
                     "workflows": [
-                        {"id": "compare-sources", "path": "workflows/compare-sources.md"}
+                        {"id": "compare-sources", "path": "workflows/compare-sources.json"}
                     ],
                 },
                 "permissions": {
@@ -8504,13 +8544,39 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.plugin_skill_ref_from_token("research-pack/source-review") == plugin_ref
     assert "Research Pack" in a.format_plugin_list(registry), a.format_plugin_list(registry)
     assert "Plugin source review SOP" in a.format_plugin_info("research-pack", registry)
+    workflow_ref = "plugin://research-pack/workflows/compare-sources"
+    assert a.parse_plugin_workflow_ref("research-pack/compare-sources") == ("research-pack", "compare-sources")
+    assert a.plugin_workflow_file_for_ref(workflow_ref, registry).endswith("workflows/compare-sources.json")
+    workflow_result = a.workflow_load_result_for_ref(workflow_ref, registry)
+    assert workflow_result.definition is not None, workflow_result
+    assert not workflow_result.issues, workflow_result.issues
+    assert workflow_marker in a.format_workflow_dry_run(workflow_result), a.format_workflow_dry_run(workflow_result)
+    assert "No execution occurred." in a.format_workflow_dry_run(workflow_result)
     assert "/plugins" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/plugin" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
+    assert "/workflows" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
+    assert "/workflow" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "plugin" in {cmd for cmd, _args, _desc, _sendable in a.AGENT_SUBCOMMANDS}
     assert "/plugins" in a.SECRET_BLOCKED_NORMAL_COMMANDS
+    assert "/workflows" in a.SECRET_BLOCKED_NORMAL_COMMANDS
+    assert "/workflow" in a.SECRET_BLOCKED_NORMAL_COMMANDS
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert 'if panel == "plugins"' in app_source, app_source
+    assert 'if panel == "workflows"' in app_source, app_source
     assert '"/plugins"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
+    assert '"/workflows"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
+    workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
+    forbidden_workflow_imports = [
+        "app",
+        "runtime_dispatch",
+        "governance",
+        "ledger_store",
+        "secret_vault",
+        "curses",
+        "subprocess",
+    ]
+    assert not any(f"import {name}" in workflow_source or f"from . import {name}" in workflow_source for name in forbidden_workflow_imports), workflow_source
+    assert "start_subagent" not in workflow_source and "append_task_ledger" not in workflow_source, workflow_source
     panel_items = a.plugin_panel_items()
     plugin_item = next(item for item in panel_items if item.key == "research-pack")
     assert plugin_item.status == "warning", plugin_item
@@ -8519,6 +8585,11 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert unique_marker not in plugin_item.detail, plugin_item.detail
     issue_items = [item for item in panel_items if item.status == "warning" and item.key != "research-pack"]
     assert any("not valid JSON" in item.detail for item in issue_items), panel_items
+    workflow_items = a.workflow_panel_items()
+    workflow_item = next(item for item in workflow_items if item.key == workflow_ref)
+    assert workflow_item.status == "ok", workflow_item
+    assert "Compare Sources" in workflow_item.detail, workflow_item.detail
+    assert workflow_marker not in workflow_item.detail, workflow_item.detail
 
     state = a.State(agent=ContextFakeAgent())
     state.running = True
@@ -8544,6 +8615,15 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_plugin_command(state, "/plugin template research-pack/evidence-researcher") is True
     assert "plugin://research-pack/agents/evidence-researcher" in state.messages[-1].content, state.messages[-1].content
     assert a.handle_plugin_command(state, "/plugin create research-pack/evidence-researcher Evidence Plugin Agent") is True
+    subagent_count_after_plugin_create = len(state.subagents)
+    assert a.handle_workflow_command(state, "/workflows") is True
+    assert workflow_ref in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow info {workflow_ref}") is True
+    assert "Compare Sources" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow dry-run {workflow_ref}") is True
+    assert "No execution occurred." in state.messages[-1].content, state.messages[-1].content
+    assert workflow_marker in state.messages[-1].content, state.messages[-1].content
+    assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
     templated = a.resolve_subagent(state, "Evidence Plugin Agent")
     assert templated is not None, state.subagents
     assert templated.role == "researcher", templated

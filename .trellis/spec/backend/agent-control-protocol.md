@@ -2213,6 +2213,89 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /agent plugin add agent-research research-pack/source-review -> only agent-research context_pack.skill_pack includes plugin://research-pack/skills/source-review
 ```
 
+## Scenario: Declarative Workflow Registry And Dry-Run
+
+### 1. Scope / Trigger
+
+- Trigger: Users need local/plugin workflows to be discoverable, inspectable, and dry-runnable before Shuheng adds workflow execution.
+- Applies to: `plugin://<plugin-id>/workflows/<workflow-id>` refs, manifest-declared workflow files, `workflows.py`, `/workflows`, `/workflow info <ref>`, `/workflow dry-run <ref>`, the Workflows harness panel, plugin registry cache refresh, Secret Vault command isolation, and policy gates.
+- Non-goal: This does not run workflow steps, dispatch subagents, create approvals, write workflow run ledgers, execute tools, run plugin code, schedule workflows, or expose remote A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Workflow ref shape: `plugin://<plugin-id>/workflows/<workflow-id>`.
+- Accepted shorthand in TUI commands: `<plugin-id>/<workflow-id>` and `<plugin-id>/workflows/<workflow-id>`.
+- Workflow definition schema version: `shuheng.workflow.v1`.
+- MVP definition body: JSON object, either as the whole file body or as a fenced JSON object in a Markdown file.
+- Supported MVP step types: `prompt`, `agent_task`, `approval`, `artifact_summary`, `pause`, `notify`, and `condition`.
+- Public commands:
+  - `/workflows`
+  - `/workflow info <plugin-id>/<workflow-id>`
+  - `/workflow dry-run <plugin-id>/<workflow-id>`
+- Registry owner modules:
+  - `plugins.py` owns workflow ref parsing and manifest-declared workflow file resolution.
+  - `workflows.py` owns pure workflow definition parsing, validation, and bounded formatting.
+  - `app.py` owns TUI command routing and panel rendering only.
+
+### 3. Contracts
+
+- Workflow definitions are declarative data only. They must not execute Python, JavaScript, shell commands, plugin-native code, tools, model calls, or subagent tasks during registry load, info rendering, panel rendering, or dry-run.
+- Workflow files must be loaded only through manifest-declared `PluginWorkflow` records. App-level code must not guess filesystem paths from a workflow ref.
+- `workflows.py` must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, Web Console, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, provider adapters, or subprocess.
+- Dry-run output is an execution plan preview. It may show inputs, permissions metadata, ordered steps, dependencies, target agent refs, prompt strings, and validation issues, but must explicitly state that no execution occurred.
+- `/workflows` uses the existing harness panel browser and read-only `PanelItem` rows.
+- `/workflow info` and `/workflow dry-run` may return text through normal command handling, but must not mutate runtime state beyond adding a system message.
+- Workflow `permissions` are metadata only in this scenario. They must not alter role write policy, approval gates, Secret Vault isolation, single-writer locks, artifact provenance, task ledgers, or runtime dispatch permissions.
+- Secret Vault unlocked mode treats `/workflows` and `/workflow` as normal harness commands and blocks them until `/lock`.
+
+### 4. Validation & Error Matrix
+
+- Missing plugin root -> `/workflows` reports no workflows, no crash.
+- Missing workflow file -> visible workflow validation issue, no execution.
+- Non-JSON workflow body without fenced JSON -> visible workflow validation issue, no execution.
+- Wrong `schema_version` -> visible validation issue; dry-run still says no execution.
+- Workflow id missing or not filesystem-safe -> validation issue.
+- Workflow id differs from manifest contribution id -> validation issue.
+- Duplicate input id -> validation issue.
+- Duplicate step id -> validation issue.
+- Unsupported step type -> validation issue.
+- Step dependency references a missing step -> validation issue.
+- `/workflow info <missing>` -> visible missing workflow message.
+- `/workflow dry-run <valid>` -> ordered plan preview plus `No execution occurred.`
+
+### 5. Good/Base/Bad Cases
+
+- Good: `research-pack` declares `compare-sources`, `/workflow dry-run research-pack/compare-sources` renders inputs and ordered steps without starting a subagent or writing a ledger.
+- Good: `/workflows` opens a read-only panel that surfaces workflow metadata and validation issues.
+- Base: Workflow files may be Markdown files that contain a fenced JSON definition for readability.
+- Base: A workflow may include future execution metadata such as `permissions`, `agent`, `depends_on`, and prompt text before the runner exists.
+- Bad: `/workflow dry-run` calls `start_subagent_task(...)`.
+- Bad: The app maps `plugin://research-pack/workflows/x` directly to `~/.shuheng/plugins/research-pack/workflows/x.json` without consulting the manifest.
+- Bad: Workflow `permissions` grants write access or bypasses approvals.
+- Bad: Importing runtime dispatch, governance, ledger, or Secret Vault owners into `workflows.py`.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert valid JSON workflow parsing, fenced JSON parsing, invalid body errors, schema validation, duplicate id validation, unsupported step validation, dependency validation, and dry-run wording.
+- `tests/test_plugins.py` must assert workflow ref construction/parsing and shorthand parsing.
+- `scripts/check_policy_gates.py` must assert `/workflows` and `/workflow` are visible commands, Secret Vault blocks both normal commands, the Workflows panel route exists, and dry-run does not create subagents or call runtime dispatch/ledger/governance owners.
+- `scripts/check_policy_gates.py` must assert `workflows.py` stays pure and does not import app/runtime/UI/governance owners.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow dry-run research-pack/compare-sources -> dispatches plugin://research-pack/agents/evidence-researcher
+```
+
+#### Correct
+
+```text
+/workflow dry-run research-pack/compare-sources -> renders plan preview and says "No execution occurred."
+```
+
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger

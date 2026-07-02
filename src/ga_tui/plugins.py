@@ -20,6 +20,9 @@ _PLUGIN_SKILL_REF_RE = re.compile(
 _PLUGIN_AGENT_TEMPLATE_REF_RE = re.compile(
     r"^plugin://(?P<plugin>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})/agents/(?P<template>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})$"
 )
+_PLUGIN_WORKFLOW_REF_RE = re.compile(
+    r"^plugin://(?P<plugin>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})/workflows/(?P<workflow>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})$"
+)
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,12 @@ def plugin_agent_template_ref(plugin_id: str, template_id: str) -> str:
     return f"plugin://{plugin}/agents/{template}" if plugin and template else ""
 
 
+def plugin_workflow_ref(plugin_id: str, workflow_id: str) -> str:
+    plugin = safe_plugin_id(plugin_id)
+    workflow = safe_plugin_id(workflow_id)
+    return f"plugin://{plugin}/workflows/{workflow}" if plugin and workflow else ""
+
+
 def parse_plugin_skill_ref(ref: Any) -> tuple[str, str]:
     text = str(ref or "").strip().removeprefix("skill://").strip()
     match = _PLUGIN_SKILL_REF_RE.fullmatch(text)
@@ -119,6 +128,19 @@ def parse_plugin_agent_template_ref(ref: Any) -> tuple[str, str]:
     if len(parts) == 2 and safe_plugin_id(parts[0]) and safe_plugin_id(parts[1]):
         return parts[0], parts[1]
     if len(parts) == 3 and parts[1] == "agents" and safe_plugin_id(parts[0]) and safe_plugin_id(parts[2]):
+        return parts[0], parts[2]
+    return "", ""
+
+
+def parse_plugin_workflow_ref(ref: Any) -> tuple[str, str]:
+    text = str(ref or "").strip()
+    match = _PLUGIN_WORKFLOW_REF_RE.fullmatch(text)
+    if match:
+        return match.group("plugin"), match.group("workflow")
+    parts = text.split("/")
+    if len(parts) == 2 and safe_plugin_id(parts[0]) and safe_plugin_id(parts[1]):
+        return parts[0], parts[1]
+    if len(parts) == 3 and parts[1] == "workflows" and safe_plugin_id(parts[0]) and safe_plugin_id(parts[2]):
         return parts[0], parts[2]
     return "", ""
 
@@ -376,7 +398,7 @@ def _parse_workflows(
             PluginWorkflow(
                 plugin_id=plugin_id,
                 workflow_id=workflow_id,
-                ref=f"plugin://{plugin_id}/workflows/{workflow_id}",
+                ref=plugin_workflow_ref(plugin_id, workflow_id),
                 name=str(entry.get("name") or workflow_id).strip() or workflow_id,
                 description=str(entry.get("description") or "").strip(),
                 path=path,
@@ -485,6 +507,29 @@ def plugin_agent_template_for_ref(ref: Any, registry: PluginRegistry) -> PluginA
         if template.template_id == template_id:
             return template
     return None
+
+
+def plugin_workflow_for_ref(ref: Any, registry: PluginRegistry) -> PluginWorkflow | None:
+    plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
+    if not plugin_id or not workflow_id:
+        return None
+    plugin = registry.plugins.get(plugin_id)
+    if plugin is None:
+        return None
+    for workflow in plugin.workflows:
+        if workflow.workflow_id == workflow_id:
+            return workflow
+    return None
+
+
+def plugin_workflow_file_for_ref(ref: Any, registry: PluginRegistry) -> str:
+    workflow = plugin_workflow_for_ref(ref, registry)
+    if workflow is None or not os.path.isfile(workflow.path):
+        return ""
+    plugin = registry.plugins.get(workflow.plugin_id)
+    if plugin is None or not path_is_within(workflow.path, plugin.root):
+        return ""
+    return normalized_path(workflow.path)
 
 
 def format_plugin_list(registry: PluginRegistry) -> str:

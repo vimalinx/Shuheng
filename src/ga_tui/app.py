@@ -113,6 +113,7 @@ try:
     from . import path_utils
     from . import subagent_store as subagent_store_helpers
     from . import plugins as plugin_helpers
+    from . import workflows as workflow_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -247,6 +248,7 @@ except Exception:
     import path_utils  # type: ignore
     import subagent_store as subagent_store_helpers  # type: ignore
     import plugins as plugin_helpers  # type: ignore
+    import workflows as workflow_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
@@ -701,6 +703,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/agent skill", "<cmd>", "给指定子 agent 配置专属 skill", False),
     ("/plugins", "", "列出本地声明式插件", True),
     ("/plugin", "<cmd>", "查看插件详情或创建插件 agent", False),
+    ("/workflows", "", "查看声明式 workflow 注册表", True),
+    ("/workflow", "<cmd>", "查看或 dry-run 声明式 workflow", False),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
@@ -957,6 +961,13 @@ plugin_roots = plugin_helpers.plugin_roots
 plugin_skill_display_name = plugin_helpers.plugin_skill_display_name
 plugin_skill_file_for_ref = plugin_helpers.plugin_skill_file_for_ref
 plugin_skill_ref_from_token = plugin_helpers.plugin_skill_ref_from_token
+plugin_workflow_file_for_ref = plugin_helpers.plugin_workflow_file_for_ref
+plugin_workflow_for_ref = plugin_helpers.plugin_workflow_for_ref
+parse_plugin_workflow_ref = plugin_helpers.parse_plugin_workflow_ref
+format_workflow_dry_run = workflow_helpers.format_workflow_dry_run
+format_workflow_info = workflow_helpers.format_workflow_info
+format_workflow_list = workflow_helpers.format_workflow_list
+workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
 
 def is_normal_session_log_path(path: str) -> bool:
@@ -4380,7 +4391,7 @@ def secret_status_text(state: State) -> str:
 
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
-    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/continue", "/sessions",
+    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/continue", "/sessions",
     "/workspace", "/workspaces",
     "/temp",
 }
@@ -20564,6 +20575,96 @@ def plugin_panel_items() -> list[PanelItem]:
     return items
 
 
+def workflow_panel_items() -> list[PanelItem]:
+    registry = user_plugin_registry()
+    results = workflow_helpers.all_workflow_load_results(registry)
+    items: list[PanelItem] = []
+    seen_issue_keys: set[tuple[str, str]] = set()
+    for result in results:
+        status = workflow_helpers.workflow_result_status(result)
+        definition = result.definition
+        if definition is None:
+            title = f"Workflow issue · {result.workflow_ref}"
+            subtitle = result.issues[0].message if result.issues else "invalid workflow"
+            detail = format_workflow_info(result)
+            key = result.workflow_ref
+            path = result.path
+            payload = {"workflow_ref": result.workflow_ref, "issue_count": len(result.issues)}
+        else:
+            title = f"{definition.name} · {definition.workflow_ref}"
+            subtitle = f"{status} · inputs:{len(definition.inputs)} steps:{len(definition.steps)}"
+            detail = "\n".join([
+                format_workflow_info(result),
+                "",
+                "Commands:",
+                f"- /workflow info {definition.workflow_ref}",
+                f"- /workflow dry-run {definition.workflow_ref}",
+            ])
+            key = definition.workflow_ref
+            path = definition.path
+            payload = {
+                "workflow_ref": definition.workflow_ref,
+                "path": definition.path,
+                "inputs": [item.input_id for item in definition.inputs],
+                "steps": [step.step_id for step in definition.steps],
+                "issue_count": len(result.issues),
+            }
+        items.append(PanelItem(
+            key=key,
+            title=title,
+            subtitle=subtitle,
+            detail=detail,
+            status=status,
+            path=path,
+            payload=payload,
+        ))
+        for issue in result.issues:
+            seen_issue_keys.add((issue.workflow_ref, issue.message))
+    for index, issue in enumerate(registry.issues, 1):
+        if "workflow" not in issue.message.lower():
+            continue
+        key = (f"plugin:{issue.plugin_id}", issue.message)
+        if key in seen_issue_keys:
+            continue
+        items.append(PanelItem(
+            key=f"workflow-plugin-issue-{index}",
+            title=f"Workflow registry issue · {issue.plugin_id}",
+            subtitle=issue.message,
+            detail="\n".join([
+                f"Plugin: {issue.plugin_id}",
+                f"Manifest: {issue.manifest_path}",
+                f"Issue: {issue.message}",
+                "",
+                "This issue came from plugin manifest workflow metadata.",
+            ]),
+            status="warning",
+            path=issue.manifest_path,
+            payload={"plugin_id": issue.plugin_id, "manifest_path": issue.manifest_path, "message": issue.message},
+        ))
+    if not items:
+        roots = user_plugin_roots()
+        items.append(PanelItem(
+            key="no-workflows",
+            title="No workflows found",
+            subtitle=", ".join(roots) if roots else "-",
+            detail="\n".join([
+                "No declarative workflows were found.",
+                "",
+                "Workflow roots are discovered through plugin manifests:",
+                *[f"- {root}" for root in roots],
+                "",
+                "Expected package shape:",
+                "<plugin-id>/plugin.json",
+                "<plugin-id>/workflows/<workflow-id>.json",
+                "",
+                "Use /workflow info <plugin-id>/<workflow-id> after adding a workflow package.",
+            ]),
+            status="empty",
+            payload={"roots": roots},
+        ))
+    return items
+
+
 def draw_panel_browser(
     stdscr,
     state: State,
@@ -20646,6 +20747,8 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
             return "Architecture Baseline", baseline_panel_items(state), "r 重新生成报告  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "plugins":
             return "Plugins", plugin_panel_items(), "r 刷新插件 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+        if panel == "workflows":
+            return "Workflows", workflow_panel_items(), "r 刷新 workflow registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         return "Harness", [], "Esc/q 关闭"
 
     try:
@@ -20697,6 +20800,9 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
                 elif panel == "plugins":
                     clear_plugin_registry_cache()
                     message = "Plugin registry 已刷新。"
+                elif panel == "workflows":
+                    clear_plugin_registry_cache()
+                    message = "Workflow registry 已刷新。"
                 else:
                     message = "已刷新。"
                 detail_scroll = 0
@@ -21901,6 +22007,32 @@ def handle_plugin_command(state: State, text: str) -> bool:
     return False
 
 
+def handle_workflow_command(state: State, text: str) -> bool:
+    raw = (text or "").strip()
+    if raw in {"/workflows", "/workflow", "/workflow list"}:
+        add_system(state, format_workflow_list(user_plugin_registry(force=True)))
+        return True
+    m_info = re.match(r"/workflows?\s+info\s+(\S+)\s*$", raw, re.I)
+    if m_info:
+        result = workflow_load_result_for_ref(m_info.group(1), user_plugin_registry(force=True))
+        add_system(state, format_workflow_info(result))
+        return True
+    m_dry_run = re.match(r"/workflows?\s+(?:dry-run|dryrun|plan)\s+(\S+)\s*$", raw, re.I)
+    if m_dry_run:
+        result = workflow_load_result_for_ref(m_dry_run.group(1), user_plugin_registry(force=True))
+        add_system(state, format_workflow_dry_run(result))
+        return True
+    if raw.startswith("/workflow"):
+        add_system(
+            state,
+            "未知 /workflow 命令。\n"
+            "用法：/workflows、/workflow info <plugin-id>/<workflow-id>、"
+            "/workflow dry-run <plugin-id>/<workflow-id>",
+        )
+        return True
+    return False
+
+
 def handle_subagent_command(state: State, text: str) -> bool:
     raw = (text or "").strip()
     load_subagents(state)
@@ -22746,6 +22878,8 @@ def submit(state: State, text: str) -> None:
     if handle_workspace_command(state, text):
         return
     if handle_plugin_command(state, text):
+        return
+    if handle_workflow_command(state, text):
         return
     if handle_subagent_command(state, text):
         return
@@ -25314,7 +25448,7 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
-        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins"}:
+        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/workflows"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
             open_harness_panel(stdscr, state, panel)

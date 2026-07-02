@@ -108,6 +108,21 @@ def test_plugin_ref_parsing_and_roots_are_stable(tmp_path: Path, monkeypatch) ->
     assert plugins.plugin_skill_ref_from_token("research-pack/skills/source-review") == (
         "plugin://research-pack/skills/source-review"
     )
+    assert plugins.plugin_workflow_ref("research-pack", "compare-sources") == (
+        "plugin://research-pack/workflows/compare-sources"
+    )
+    assert plugins.parse_plugin_workflow_ref("plugin://research-pack/workflows/compare-sources") == (
+        "research-pack",
+        "compare-sources",
+    )
+    assert plugins.parse_plugin_workflow_ref("research-pack/compare-sources") == (
+        "research-pack",
+        "compare-sources",
+    )
+    assert plugins.parse_plugin_workflow_ref("research-pack/workflows/compare-sources") == (
+        "research-pack",
+        "compare-sources",
+    )
     assert plugins.parse_plugin_skill_ref("skill://plugin://research-pack/skills/source-review") == (
         "research-pack",
         "source-review",
