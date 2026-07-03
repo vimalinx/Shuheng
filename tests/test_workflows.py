@@ -284,13 +284,15 @@ def test_workflow_run_last_saves_and_runs_safe_generated_draft(tmp_path: Path, m
         "schema_version": "shuheng.workflow.v1",
         "id": "draft-safe-flow",
         "name": "Draft Safe Flow",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
         "steps": [
             {"id": "plan", "type": "prompt", "prompt": "Plan."},
-            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
         ],
     }
 
-    assert app_module.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow") is True
+    assert app_module.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow ready=true") is True
 
     assert "Workflow draft saved and run started." in state.messages[-1].content
     assert "Workflow draft saved." in state.messages[-1].content
@@ -303,9 +305,10 @@ def test_workflow_run_last_saves_and_runs_safe_generated_draft(tmp_path: Path, m
     assert len(rows) == 2
     assert rows[0]["status"] == "planned"
     assert rows[1]["status"] == "completed"
+    assert rows[0]["inputs"] == {"ready": True}
     assert rows[0]["workflow_ref"] == "plugin://generated-pack/workflows/safe-flow"
     assert rows[1]["run_id"] == rows[0]["run_id"]
-    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed"]
+    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed", "completed"]
     assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
@@ -341,7 +344,7 @@ def test_workflow_run_last_uses_existing_approval_bridge(tmp_path: Path, monkeyp
     assert approval_rows[0]["approval_id"] == approval_id
     assert approval_rows[0]["type"] == "workflow_step_approval"
     assert approval_rows[0]["payload"]["workflow_ref"] == "plugin://generated-pack/workflows/approval-flow"
-    assert approval_rows[0]["payload"]["source_command"] == "/workflow run-last plugin://generated-pack/workflows/approval-flow"
+    assert approval_rows[0]["payload"]["source_command"] == "/workflow run-last generated-pack/approval-flow"
     assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
@@ -593,6 +596,130 @@ def test_workflow_runner_v0_blocks_agent_task_and_condition(tmp_path: Path) -> N
     assert "requires condition evaluation" in condition_advanced.blocked_reason
 
 
+def test_workflow_inputs_resolve_defaults_and_reject_missing_or_unknown(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "inputs": {
+                "ready": {"type": "boolean", "required": True},
+                "mode": {"type": "string", "required": False, "default": "safe"},
+            },
+            "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-inputs",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={"ready": True},
+    )
+    missing = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-missing",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={},
+    )
+    unknown = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-unknown",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={"ready": True, "typo": "x"},
+    )
+
+    assert built.record is not None
+    assert built.record["inputs"] == {"ready": True, "mode": "safe"}
+    assert missing.record is None
+    assert "required workflow input is missing: ready" in workflows.format_workflow_run_rejected(result, missing.issues)
+    assert unknown.record is None
+    assert "unknown workflow input: typo" in workflows.format_workflow_run_rejected(result, unknown.issues)
+
+
+def test_workflow_condition_v1_evaluates_true_false_and_unsupported(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "inputs": {
+                "ready": {"type": "boolean", "required": True},
+                "mode": {"type": "string", "required": False, "default": "safe"},
+            },
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "check",
+                    "type": "condition",
+                    "depends_on": ["plan"],
+                    "condition": {
+                        "all": [
+                            {"ref": "inputs.ready", "equals": True},
+                            {"ref": "inputs.mode", "in": ["safe", "fast"]},
+                        ]
+                    },
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["check"]},
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    true_built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-condition-true",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={"ready": True},
+    )
+    false_built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-condition-false",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={"ready": False},
+    )
+    assert true_built.record is not None
+    assert false_built.record is not None
+
+    true_advanced = workflows.advance_workflow_run_v0(
+        true_built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+    false_advanced = workflows.advance_workflow_run_v0(
+        false_built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    assert true_advanced.status == "completed"
+    assert true_advanced.completed_step_ids == ("plan", "check", "notify")
+    assert [step["status"] for step in true_advanced.record["steps"]] == ["completed", "completed", "completed"]
+    assert false_advanced.status == "blocked"
+    assert false_advanced.blocked_step_id == "check"
+    assert [step["status"] for step in false_advanced.record["steps"]] == ["completed", "skipped", "pending"]
+    assert false_advanced.record["execution"]["subagents_dispatched"] == 0
+    assert false_advanced.record["execution"]["approvals_created"] == 0
+    assert false_advanced.record["execution"]["task_ledger_rows_written"] == 0
+
+    unsupported_record = dict(true_built.record)
+    unsupported_record["steps"] = [
+        {
+            **true_built.record["steps"][1],
+            "status": "pending",
+            "started_at": "",
+            "completed_at": "",
+            "depends_on": [],
+            "condition": {"ref": "artifacts.output", "truthy": True},
+        }
+    ]
+    unsupported = workflows.advance_workflow_run_v0(
+        unsupported_record,
+        timestamp="2026-07-03T00:00:02+0800",
+    )
+    assert unsupported.status == "blocked"
+    assert unsupported.record["steps"][0]["status"] == "blocked"
+    assert "inputs.<id>" in unsupported.blocked_reason
+
+
 def test_workflow_run_inspection_formatters_show_latest_rows(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -789,6 +916,70 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
     assert len(state.subagents) == 0
+
+
+def test_workflow_run_command_resolves_inputs_and_condition_v1(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "condition-input-flow",
+            "name": "Condition Input Flow",
+            "inputs": {
+                "ready": {"type": "boolean", "required": True},
+                "mode": {"type": "string", "required": False, "default": "safe"},
+            },
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "check",
+                    "type": "condition",
+                    "depends_on": ["plan"],
+                    "condition": {
+                        "all": [
+                            {"ref": "inputs.ready", "equals": True},
+                            {"ref": "inputs.mode", "in": ["safe"]},
+                        ]
+                    },
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["check"]},
+            ],
+        },
+        workflow_name="condition-input-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/condition-input-flow") is True
+    assert "required workflow input is missing: ready" in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/condition-input-flow ready=true typo=x") is True
+    assert "unknown workflow input: typo" in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/condition-input-flow ready=true") is True
+    assert "status: completed" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["inputs"] == {"ready": True, "mode": "safe"}
+    assert rows[1]["status"] == "completed"
+    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed", "completed"]
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+    rows_after_true = len(app_module.workflow_run_records())
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/condition-input-flow ready=false") is True
+    false_rows = app_module.workflow_run_records()
+    assert len(false_rows) == rows_after_true + 2
+    assert false_rows[-1]["status"] == "blocked"
+    assert [step["status"] for step in false_rows[-1]["steps"]] == ["completed", "skipped", "pending"]
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
 
 
 def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Path, monkeypatch) -> None:

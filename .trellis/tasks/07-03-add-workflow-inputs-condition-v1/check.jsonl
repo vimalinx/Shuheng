@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for quality verification."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Workflow input/condition contracts and side-effect boundaries to verify."}
+{"file": ".trellis/tasks/07-03-add-workflow-inputs-condition-v1/research/inputs-condition-design.md", "reason": "Design constraints for condition v1 and run input validation."}

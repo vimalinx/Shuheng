@@ -105,6 +105,12 @@ class WorkflowRunBuildResult:
 
 
 @dataclass(frozen=True)
+class WorkflowInputResolveResult:
+    inputs: dict[str, Any]
+    issues: tuple[WorkflowIssue, ...] = ()
+
+
+@dataclass(frozen=True)
 class WorkflowRunAdvanceResult:
     record: dict[str, Any]
     status: str
@@ -507,7 +513,7 @@ def format_workflow_dry_run(result: WorkflowLoadResult) -> str:
 
 
 def workflow_step_run_snapshot(step: WorkflowStep, *, order: int) -> dict[str, Any]:
-    return {
+    snapshot = {
         "step_id": step.step_id,
         "order": order,
         "type": step.step_type,
@@ -525,6 +531,180 @@ def workflow_step_run_snapshot(step: WorkflowStep, *, order: int) -> dict[str, A
         "task_id": "",
         "error": "",
     }
+    payload = step.payload if isinstance(step.payload, dict) else {}
+    for key in ("condition", "when", "expression"):
+        if key in payload:
+            snapshot[key] = deepcopy(payload.get(key))
+    return snapshot
+
+
+def resolve_workflow_run_inputs(
+    definition: WorkflowDefinition,
+    inputs: dict[str, Any] | None = None,
+) -> WorkflowInputResolveResult:
+    explicit = dict(inputs or {})
+    if not definition.inputs:
+        return WorkflowInputResolveResult(inputs=explicit)
+
+    declared = {item.input_id: item for item in definition.inputs}
+    issues: list[WorkflowIssue] = []
+    for key in explicit:
+        input_id = plugin_helpers.safe_plugin_id(key)
+        if not input_id:
+            issues.append(workflow_issue(definition.workflow_ref, definition.path, f"workflow input key is invalid: {key}"))
+        elif input_id not in declared:
+            issues.append(workflow_issue(definition.workflow_ref, definition.path, f"unknown workflow input: {input_id}"))
+    if issues:
+        return WorkflowInputResolveResult(inputs={}, issues=tuple(issues))
+
+    resolved: dict[str, Any] = {}
+    for item in definition.inputs:
+        if item.input_id in explicit:
+            resolved[item.input_id] = explicit[item.input_id]
+            continue
+        if item.default is not None:
+            resolved[item.input_id] = deepcopy(item.default)
+            continue
+        if item.required:
+            issues.append(workflow_issue(definition.workflow_ref, definition.path, f"required workflow input is missing: {item.input_id}"))
+    if issues:
+        return WorkflowInputResolveResult(inputs={}, issues=tuple(issues))
+    return WorkflowInputResolveResult(inputs=resolved)
+
+
+@dataclass(frozen=True)
+class _WorkflowConditionEvaluation:
+    supported: bool
+    passed: bool
+    reason: str = ""
+
+
+def _condition_ref_value(ref: Any, inputs: dict[str, Any]) -> tuple[bool, bool, Any, str]:
+    text = str(ref or "").strip()
+    if not text.startswith("inputs."):
+        return False, False, None, f"condition ref must read inputs.<id>, got {text or '(missing)'}"
+    input_id = text[len("inputs.") :]
+    if not plugin_helpers.safe_plugin_id(input_id):
+        return False, False, None, f"condition ref has invalid input id: {text}"
+    return True, input_id in inputs, inputs.get(input_id), ""
+
+
+def _evaluate_condition_predicate(predicate: Any, inputs: dict[str, Any]) -> _WorkflowConditionEvaluation:
+    if not isinstance(predicate, dict):
+        return _WorkflowConditionEvaluation(
+            supported=False,
+            passed=False,
+            reason="condition requires condition evaluation via condition v1 JSON predicate object",
+        )
+
+    if "all" in predicate:
+        children = predicate.get("all")
+        if not isinstance(children, list):
+            return _WorkflowConditionEvaluation(False, False, "condition all operator must contain a list")
+        for child in children:
+            result = _evaluate_condition_predicate(child, inputs)
+            if not result.supported or not result.passed:
+                return result
+        return _WorkflowConditionEvaluation(True, True, "condition evaluated true")
+
+    if "any" in predicate:
+        children = predicate.get("any")
+        if not isinstance(children, list):
+            return _WorkflowConditionEvaluation(False, False, "condition any operator must contain a list")
+        false_reasons: list[str] = []
+        for child in children:
+            result = _evaluate_condition_predicate(child, inputs)
+            if not result.supported:
+                return result
+            if result.passed:
+                return _WorkflowConditionEvaluation(True, True, "condition evaluated true")
+            if result.reason:
+                false_reasons.append(result.reason)
+        reason = false_reasons[0] if false_reasons else "condition any operator had no matching predicate"
+        return _WorkflowConditionEvaluation(True, False, reason)
+
+    if "not" in predicate:
+        result = _evaluate_condition_predicate(predicate.get("not"), inputs)
+        if not result.supported:
+            return result
+        return _WorkflowConditionEvaluation(True, not result.passed, "condition evaluated true" if not result.passed else "condition not predicate evaluated false")
+
+    if "ref" not in predicate:
+        return _WorkflowConditionEvaluation(False, False, "condition predicate must include ref or all/any/not")
+
+    ok, exists, value, reason = _condition_ref_value(predicate.get("ref"), inputs)
+    if not ok:
+        return _WorkflowConditionEvaluation(False, False, reason)
+
+    operator_keys = [
+        key
+        for key in ("equals", "not_equals", "exists", "truthy", "in")
+        if key in predicate
+    ]
+    if len(operator_keys) != 1:
+        return _WorkflowConditionEvaluation(False, False, "condition predicate must include exactly one supported operator")
+
+    operator = operator_keys[0]
+    ref = str(predicate.get("ref") or "").strip()
+    if operator == "exists":
+        expected = bool(predicate.get("exists"))
+        passed = exists is expected
+        reason = "condition evaluated true" if passed else f"condition {ref} exists={exists}, expected {expected}"
+        return _WorkflowConditionEvaluation(True, passed, reason)
+    if not exists:
+        return _WorkflowConditionEvaluation(True, False, f"condition {ref} is missing")
+    if operator == "truthy":
+        expected = bool(predicate.get("truthy"))
+        actual = bool(value)
+        passed = actual is expected
+        reason = "condition evaluated true" if passed else f"condition {ref} truthy={actual}, expected {expected}"
+        return _WorkflowConditionEvaluation(True, passed, reason)
+    if operator == "equals":
+        expected = predicate.get("equals")
+        passed = value == expected
+        reason = "condition evaluated true" if passed else f"condition {ref} value did not equal {expected!r}"
+        return _WorkflowConditionEvaluation(True, passed, reason)
+    if operator == "not_equals":
+        expected = predicate.get("not_equals")
+        passed = value != expected
+        reason = "condition evaluated true" if passed else f"condition {ref} value unexpectedly equaled {expected!r}"
+        return _WorkflowConditionEvaluation(True, passed, reason)
+    options = predicate.get("in")
+    if not isinstance(options, list):
+        return _WorkflowConditionEvaluation(False, False, "condition in operator must contain a list")
+    passed = value in options
+    reason = "condition evaluated true" if passed else f"condition {ref} value was not in allowed list"
+    return _WorkflowConditionEvaluation(True, passed, reason)
+
+
+def _evaluate_condition_step_v1(step: dict[str, Any], inputs: dict[str, Any]) -> _WorkflowConditionEvaluation:
+    if isinstance(step.get("condition"), dict):
+        return _evaluate_condition_predicate(step.get("condition"), inputs)
+    if isinstance(step.get("when"), dict):
+        return _evaluate_condition_predicate(step.get("when"), inputs)
+    if "condition" in step and not isinstance(step.get("condition"), dict):
+        return _WorkflowConditionEvaluation(
+            supported=False,
+            passed=False,
+            reason="condition requires condition evaluation via condition v1 JSON predicate object",
+        )
+    if "when" in step and not isinstance(step.get("when"), dict):
+        return _WorkflowConditionEvaluation(
+            supported=False,
+            passed=False,
+            reason="condition requires condition evaluation via condition v1 JSON predicate object",
+        )
+    if str(step.get("expression") or "").strip():
+        return _WorkflowConditionEvaluation(
+            supported=False,
+            passed=False,
+            reason="condition requires condition evaluation via condition v1 JSON predicate; string expressions are not supported",
+        )
+    return _WorkflowConditionEvaluation(
+        supported=False,
+        passed=False,
+        reason="condition requires condition evaluation via condition v1 JSON predicate",
+    )
 
 
 def build_workflow_run_record(
@@ -548,6 +728,9 @@ def build_workflow_run_record(
         return WorkflowRunBuildResult(record=None, issues=(
             workflow_issue(definition.workflow_ref, definition.path, "run_id is required and must be filesystem-safe"),
         ))
+    resolved_inputs = resolve_workflow_run_inputs(definition, inputs)
+    if resolved_inputs.issues:
+        return WorkflowRunBuildResult(record=None, issues=resolved_inputs.issues)
     row = {
         "schema_version": WORKFLOW_RUN_SCHEMA_VERSION,
         "run_id": safe_run_id,
@@ -560,7 +743,7 @@ def build_workflow_run_record(
         "workflow_name": definition.name,
         "workflow_description": definition.description,
         "workflow_path": definition.path,
-        "inputs": dict(inputs or {}),
+        "inputs": dict(resolved_inputs.inputs),
         "permissions": dict(definition.permissions or {}),
         "validation_issues": [],
         "steps": [
@@ -616,17 +799,25 @@ def _workflow_run_status_for_blocked_step(step: dict[str, Any]) -> tuple[str, st
 def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowRunAdvanceResult:
     advanced = deepcopy(row)
     steps = advanced.get("steps") if isinstance(advanced.get("steps"), list) else []
+    inputs = advanced.get("inputs") if isinstance(advanced.get("inputs"), dict) else {}
     completed_step_ids: list[str] = []
     blocked_step: dict[str, Any] | None = None
     blocked_reason = ""
+    blocked_status = ""
     completed = _completed_step_ids(steps)
     for raw_step in steps:
         if not isinstance(raw_step, dict):
             continue
         step_id = str(raw_step.get("step_id") or "").strip()
         step_type = str(raw_step.get("type") or "").strip()
-        if not step_id or raw_step.get("status") == "completed":
+        step_status = str(raw_step.get("status") or "").strip()
+        if not step_id or step_status == "completed":
             continue
+        if step_status == "skipped":
+            blocked_step = raw_step
+            blocked_status = "blocked"
+            blocked_reason = str(raw_step.get("error") or f"step {step_id} was skipped")
+            break
         dependencies = [
             str(item or "").strip()
             for item in raw_step.get("depends_on", [])
@@ -650,6 +841,29 @@ def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowR
             completed.add(step_id)
             completed_step_ids.append(step_id)
             continue
+        if step_type == "condition":
+            condition = _evaluate_condition_step_v1(raw_step, inputs)
+            if not condition.supported:
+                blocked_step = raw_step
+                blocked_status = "blocked"
+                blocked_reason = condition.reason
+                raw_step["status"] = "blocked"
+                raw_step["error"] = blocked_reason
+                break
+            raw_step["started_at"] = raw_step.get("started_at") or timestamp
+            raw_step["completed_at"] = timestamp
+            if condition.passed:
+                raw_step["status"] = "completed"
+                raw_step["error"] = ""
+                completed.add(step_id)
+                completed_step_ids.append(step_id)
+                continue
+            blocked_step = raw_step
+            blocked_status = "blocked"
+            blocked_reason = condition.reason or f"condition step {step_id} evaluated false"
+            raw_step["status"] = "skipped"
+            raw_step["error"] = blocked_reason
+            break
         blocked_step = raw_step
         status, blocked_reason = _workflow_run_status_for_blocked_step(raw_step)
         raw_step["status"] = status
@@ -661,7 +875,7 @@ def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowR
         blocked_step_type = ""
         completed_at = timestamp
     else:
-        status = str(blocked_step.get("status") or "blocked")
+        status = blocked_status or str(blocked_step.get("status") or "blocked")
         blocked_step_id = str(blocked_step.get("step_id") or "").strip()
         blocked_step_type = str(blocked_step.get("type") or "").strip()
         completed_at = ""

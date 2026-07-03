@@ -8538,6 +8538,46 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         ),
         encoding="utf-8",
     )
+    workflow_dir.joinpath("condition-input-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "condition-input-flow",
+                "name": "Condition Input Flow",
+                "description": "Exercise workflow inputs and condition v1 evaluation.",
+                "inputs": {
+                    "ready": {"type": "boolean", "required": True},
+                    "mode": {"type": "string", "required": False, "default": "safe"},
+                },
+                "steps": [
+                    {
+                        "id": "plan",
+                        "type": "prompt",
+                        "prompt": "Plan condition-input-gated work.",
+                    },
+                    {
+                        "id": "check",
+                        "type": "condition",
+                        "depends_on": ["plan"],
+                        "condition": {
+                            "all": [
+                                {"ref": "inputs.ready", "equals": True},
+                                {"ref": "inputs.mode", "in": ["safe"]},
+                            ]
+                        },
+                    },
+                    {
+                        "id": "notify",
+                        "type": "notify",
+                        "depends_on": ["check"],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     outside_file = Path(root, "outside-plugin-skill.md")
     outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
     outside_file.write_text(outside_marker, encoding="utf-8")
@@ -8577,6 +8617,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
                         {"id": "compare-sources", "path": "workflows/compare-sources.json"},
                         {"id": "approval-flow", "path": "workflows/approval-flow.json"},
                         {"id": "condition-flow", "path": "workflows/condition-flow.json"},
+                        {"id": "condition-input-flow", "path": "workflows/condition-input-flow.json"},
                     ],
                 },
                 "permissions": {
@@ -8616,6 +8657,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         workflow_result,
         run_id="wfr-policy-gate",
         timestamp="2026-07-03T00:00:00+0800",
+        inputs={"topic": "workflow safety"},
     )
     assert built_workflow_run.record is not None, built_workflow_run.issues
     assert built_workflow_run.record["schema_version"] == "shuheng.workflow_run.v1"
@@ -8771,7 +8813,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     old_new_agent = a.new_agent
     try:
         a.new_agent = lambda log_path=None: workflow_fake_agent
-        assert a.handle_workflow_command(state, f"/workflow run {workflow_ref}") is True
+        assert a.handle_workflow_command(state, f"/workflow run {workflow_ref} topic=workflow-safety") is True
     finally:
         a.new_agent = old_new_agent
     assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
@@ -8782,6 +8824,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert len(workflow_run_rows) == 2, workflow_run_rows
     assert workflow_run_rows[0]["workflow_ref"] == workflow_ref, workflow_run_rows[0]
     assert workflow_run_rows[0]["status"] == "planned", workflow_run_rows[0]
+    assert workflow_run_rows[0]["inputs"] == {"topic": "workflow-safety"}, workflow_run_rows[0]
     assert workflow_run_rows[1]["run_id"] == workflow_run_rows[0]["run_id"], workflow_run_rows
     assert workflow_run_rows[1]["workflow_ref"] == workflow_ref, workflow_run_rows[1]
     assert workflow_run_rows[1]["status"] == "waiting_task", workflow_run_rows[1]
@@ -8923,6 +8966,34 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.normalize_subagent_skill_refs(templated.skill_refs) == [plugin_ref], templated.skill_refs
     assert "approved_only" not in a.subagent_prompt_block(templated), a.subagent_prompt_block(templated)
 
+    condition_v1_ref = "plugin://research-pack/workflows/condition-input-flow"
+    workflow_rows_before_condition_v1 = len(a.workflow_run_records())
+    task_rows_before_condition_v1 = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_condition_v1 = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_condition_v1 = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    artifact_rows_before_condition_v1 = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    assert a.handle_workflow_command(state, f"/workflow run {condition_v1_ref}") is True
+    assert "required workflow input is missing: ready" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_condition_v1
+    assert a.handle_workflow_command(state, f"/workflow run {condition_v1_ref} ready=true typo=x") is True
+    assert "unknown workflow input: typo" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_condition_v1
+    assert a.handle_workflow_command(state, f"/workflow run {condition_v1_ref} ready=true") is True
+    condition_true_rows = a.workflow_run_records()
+    assert len(condition_true_rows) == workflow_rows_before_condition_v1 + 2, condition_true_rows
+    assert condition_true_rows[-2]["inputs"] == {"ready": True, "mode": "safe"}, condition_true_rows[-2]
+    assert condition_true_rows[-1]["status"] == "completed", condition_true_rows[-1]
+    assert [step["status"] for step in condition_true_rows[-1]["steps"]] == ["completed", "completed", "completed"]
+    assert a.handle_workflow_command(state, f"/workflow run {condition_v1_ref} ready=false") is True
+    condition_false_rows = a.workflow_run_records()
+    assert len(condition_false_rows) == workflow_rows_before_condition_v1 + 4, condition_false_rows
+    assert condition_false_rows[-1]["status"] == "blocked", condition_false_rows[-1]
+    assert [step["status"] for step in condition_false_rows[-1]["steps"]] == ["completed", "skipped", "pending"]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_condition_v1
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_condition_v1
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_condition_v1
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_condition_v1
+
     assert a.handle_subagent_command(state, f"/agent plugin add {skilled.agent_id} research-pack/source-review") is True
     assert a.normalize_subagent_skill_refs(skilled.skill_refs) == [plugin_ref], skilled.skill_refs
     assert a.normalize_subagent_skill_refs(plain.skill_refs) == [], plain.skill_refs
@@ -8965,15 +9036,17 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
         "id": "draft-safe-flow",
         "name": "Draft Safe Flow",
         "description": "Policy gate draft saved and run through the normal runner.",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
         "steps": [
             {"id": "plan", "type": "prompt", "prompt": "Plan generated work."},
-            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
         ],
     }
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "/workflow run-last" in app_source and "run_latest_workflow_draft" in app_source, app_source
     assert "create_workflow_run_v0(" in app_source and "save_latest_workflow_draft_result" in app_source, app_source
-    assert a.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow") is True
+    assert a.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow ready=true") is True
     assert "Workflow draft saved and run started." in state.messages[-1].content, state.messages[-1].content
     assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
     assert "status: completed" in state.messages[-1].content, state.messages[-1].content
@@ -8985,9 +9058,10 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert len(workflow_rows) == 2, workflow_rows
     assert workflow_rows[0]["status"] == "planned", workflow_rows
     assert workflow_rows[1]["status"] == "completed", workflow_rows
+    assert workflow_rows[0]["inputs"] == {"ready": True}, workflow_rows
     assert workflow_rows[0]["workflow_ref"] == generated_ref, workflow_rows
     assert workflow_rows[1]["run_id"] == workflow_rows[0]["run_id"], workflow_rows
-    assert [step["status"] for step in workflow_rows[1]["steps"]] == ["completed", "completed"], workflow_rows
+    assert [step["status"] for step in workflow_rows[1]["steps"]] == ["completed", "completed", "completed"], workflow_rows
     assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == []
     assert a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH) == []
     assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []

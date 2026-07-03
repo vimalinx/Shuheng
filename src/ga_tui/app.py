@@ -22,6 +22,7 @@ import os
 import queue
 import re
 import shutil
+import shlex
 import signal
 import socket
 import subprocess
@@ -4727,8 +4728,8 @@ def workflow_generation_prompt(goal: str) -> str:
         f"Supported step types are: {supported_types}.\n"
         "Each step must have a filesystem-safe id and type. Use depends_on for ordering.\n"
         "Use agent_task only when a subagent should do bounded work; include agent and prompt.\n"
-        "Use approval when a human gate is required. Use condition only as a blocking placeholder; "
-        "do not invent executable expressions that must run now.\n"
+        "Use approval when a human gate is required. For condition steps, use only safe JSON predicates "
+        "such as {\"condition\":{\"ref\":\"inputs.ready\",\"equals\":true}}; never use expression strings.\n"
         "Never include shell, Python, JavaScript, plugin code, tool execution fields, permission bypasses, "
         "secrets, credentials, or requests to run the workflow.\n"
         "The workflow is a reusable declarative plan only; Shuheng will validate it before any save or run.\n\n"
@@ -4863,6 +4864,50 @@ def save_latest_workflow_draft(state: State, ref: str) -> str:
     return message
 
 
+def _parse_workflow_input_value(value: str) -> Any:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "null":
+        return None
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", text):
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+    if text.startswith(("{", "[", '"')):
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+    return text
+
+
+def parse_workflow_run_command_args(tail: str) -> tuple[str, dict[str, Any], str]:
+    try:
+        parts = shlex.split(str(tail or "").strip())
+    except ValueError as exc:
+        return "", {}, f"Invalid workflow input syntax: {exc}"
+    if not parts:
+        return "", {}, "Missing workflow ref."
+    ref = parts[0]
+    inputs: dict[str, Any] = {}
+    for token in parts[1:]:
+        if "=" not in token or token.startswith("="):
+            return ref, {}, f"Invalid workflow input override: {token}. Use key=value."
+        key, value = token.split("=", 1)
+        input_id = plugin_helpers.safe_plugin_id(key)
+        if not input_id:
+            return ref, {}, f"Invalid workflow input key: {key}"
+        if input_id in inputs:
+            return ref, {}, f"Duplicate workflow input: {input_id}"
+        inputs[input_id] = _parse_workflow_input_value(value)
+    return ref, inputs, ""
+
+
 def save_latest_workflow_draft_result(state: State, ref: str) -> tuple[str, str]:
     plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
     if not plugin_id or not workflow_id:
@@ -4908,7 +4953,13 @@ def save_latest_workflow_draft_result(state: State, ref: str) -> tuple[str, str]
     )
 
 
-def run_latest_workflow_draft(state: State, ref: str) -> str:
+def run_latest_workflow_draft(
+    state: State,
+    ref: str,
+    *,
+    inputs: dict[str, Any] | None = None,
+    source_command: str = "",
+) -> str:
     saved_ref, save_message = save_latest_workflow_draft_result(state, ref)
     if not saved_ref:
         return "Workflow draft was not run.\n" + save_message
@@ -4916,7 +4967,8 @@ def run_latest_workflow_draft(state: State, ref: str) -> str:
     row, run_message = create_workflow_run_v0(
         result,
         state=state,
-        source_command=f"/workflow run-last {saved_ref}",
+        inputs=inputs,
+        source_command=source_command or f"/workflow run-last {saved_ref}",
     )
     if row is None:
         return "Workflow draft saved but not run.\n\n[Save]\n" + save_message + "\n\n[Run]\n" + run_message
@@ -5138,6 +5190,7 @@ def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> 
 def create_workflow_run_v0(
     result: workflow_helpers.WorkflowLoadResult,
     state: Optional[State] = None,
+    inputs: Optional[dict[str, Any]] = None,
     source_command: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
     command = source_command or f"/workflow run {result.workflow_ref}"
@@ -5145,7 +5198,7 @@ def create_workflow_run_v0(
         result,
         run_id=short_uid("wfr"),
         timestamp=now_iso(),
-        inputs={},
+        inputs=inputs or {},
         source="workflow_command",
     )
     if built.record is None:
@@ -22727,9 +22780,13 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if m_save_last:
         add_system(state, save_latest_workflow_draft(state, m_save_last.group(1)))
         return True
-    m_run_last = re.match(r"/workflows?\s+run-last\s+(\S+)\s*$", raw, re.I)
+    m_run_last = re.match(r"/workflows?\s+run-last\s+([\s\S]+?)\s*$", raw, re.I)
     if m_run_last:
-        add_system(state, run_latest_workflow_draft(state, m_run_last.group(1)))
+        ref, inputs, error = parse_workflow_run_command_args(m_run_last.group(1))
+        if error:
+            add_system(state, error + "\n用法：/workflow run-last <plugin-id>/<workflow-id> [key=value ...]")
+        else:
+            add_system(state, run_latest_workflow_draft(state, ref, inputs=inputs, source_command=raw))
         return True
     if re.match(r"/workflows?\s+runs\s*$", raw, re.I):
         add_system(state, format_workflow_runs(workflow_run_records()))
@@ -22753,11 +22810,15 @@ def handle_workflow_command(state: State, text: str) -> bool:
         result = workflow_load_result_for_ref(m_dry_run.group(1), user_plugin_registry(force=True))
         add_system(state, format_workflow_dry_run(result))
         return True
-    m_run = re.match(r"/workflows?\s+run\s+(\S+)\s*$", raw, re.I)
+    m_run = re.match(r"/workflows?\s+run\s+([\s\S]+?)\s*$", raw, re.I)
     if m_run:
-        result = workflow_load_result_for_ref(m_run.group(1), user_plugin_registry(force=True))
-        _row, message = create_workflow_run_v0(result, state=state)
-        add_system(state, message)
+        ref, inputs, error = parse_workflow_run_command_args(m_run.group(1))
+        if error:
+            add_system(state, error + "\n用法：/workflow run <plugin-id>/<workflow-id> [key=value ...]")
+        else:
+            result = workflow_load_result_for_ref(ref, user_plugin_registry(force=True))
+            _row, message = create_workflow_run_v0(result, state=state, inputs=inputs, source_command=raw)
+            add_system(state, message)
         return True
     if raw.startswith("/workflow"):
         add_system(
@@ -22766,7 +22827,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "用法：/workflows、/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
-            "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>、"
+            "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"
             "/workflow runs、/workflow show <run-id>、/workflow continue|resume <run-id>",
         )
         return True

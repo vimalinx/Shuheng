@@ -2384,7 +2384,7 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 
 - Trigger: Users want a shorter explicit path from a validated AI workflow draft to a governed workflow run.
 - Applies to: `/workflow run-last <plugin-id>/<workflow-id>`, latest workflow draft state, user plugin manifests, plugin registry refresh, `workflow_runs.jsonl`, `app.save_latest_workflow_draft_result(...)`, `app.run_latest_workflow_draft(...)`, `app.create_workflow_run_v0(...)`, `tests/test_workflows.py`, and policy gates.
-- Non-goal: This does not auto-run at `/workflow generate` completion, run in-memory drafts, create a hidden workflow executor, bypass manifest-backed workflow files, duplicate runner/bridge logic, evaluate conditions, schedule workflows, run plugin code directly, or expose A2A/MCP workflow services.
+- Non-goal: This does not auto-run at `/workflow generate` completion, run in-memory drafts, create a hidden workflow executor, bypass manifest-backed workflow files, duplicate runner/bridge logic, evaluate free-form condition expressions, schedule workflows, run plugin code directly, or expose A2A/MCP workflow services.
 
 ### 2. Signatures
 
@@ -2418,7 +2418,7 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 - Safe-only valid draft -> workflow file + manifest saved, then planned + completed workflow run rows appended.
 - Draft with `approval` blocker -> workflow file + manifest saved, planned + waiting-approval workflow rows appended, and exactly one normal approval row created by the approval bridge.
 - Draft with `agent_task` blocker -> workflow file + manifest saved, planned + waiting-task workflow rows appended, and exactly one governed subagent task dispatched by the agent-task bridge.
-- Draft with `condition` blocker -> workflow file + manifest saved, planned + blocked workflow rows appended, no side-effect ledgers except workflow runs.
+- Draft with unsupported/string `condition` blocker -> workflow file + manifest saved, planned + blocked workflow rows appended, no side-effect ledgers except workflow runs. Drafts with condition v1 predicates follow the Workflow Inputs and Condition V1 contract below.
 
 ### 5. Good/Base/Bad Cases
 
@@ -2447,6 +2447,94 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 
 ```text
 /workflow run-last research-pack/source-summary -> save plugin workflow -> load via registry -> create_workflow_run_v0(...)
+```
+
+## Scenario: Workflow Inputs and Condition V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users need manifest-backed workflows to accept explicit run inputs and make safe deterministic branches without adding a hidden expression engine.
+- Applies to: workflow `inputs`, `/workflow run <ref> key=value ...`, `/workflow run-last <plugin-id>/<workflow-id> key=value ...`, `workflow_runs.jsonl`, `workflows.resolve_workflow_run_inputs(...)`, `workflows.advance_workflow_run_v0(...)`, `app.create_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add Python/JavaScript/shell expression execution, prompt templating, artifact/task/file/env/Secret Vault reads, model/tool calls, plugin code execution, fan-out/fan-in, scheduling, retries, rollback, UI forms, or A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow run <plugin-id>/<workflow-id> [key=value ...]`
+  - `/workflow run-last <plugin-id>/<workflow-id> [key=value ...]`
+- Input declaration source: workflow definition `inputs` object or list already parsed into `WorkflowInput`.
+- Condition v1 source: a JSON object under a condition step's `condition` or `when` field.
+- Supported condition operators:
+  - `{"ref":"inputs.<id>","equals":<value>}`
+  - `{"ref":"inputs.<id>","not_equals":<value>}`
+  - `{"ref":"inputs.<id>","exists":true|false}`
+  - `{"ref":"inputs.<id>","truthy":true|false}`
+  - `{"ref":"inputs.<id>","in":[...]}`
+  - `{"all":[...]}`, `{"any":[...]}`, and `{"not":{...}}`
+- Pure helper ownership:
+  - `workflows.resolve_workflow_run_inputs(definition, inputs=None)`
+  - `workflows.build_workflow_run_record(result, run_id, timestamp, inputs=None, source="workflow_command")`
+  - `workflows.advance_workflow_run_v0(row, timestamp=...)`
+- App ownership:
+  - `app.parse_workflow_run_command_args(...)`
+  - `app.create_workflow_run_v0(result, state=None, inputs=None, source_command=...)`
+  - `app.run_latest_workflow_draft(state, ref, inputs=None, source_command=...)`
+
+### 3. Contracts
+
+- Input resolution must happen before any workflow run row is appended.
+- If a workflow declares no inputs, `build_workflow_run_record(..., inputs=...)` preserves the previous behavior and stores the explicit input snapshot as-is.
+- If a workflow declares inputs, unknown explicit input keys must reject run creation with visible validation issues.
+- Required inputs without explicit values or non-`null` defaults must reject run creation with visible validation issues.
+- Optional/defaulted inputs must be resolved into the planned workflow row before runner v0 advances.
+- CLI overrides use `key=value` syntax. `true`, `false`, `null`, JSON arrays/objects/strings, and simple numbers may be parsed into JSON-like values; validation still belongs to the workflow input contract.
+- Condition v1 may read only `inputs.<id>`. Any other ref namespace is unsupported.
+- A true condition marks the condition step `completed`, increments normal runner-v0 completed-step progress, and allows later dependent safe steps to continue.
+- A false condition marks the condition step `skipped`, leaves downstream dependent steps pending, sets the workflow run status to `blocked`, and must not create side-effect ledgers.
+- Unsupported condition shapes, string `expression` fields, invalid refs, or invalid operator payloads remain `blocked` with a clear reason and no side effects.
+- `workflows.py` remains pure: no app/runtime/UI/governance imports, no JSONL writes, no approval queue writes, no subagent dispatch, no tools/providers/subprocess, and no Secret Vault access.
+- `app.py` remains the Orchestrator owner for command parsing, run id/timestamp selection, file writes, registry refresh, state mutation, and ledger appends.
+
+### 4. Validation & Error Matrix
+
+- `/workflow run research-pack/flow` with missing required input -> visible rejection, no workflow/task/progress/approval/artifact ledger writes.
+- `/workflow run research-pack/flow ready=true typo=x` when `typo` is undeclared -> visible rejection, no workflow run row.
+- Optional/defaulted input omitted -> planned row contains the resolved default.
+- `prompt -> condition -> notify` with `ready=true` and a matching condition v1 predicate -> planned + completed workflow rows, all three steps completed, no side-effect ledgers.
+- Same workflow with `ready=false` -> planned + blocked workflow rows, condition step `skipped`, notify step pending, no task/progress/approval/artifact ledgers.
+- String `expression` condition -> blocked and side-effect-free.
+- Condition ref such as `artifacts.output` or `files.x` -> blocked and side-effect-free.
+- `/workflow run-last generated-pack/flow ready=true` -> saves the latest valid draft, reloads it through the plugin registry, then creates normal workflow run rows with resolved inputs.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow run research-pack/review ready=true mode=safe` stores `{"ready": true, "mode": "safe"}` in the planned row and completes the safe branch if the condition predicate matches.
+- Good: A false condition is auditable as a skipped condition step, not as a silent success.
+- Good: A generated workflow can include `{"condition":{"ref":"inputs.ready","equals":true}}`, then `/workflow run-last ... ready=true` saves and runs through the same manifest-backed path as hand-written workflows.
+- Base: String `expression` remains allowed as inert future metadata only when validation accepts the workflow; runner v0 must not execute it.
+- Bad: `workflows.py` uses `eval`, `exec`, Python AST evaluation, JavaScript, shell, or plugin code to evaluate a condition.
+- Bad: Condition predicates read artifacts, task results, files, environment variables, Secret Vault entries, model output, or tool results in this slice.
+- Bad: Missing inputs create a planned workflow row and fail later during runner advancement.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert input defaults, missing required input rejection, unknown input rejection, app command `key=value` parsing, true/false/unsupported condition behavior, run-last with inputs, and side-effect ledger invariants.
+- `scripts/check_policy_gates.py` must assert missing/unknown inputs write no workflow rows, condition v1 true completes, condition v1 false skips and blocks, unsupported/string conditions remain blocked, and `workflows.py` purity holds.
+- Existing workflow approval, agent-task, auto-continue, generation, save-last, run-last, run inspection, and continue tests must remain green.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow run research-pack/review ready=true -> eval("inputs.ready == true") inside workflows.py
+```
+
+#### Correct
+
+```text
+/workflow run research-pack/review ready=true -> resolve inputs -> evaluate finite JSON predicate -> append audited workflow rows
 ```
 
 ## Scenario: Planned Workflow Run Ledger Skeleton
@@ -2530,7 +2618,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: Users want workflow runner v0 to make deterministic safe progress after the planned run ledger skeleton exists.
 - Applies to: `/workflow run <ref>`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.advance_workflow_run_v0(...)`, `workflows.format_workflow_run_advanced(...)`, `app.create_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
-- Non-goal: The pure runner does not dispatch subagents, create approval rows, call model providers, execute tools, run shell commands, execute plugin code, evaluate conditions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services. App-side bridge contracts may act after the pure runner reaches a supported blocking step.
+- Non-goal: The pure runner does not dispatch subagents, create approval rows, call model providers, execute tools, run shell commands, execute plugin code, evaluate free-form condition expressions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services. App-side bridge contracts may act after the pure runner reaches a supported blocking step.
 
 ### 2. Signatures
 
@@ -2543,7 +2631,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - App ownership:
   - `app.create_workflow_run_v0(result, state=None)` chooses run id/timestamps, appends one initial planned row, advances the copied row through runner v0, then lets app-owned bridge contracts attach approval or subagent task side effects before appending the second row with the same `run_id`.
 - Runner v0 safe step types: `prompt`, `notify`, `pause`, and `artifact_summary`.
-- Runner v0 blocking step types: `approval`, `agent_task`, `condition`, and any future step type not explicitly classified as safe.
+- Runner v0 blocking step types: `approval`, `agent_task`, unsupported/string `condition`, false condition v1, and any future step type not explicitly classified as safe.
 - Advanced row execution mode: `workflow_runner_v0`.
 
 ### 3. Contracts
@@ -2555,7 +2643,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - `steps_executed` records the count of safe steps completed by runner v0. It is the only execution counter that may be non-zero in the pure runner result before app-owned bridge contracts run.
 - `approval` stops the run at `waiting_approval`, sets workflow-run approval metadata to pending, and must not write `approvals.jsonl`.
 - `agent_task` stops the pure runner at `blocked` and must not call `start_subagent_task(...)`, runtime dispatch, or task/progress ledger writers from `workflows.py`. Real dispatch is owned only by the Workflow Agent Task Bridge scenario below.
-- `condition` stops the run at `blocked` and must not evaluate expressions, inspect runtime state, call tools, or call model providers.
+- `condition` may evaluate only the finite condition v1 JSON predicate operators documented in the Workflow Inputs and Condition V1 scenario. It must not evaluate string expressions, inspect runtime state, call tools, call model providers, or read anything outside resolved run inputs.
 - Dependency gaps stop the run at `blocked` rather than reordering or guessing execution.
 - `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
 - Workflow `permissions` remain metadata. They must not grant tools, write permissions, approval bypasses, Secret Vault access, single-writer locks, artifact provenance writes, task ledgers, or runtime dispatch capability.
@@ -2571,7 +2659,9 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Valid workflow with safe step then `approval` -> two rows, latest row `status=waiting_approval`, prior safe steps `completed`, approval step `waiting_approval`, no approval row.
 - Pure helper with safe step then `agent_task` -> latest copied row `status=blocked`, prior safe steps `completed`, agent task `blocked`, no subagent/task/progress rows.
 - App `/workflow run` with safe step then bridgeable `agent_task` -> two workflow rows, latest row `status=waiting_task`, one governed subagent task dispatched by the Workflow Agent Task Bridge.
-- Valid workflow with `condition` -> two rows, latest row `status=blocked`, no expression evaluation.
+- Valid workflow with unsupported/string `condition` -> two rows, latest row `status=blocked`, no expression evaluation.
+- Valid workflow with true condition v1 -> two rows, latest row may continue through later safe steps.
+- Valid workflow with false condition v1 -> two rows, latest row `status=blocked`, condition step `skipped`, no side-effect ledgers.
 - Valid workflow with unmet dependency order -> latest row `status=blocked`, no reordering.
 
 ### 5. Good/Base/Bad Cases
@@ -2584,12 +2674,12 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Base: `artifact_summary` is ledger-only in v0 and must not create artifact index rows.
 - Bad: `workflows.advance_workflow_run_v0(...)` calls `start_subagent_task(...)` for `agent_task`.
 - Bad: Runner v0 writes `tasks.jsonl`, `progress.jsonl`, `approvals.jsonl`, or `artifacts.jsonl`.
-- Bad: Runner v0 evaluates a `condition` expression from plugin workflow data.
+- Bad: Runner v0 evaluates a `condition` string expression from plugin workflow data.
 - Bad: Runner v0 imports app/runtime/governance modules into `workflows.py` to append records directly.
 
 ### 6. Tests Required
 
-- `tests/test_workflows.py` must assert safe-only completion, approval wait without approval-row creation in the pure helper, agent-task blocking without subagent/task/progress rows in the pure helper, condition blocking without evaluation, planned-row compatibility, invalid workflow rejection, and app command side effects.
+- `tests/test_workflows.py` must assert safe-only completion, approval wait without approval-row creation in the pure helper, agent-task blocking without subagent/task/progress rows in the pure helper, unsupported/string condition blocking without expression evaluation, condition v1 true/false behavior, planned-row compatibility, invalid workflow rejection, and app command side effects.
 - `scripts/check_policy_gates.py` must assert the pure helper advances a planned row, `/workflow run` appends exactly two workflow run rows, latest status/step statuses are correct for bridged and unbridged cases, condition rows keep side-effect ledgers unchanged, and `workflows.py` remains independent from app/runtime/UI/governance owners.
 - Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
@@ -2685,7 +2775,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: Users need to resume a durable append-only workflow run from its latest `workflow_runs.jsonl` row.
 - Applies to: `/workflow continue <run_id>`, `/workflow resume <run_id>`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.WorkflowRunContinueResult`, `workflows.workflow_run_has_meaningful_transition(...)`, `workflows.format_workflow_continue_result(...)`, `app.continue_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
-- Non-goal: Continue commands do not call model providers directly, execute tools, run shell commands, execute plugin code, evaluate conditions, write workflow-owned artifacts, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services. Approval rows and subagent task rows may be created only through the separate Workflow Approval Bridge and Workflow Agent Task Bridge contracts.
+- Non-goal: Continue commands do not call model providers directly, execute tools, run shell commands, execute plugin code, evaluate free-form condition expressions, write workflow-owned artifacts, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services. Approval rows and subagent task rows may be created only through the separate Workflow Approval Bridge and Workflow Agent Task Bridge contracts.
 
 ### 2. Signatures
 
@@ -2710,7 +2800,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - A latest row that cannot make runner-v0 safe progress must render a no-progress message and append no workflow run row.
 - A latest row that can make runner-v0 safe progress must append exactly one new row with the same `run_id`.
 - Meaningful continuation is defined by status, completed/error state, step status/artifact/approval/task/error fields, blocked-step metadata, or approval metadata changing. Timestamp-only updates are not meaningful and must not create a duplicate row.
-- Continue uses runner-v0 semantics for safe steps; `approval` and `agent_task` blockers are delegated to their bridge contracts, while `condition`, unsupported step types, and unmet dependencies still block.
+- Continue uses runner-v0 semantics for safe steps and condition v1 predicates; `approval` and `agent_task` blockers are delegated to their bridge contracts, while unsupported/string conditions, unsupported step types, and unmet dependencies still block.
 - Continue output must report whether a row was appended, latest status, safe-step count when progressed, history row count, and stop reason when present.
 - Continue must not mutate task/progress/artifact ledgers or change `state.subagents` except through the Workflow Agent Task Bridge. Approval-ledger writes are allowed only for the Workflow Approval Bridge.
 - `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
