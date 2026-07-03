@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
+- **Total Sessions**: 36
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1202 | Active |
+| `journal-1.md` | ~1235 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-07-03 | Add workflow agent task bridge | `f191443` | `main` |
 | 35 | 2026-07-03 | Add workflow approval bridge | `ff2835c` | `main` |
 | 34 | 2026-07-03 | Add workflow continue command | `57fdb6c` | `main` |
 | 33 | 2026-07-03 | Add workflow run inspection commands | `bd61911` | `main` |

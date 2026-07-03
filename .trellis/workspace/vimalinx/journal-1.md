@@ -1200,3 +1200,36 @@ Implemented workflow approval bridge: runner-v0 approval steps now create workfl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: Add workflow agent task bridge
+
+**Date**: 2026-07-03
+**Task**: Add workflow agent task bridge
+**Branch**: `main`
+
+### Summary
+
+Implemented workflow agent_task bridge through the existing governed subagent task pipeline. Workflow rows now attach task_id, wait on non-terminal task status, continue after completed task artifacts, stop on terminal failures, and support plugin agent template refs while keeping workflows.py pure.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f191443` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
