@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1070 | Active |
+| `journal-1.md` | ~1103 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-07-03 | Add workflow runner v0 | `2347e45` | `main` |
 | 31 | 2026-07-03 | Add workflow run ledger skeleton | `fd65771` | `main` |
 | 30 | 2026-07-03 | Add workflow registry dry-run | `d8c3316` | `main` |
 | 29 | 2026-07-01 | App.py decomposition phases 0-4 | `8c53eb0`, `58189c2`, `4b2cc7c`, `49daddb`, `0ba566c` | `main` |

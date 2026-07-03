@@ -1068,3 +1068,36 @@ Added planned-only workflow run ledger records and /workflow run command with te
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: Add workflow runner v0
+
+**Date**: 2026-07-03
+**Task**: Add workflow runner v0
+**Branch**: `main`
+
+### Summary
+
+Implemented workflow runner v0 as append-only workflow_runs ledger progression for safe declarative steps, with approval/agent_task/condition blocking, tests, policy gates, spec updates, and full release smoke verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2347e45` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
