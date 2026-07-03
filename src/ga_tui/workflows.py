@@ -108,6 +108,7 @@ class WorkflowRunContinueResult:
     advanced: WorkflowRunAdvanceResult | None = None
     history_rows: int = 0
     reason: str = ""
+    approval_id: str = ""
 
 
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
@@ -614,11 +615,20 @@ def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowR
     advanced["completed_at"] = completed_at
     advanced["error"] = blocked_reason
     approval = dict(advanced.get("approval") if isinstance(advanced.get("approval"), dict) else {})
+    existing_approval_id = str(approval.get("approval_id") or "").strip()
+    existing_approval_status = str(approval.get("approval_status") or "").strip()
     if status == "waiting_approval":
+        step_approval_id = str(blocked_step.get("approval_id") or "").strip() if blocked_step else ""
         approval.update({
             "approval_status": "pending",
-            "approval_id": "",
+            "approval_id": existing_approval_id or step_approval_id,
             "approval_required_for": [blocked_step_id] if blocked_step_id else [],
+        })
+    elif existing_approval_id and existing_approval_status in {"approved", "rejected"}:
+        approval.update({
+            "approval_status": existing_approval_status,
+            "approval_id": existing_approval_id,
+            "approval_required_for": approval.get("approval_required_for") or [],
         })
     else:
         approval.update({
@@ -635,6 +645,141 @@ def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowR
         blocked_step_type=blocked_step_type,
         blocked_reason=blocked_reason,
     )
+
+
+def pending_workflow_approval_step(row: dict[str, Any]) -> dict[str, Any] | None:
+    if str(row.get("status") or "").strip() != "waiting_approval":
+        return None
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    fallback: dict[str, Any] | None = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("type") or "").strip() != "approval":
+            continue
+        if str(step.get("status") or "").strip() != "waiting_approval":
+            continue
+        if blocked_step_id and str(step.get("step_id") or "").strip() == blocked_step_id:
+            return step
+        if fallback is None:
+            fallback = step
+    return fallback
+
+
+def workflow_approval_id(row: dict[str, Any]) -> str:
+    approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
+    approval_id = str(approval.get("approval_id") or "").strip()
+    if approval_id:
+        return approval_id
+    step = pending_workflow_approval_step(row)
+    return str(step.get("approval_id") or "").strip() if step else ""
+
+
+def _at_least_int(value: Any, minimum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 0
+    return max(parsed, minimum)
+
+
+def attach_workflow_step_approval(row: dict[str, Any], *, approval_id: str, timestamp: str) -> dict[str, Any]:
+    safe_approval_id = str(approval_id or "").strip()
+    updated = deepcopy(row)
+    if not safe_approval_id:
+        return updated
+    step = pending_workflow_approval_step(updated)
+    if step is None:
+        return updated
+    step_id = str(step.get("step_id") or "").strip()
+    step["approval_id"] = safe_approval_id
+    step["status"] = "waiting_approval"
+    approval = dict(updated.get("approval") if isinstance(updated.get("approval"), dict) else {})
+    approval.update({
+        "approval_status": "pending",
+        "approval_id": safe_approval_id,
+        "approval_required_for": [step_id] if step_id else [],
+    })
+    updated["approval"] = approval
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["approvals_created"] = _at_least_int(execution.get("approvals_created"), 1)
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "approval"
+    execution["blocked_reason"] = execution.get("blocked_reason") or step.get("error") or (
+        f"step {step_id} requires human approval" if step_id else "workflow step requires human approval"
+    )
+    updated["execution"] = execution
+    updated["updated_at"] = timestamp
+    updated["status"] = "waiting_approval"
+    updated["completed_at"] = ""
+    updated["error"] = str(execution.get("blocked_reason") or "")
+    return updated
+
+
+def apply_workflow_step_approval_decision(
+    row: dict[str, Any],
+    *,
+    approval_id: str,
+    approved: bool,
+    timestamp: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    safe_approval_id = str(approval_id or "").strip()
+    updated = deepcopy(row)
+    step = pending_workflow_approval_step(updated)
+    if step is None:
+        return updated
+    step_id = str(step.get("step_id") or "").strip()
+    approval = dict(updated.get("approval") if isinstance(updated.get("approval"), dict) else {})
+    approval.update({
+        "approval_status": "approved" if approved else "rejected",
+        "approval_id": safe_approval_id or str(approval.get("approval_id") or step.get("approval_id") or ""),
+        "approval_required_for": [step_id] if step_id else [],
+    })
+    updated["approval"] = approval
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["approvals_created"] = _at_least_int(execution.get("approvals_created"), 1)
+    if approved:
+        step["status"] = "completed"
+        step["approval_id"] = approval["approval_id"]
+        step["started_at"] = step.get("started_at") or timestamp
+        step["completed_at"] = timestamp
+        step["error"] = ""
+        execution["blocked_step_id"] = ""
+        execution["blocked_step_type"] = ""
+        execution["blocked_reason"] = ""
+        updated["execution"] = execution
+        updated["error"] = ""
+        updated["updated_at"] = timestamp
+        return updated
+    rejected_reason = reason or f"workflow approval rejected: {approval['approval_id'] or step_id}"
+    step["status"] = "rejected"
+    step["approval_id"] = approval["approval_id"]
+    step["started_at"] = step.get("started_at") or timestamp
+    step["completed_at"] = timestamp
+    step["error"] = rejected_reason
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "approval"
+    execution["blocked_reason"] = rejected_reason
+    updated["execution"] = execution
+    updated["status"] = "rejected"
+    updated["updated_at"] = timestamp
+    updated["completed_at"] = timestamp
+    updated["error"] = rejected_reason
+    return updated
+
+
+def _workflow_side_effect_footer(row: dict[str, Any]) -> str:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    approvals_created = _at_least_int(execution.get("approvals_created"), 0)
+    if approvals_created:
+        return (
+            f"Approvals created: {approvals_created}. "
+            "No subagents, tools, artifacts, task ledger rows, or progress ledger rows were created."
+        )
+    return "No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created."
 
 
 def format_workflow_run_created(row: dict[str, Any]) -> str:
@@ -668,7 +813,7 @@ def format_workflow_run_advanced(result: WorkflowRunAdvanceResult) -> str:
         lines.append(f"reason: {result.blocked_reason}")
     elif result.status == "completed":
         lines.append("All workflow runner v0 safe steps completed.")
-    lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
+    lines.append(_workflow_side_effect_footer(row))
     return "\n".join(lines)
 
 
@@ -727,6 +872,35 @@ def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
             lines.append(f"reason: {result.reason}")
         lines.append("No workflow run row was appended.")
         return "\n".join(lines)
+    if result.status == "approval_created":
+        lines = [
+            f"Workflow approval created: {run_id}",
+            f"approval_id: {result.approval_id or '-'}",
+            f"history_rows: {result.history_rows}",
+            "Approve with /approve <approval_id>, then run /workflow continue <run_id>.",
+            "No subagents, tools, artifacts, task ledger rows, or progress ledger rows were created.",
+        ]
+        return "\n".join(lines)
+    if result.status == "approval_pending":
+        lines = [
+            f"Workflow run waiting for approval: {run_id}",
+            f"approval_id: {result.approval_id or '-'}",
+            f"history_rows: {result.history_rows}",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        lines.append("No workflow run row was appended.")
+        return "\n".join(lines)
+    if result.status == "approval_rejected":
+        lines = [
+            f"Workflow run rejected by approval: {run_id}",
+            f"approval_id: {result.approval_id or '-'}",
+            f"history_rows: {result.history_rows}",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        lines.append("No later workflow steps were continued.")
+        return "\n".join(lines)
     if result.advanced is None or result.record is None:
         return f"Workflow run continuation failed: {run_id}"
     advanced = result.advanced
@@ -745,7 +919,7 @@ def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
         lines.append(f"reason: {advanced.blocked_reason}")
     elif advanced.status == "completed":
         lines.append("All workflow runner v0 safe steps completed.")
-    lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
+    lines.append(_workflow_side_effect_footer(row))
     return "\n".join(lines)
 
 

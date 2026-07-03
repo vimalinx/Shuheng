@@ -975,8 +975,12 @@ format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
+apply_workflow_step_approval_decision = workflow_helpers.apply_workflow_step_approval_decision
+attach_workflow_step_approval = workflow_helpers.attach_workflow_step_approval
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
+pending_workflow_approval_step = workflow_helpers.pending_workflow_approval_step
 workflow_run_has_meaningful_transition = workflow_helpers.workflow_run_has_meaningful_transition
+workflow_approval_id = workflow_helpers.workflow_approval_id
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
 
@@ -4708,6 +4712,60 @@ def append_workflow_run(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def queue_workflow_step_approval(row: dict[str, Any], *, source_command: str) -> str:
+    step = pending_workflow_approval_step(row)
+    if step is None:
+        return ""
+    run_id = str(row.get("run_id") or "")
+    step_id = str(step.get("step_id") or "")
+    step_name = str(step.get("name") or step_id or "approval")
+    workflow_ref = str(row.get("workflow_ref") or "")
+    workflow_name = str(row.get("workflow_name") or row.get("workflow_id") or workflow_ref or "workflow")
+    payload = {
+        "run_id": run_id,
+        "workflow_ref": workflow_ref,
+        "workflow_id": str(row.get("workflow_id") or ""),
+        "workflow_name": workflow_name,
+        "workflow_path": str(row.get("workflow_path") or ""),
+        "step_id": step_id,
+        "step_name": step_name,
+        "step_type": str(step.get("type") or "approval"),
+        "source": str(row.get("source") or "workflow_command"),
+        "source_command": source_command,
+    }
+    return queue_approval(
+        approval_type="workflow_step_approval",
+        summary=f"Workflow approval: {workflow_name} / {step_name}",
+        payload=payload,
+        source="workflow_runner_v0",
+        target=run_id,
+        approval_required_for=f"workflow_step:{step_id or 'approval'}",
+    )
+
+
+def bridge_workflow_step_approval(
+    row: dict[str, Any],
+    *,
+    source_command: str,
+    state: Optional[State] = None,
+) -> tuple[dict[str, Any], str]:
+    if pending_workflow_approval_step(row) is None or workflow_approval_id(row):
+        return row, ""
+    approval_id = queue_workflow_step_approval(row, source_command=source_command)
+    if not approval_id:
+        return row, ""
+    if state is not None:
+        offer_pending_approval_interaction(state, approval_id)
+    return attach_workflow_step_approval(row, approval_id=approval_id, timestamp=now_iso()), approval_id
+
+
+def workflow_approval_latest_record(approval_id: str) -> dict[str, Any] | None:
+    target = str(approval_id or "").strip()
+    if not target:
+        return None
+    return approval_latest_records().get(target)
+
+
 def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
     built = build_workflow_run_record(
         result,
@@ -4722,7 +4780,10 @@ def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> 
     return row, format_workflow_run_created(row)
 
 
-def create_workflow_run_v0(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
+def create_workflow_run_v0(
+    result: workflow_helpers.WorkflowLoadResult,
+    state: Optional[State] = None,
+) -> tuple[dict[str, Any] | None, str]:
     built = build_workflow_run_record(
         result,
         run_id=short_uid("wfr"),
@@ -4734,11 +4795,24 @@ def create_workflow_run_v0(result: workflow_helpers.WorkflowLoadResult) -> tuple
         return None, format_workflow_run_rejected(result, built.issues)
     append_workflow_run(built.record)
     advanced = advance_workflow_run_v0(built.record, timestamp=now_iso())
-    row = append_workflow_run(advanced.record)
-    return row, format_workflow_run_advanced(advanced)
+    row, _approval_id = bridge_workflow_step_approval(
+        advanced.record,
+        source_command=f"/workflow run {result.workflow_ref}",
+        state=state,
+    )
+    row = append_workflow_run(row)
+    advanced_for_format = workflow_helpers.WorkflowRunAdvanceResult(
+        record=row,
+        status=advanced.status,
+        completed_step_ids=advanced.completed_step_ids,
+        blocked_step_id=advanced.blocked_step_id,
+        blocked_step_type=advanced.blocked_step_type,
+        blocked_reason=advanced.blocked_reason,
+    )
+    return row, format_workflow_run_advanced(advanced_for_format)
 
 
-def continue_workflow_run_v0(run_id: str) -> tuple[dict[str, Any] | None, str]:
+def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tuple[dict[str, Any] | None, str]:
     target = str(run_id or "").strip()
     if not target:
         result = workflow_helpers.WorkflowRunContinueResult(run_id="", status="not_found")
@@ -4757,6 +4831,91 @@ def continue_workflow_run_v0(run_id: str) -> tuple[dict[str, Any] | None, str]:
             history_rows=len(history),
         )
         return None, format_workflow_continue_result(result)
+    if str(latest.get("status") or "").strip() == "waiting_approval" and pending_workflow_approval_step(latest):
+        approval_id = workflow_approval_id(latest)
+        if not approval_id:
+            bridged, approval_id = bridge_workflow_step_approval(
+                latest,
+                source_command=f"/workflow continue {target}",
+                state=state,
+            )
+            if approval_id:
+                row = append_workflow_run(bridged)
+                result = workflow_helpers.WorkflowRunContinueResult(
+                    run_id=target,
+                    status="approval_created",
+                    record=row,
+                    history_rows=len(history) + 1,
+                    approval_id=approval_id,
+                )
+                return row, format_workflow_continue_result(result)
+        approval_row = workflow_approval_latest_record(approval_id)
+        approval_status = str(approval_row.get("status") or "") if isinstance(approval_row, dict) else ""
+        if approval_status == "pending":
+            if state is not None:
+                offer_pending_approval_interaction(state, approval_id)
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="approval_pending",
+                record=latest,
+                history_rows=len(history),
+                reason="workflow approval is still pending",
+                approval_id=approval_id,
+            )
+            return None, format_workflow_continue_result(result)
+        if approval_status == "rejected":
+            rejected = apply_workflow_step_approval_decision(
+                latest,
+                approval_id=approval_id,
+                approved=False,
+                timestamp=now_iso(),
+                reason="workflow approval was rejected",
+            )
+            row = append_workflow_run(rejected)
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="approval_rejected",
+                record=row,
+                history_rows=len(history) + 1,
+                reason="workflow approval was rejected",
+                approval_id=approval_id,
+            )
+            return row, format_workflow_continue_result(result)
+        if approval_status != "approved":
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="no_progress",
+                record=latest,
+                history_rows=len(history),
+                reason=f"workflow approval row is missing or not decidable: {approval_id or '(missing)'}",
+            )
+            return None, format_workflow_continue_result(result)
+        approved_row = apply_workflow_step_approval_decision(
+            latest,
+            approval_id=approval_id,
+            approved=True,
+            timestamp=now_iso(),
+        )
+        advanced = advance_workflow_run_v0(approved_row, timestamp=now_iso())
+        if not workflow_run_has_meaningful_transition(latest, advanced.record):
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="no_progress",
+                record=latest,
+                history_rows=len(history),
+                reason="approved workflow approval did not produce runner-v0 progress",
+            )
+            return None, format_workflow_continue_result(result)
+        row = append_workflow_run(advanced.record)
+        result = workflow_helpers.WorkflowRunContinueResult(
+            run_id=target,
+            status="continued",
+            record=row,
+            advanced=advanced,
+            history_rows=len(history) + 1,
+            approval_id=approval_id,
+        )
+        return row, format_workflow_continue_result(result)
     advanced = advance_workflow_run_v0(latest, timestamp=now_iso())
     if not workflow_run_has_meaningful_transition(latest, advanced.record):
         execution = latest.get("execution") if isinstance(latest.get("execution"), dict) else {}
@@ -22116,7 +22275,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
         return True
     m_continue = re.match(r"/workflows?\s+(?:continue|resume)\s+(\S+)\s*$", raw, re.I)
     if m_continue:
-        _row, message = continue_workflow_run_v0(m_continue.group(1))
+        _row, message = continue_workflow_run_v0(m_continue.group(1), state=state)
         add_system(state, message)
         return True
     m_info = re.match(r"/workflows?\s+info\s+(\S+)\s*$", raw, re.I)
@@ -22132,7 +22291,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
     m_run = re.match(r"/workflows?\s+run\s+(\S+)\s*$", raw, re.I)
     if m_run:
         result = workflow_load_result_for_ref(m_run.group(1), user_plugin_registry(force=True))
-        _row, message = create_workflow_run_v0(result)
+        _row, message = create_workflow_run_v0(result, state=state)
         add_system(state, message)
         return True
     if raw.startswith("/workflow"):

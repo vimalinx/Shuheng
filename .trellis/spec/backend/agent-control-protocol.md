@@ -2530,7 +2530,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: Users need to resume a durable append-only workflow run from its latest `workflow_runs.jsonl` row before Shuheng adds real approval bridge, agent dispatch, or external schedulers.
 - Applies to: `/workflow continue <run_id>`, `/workflow resume <run_id>`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.WorkflowRunContinueResult`, `workflows.workflow_run_has_meaningful_transition(...)`, `workflows.format_workflow_continue_result(...)`, `app.continue_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
-- Non-goal: Continue commands do not dispatch subagents, create approvals, call model providers, execute tools, run shell commands, execute plugin code, evaluate conditions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services.
+- Non-goal: Continue commands do not dispatch subagents, call model providers, execute tools, run shell commands, execute plugin code, evaluate conditions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services. Approval rows are created only by the separate Workflow Approval Bridge contract below.
 
 ### 2. Signatures
 
@@ -2556,7 +2556,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Meaningful continuation is defined by status, completed/error state, step status/artifact/approval/task/error fields, blocked-step metadata, or approval metadata changing. Timestamp-only updates are not meaningful and must not create a duplicate row.
 - Continue uses runner-v0 semantics only: safe steps may complete; `approval`, `agent_task`, `condition`, unsupported step types, and unmet dependencies still block.
 - Continue output must report whether a row was appended, latest status, safe-step count when progressed, history row count, and stop reason when present.
-- Continue must not mutate task/progress/approval/artifact ledgers and must not change `state.subagents`.
+- Continue must not mutate task/progress/artifact ledgers and must not change `state.subagents`. Approval-ledger writes are allowed only for the Workflow Approval Bridge case below.
 - `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
 
 ### 4. Validation & Error Matrix
@@ -2565,7 +2565,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Unknown run id -> visible not-found message, no row append.
 - Latest row already completed -> visible already-completed message, no row append.
 - Latest row blocked at `agent_task` -> visible no-progress message, no subagent/task/progress rows, no workflow row append.
-- Latest row waiting at `approval` without an approval bridge row -> visible no-progress message, no approval row, no workflow row append.
+- Latest row waiting at `approval` -> handled by the Workflow Approval Bridge contract below; it must not self-approve or skip the human gate.
 - Latest row planned with safe steps -> append exactly one runner-v0 row and complete safe steps until completion or first blocked step.
 - Latest row with timestamp-only runner-v0 output -> no workflow row append.
 
@@ -2574,15 +2574,15 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Good: A planned safe-only run continued with `/workflow continue wfr_...` appends one completed row and leaves side-effect ledgers empty.
 - Good: A planned run with `prompt -> agent_task` appends one blocked row, completing only the prompt step and creating no subagent.
 - Base: `/workflow resume <run_id>` is a command alias for `/workflow continue <run_id>`.
-- Base: Future approval bridge work may create a new latest row that unblocks later safe steps; this command can then advance only those safe steps.
+- Base: The approval bridge may create or observe a real approval row; this command can then advance only later runner-v0 safe steps after the approval row is approved.
 - Bad: Continuing a blocked `agent_task` run creates a subagent or task/progress ledger rows.
-- Bad: Continuing a `waiting_approval` run creates approval rows or self-approves.
+- Bad: Continuing a `waiting_approval` run self-approves, bypasses `/approve`, or creates duplicate approval rows for the same bridged step.
 - Bad: Continuing an unchanged blocked row appends another row only to update timestamps.
 
 ### 6. Tests Required
 
 - `tests/test_workflows.py` must assert meaningful-transition detection, continuation formatting, planned run continuation, completed no-op, unknown run no-op, blocked no-progress, alias behavior, and side-effect ledger invariants.
-- `scripts/check_policy_gates.py` must assert continue/resume can advance a planned row, cannot advance a blocked `agent_task` row, appends at most one workflow row, and leaves subagents plus task/progress/approval/artifact ledgers unchanged.
+- `scripts/check_policy_gates.py` must assert continue/resume can advance a planned row, cannot advance a blocked `agent_task` row, appends at most one workflow row, and leaves subagents plus task/progress/artifact ledgers unchanged. Approval-ledger changes must be covered by the Workflow Approval Bridge tests below.
 - Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
 ### 7. Wrong vs Correct
@@ -2597,6 +2597,94 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 ```text
 /workflow continue wfr_123 -> appends one runner-v0 row only when safe workflow state changes; otherwise reports no progress
+```
+
+## Scenario: Workflow Approval Bridge
+
+### 1. Scope / Trigger
+
+- Trigger: A runner-v0 workflow reaches an `approval` step and the user must approve or reject it through Shuheng's existing governed approval surface.
+- Applies to: `/workflow run <ref>`, `/workflow continue <run_id>`, `/workflow resume <run_id>`, `workflow_runs.jsonl`, `approvals.jsonl`, `agentapproval.v1`, `shuheng.workflow_run.v1`, `workflows.py` pure approval-state helpers, `app.py` approval-queue integration, `/approvals`, `/approve <approval_id>`, `/reject <approval_id>`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: The bridge does not dispatch subagents, evaluate conditions, call tools or model providers, execute plugin code, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, auto-continue inside `/approve`, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Approval row type: `workflow_step_approval`.
+- Approval row schema: existing `agentapproval.v1`.
+- Approval payload must include `run_id`, `workflow_ref`, `workflow_id`, `workflow_name`, `workflow_path`, `step_id`, `step_name`, `step_type`, `source`, and `source_command`.
+- Workflow run top-level approval fields:
+  - `approval.approval_status`: `pending`, `approved`, or `rejected` while the bridge owns the step.
+  - `approval.approval_id`: the `agentapproval.v1` id for the bridged workflow step.
+  - `approval.approval_required_for`: the blocked workflow step id list.
+- Approval step snapshot fields:
+  - `status`: `waiting_approval`, `completed`, or `rejected`.
+  - `approval_id`: the same `agentapproval.v1` id.
+- Pure helper ownership:
+  - `workflows.pending_workflow_approval_step(row)`
+  - `workflows.workflow_approval_id(row)`
+  - `workflows.attach_workflow_step_approval(row, approval_id, timestamp)`
+  - `workflows.apply_workflow_step_approval_decision(row, approval_id, approved, timestamp, reason="")`
+- App ownership:
+  - `app.queue_workflow_step_approval(row, source_command=...)` writes the concrete `agentapproval.v1` row through existing `queue_approval(...)`.
+  - `app.continue_workflow_run_v0(run_id, state=None)` consults latest approval rows and appends at most one workflow run row per explicit continue call.
+
+### 3. Contracts
+
+- A `/workflow run` that stops at an `approval` step must append exactly two workflow rows: the initial `planned` row and the runner-v0 `waiting_approval` row.
+- The `waiting_approval` row must contain the approval id both in top-level approval metadata and in the blocked approval step snapshot.
+- The bridge must create exactly one pending `agentapproval.v1` row for the blocked workflow approval step.
+- `/approvals` must show workflow approvals because they are normal approval-ledger rows.
+- `/approve <approval_id>` and `/reject <approval_id>` must remain generic approval-decision commands. They update the approval ledger but must not automatically continue the workflow.
+- `/workflow continue <run_id>` with a pending approval must append no workflow row and must report the pending approval id.
+- `/workflow continue <run_id>` after an approved `workflow_step_approval` must mark the approval step completed, preserve the approval id, and then advance only runner-v0 safe steps from that resulting state.
+- `/workflow continue <run_id>` after a rejected `workflow_step_approval` must append one terminal rejected workflow row and must not continue later steps.
+- Legacy `waiting_approval` rows without an `approval_id` must be bridgeable: the next `/workflow continue <run_id>` creates one approval row, attaches the id, and appends one updated `waiting_approval` workflow row.
+- `workflows.py` remains pure. It may copy and transform workflow run dictionaries, but must not import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+- Workflow approval bridge rows may increment `execution.approvals_created` to `1`. All other side-effect counters for subagents, tools, artifacts, task ledger rows, progress ledger rows, and plugin code must stay zero.
+
+### 4. Validation & Error Matrix
+
+- Valid workflow with `prompt -> approval -> notify` run through `/workflow run` -> two workflow rows, one pending approval row, latest row `waiting_approval`, approval id attached at top level and step level.
+- `/workflow continue <run_id>` before the approval decision -> no workflow row append, pending approval id shown.
+- `/approve <approval_id>` then `/workflow continue <run_id>` -> one workflow row append, approval step `completed`, later safe steps continue, final status `completed` if no later blocker exists.
+- `/reject <approval_id>` then `/workflow continue <run_id>` -> one workflow row append, approval step `rejected`, final status `rejected`, later safe steps remain pending.
+- Latest workflow row has `waiting_approval` and no approval id -> `/workflow continue <run_id>` creates one pending approval row and appends one bridged waiting row.
+- Latest workflow row has `waiting_approval` with approval id but the approval row is missing or not decidable -> no workflow row append; visible no-progress message.
+- Latest approval row is already approved or rejected -> continuation must use that latest decision row, not an older pending row.
+- Blocked `agent_task` or `condition` rows -> no approval row creation and no subagent/tool execution.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow run research-pack/approval-flow` creates `agentapproval.v1 type=workflow_step_approval` and shows the same id in `/workflow show <run_id>`.
+- Good: `/workflow continue wfr_...` reports "waiting for approval" until the user runs `/approve appr_...`.
+- Good: After approval, runner v0 completes only safe steps such as `notify`; it still blocks at later `agent_task` or `condition` steps.
+- Base: `/approve` records the human decision only. The user must run `/workflow continue <run_id>` to resume the workflow.
+- Base: Approval payload is audit/resume context, not executable plugin code.
+- Bad: `/approve appr_...` automatically resumes a workflow.
+- Bad: `/workflow continue wfr_...` self-approves a pending approval.
+- Bad: The bridge creates a second approval mechanism or writes a new approval type outside `agentapproval.v1`.
+- Bad: `workflows.py` imports `app.py`, governance, ledgers, runtime dispatch, curses, Secret Vault, provider adapters, or subprocess.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert approval creation during `/workflow run`, top-level and step-level approval id attachment, `/approvals` visibility, pending continue no-op, approved continuation, rejected termination, legacy waiting-row bridge, and side-effect invariants.
+- `tests/test_workflows.py` must keep the pure runner test that `advance_workflow_run_v0(...)` alone does not write approval rows.
+- `scripts/check_policy_gates.py` must assert the approval bridge creates only the expected approval rows, leaves task/progress/artifact ledgers unchanged, does not change `state.subagents`, and keeps blocked `agent_task` continuation side-effect-free.
+- `scripts/check_policy_gates.py` must keep asserting `workflows.py` has no app/runtime/UI/governance imports.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow continue wfr_approval -> marks deploy_gate approved because the model thinks it is safe
+```
+
+#### Correct
+
+```text
+/workflow continue wfr_approval -> waits until /approve appr_... records a human decision, then continues only runner-v0 safe steps
 ```
 
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering

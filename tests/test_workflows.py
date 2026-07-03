@@ -41,6 +41,20 @@ def create_workflow_plugin(tmp_path: Path, workflow_payload: dict | str, *, work
     return registry, workflow_path
 
 
+def configure_app_workflow_harness(tmp_path: Path, monkeypatch, plugin_root: Path) -> Path:
+    harness_dir = tmp_path / "harness"
+    monkeypatch.setattr(app_module, "SHUHENG_PLUGINS_DIR", str(plugin_root))
+    monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness_dir / "tasks.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness_dir / "progress.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness_dir / "approvals.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_ARTIFACT_INDEX_PATH", str(harness_dir / "artifacts.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_MAIL_PATH", str(harness_dir / "mail.jsonl"))
+    app_module.clear_plugin_registry_cache()
+    return harness_dir
+
+
 def test_workflow_definition_loads_from_manifest_declared_file(tmp_path: Path) -> None:
     marker = "WORKFLOW_DRY_RUN_TEST_MARKER"
     registry, workflow_path = create_workflow_plugin(
@@ -644,4 +658,149 @@ def test_workflow_continue_command_advances_planned_run_only(tmp_path: Path, mon
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_continue
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_continue
     assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_continue
+    assert len(state.subagents) == 0
+
+
+def test_workflow_approval_bridge_creates_pending_approval_and_continues_after_approval(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "approval-flow",
+            "name": "Approval Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "deploy_gate", "type": "approval", "name": "Deploy Gate", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["deploy_gate"]},
+            ],
+        },
+        workflow_name="approval-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/approval-flow") is True
+    assert "Workflow run advanced:" in state.messages[-1].content
+    assert "Approvals created: 1" in state.messages[-1].content
+
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    run_id = rows[-1]["run_id"]
+    approval_id = rows[-1]["approval"]["approval_id"]
+    assert rows[0]["status"] == "planned"
+    assert rows[1]["status"] == "waiting_approval"
+    assert approval_id
+    assert rows[1]["approval"]["approval_required_for"] == ["deploy_gate"]
+    assert rows[1]["steps"][1]["approval_id"] == approval_id
+    assert rows[1]["steps"][1]["status"] == "waiting_approval"
+    assert rows[1]["execution"]["approvals_created"] == 1
+
+    approval_rows = app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)
+    assert len(approval_rows) == 1
+    assert approval_rows[0]["approval_id"] == approval_id
+    assert approval_rows[0]["type"] == "workflow_step_approval"
+    assert approval_rows[0]["payload"]["run_id"] == run_id
+    assert approval_rows[0]["payload"]["workflow_ref"] == "plugin://research-pack/workflows/approval-flow"
+    assert approval_rows[0]["payload"]["step_id"] == "deploy_gate"
+    assert approval_id in app_module.format_approvals(state)
+    assert "workflow_step_approval" in app_module.format_approvals(state)
+
+    task_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    artifact_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+    approval_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run waiting for approval:" in state.messages[-1].content
+    assert approval_id in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 2
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
+
+    approved_message = app_module.decide_approval(state, approval_id, True)
+    assert f"已批准：{approval_id}" in approved_message
+    assert app_module.approval_latest_records()[approval_id]["status"] == "approved"
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run continued:" in state.messages[-1].content
+    assert "status: completed" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 3
+    assert rows[-1]["status"] == "completed"
+    assert rows[-1]["approval"]["approval_id"] == approval_id
+    assert rows[-1]["approval"]["approval_status"] == "approved"
+    assert [step["status"] for step in rows[-1]["steps"]] == ["completed", "completed", "completed"]
+    assert rows[-1]["steps"][1]["approval_id"] == approval_id
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
+    assert len(state.subagents) == 0
+
+
+def test_workflow_approval_bridge_rejects_and_upgrades_legacy_waiting_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "approval-flow",
+            "name": "Approval Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "deploy_gate", "type": "approval", "name": "Deploy Gate", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["deploy_gate"]},
+            ],
+        },
+        workflow_name="approval-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/approval-flow") is True
+    rejected_wait = app_module.workflow_run_records()[-1]
+    rejected_run_id = rejected_wait["run_id"]
+    rejected_approval_id = rejected_wait["approval"]["approval_id"]
+    assert rejected_approval_id
+    reject_message = app_module.decide_approval(state, rejected_approval_id, False)
+    assert f"已拒绝：{rejected_approval_id}" in reject_message
+    assert app_module.handle_workflow_command(state, f"/workflow continue {rejected_run_id}") is True
+    assert "Workflow run rejected by approval:" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 3
+    assert rows[-1]["status"] == "rejected"
+    assert rows[-1]["approval"]["approval_status"] == "rejected"
+    assert rows[-1]["steps"][1]["status"] == "rejected"
+    assert rows[-1]["steps"][2]["status"] == "pending"
+
+    result = app_module.workflow_load_result_for_ref(
+        "research-pack/approval-flow",
+        app_module.user_plugin_registry(force=True),
+    )
+    planned, planned_message = app_module.create_planned_workflow_run(result)
+    assert planned is not None, planned_message
+    legacy_run_id = planned["run_id"]
+    legacy_wait = app_module.advance_workflow_run_v0(planned, timestamp="2026-07-03T00:00:00+0800")
+    assert legacy_wait.record["status"] == "waiting_approval"
+    assert legacy_wait.record["approval"]["approval_id"] == ""
+    app_module.append_workflow_run(legacy_wait.record)
+    approval_rows_before_legacy_bridge = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {legacy_run_id}") is True
+    assert "Workflow approval created:" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 6
+    legacy_bridged = rows[-1]
+    legacy_approval_id = legacy_bridged["approval"]["approval_id"]
+    assert legacy_bridged["status"] == "waiting_approval"
+    assert legacy_approval_id
+    assert legacy_bridged["steps"][1]["approval_id"] == legacy_approval_id
+    assert legacy_bridged["execution"]["approvals_created"] == 1
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_legacy_bridge + 1
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
     assert len(state.subagents) == 0

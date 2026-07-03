@@ -8481,6 +8481,37 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         ),
         encoding="utf-8",
     )
+    workflow_dir.joinpath("approval-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "approval-flow",
+                "name": "Approval Flow",
+                "description": "Exercise the workflow approval bridge without dispatching agents.",
+                "steps": [
+                    {
+                        "id": "plan",
+                        "type": "prompt",
+                        "prompt": "Plan approval-gated work.",
+                    },
+                    {
+                        "id": "deploy_gate",
+                        "type": "approval",
+                        "name": "Deploy Gate",
+                        "depends_on": ["plan"],
+                    },
+                    {
+                        "id": "notify",
+                        "type": "notify",
+                        "depends_on": ["deploy_gate"],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     outside_file = Path(root, "outside-plugin-skill.md")
     outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
     outside_file.write_text(outside_marker, encoding="utf-8")
@@ -8517,7 +8548,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
                         }
                     ],
                     "workflows": [
-                        {"id": "compare-sources", "path": "workflows/compare-sources.json"}
+                        {"id": "compare-sources", "path": "workflows/compare-sources.json"},
+                        {"id": "approval-flow", "path": "workflows/approval-flow.json"},
                     ],
                 },
                 "permissions": {
@@ -8708,6 +8740,51 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_workflow_run
+    assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
+    approval_workflow_ref = "plugin://research-pack/workflows/approval-flow"
+    assert a.handle_workflow_command(state, f"/workflow run {approval_workflow_ref}") is True
+    assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
+    assert "Approvals created: 1" in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows_after_approval_run = a.workflow_run_records()
+    assert len(workflow_run_rows_after_approval_run) == 6, workflow_run_rows_after_approval_run
+    approval_wait_row = workflow_run_rows_after_approval_run[-1]
+    approval_run_id = approval_wait_row["run_id"]
+    approval_id = approval_wait_row["approval"]["approval_id"]
+    assert approval_wait_row["status"] == "waiting_approval", approval_wait_row
+    assert approval_id, approval_wait_row
+    assert approval_wait_row["steps"][0]["status"] == "completed", approval_wait_row
+    assert approval_wait_row["steps"][1]["status"] == "waiting_approval", approval_wait_row
+    assert approval_wait_row["steps"][1]["approval_id"] == approval_id, approval_wait_row
+    assert approval_wait_row["execution"]["approvals_created"] == 1, approval_wait_row
+    workflow_approvals = a.read_jsonl(a.AGENT_APPROVALS_PATH)
+    assert len(workflow_approvals) == approval_rows_before_workflow_run + 1, workflow_approvals
+    workflow_approval = workflow_approvals[-1]
+    assert workflow_approval["approval_id"] == approval_id, workflow_approval
+    assert workflow_approval["type"] == "workflow_step_approval", workflow_approval
+    assert workflow_approval["payload"]["run_id"] == approval_run_id, workflow_approval
+    assert workflow_approval["payload"]["workflow_ref"] == approval_workflow_ref, workflow_approval
+    assert workflow_approval["payload"]["step_id"] == "deploy_gate", workflow_approval
+    assert approval_id in a.format_approvals(state), a.format_approvals(state)
+    assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
+    assert "Workflow run waiting for approval:" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == 6, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run + 1
+    assert f"已批准：{approval_id}" in a.decide_approval(state, approval_id, True)
+    assert a.approval_latest_records()[approval_id]["status"] == "approved"
+    assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
+    assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows_after_approval_continue = a.workflow_run_records()
+    assert len(workflow_run_rows_after_approval_continue) == 7, workflow_run_rows_after_approval_continue
+    approval_done_row = workflow_run_rows_after_approval_continue[-1]
+    assert approval_done_row["run_id"] == approval_run_id, approval_done_row
+    assert approval_done_row["status"] == "completed", approval_done_row
+    assert approval_done_row["approval"]["approval_status"] == "approved", approval_done_row
+    assert approval_done_row["approval"]["approval_id"] == approval_id, approval_done_row
+    assert [step["status"] for step in approval_done_row["steps"]] == ["completed", "completed", "completed"]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run + 2
     assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_workflow_run
     assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
     templated = a.resolve_subagent(state, "Evidence Plugin Agent")
