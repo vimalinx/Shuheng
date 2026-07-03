@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for the active Shuheng control-plane layer."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable protocol contract for workflow registry, ledgers, approvals, and harness boundaries."}
+{"file": ".trellis/tasks/07-03-add-workflow-run-ledger-skeleton/research/workflow-run-ledger-design.md", "reason": "Task-specific design notes for planned-only workflow run ledger."}
