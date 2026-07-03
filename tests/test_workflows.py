@@ -79,6 +79,7 @@ def configure_app_workflow_harness(tmp_path: Path, monkeypatch, plugin_root: Pat
     monkeypatch.setattr(app_module, "SHUHENG_TEMP_DIR", str(temp_dir))
     monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
     monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_EVENTS_PATH", str(harness_dir / "workflow_events.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness_dir / "tasks.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness_dir / "progress.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness_dir / "approvals.jsonl"))
@@ -1417,6 +1418,64 @@ def test_workflow_run_detail_includes_artifact_refs(tmp_path: Path) -> None:
     assert "artifact_refs=artifact://step/report.md" in detail
 
 
+def test_workflow_run_event_builds_bounded_idempotent_records() -> None:
+    row = {
+        "run_id": "wfr-event",
+        "workflow_ref": "plugin://research-pack/workflows/event-flow",
+        "status": "waiting_task",
+        "artifact_refs": ["artifact://run/report.md"],
+        "execution": {
+            "blocked_step_id": "review",
+            "blocked_step_type": "agent_task",
+            "blocked_reason": "waiting for review",
+        },
+        "steps": [
+            {"step_id": "plan", "type": "prompt", "status": "completed"},
+            {
+                "step_id": "review",
+                "type": "agent_task",
+                "status": "waiting_task",
+                "task_id": "task_event",
+                "artifact_refs": ["artifact://step/report.md"],
+            },
+        ],
+    }
+    source_command = "/workflow continue wfr-event " + ("x" * 300)
+    built = workflows.build_workflow_run_event(
+        row,
+        event_id="wfe-event",
+        timestamp="2026-07-03T00:00:00+0800",
+        event_type="continue-task-pending",
+        source_command=source_command,
+        row_index=2,
+        message="still waiting " + ("y" * 500),
+    )
+    same_key = workflows.workflow_run_event_idempotency_key(
+        row,
+        event_type="continue_task_pending",
+        source_command=source_command,
+        row_index=2,
+    )
+
+    assert built.event is not None
+    assert built.issues == ()
+    assert built.event["schema_version"] == "shuheng.workflow_event.v1"
+    assert built.event["event_id"] == "wfe-event"
+    assert built.event["run_id"] == "wfr-event"
+    assert built.event["event_type"] == "continue_task_pending"
+    assert built.event["status"] == "waiting_task"
+    assert built.event["idempotency_key"] == same_key
+    assert built.event["idempotency_key"].startswith("wfidem_")
+    assert source_command not in built.event["idempotency_key"]
+    assert built.event["row_index"] == 2
+    assert built.event["step_id"] == "review"
+    assert built.event["step_type"] == "agent_task"
+    assert built.event["task_id"] == "task_event"
+    assert built.event["artifact_refs"] == ["artifact://run/report.md", "artifact://step/report.md"]
+    assert len(built.event["source_command"]) <= 240
+    assert len(built.event["message"]) <= 400
+
+
 def test_workflow_run_trace_links_task_approval_artifact_and_trace_refs(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -1506,6 +1565,27 @@ def test_workflow_run_trace_links_task_approval_artifact_and_trace_refs(tmp_path
                 "payload": {"raw": "SHOULD_NOT_INLINE"},
             }
         ],
+        workflow_event_rows=[
+            {
+                "schema_version": "shuheng.workflow_event.v1",
+                "event_id": "wfe_trace",
+                "run_id": "wfr-trace",
+                "workflow_ref": "plugin://research-pack/workflows/trace-flow",
+                "timestamp": "2026-07-03T00:00:03+0800",
+                "event_type": "run_task_dispatched",
+                "status": "waiting_task",
+                "idempotency_key": "wfidem_trace",
+                "source_command": "/workflow run research-pack/trace-flow",
+                "row_index": 3,
+                "step_id": "review",
+                "step_type": "agent_task",
+                "approval_id": "",
+                "task_id": "task_trace",
+                "artifact_refs": ["artifact://event/report.md"],
+                "message": "dispatched",
+                "payload": {"raw": "EVENT_RAW_SHOULD_NOT_INLINE"},
+            }
+        ],
     )
     missing = workflows.format_workflow_run_trace("missing-run", [built.record, advanced.record])
 
@@ -1524,7 +1604,12 @@ def test_workflow_run_trace_links_task_approval_artifact_and_trace_refs(tmp_path
     assert "artifact://step/report.md | kind=markdown | generated_by=workflow" in rendered
     assert "artifact://task/result.md | kind=markdown | generated_by=agent_trace" in rendered
     assert "trace_task | task=task_trace | event=completed | status=completed" in rendered
+    assert "workflow_events:" in rendered
+    assert "wfe_trace | type=run_task_dispatched | status=waiting_task" in rendered
+    assert "idempotency_key=wfidem_trace" in rendered
+    assert "artifact://event/report.md" in rendered
     assert "SHOULD_NOT_INLINE" not in rendered
+    assert "EVENT_RAW_SHOULD_NOT_INLINE" not in rendered
     assert "Workflow run not found: missing-run" in missing
 
 
@@ -1851,6 +1936,14 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert rows[1]["execution"]["subagents_dispatched"] == 0
     assert rows[1]["execution"]["task_ledger_rows_written"] == 0
     assert rows[1]["execution"]["progress_ledger_rows_written"] == 0
+    workflow_events = app_module.workflow_event_records()
+    assert [row["event_type"] for row in workflow_events] == ["run_planned", "run_advanced"]
+    assert workflow_events[0]["run_id"] == rows[0]["run_id"]
+    assert workflow_events[0]["row_index"] == 1
+    assert workflow_events[1]["row_index"] == 2
+    assert workflow_events[1]["step_id"] == "check"
+    assert workflow_events[1]["step_type"] == "condition"
+    assert workflow_events[1]["idempotency_key"].startswith("wfidem_")
     assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
@@ -1879,6 +1972,8 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert "#2 status=blocked" in state.messages[-1].content
     assert "latest_steps:" in state.messages[-1].content
     assert "linked_tasks:" in state.messages[-1].content
+    assert "workflow_events:" in state.messages[-1].content
+    assert "type=run_advanced" in state.messages[-1].content
     assert "Raw artifact content and raw trace payloads are not inlined." in state.messages[-1].content
     assert app_module.handle_workflow_command(state, f"/workflow provenance {rows[1]['run_id']}") is True
     assert f"Workflow run trace: {rows[1]['run_id']}" in state.messages[-1].content
@@ -1921,6 +2016,12 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert "Workflow run cannot continue with runner v0" in state.messages[-1].content
     assert "requires condition evaluation" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 2
+    workflow_events_after_continue = app_module.workflow_event_records()
+    assert len(workflow_events_after_continue) == len(workflow_events) + 1
+    assert workflow_events_after_continue[-1]["event_type"] == "continue_no_progress"
+    assert workflow_events_after_continue[-1]["run_id"] == rows[1]["run_id"]
+    assert workflow_events_after_continue[-1]["row_index"] == 2
+    assert workflow_events_after_continue[-1]["step_id"] == "check"
     assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
@@ -1951,6 +2052,8 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     rows = app_module.workflow_run_records()
     assert len(rows) == 2
     run_id = rows[-1]["run_id"]
+    events_after_run = app_module.workflow_event_records()
+    assert [row["event_type"] for row in events_after_run] == ["run_planned", "run_advanced"]
     task_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
     progress_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
     approval_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
@@ -1959,6 +2062,7 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     assert app_module.handle_workflow_command(state, "/workflow cancel missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 2
+    assert app_module.workflow_event_records() == events_after_run
 
     assert app_module.handle_workflow_command(state, f"/workflow cancel {run_id} no longer needed") is True
     assert "Workflow run cancelled:" in state.messages[-1].content
@@ -1969,6 +2073,12 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     assert rows[-1]["status"] == "cancelled"
     assert rows[-1]["error"] == "no longer needed"
     assert [step["status"] for step in rows[-1]["steps"]] == ["completed", "cancelled", "pending"]
+    events_after_cancel = app_module.workflow_event_records()
+    assert len(events_after_cancel) == len(events_after_run) + 1
+    assert events_after_cancel[-1]["event_type"] == "cancel_cancelled"
+    assert events_after_cancel[-1]["run_id"] == run_id
+    assert events_after_cancel[-1]["row_index"] == 3
+    assert events_after_cancel[-1]["message"] == "no longer needed"
     assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_cancel
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_cancel
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_cancel
@@ -1978,6 +2088,10 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     assert app_module.handle_workflow_command(state, f"/workflow cancel {run_id}") is True
     assert "Workflow run already terminal:" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 3
+    events_after_terminal_cancel = app_module.workflow_event_records()
+    assert len(events_after_terminal_cancel) == len(events_after_cancel) + 1
+    assert events_after_terminal_cancel[-1]["event_type"] == "cancel_already_terminal"
+    assert events_after_terminal_cancel[-1]["row_index"] == 3
 
     completed = dict(rows[0])
     completed["run_id"] = "wfr-completed-cancel-noop"
@@ -1987,6 +2101,10 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     assert app_module.handle_workflow_command(state, "/workflow cancel wfr-completed-cancel-noop") is True
     assert "Workflow run already completed: wfr-completed-cancel-noop" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 4
+    events_after_completed_cancel = app_module.workflow_event_records()
+    assert len(events_after_completed_cancel) == len(events_after_terminal_cancel) + 1
+    assert events_after_completed_cancel[-1]["event_type"] == "cancel_already_completed"
+    assert events_after_completed_cancel[-1]["run_id"] == "wfr-completed-cancel-noop"
 
 
 def test_workflow_run_command_resolves_inputs_and_condition_v1(tmp_path: Path, monkeypatch) -> None:
@@ -2689,6 +2807,7 @@ def test_workflow_continue_command_advances_planned_run_only(tmp_path: Path, mon
     monkeypatch.setattr(app_module, "SHUHENG_PLUGINS_DIR", str(plugin_root))
     monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
     monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_EVENTS_PATH", str(harness_dir / "workflow_events.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness_dir / "tasks.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness_dir / "progress.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness_dir / "approvals.jsonl"))

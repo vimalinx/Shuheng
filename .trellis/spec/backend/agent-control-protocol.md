@@ -2993,6 +2993,71 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow run research-pack/compare-sources -> appends planned + runner_v0 rows, completes safe steps, then blocks before agent dispatch
 ```
 
+## Scenario: Workflow Durable Run Event History V1
+
+### 1. Scope / Trigger
+
+- Trigger: Workflow runs need an explicit event history foundation before Shuheng adds replay, recovery, idempotent retry, timers, workflow-owned actions, or parallel DAG scheduling.
+- Applies to: `workflow_events.jsonl`, `shuheng.workflow_event.v1`, `workflows.build_workflow_run_event(...)`, `workflows.workflow_run_event_idempotency_key(...)`, `app.workflow_event_records(...)`, `app.append_workflow_run_event(...)`, `/workflow run`, `/workflow continue|resume`, `/workflow cancel`, `/workflow trace`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add a workflow-owned executor, replay engine, parallel/fan-out/fan-in scheduler, timer/sleep service, timeout daemon, webhook/event bus service, direct tool/model/shell/plugin-code execution, Secret Vault workflow execution, memory writes, or A2A/MCP workflow service exposure.
+
+### 2. Signatures
+
+- Event schema version: `shuheng.workflow_event.v1`.
+- Event ledger path: `AGENT_WORKFLOW_EVENTS_PATH = <agent_harness>/workflow_events.jsonl`.
+- Pure helper ownership:
+  - `workflows.build_workflow_run_event(row, event_id, timestamp, event_type, source_command="", row_index=0, message="")`
+  - `workflows.workflow_run_event_idempotency_key(row, event_type=..., source_command="", row_index=0)`
+- App ownership:
+  - `app.workflow_event_records(limit=0)`
+  - `app.append_workflow_event(row)`
+  - `app.append_workflow_run_event(row, event_type=..., source_command="", message="")`
+- Event fields: `schema_version`, `event_id`, `run_id`, `workflow_ref`, `timestamp`, `event_type`, `status`, `idempotency_key`, `source_command`, `row_index`, `step_id`, `step_type`, `approval_id`, `task_id`, `artifact_refs`, and `message`.
+
+### 3. Contracts
+
+- Workflow events are append-only audit/provenance records. They must not replace `workflow_runs.jsonl`; run rows remain the source of current workflow state.
+- `workflows.py` may build event rows and idempotency keys, but must not append JSONL rows or import app/runtime/UI/governance owners.
+- `app.py` remains the only owner for appending workflow event rows.
+- A successful `/workflow run <ref>` must append event rows for the initial `run_planned` row and the subsequent runner/bridge row.
+- `/workflow continue|resume <run_id>` must append an event for every known run outcome, including continued, completed, no-progress, approval-created, approval-pending, approval-rejected, task-dispatched, task-pending, task-retried, task-terminal, already-completed, and already-terminal outcomes.
+- `/workflow cancel <run_id>` must append an event for real cancellation and for already-completed/already-terminal no-op cancellations. Unknown run ids have no row to attach and append no event.
+- Event rows must not mutate task/progress/approval/artifact ledgers. Approval and agent-task side effects remain owned by their existing bridge contracts.
+- `idempotency_key` must be deterministic for the same run/status/blocker/source transition shape and must hash source command content rather than storing raw prompt text in the key.
+- `source_command` and `message` are bounded text fields for audit display. Raw workflow step prompts, model payloads, artifact contents, and trace payloads must not be inlined into workflow events.
+- `/workflow trace <run-id>` must include linked workflow event rows and keep raw event payloads out of normal rendering.
+- Workflow event rows are an execution-history foundation only. They do not by themselves authorize replay, recovery, timers, tool execution, scheduler fan-out, or approval bypasses.
+
+### 4. Validation & Error Matrix
+
+- Invalid event id -> pure helper returns an issue and no event row.
+- Missing run id -> pure helper returns an issue and no event row.
+- Planned run -> appends `run_planned` event with `row_index=1`.
+- Runner/bridge row after `/workflow run` -> appends `run_completed`, `run_advanced`, `run_approval_created`, or `run_task_dispatched`.
+- Continue on blocked condition with no progress -> appends `continue_no_progress` and no workflow run row.
+- Continue while agent task is still non-terminal -> appends `continue_task_pending` and no workflow run row.
+- Continue after completed agent task -> appends `continue_completed` or `continue_advanced` on the newly appended workflow run row.
+- Continue after failed agent task with remaining attempts -> appends `continue_task_retried` on the retry-dispatched row.
+- Cancel active run -> appends one cancelled workflow run row and one `cancel_cancelled` event.
+- Cancel already terminal run -> appends no workflow run row and one no-op cancellation event.
+- Trace rendering with event rows -> shows event id/type/status/row index/blocker refs/idempotency key, but not raw payloads.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow run research-pack/compare-sources` creates two workflow run rows and two workflow event rows.
+- Good: Repeated `/workflow continue <run-id>` on an unchanged blocked condition appends repeat `continue_no_progress` events with the same idempotency key but no duplicate workflow run row.
+- Good: `/workflow trace <run-id>` shows `workflow_events:` with bounded event summaries.
+- Base: `workflow_events.jsonl` is not yet a replay log; it is the durable event-history substrate for a later replay/recovery engine.
+- Bad: `workflows.build_workflow_run_event(...)` calls `append_jsonl(...)`.
+- Bad: Event idempotency keys include raw user prompts or full source command text.
+- Bad: Writing a workflow event creates approval, task, progress, artifact, memory, scheduler, or trace rows.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert pure event construction, deterministic idempotency key shape, bounded source/message fields, run/continue/cancel event append behavior, trace rendering, and raw payload exclusion.
+- `scripts/check_policy_gates.py` must assert `WORKFLOW_EVENT_SCHEMA_VERSION`, `AGENT_WORKFLOW_EVENTS_PATH`, event helper ownership, app-owned append path, `/workflow trace` event integration, and `workflows.py` purity.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
 ## Scenario: Workflow Run Inspection Commands
 
 ### 1. Scope / Trigger

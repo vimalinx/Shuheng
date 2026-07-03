@@ -75,6 +75,7 @@ def retarget_harness(root: str) -> None:
     a.AGENT_TASK_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "tasks.jsonl")
     a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "progress.jsonl")
     a.AGENT_WORKFLOW_RUNS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "workflow_runs.jsonl")
+    a.AGENT_WORKFLOW_EVENTS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "workflow_events.jsonl")
     a.AGENT_MAIL_PATH = os.path.join(a.AGENT_HARNESS_DIR, "messages.jsonl")
     a.AGENT_APPROVALS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "approvals.jsonl")
     a.AGENT_ARTIFACTS_DIR = os.path.join(a.AGENT_HARNESS_DIR, "artifacts")
@@ -8446,6 +8447,9 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert builtin_rows[0]["status"] == "planned", builtin_rows
     assert builtin_rows[0]["inputs"] == {"topic": "daily priorities", "include_notify": True}, builtin_rows[0]
     assert builtin_rows[1]["status"] == "completed", builtin_rows
+    builtin_events = a.workflow_event_records()
+    assert [row["event_type"] for row in builtin_events] == ["run_planned", "run_completed"], builtin_events
+    assert all(row["schema_version"] == "shuheng.workflow_event.v1" for row in builtin_events), builtin_events
     assert [step["status"] for step in builtin_rows[1]["steps"]] == [
         "completed",
         "completed",
@@ -8787,10 +8791,15 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "format_workflow_step_output_context" in workflow_source, workflow_source
     assert "WorkflowRunCancelResult" in workflow_source, workflow_source
     assert "cancel_workflow_run_v0" in workflow_source and "format_workflow_cancel_result" in workflow_source, workflow_source
+    assert "WORKFLOW_EVENT_SCHEMA_VERSION" in workflow_source, workflow_source
+    assert "WorkflowRunEventBuildResult" in workflow_source, workflow_source
+    assert "build_workflow_run_event" in workflow_source, workflow_source
+    assert "workflow_run_event_idempotency_key" in workflow_source, workflow_source
     assert "_workflow_dependency_issues" in workflow_source, workflow_source
     assert "workflow dependency cycle detected" in workflow_source, workflow_source
     assert "artifact contents are not loaded" in workflow_source, workflow_source
     assert "start_subagent" not in workflow_source and "append_task_ledger" not in workflow_source, workflow_source
+    assert "append_jsonl" not in workflow_source and "workflow_events.jsonl" not in workflow_source, workflow_source
     panel_items = a.plugin_panel_items()
     plugin_item = next(item for item in panel_items if item.key == "research-pack")
     assert plugin_item.status == "warning", plugin_item
@@ -8925,6 +8934,12 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert workflow_run_rows[1]["steps"][1]["status"] == "waiting_task", workflow_run_rows[1]
     workflow_task_id = workflow_run_rows[1]["steps"][1]["task_id"]
     assert workflow_task_id, workflow_run_rows[1]
+    workflow_event_rows = a.workflow_event_records()
+    assert [row["event_type"] for row in workflow_event_rows] == ["run_planned", "run_task_dispatched"], workflow_event_rows
+    assert workflow_event_rows[0]["run_id"] == workflow_run_rows[0]["run_id"], workflow_event_rows
+    assert workflow_event_rows[1]["task_id"] == workflow_task_id, workflow_event_rows
+    assert workflow_event_rows[1]["row_index"] == 2, workflow_event_rows
+    assert workflow_event_rows[1]["idempotency_key"].startswith("wfidem_"), workflow_event_rows
     assert workflow_run_rows[1]["execution"]["steps_executed"] == 1, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["subagents_dispatched"] == 1, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["approvals_created"] == 0, workflow_run_rows[1]
@@ -8954,7 +8969,11 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "WORKFLOW_NEXT_ACTION_SCHEMA_VERSION" in workflow_source, workflow_source
     assert "task_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
     assert "approval_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
+    assert "workflow_event_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
     assert "read_jsonl(AGENT_TRACES_PATH)" in app_source, app_source
+    assert "AGENT_WORKFLOW_EVENTS_PATH" in app_source, app_source
+    assert "workflow_event_records()" in app_source, app_source
+    assert "workflow_event_rows=workflow_event_records()" in app_source, app_source
     assert "m_next = re.match" in app_source and "next|diagnose" in app_source, app_source
     assert "m_next_json = re.match" in app_source and "next-json|diagnose-json" in app_source, app_source
     assert "format_workflow_run_next_action(" in app_source, app_source
@@ -8968,6 +8987,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "linked_tasks:" in state.messages[-1].content, state.messages[-1].content
     assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
     assert "trace_refs:" in state.messages[-1].content, state.messages[-1].content
+    assert "workflow_events:" in state.messages[-1].content, state.messages[-1].content
+    assert "type=run_task_dispatched" in state.messages[-1].content, state.messages[-1].content
     assert "Raw artifact content and raw trace payloads are not inlined." in state.messages[-1].content, state.messages[-1].content
     assert a.handle_workflow_command(state, f"/workflow provenance {run_id}") is True
     assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
@@ -9016,6 +9037,10 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "Workflow run waiting for subagent task:" in state.messages[-1].content, state.messages[-1].content
     assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
+    workflow_event_rows_after_pending = a.workflow_event_records()
+    assert len(workflow_event_rows_after_pending) == len(workflow_event_rows) + 1, workflow_event_rows_after_pending
+    assert workflow_event_rows_after_pending[-1]["event_type"] == "continue_task_pending", workflow_event_rows_after_pending
+    assert workflow_event_rows_after_pending[-1]["task_id"] == workflow_task_id, workflow_event_rows_after_pending
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
     assert len(a.read_jsonl(a.AGENT_TRACES_PATH)) == trace_rows_before_inspection
     assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents

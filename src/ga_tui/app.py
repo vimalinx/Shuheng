@@ -422,6 +422,7 @@ AGENT_HARNESS_DIR = os.path.abspath(os.path.expanduser(os.environ.get("GA_TUI_HA
 AGENT_TASK_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "tasks.jsonl")
 AGENT_PROGRESS_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "progress.jsonl")
 AGENT_WORKFLOW_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_runs.jsonl")
+AGENT_WORKFLOW_EVENTS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_events.jsonl")
 AGENT_MAIL_PATH = os.path.join(AGENT_HARNESS_DIR, "messages.jsonl")
 AGENT_APPROVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "approvals.jsonl")
 AGENT_ARTIFACTS_DIR = os.path.join(AGENT_HARNESS_DIR, "artifacts")
@@ -5138,6 +5139,46 @@ def append_workflow_run(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def workflow_event_records(limit: int = 0) -> list[dict[str, Any]]:
+    return read_jsonl(AGENT_WORKFLOW_EVENTS_PATH, limit=limit)
+
+
+def append_workflow_event(row: dict[str, Any]) -> dict[str, Any]:
+    append_jsonl(AGENT_WORKFLOW_EVENTS_PATH, row)
+    return row
+
+
+def workflow_run_history_row_index(run_id: str) -> int:
+    target = str(run_id or "").strip()
+    if not target:
+        return 0
+    return len([
+        row for row in workflow_run_records()
+        if str(row.get("run_id") or "").strip() == target
+    ])
+
+
+def append_workflow_run_event(
+    row: dict[str, Any],
+    *,
+    event_type: str,
+    source_command: str = "",
+    message: str = "",
+) -> dict[str, Any] | None:
+    built = workflow_helpers.build_workflow_run_event(
+        row,
+        event_id=short_uid("wfe"),
+        timestamp=now_iso(),
+        event_type=event_type,
+        source_command=source_command,
+        row_index=workflow_run_history_row_index(str(row.get("run_id") or "")),
+        message=message,
+    )
+    if built.event is None:
+        return None
+    return append_workflow_event(built.event)
+
+
 def queue_workflow_step_approval(row: dict[str, Any], *, source_command: str) -> str:
     step = pending_workflow_approval_step(row)
     if step is None:
@@ -5339,6 +5380,12 @@ def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> 
     if built.record is None:
         return None, format_workflow_run_rejected(result, built.issues)
     row = append_workflow_run(built.record)
+    append_workflow_run_event(
+        row,
+        event_type="run_planned",
+        source_command=f"/workflow run {result.workflow_ref}",
+        message="workflow run planned",
+    )
     return row, format_workflow_run_created(row)
 
 
@@ -5358,13 +5405,21 @@ def create_workflow_run_v0(
     )
     if built.record is None:
         return None, format_workflow_run_rejected(result, built.issues)
-    append_workflow_run(built.record)
+    planned_row = append_workflow_run(built.record)
+    append_workflow_run_event(
+        planned_row,
+        event_type="run_planned",
+        source_command=command,
+        message="workflow run planned",
+    )
     advanced = advance_workflow_run_v0(built.record, timestamp=now_iso())
     row, _approval_id = bridge_workflow_step_approval(
         advanced.record,
         source_command=command,
         state=state,
     )
+    _task_id = ""
+    _task_message = ""
     if _approval_id == "":
         row, _task_id, _task_message = bridge_workflow_agent_task(
             row,
@@ -5372,6 +5427,19 @@ def create_workflow_run_v0(
             state=state,
         )
     row = append_workflow_run(row)
+    if _approval_id:
+        event_type = "run_approval_created"
+        event_message = f"workflow approval created: {_approval_id}"
+    elif _task_id:
+        event_type = "run_task_dispatched"
+        event_message = _task_message or f"workflow agent task dispatched: {_task_id}"
+    elif str(row.get("status") or "") == "completed":
+        event_type = "run_completed"
+        event_message = "workflow run completed"
+    else:
+        event_type = "run_advanced"
+        event_message = str(row.get("error") or advanced.blocked_reason or "workflow run advanced")
+    append_workflow_run_event(row, event_type=event_type, source_command=command, message=event_message)
     advanced_for_format = workflow_helpers.WorkflowRunAdvanceResult(
         record=row,
         status=advanced.status,
@@ -5388,6 +5456,7 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
     if not target:
         result = workflow_helpers.WorkflowRunContinueResult(run_id="", status="not_found")
         return None, format_workflow_continue_result(result)
+    command = f"/workflow continue {target}"
     rows = workflow_run_records()
     history = [row for row in rows if str(row.get("run_id") or "").strip() == target]
     if not history:
@@ -5396,6 +5465,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
     latest = history[-1]
     latest_status = str(latest.get("status") or "").strip().lower()
     if latest_status == "completed":
+        append_workflow_run_event(
+            latest,
+            event_type="continue_already_completed",
+            source_command=command,
+            message="workflow run already completed",
+        )
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="already_completed",
@@ -5404,6 +5479,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         )
         return None, format_workflow_continue_result(result)
     if latest_status in workflow_helpers.WORKFLOW_RUN_TERMINAL_STATUSES:
+        append_workflow_run_event(
+            latest,
+            event_type="continue_already_terminal",
+            source_command=command,
+            message=str(latest.get("error") or f"workflow run already terminal: {latest_status}"),
+        )
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="already_terminal",
@@ -5418,11 +5499,17 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         if not approval_id:
             bridged, approval_id = bridge_workflow_step_approval(
                 latest,
-                source_command=f"/workflow continue {target}",
+                source_command=command,
                 state=state,
             )
             if approval_id:
                 row = append_workflow_run(bridged)
+                append_workflow_run_event(
+                    row,
+                    event_type="continue_approval_created",
+                    source_command=command,
+                    message=f"workflow approval created: {approval_id}",
+                )
                 result = workflow_helpers.WorkflowRunContinueResult(
                     run_id=target,
                     status="approval_created",
@@ -5436,6 +5523,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         if approval_status == "pending":
             if state is not None:
                 offer_pending_approval_interaction(state, approval_id)
+            append_workflow_run_event(
+                latest,
+                event_type="continue_approval_pending",
+                source_command=command,
+                message="workflow approval is still pending",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="approval_pending",
@@ -5454,6 +5547,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
                 reason="workflow approval was rejected",
             )
             row = append_workflow_run(rejected)
+            append_workflow_run_event(
+                row,
+                event_type="continue_approval_rejected",
+                source_command=command,
+                message="workflow approval was rejected",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="approval_rejected",
@@ -5464,6 +5563,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             )
             return row, format_workflow_continue_result(result)
         if approval_status != "approved":
+            append_workflow_run_event(
+                latest,
+                event_type="continue_no_progress",
+                source_command=command,
+                message=f"workflow approval row is missing or not decidable: {approval_id or '(missing)'}",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="no_progress",
@@ -5480,6 +5585,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         )
         advanced = advance_workflow_run_v0(approved_row, timestamp=now_iso())
         if not workflow_run_has_meaningful_transition(latest, advanced.record):
+            append_workflow_run_event(
+                latest,
+                event_type="continue_no_progress",
+                source_command=command,
+                message="approved workflow approval did not produce runner-v0 progress",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="no_progress",
@@ -5489,6 +5600,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             )
             return None, format_workflow_continue_result(result)
         row = append_workflow_run(advanced.record)
+        append_workflow_run_event(
+            row,
+            event_type="continue_completed" if str(row.get("status") or "") == "completed" else "continue_advanced",
+            source_command=command,
+            message="workflow approval accepted and run advanced",
+        )
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="continued",
@@ -5503,12 +5620,18 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         if not task_id:
             bridged, task_id, dispatch_message = bridge_workflow_agent_task(
                 latest,
-                source_command=f"/workflow continue {target}",
+                source_command=command,
                 state=state,
             )
             if workflow_run_has_meaningful_transition(latest, bridged):
                 row = append_workflow_run(bridged)
                 result_status = "task_dispatched" if task_id else "task_terminal"
+                append_workflow_run_event(
+                    row,
+                    event_type=f"continue_{result_status}",
+                    source_command=command,
+                    message=dispatch_message or str(row.get("error") or ""),
+                )
                 result = workflow_helpers.WorkflowRunContinueResult(
                     run_id=target,
                     status=result_status,
@@ -5521,6 +5644,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
                 return row, format_workflow_continue_result(result)
         task_row = latest_task_records().get(task_id) if task_id else None
         if not isinstance(task_row, dict):
+            append_workflow_run_event(
+                latest,
+                event_type="continue_no_progress",
+                source_command=command,
+                message=f"workflow subagent task row is missing: {task_id or '(missing)'}",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="no_progress",
@@ -5532,6 +5661,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             return None, format_workflow_continue_result(result)
         task_status = str(task_row.get("status") or "").strip().lower()
         if not terminal_task_status(task_status):
+            append_workflow_run_event(
+                latest,
+                event_type="continue_task_pending",
+                source_command=command,
+                message=str(task_row.get("summary") or task_row.get("error") or ""),
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="task_pending",
@@ -5552,12 +5687,18 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
                 )
                 retried, retry_task_id, retry_message = bridge_workflow_agent_task(
                     retry_seed,
-                    source_command=f"/workflow continue {target}",
+                    source_command=command,
                     state=state,
                 )
                 if workflow_run_has_meaningful_transition(latest, retried):
                     row = append_workflow_run(retried)
                     pending_step = pending_workflow_agent_task_step(row) or {}
+                    append_workflow_run_event(
+                        row,
+                        event_type="continue_task_retried" if retry_task_id else "continue_task_terminal",
+                        source_command=command,
+                        message=retry_message or str(row.get("error") or ""),
+                    )
                     result = workflow_helpers.WorkflowRunContinueResult(
                         run_id=target,
                         status="task_retried" if retry_task_id else "task_terminal",
@@ -5569,6 +5710,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
                     )
                     return row, format_workflow_continue_result(result)
             row = append_workflow_run(applied)
+            append_workflow_run_event(
+                row,
+                event_type="continue_task_terminal",
+                source_command=command,
+                message=str(row.get("error") or ""),
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="task_terminal",
@@ -5581,6 +5728,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             return row, format_workflow_continue_result(result)
         advanced = advance_workflow_run_v0(applied, timestamp=now_iso())
         if not workflow_run_has_meaningful_transition(latest, advanced.record):
+            append_workflow_run_event(
+                latest,
+                event_type="continue_no_progress",
+                source_command=command,
+                message="completed subagent task did not produce runner-v0 progress",
+            )
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,
                 status="no_progress",
@@ -5592,6 +5745,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             )
             return None, format_workflow_continue_result(result)
         row = append_workflow_run(advanced.record)
+        append_workflow_run_event(
+            row,
+            event_type="continue_completed" if str(row.get("status") or "") == "completed" else "continue_advanced",
+            source_command=command,
+            message="completed subagent task applied and run advanced",
+        )
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="continued",
@@ -5606,6 +5765,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
     if not workflow_run_has_meaningful_transition(latest, advanced.record):
         execution = latest.get("execution") if isinstance(latest.get("execution"), dict) else {}
         reason = str(execution.get("blocked_reason") or latest.get("error") or "no runner-v0 safe progress is available")
+        append_workflow_run_event(
+            latest,
+            event_type="continue_no_progress",
+            source_command=command,
+            message=reason,
+        )
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="no_progress",
@@ -5615,6 +5780,12 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         )
         return None, format_workflow_continue_result(result)
     row = append_workflow_run(advanced.record)
+    append_workflow_run_event(
+        row,
+        event_type="continue_completed" if str(row.get("status") or "") == "completed" else "continue_advanced",
+        source_command=command,
+        message="workflow run continued",
+    )
     result = workflow_helpers.WorkflowRunContinueResult(
         run_id=target,
         status="continued",
@@ -5630,6 +5801,7 @@ def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any
     if not target:
         result = workflow_helpers.WorkflowRunCancelResult(run_id="", status="not_found")
         return None, format_workflow_cancel_result(result)
+    command = f"/workflow cancel {target}"
     rows = workflow_run_records()
     history = [row for row in rows if str(row.get("run_id") or "").strip() == target]
     if not history:
@@ -5642,6 +5814,12 @@ def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any
         reason=reason,
     )
     if cancelled.status != "cancelled" or cancelled.record is None:
+        append_workflow_run_event(
+            cancelled.record or latest,
+            event_type=f"cancel_{cancelled.status or 'no_progress'}",
+            source_command=command,
+            message=cancelled.reason or str(latest.get("error") or ""),
+        )
         result = workflow_helpers.WorkflowRunCancelResult(
             run_id=target,
             status=cancelled.status,
@@ -5652,6 +5830,12 @@ def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any
         )
         return None, format_workflow_cancel_result(result)
     if not workflow_run_has_meaningful_transition(latest, cancelled.record):
+        append_workflow_run_event(
+            latest,
+            event_type="cancel_already_terminal",
+            source_command=command,
+            message=str(latest.get("error") or "workflow run already terminal"),
+        )
         result = workflow_helpers.WorkflowRunCancelResult(
             run_id=target,
             status="already_terminal",
@@ -5662,6 +5846,12 @@ def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any
         )
         return None, format_workflow_cancel_result(result)
     row = append_workflow_run(cancelled.record)
+    append_workflow_run_event(
+        row,
+        event_type="cancel_cancelled",
+        source_command=command,
+        message=cancelled.reason,
+    )
     result = workflow_helpers.WorkflowRunCancelResult(
         run_id=target,
         status="cancelled",
@@ -23362,6 +23552,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
                 approval_rows=read_jsonl(AGENT_APPROVALS_PATH),
                 artifact_rows=read_jsonl(AGENT_ARTIFACT_INDEX_PATH),
                 trace_rows=read_jsonl(AGENT_TRACES_PATH),
+                workflow_event_rows=workflow_event_records(),
             ),
         )
         return True

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,7 @@ except Exception:  # pragma: no cover - script-mode compatibility
 
 WORKFLOW_SCHEMA_VERSION = "shuheng.workflow.v1"
 WORKFLOW_RUN_SCHEMA_VERSION = "shuheng.workflow_run.v1"
+WORKFLOW_EVENT_SCHEMA_VERSION = "shuheng.workflow_event.v1"
 WORKFLOW_NEXT_ACTION_SCHEMA_VERSION = "shuheng.workflow_next_action.v1"
 WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES = frozenset({
     "prompt",
@@ -152,6 +154,12 @@ class WorkflowRunCancelResult:
     history_rows: int = 0
     reason: str = ""
     run_status: str = ""
+
+
+@dataclass(frozen=True)
+class WorkflowRunEventBuildResult:
+    event: dict[str, Any] | None = None
+    issues: tuple[WorkflowIssue, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1373,6 +1381,112 @@ def _unique_strings(*groups: Any) -> list[str]:
     return values
 
 
+def _workflow_event_text(value: Any, *, limit: int = 320) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _workflow_event_step(row: dict[str, Any]) -> dict[str, Any]:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+    blocked_step_type = str(execution.get("blocked_step_type") or "").strip()
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    if blocked_step_id:
+        for raw_step in steps:
+            if not isinstance(raw_step, dict):
+                continue
+            if str(raw_step.get("step_id") or "").strip() == blocked_step_id:
+                return raw_step
+        return {"step_id": blocked_step_id, "type": blocked_step_type}
+    for raw_step in reversed(steps):
+        if not isinstance(raw_step, dict):
+            continue
+        status = str(raw_step.get("status") or "").strip()
+        if status in {"blocked", "waiting_approval", "waiting_task", "failed", "rejected", "cancelled", "canceled", "aborted"}:
+            return raw_step
+    return {}
+
+
+def workflow_run_event_idempotency_key(
+    row: dict[str, Any],
+    *,
+    event_type: str,
+    source_command: str = "",
+    row_index: int = 0,
+) -> str:
+    step = _workflow_event_step(row)
+    source_hash = hashlib.sha1(str(source_command or "").encode("utf-8")).hexdigest()[:16]
+    payload = {
+        "run_id": str(row.get("run_id") or "").strip(),
+        "event_type": str(event_type or "").strip(),
+        "status": str(row.get("status") or "").strip(),
+        "row_index": _at_least_int(row_index, 0),
+        "step_id": str(step.get("step_id") or "").strip(),
+        "step_type": str(step.get("type") or "").strip(),
+        "approval_id": str(workflow_approval_id(row) or step.get("approval_id") or "").strip(),
+        "task_id": str(workflow_agent_task_id(row) or step.get("task_id") or "").strip(),
+        "source_hash": source_hash,
+    }
+    digest = hashlib.sha1(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return f"wfidem_{digest[:32]}"
+
+
+def build_workflow_run_event(
+    row: dict[str, Any],
+    *,
+    event_id: str,
+    timestamp: str,
+    event_type: str,
+    source_command: str = "",
+    row_index: int = 0,
+    message: str = "",
+) -> WorkflowRunEventBuildResult:
+    safe_event_id = plugin_helpers.safe_plugin_id(event_id)
+    run_id = str(row.get("run_id") or "").strip()
+    clean_event_type = str(event_type or "").strip().lower().replace("-", "_")
+    if not safe_event_id:
+        return WorkflowRunEventBuildResult(event=None, issues=(
+            workflow_issue(str(row.get("workflow_ref") or "(workflow-event)"), "", "workflow event_id is required and must be filesystem-safe"),
+        ))
+    if not run_id:
+        return WorkflowRunEventBuildResult(event=None, issues=(
+            workflow_issue(str(row.get("workflow_ref") or "(workflow-event)"), "", "workflow event run_id is required"),
+        ))
+    if not clean_event_type:
+        return WorkflowRunEventBuildResult(event=None, issues=(
+            workflow_issue(str(row.get("workflow_ref") or "(workflow-event)"), "", "workflow event_type is required"),
+        ))
+    step = _workflow_event_step(row)
+    step_id = str(step.get("step_id") or "").strip()
+    step_type = str(step.get("type") or "").strip()
+    event = {
+        "schema_version": WORKFLOW_EVENT_SCHEMA_VERSION,
+        "event_id": safe_event_id,
+        "run_id": run_id,
+        "workflow_ref": str(row.get("workflow_ref") or "").strip(),
+        "timestamp": str(timestamp or "").strip(),
+        "event_type": clean_event_type,
+        "status": str(row.get("status") or "").strip(),
+        "idempotency_key": workflow_run_event_idempotency_key(
+            row,
+            event_type=clean_event_type,
+            source_command=source_command,
+            row_index=row_index,
+        ),
+        "source_command": _workflow_event_text(source_command, limit=240),
+        "row_index": _at_least_int(row_index, 0),
+        "step_id": step_id,
+        "step_type": step_type,
+        "approval_id": str(workflow_approval_id(row) or step.get("approval_id") or "").strip(),
+        "task_id": str(workflow_agent_task_id(row) or step.get("task_id") or "").strip(),
+        "artifact_refs": _unique_strings(row.get("artifact_refs"), step.get("artifact_refs")),
+        "message": _workflow_event_text(message or row.get("error") or workflow_run_stop_reason(row), limit=400),
+    }
+    return WorkflowRunEventBuildResult(event=event, issues=())
+
+
 def workflow_upstream_step_output_context(
     row: dict[str, Any],
     target_step: dict[str, Any],
@@ -2323,6 +2437,7 @@ def format_workflow_run_trace(
     approval_rows: list[dict[str, Any]] | None = None,
     artifact_rows: list[dict[str, Any]] | None = None,
     trace_rows: list[dict[str, Any]] | None = None,
+    workflow_event_rows: list[dict[str, Any]] | None = None,
 ) -> str:
     target = str(run_id or "").strip()
     if not target:
@@ -2335,6 +2450,7 @@ def format_workflow_run_trace(
     approval_rows = approval_rows or []
     artifact_rows = artifact_rows or []
     trace_rows = trace_rows or []
+    workflow_event_rows = workflow_event_rows or []
     latest = history[-1]
     completed, total = workflow_run_step_counts(latest)
     reason = workflow_run_stop_reason(latest)
@@ -2350,6 +2466,10 @@ def format_workflow_run_trace(
     linked_traces = [
         row for row in trace_rows
         if str(row.get("task_id") or "").strip() in set(task_ids)
+    ]
+    linked_workflow_events = [
+        row for row in workflow_event_rows
+        if str(row.get("run_id") or "").strip() == target
     ]
 
     lines = [
@@ -2476,6 +2596,39 @@ def format_workflow_run_trace(
             event = str(row.get("event") or "-")
             status = str(row.get("status") or "-")
             lines.append(f"- {trace_id} | task={task_id} | event={event} | status={status}")
+    lines.append("workflow_events:")
+    if not linked_workflow_events:
+        lines.append("- (none)")
+    else:
+        for row in linked_workflow_events[-40:]:
+            event_id = str(row.get("event_id") or "-")
+            event_type = str(row.get("event_type") or "-")
+            status = str(row.get("status") or "-")
+            row_index = row.get("row_index")
+            step_id = str(row.get("step_id") or "-")
+            step_type = str(row.get("step_type") or "-")
+            idem = str(row.get("idempotency_key") or "-")
+            parts = [
+                f"- {event_id}",
+                f"type={event_type}",
+                f"status={status}",
+                f"row_index={row_index if row_index not in (None, '') else '-'}",
+                f"step={step_id}[{step_type}]",
+                f"idempotency_key={idem}",
+            ]
+            approval_id = str(row.get("approval_id") or "").strip()
+            task_id = str(row.get("task_id") or "").strip()
+            if approval_id:
+                parts.append(f"approval_id={approval_id}")
+            if task_id:
+                parts.append(f"task_id={task_id}")
+            refs = _unique_strings(row.get("artifact_refs"))
+            if refs:
+                parts.append("artifact_refs=" + ",".join(refs))
+            message = str(row.get("message") or "").strip()
+            if message:
+                parts.append(f"message={message}")
+            lines.append(" | ".join(parts))
     lines.append("Raw artifact content and raw trace payloads are not inlined.")
     return "\n".join(lines)
 
