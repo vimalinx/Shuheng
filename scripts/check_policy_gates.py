@@ -8725,6 +8725,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert '"/plugins"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
     assert '"/workflows"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
     assert "/workflow generate" in app_source and "/workflow save-last" in app_source, app_source
+    assert "/workflow cancel" in app_source and "cancel_workflow_run_v0" in app_source, app_source
     assert "is_workflow_generation_source" in app_source and "save_latest_workflow_draft" in app_source, app_source
     workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
     forbidden_workflow_imports = [
@@ -8741,6 +8742,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "WorkflowStepOutputContext" in workflow_source, workflow_source
     assert "workflow_upstream_step_output_context" in workflow_source, workflow_source
     assert "format_workflow_step_output_context" in workflow_source, workflow_source
+    assert "WorkflowRunCancelResult" in workflow_source, workflow_source
+    assert "cancel_workflow_run_v0" in workflow_source and "format_workflow_cancel_result" in workflow_source, workflow_source
     assert "_workflow_dependency_issues" in workflow_source, workflow_source
     assert "workflow dependency cycle detected" in workflow_source, workflow_source
     assert "artifact contents are not loaded" in workflow_source, workflow_source
@@ -9037,12 +9040,37 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_agent_completion
     assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents
+    workflow_rows_before_cancel = len(a.workflow_run_records())
+    assert a.handle_workflow_command(state, "/workflow cancel missing-workflow-run") is True
+    assert "Workflow run not found: missing-workflow-run" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_cancel, a.workflow_run_records()
+    assert a.handle_workflow_command(state, f"/workflow cancel {planned_continue_id} operator stop") is True
+    assert "Workflow run cancelled:" in state.messages[-1].content, state.messages[-1].content
+    assert "reason: operator stop" in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows_after_cancel = a.workflow_run_records()
+    assert len(workflow_run_rows_after_cancel) == workflow_rows_before_cancel + 1, workflow_run_rows_after_cancel
+    workflow_cancel_row = workflow_run_rows_after_cancel[-1]
+    assert workflow_cancel_row["run_id"] == planned_continue_id, workflow_cancel_row
+    assert workflow_cancel_row["status"] == "cancelled", workflow_cancel_row
+    assert workflow_cancel_row["steps"][0]["status"] == "completed", workflow_cancel_row
+    assert workflow_cancel_row["steps"][1]["status"] == "cancelled", workflow_cancel_row
+    assert workflow_cancel_row["error"] == "operator stop", workflow_cancel_row
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_after_agent_completion
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_agent_completion
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_agent_completion
+    assert a.handle_workflow_command(state, f"/workflow continue {planned_continue_id}") is True
+    assert "Workflow run already terminal:" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_cancel + 1, a.workflow_run_records()
+    assert a.handle_workflow_command(state, f"/workflow cancel {run_id}") is True
+    assert "Workflow run already completed:" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_cancel + 1, a.workflow_run_records()
     approval_workflow_ref = "plugin://research-pack/workflows/approval-flow"
     assert a.handle_workflow_command(state, f"/workflow run {approval_workflow_ref}") is True
     assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
     assert "Approvals created: 1" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_approval_run = a.workflow_run_records()
-    assert len(workflow_run_rows_after_approval_run) == 7, workflow_run_rows_after_approval_run
+    assert len(workflow_run_rows_after_approval_run) == 8, workflow_run_rows_after_approval_run
     approval_wait_row = workflow_run_rows_after_approval_run[-1]
     approval_run_id = approval_wait_row["run_id"]
     approval_id = approval_wait_row["approval"]["approval_id"]
@@ -9063,14 +9091,14 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert approval_id in a.format_approvals(state), a.format_approvals(state)
     assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
     assert "Workflow run waiting for approval:" in state.messages[-1].content, state.messages[-1].content
-    assert len(a.workflow_run_records()) == 7, a.workflow_run_records()
+    assert len(a.workflow_run_records()) == 8, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run + 1
     assert f"已批准：{approval_id}" in a.decide_approval(state, approval_id, True)
     assert a.approval_latest_records()[approval_id]["status"] == "approved"
     assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
     assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_approval_continue = a.workflow_run_records()
-    assert len(workflow_run_rows_after_approval_continue) == 8, workflow_run_rows_after_approval_continue
+    assert len(workflow_run_rows_after_approval_continue) == 9, workflow_run_rows_after_approval_continue
     approval_done_row = workflow_run_rows_after_approval_continue[-1]
     assert approval_done_row["run_id"] == approval_run_id, approval_done_row
     assert approval_done_row["status"] == "completed", approval_done_row

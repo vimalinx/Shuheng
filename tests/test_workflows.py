@@ -878,6 +878,60 @@ def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Pa
     assert "No workflow run row was appended." in no_progress
 
 
+def test_workflow_cancel_helper_marks_current_blocker_only(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "cancel-flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "gate", "type": "condition", "depends_on": ["plan"], "expression": "inputs.ready == true"},
+                {"id": "notify", "type": "notify", "depends_on": ["gate"]},
+            ],
+        },
+        workflow_name="cancel-flow",
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/cancel-flow", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-cancel",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    cancelled = workflows.cancel_workflow_run_v0(
+        advanced.record,
+        timestamp="2026-07-03T00:00:02+0800",
+        reason="user stopped this run",
+    )
+    formatted = workflows.format_workflow_cancel_result(
+        workflows.WorkflowRunCancelResult(
+            run_id="wfr-cancel",
+            status="cancelled",
+            record=cancelled.record,
+            history_rows=3,
+            reason=cancelled.reason,
+            run_status="cancelled",
+        )
+    )
+
+    assert cancelled.record is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled.record["status"] == "cancelled"
+    assert cancelled.record["error"] == "user stopped this run"
+    assert [step["status"] for step in cancelled.record["steps"]] == ["completed", "cancelled", "pending"]
+    assert cancelled.record["execution"]["blocked_step_id"] == "gate"
+    assert cancelled.record["execution"]["blocked_reason"] == "user stopped this run"
+    assert "Workflow run cancelled: wfr-cancel" in formatted
+    assert "No workflow steps were continued." in formatted
+    assert "No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created." in formatted
+
+
 def test_workflow_run_record_rejects_invalid_workflow(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -964,6 +1018,66 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
     assert len(state.subagents) == 0
+
+
+def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "cancel-flow",
+            "name": "Cancel Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "gate", "type": "condition", "depends_on": ["plan"], "expression": "inputs.ready == true"},
+                {"id": "notify", "type": "notify", "depends_on": ["gate"]},
+            ],
+        },
+        workflow_name="cancel-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/cancel-flow") is True
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    run_id = rows[-1]["run_id"]
+    task_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+
+    assert app_module.handle_workflow_command(state, "/workflow cancel missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 2
+
+    assert app_module.handle_workflow_command(state, f"/workflow cancel {run_id} no longer needed") is True
+    assert "Workflow run cancelled:" in state.messages[-1].content
+    assert "reason: no longer needed" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 3
+    assert rows[-1]["run_id"] == run_id
+    assert rows[-1]["status"] == "cancelled"
+    assert rows[-1]["error"] == "no longer needed"
+    assert [step["status"] for step in rows[-1]["steps"]] == ["completed", "cancelled", "pending"]
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_cancel
+    assert len(state.subagents) == 0
+
+    assert app_module.handle_workflow_command(state, f"/workflow cancel {run_id}") is True
+    assert "Workflow run already terminal:" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 3
+
+    completed = dict(rows[0])
+    completed["run_id"] = "wfr-completed-cancel-noop"
+    completed["status"] = "completed"
+    completed["completed_at"] = "2026-07-03T00:00:03+0800"
+    app_module.append_workflow_run(completed)
+    assert app_module.handle_workflow_command(state, "/workflow cancel wfr-completed-cancel-noop") is True
+    assert "Workflow run already completed: wfr-completed-cancel-noop" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 4
 
 
 def test_workflow_run_command_resolves_inputs_and_condition_v1(tmp_path: Path, monkeypatch) -> None:
@@ -1122,6 +1236,67 @@ def test_workflow_agent_task_prompt_appends_reference_only_context() -> None:
     assert "task_id: task_collect" in prompt
     assert "agent_id: agent_collect" in prompt
     assert "artifact://collect-report" in prompt
+
+
+def test_workflow_cancel_waiting_agent_task_does_not_abort_task(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "agent-cancel-flow",
+            "name": "Agent Cancel Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "Workflow Agent",
+                    "depends_on": ["plan"],
+                    "prompt": "Review source quality.",
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["review"]},
+            ],
+        },
+        workflow_name="agent-cancel-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.create_subagent(
+        state,
+        "Workflow Agent",
+        "Reviews source quality without writing files.",
+        role="researcher",
+        persistent=True,
+    )
+    sub.agent = SequencedWorkflowAgent(["agent task result"])
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/agent-cancel-flow") is True
+    waiting = app_module.workflow_run_records()[-1]
+    run_id = waiting["run_id"]
+    task_id = waiting["steps"][1]["task_id"]
+    assert waiting["status"] == "waiting_task"
+    task_rows_after_dispatch = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_after_dispatch = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_after_dispatch = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_after_dispatch = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+
+    assert app_module.handle_workflow_command(state, f"/workflow cancel {run_id} stop waiting") is True
+    assert "Workflow run cancelled:" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 3
+    assert rows[-1]["status"] == "cancelled"
+    assert [step["status"] for step in rows[-1]["steps"]] == ["completed", "cancelled", "pending"]
+    assert rows[-1]["steps"][1]["task_id"] == task_id
+    assert app_module.latest_task_records()[task_id]["status"] == "working"
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_dispatch
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_dispatch
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_dispatch
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_dispatch
+    assert state.subagents[sub.agent_id].active_bus_task_id == task_id
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run already terminal:" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 3
 
 
 def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Path, monkeypatch) -> None:

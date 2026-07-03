@@ -135,6 +135,16 @@ class WorkflowRunContinueResult:
 
 
 @dataclass(frozen=True)
+class WorkflowRunCancelResult:
+    run_id: str
+    status: str
+    record: dict[str, Any] | None = None
+    history_rows: int = 0
+    reason: str = ""
+    run_status: str = ""
+
+
+@dataclass(frozen=True)
 class WorkflowStepOutputContext:
     step_id: str
     step_type: str
@@ -1440,6 +1450,111 @@ def workflow_run_has_meaningful_transition(before: dict[str, Any], after: dict[s
         or before_execution.get("blocked_reason") != after_execution.get("blocked_reason")
         or before_approval != after_approval
     )
+
+
+def _workflow_cancel_target_step(row: dict[str, Any]) -> dict[str, Any] | None:
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+    if blocked_step_id:
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if str(step.get("step_id") or "").strip() != blocked_step_id:
+                continue
+            if str(step.get("status") or "").strip() not in WORKFLOW_RUN_TERMINAL_STATUSES:
+                return step
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("status") or "").strip() in {"blocked", "waiting_approval", "waiting_task"}:
+            return step
+    return None
+
+
+def cancel_workflow_run_v0(
+    row: dict[str, Any],
+    *,
+    timestamp: str,
+    reason: str = "",
+) -> WorkflowRunCancelResult:
+    run_id = _workflow_run_id(row)
+    latest_status = str(row.get("status") or "").strip().lower()
+    if latest_status == "completed":
+        return WorkflowRunCancelResult(
+            run_id=run_id,
+            status="already_completed",
+            record=row,
+            run_status=latest_status,
+        )
+    if latest_status in WORKFLOW_RUN_TERMINAL_STATUSES:
+        return WorkflowRunCancelResult(
+            run_id=run_id,
+            status="already_terminal",
+            record=row,
+            reason=str(row.get("error") or ""),
+            run_status=latest_status,
+        )
+    cancelled = deepcopy(row)
+    cancel_reason = str(reason or "").strip() or "workflow run cancelled by user"
+    cancelled["status"] = "cancelled"
+    cancelled["updated_at"] = timestamp
+    cancelled["completed_at"] = timestamp
+    cancelled["error"] = cancel_reason
+    execution = dict(cancelled.get("execution") if isinstance(cancelled.get("execution"), dict) else {})
+    step = _workflow_cancel_target_step(cancelled)
+    if step is not None:
+        step_id = str(step.get("step_id") or "").strip()
+        step_type = str(step.get("type") or "").strip()
+        step["status"] = "cancelled"
+        step["started_at"] = step.get("started_at") or timestamp
+        step["completed_at"] = timestamp
+        step["error"] = cancel_reason
+        execution["blocked_step_id"] = step_id
+        execution["blocked_step_type"] = step_type
+    execution["blocked_reason"] = cancel_reason
+    cancelled["execution"] = execution
+    return WorkflowRunCancelResult(
+        run_id=run_id,
+        status="cancelled",
+        record=cancelled,
+        reason=cancel_reason,
+        run_status="cancelled",
+    )
+
+
+def format_workflow_cancel_result(result: WorkflowRunCancelResult) -> str:
+    run_id = result.run_id or "(missing)"
+    if result.status == "not_found":
+        return f"Workflow run not found: {run_id}"
+    if result.status == "already_completed":
+        return "\n".join([
+            f"Workflow run already completed: {run_id}",
+            f"history_rows: {result.history_rows}",
+            "No workflow run row was appended.",
+        ])
+    if result.status == "already_terminal":
+        lines = [
+            f"Workflow run already terminal: {run_id}",
+            f"status: {result.run_status or '-'}",
+            f"history_rows: {result.history_rows}",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        lines.append("No workflow run row was appended.")
+        return "\n".join(lines)
+    if result.status != "cancelled" or result.record is None:
+        return f"Workflow run cancellation failed: {run_id}"
+    lines = [
+        f"Workflow run cancelled: {run_id}",
+        f"status: {result.run_status or 'cancelled'}",
+        f"history_rows: {result.history_rows}",
+    ]
+    if result.reason:
+        lines.append(f"reason: {result.reason}")
+    lines.append("No workflow steps were continued.")
+    lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
+    return "\n".join(lines)
 
 
 def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:

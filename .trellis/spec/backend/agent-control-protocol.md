@@ -2922,6 +2922,81 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow continue wfr_123 -> either advances safe runner-v0 state or delegates approval/agent_task blockers to their bridge contracts
 ```
 
+## Scenario: Workflow Cancel Command V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users need an explicit manual terminal lifecycle control for a durable append-only workflow run.
+- Applies to: `/workflow cancel <run_id> [reason...]`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.WorkflowRunCancelResult`, `workflows.cancel_workflow_run_v0(...)`, `workflows.format_workflow_cancel_result(...)`, `app.cancel_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: Cancel does not abort running subagent tasks, kill subprocesses, reject approval rows, retry steps, schedule cleanup hooks, run plugin code, hydrate artifacts, checkpoint/replay, expose A2A/MCP workflow services, or continue later steps.
+
+### 2. Signatures
+
+- Public command:
+  - `/workflow cancel <run_id> [reason...]`
+- Pure helper ownership:
+  - `workflows.cancel_workflow_run_v0(row, *, timestamp, reason="") -> WorkflowRunCancelResult`
+  - `workflows.format_workflow_cancel_result(result) -> str`
+- App ownership:
+  - `app.cancel_workflow_run_v0(run_id, reason="")` reads all workflow run rows, selects the latest row for the run id by ledger order, and appends at most one cancelled row.
+
+### 3. Contracts
+
+- `/workflow cancel <run_id>` must target a workflow run id, not a workflow definition ref.
+- Unknown or blank run id must render a not-found message and append no workflow run row.
+- A latest row with `status=completed` must render an already-completed message and append no workflow run row.
+- A latest row with terminal status `failed`, `rejected`, `cancelled`, `canceled`, or `aborted` must render an already-terminal message and append no workflow run row.
+- A latest non-terminal row must append exactly one new row with the same `run_id`, canonical top-level `status=cancelled`, `completed_at`, `updated_at`, and a human-readable cancellation reason.
+- If the latest row has a current blocked or waiting step, that step may be marked `cancelled`; later pending steps must remain pending and must not be advanced.
+- Cancel must not call `advance_workflow_run_v0(...)` in a way that continues safe steps after the cancellation request.
+- Cancel must not dispatch subagents, create approval rows, call model providers, execute tools, run shell commands, execute plugin code, write workflow-owned artifacts, mutate task/progress/approval/artifact ledgers, write memory, touch Secret Vault, or change `state.subagents`.
+- `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
+- `app.py` remains the Orchestrator owner for latest-row lookup and append-only workflow ledger writes.
+
+### 4. Validation & Error Matrix
+
+- Missing run id -> visible not-found message, no row append.
+- Unknown run id -> visible not-found message, no row append.
+- Latest row already completed -> visible already-completed message, no row append.
+- Latest row already failed/rejected/cancelled/canceled/aborted -> visible already-terminal message, no row append.
+- Latest row planned with only pending steps -> append one top-level `cancelled` row without marking pending steps completed.
+- Latest row blocked at `condition` -> append one `cancelled` row, mark the current blocked condition step `cancelled`, leave later pending steps pending.
+- Latest row waiting at `approval` -> append one `cancelled` workflow row only; do not reject, approve, or delete approval rows.
+- Latest row waiting at `agent_task` -> append one `cancelled` workflow row only; do not abort the underlying task, delete task rows, or duplicate-dispatch.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow cancel wfr_... no longer needed` appends one terminal row and later `/workflow continue wfr_...` reports already terminal.
+- Good: A cancelled run remains visible through `/workflow runs` and `/workflow show <run_id>` with append-only history.
+- Good: Cancelling a workflow waiting on a subagent task stops workflow continuation while the governed task ledger remains the source of truth for the underlying task.
+- Base: Later task-abort, cleanup hooks, retry, timeout, and checkpoint/replay features can build on this terminal run-state primitive.
+- Bad: Cancel calls `start_subagent_task_structured(...)`, `decide_approval(...)`, or any task/progress/artifact ledger writer.
+- Bad: Cancel advances pending safe steps before marking the run cancelled.
+- Bad: `workflows.py` reads `workflow_runs.jsonl` or imports app/runtime modules to perform cancellation.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert pure cancellation marks only the current blocked/waiting step and leaves future pending steps pending.
+- `tests/test_workflows.py` must assert `/workflow cancel <run_id>` appends exactly one cancelled row for a non-terminal run.
+- `tests/test_workflows.py` must assert unknown, completed, and already-terminal runs are no-op.
+- `tests/test_workflows.py` must assert cancellation leaves task/progress/approval/artifact ledgers and `state.subagents` unchanged.
+- `scripts/check_policy_gates.py` must assert the command exists, the pure helper/formatter exist, `workflows.py` remains side-effect-free, cancel appends at most one workflow row, and no side-effect ledgers change.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow cancel wfr_123 -> kills the subagent task, rejects approvals, advances notify, and writes progress rows
+```
+
+#### Correct
+
+```text
+/workflow cancel wfr_123 -> appends one workflow_runs.jsonl row with status=cancelled and leaves other ledgers untouched
+```
+
 ## Scenario: Workflow Agent Task Bridge
 
 ### 1. Scope / Trigger

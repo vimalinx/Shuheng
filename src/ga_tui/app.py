@@ -972,6 +972,7 @@ format_workflow_info = workflow_helpers.format_workflow_info
 format_workflow_list = workflow_helpers.format_workflow_list
 format_workflow_run_created = workflow_helpers.format_workflow_run_created
 format_workflow_run_advanced = workflow_helpers.format_workflow_run_advanced
+format_workflow_cancel_result = workflow_helpers.format_workflow_cancel_result
 format_workflow_continue_result = workflow_helpers.format_workflow_continue_result
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
@@ -5451,6 +5452,54 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         history_rows=len(history) + 1,
     )
     return row, format_workflow_continue_result(result)
+
+
+def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any] | None, str]:
+    target = str(run_id or "").strip()
+    if not target:
+        result = workflow_helpers.WorkflowRunCancelResult(run_id="", status="not_found")
+        return None, format_workflow_cancel_result(result)
+    rows = workflow_run_records()
+    history = [row for row in rows if str(row.get("run_id") or "").strip() == target]
+    if not history:
+        result = workflow_helpers.WorkflowRunCancelResult(run_id=target, status="not_found")
+        return None, format_workflow_cancel_result(result)
+    latest = history[-1]
+    cancelled = workflow_helpers.cancel_workflow_run_v0(
+        latest,
+        timestamp=now_iso(),
+        reason=reason,
+    )
+    if cancelled.status != "cancelled" or cancelled.record is None:
+        result = workflow_helpers.WorkflowRunCancelResult(
+            run_id=target,
+            status=cancelled.status,
+            record=cancelled.record or latest,
+            history_rows=len(history),
+            reason=cancelled.reason,
+            run_status=cancelled.run_status,
+        )
+        return None, format_workflow_cancel_result(result)
+    if not workflow_run_has_meaningful_transition(latest, cancelled.record):
+        result = workflow_helpers.WorkflowRunCancelResult(
+            run_id=target,
+            status="already_terminal",
+            record=latest,
+            history_rows=len(history),
+            reason=str(latest.get("error") or ""),
+            run_status=str(latest.get("status") or ""),
+        )
+        return None, format_workflow_cancel_result(result)
+    row = append_workflow_run(cancelled.record)
+    result = workflow_helpers.WorkflowRunCancelResult(
+        run_id=target,
+        status="cancelled",
+        record=row,
+        history_rows=len(history) + 1,
+        reason=cancelled.reason,
+        run_status="cancelled",
+    )
+    return row, format_workflow_cancel_result(result)
 
 
 def progress_history(task_id: str) -> list[dict[str, Any]]:
@@ -22802,6 +22851,11 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if m_show:
         add_system(state, format_workflow_run_detail(m_show.group(1), workflow_run_records()))
         return True
+    m_cancel = re.match(r"/workflows?\s+cancel\s+(\S+)(?:\s+([\s\S]+?))?\s*$", raw, re.I)
+    if m_cancel:
+        _row, message = cancel_workflow_run_v0(m_cancel.group(1), reason=m_cancel.group(2) or "")
+        add_system(state, message)
+        return True
     m_continue = re.match(r"/workflows?\s+(?:continue|resume)\s+(\S+)\s*$", raw, re.I)
     if m_continue:
         _row, message = continue_workflow_run_v0(m_continue.group(1), state=state)
@@ -22835,7 +22889,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"
-            "/workflow runs、/workflow show <run-id>、/workflow continue|resume <run-id>",
+            "/workflow runs、/workflow show <run-id>、/workflow cancel <run-id> [reason]、"
+            "/workflow continue|resume <run-id>",
         )
         return True
     return False
