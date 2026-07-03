@@ -982,8 +982,10 @@ format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 format_workflow_run_next_action = workflow_helpers.format_workflow_run_next_action
 format_workflow_run_trace = workflow_helpers.format_workflow_run_trace
+format_workflow_autopilot_tick_plan = workflow_helpers.format_workflow_autopilot_tick_plan
 format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
 workflow_run_next_action_projection = workflow_helpers.workflow_run_next_action_projection
+workflow_autopilot_tick_plan = workflow_helpers.workflow_autopilot_tick_plan
 latest_workflow_run_rows_for_panel = workflow_helpers.latest_workflow_run_rows
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 apply_workflow_agent_task_result = workflow_helpers.apply_workflow_agent_task_result
@@ -4821,6 +4823,46 @@ def parse_workflow_auto_command_args(tail: str) -> tuple[str, str, dict[str, Any
     return ref, goal_and_inputs, {}, ""
 
 
+def parse_workflow_tick_command_args(tail: str) -> tuple[bool, list[str], int, str]:
+    text = str(tail or "").strip()
+    if not text:
+        return False, [], 25, ""
+    try:
+        tokens = shlex.split(text)
+    except ValueError as exc:
+        return False, [], 25, f"Invalid workflow tick arguments: {exc}"
+    dry_run = False
+    limit = 25
+    run_ids: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--dry-run", "--dryrun", "-n"}:
+            dry_run = True
+        elif token == "--limit":
+            index += 1
+            if index >= len(tokens):
+                return dry_run, run_ids, limit, "Missing value for --limit."
+            try:
+                limit = int(tokens[index])
+            except ValueError:
+                return dry_run, run_ids, limit, f"Invalid --limit value: {tokens[index]}"
+        elif token.startswith("--limit="):
+            raw_limit = token.split("=", 1)[1]
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                return dry_run, run_ids, limit, f"Invalid --limit value: {raw_limit}"
+        elif token.startswith("-"):
+            return dry_run, run_ids, limit, f"Unknown workflow tick option: {token}"
+        else:
+            run_ids.append(token)
+        index += 1
+    if limit <= 0:
+        return dry_run, run_ids, limit, "--limit must be greater than zero."
+    return dry_run, run_ids, limit, ""
+
+
 def _start_workflow_generation_task(
     state: State,
     goal: str,
@@ -5794,6 +5836,89 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         history_rows=len(history) + 1,
     )
     return row, format_workflow_continue_result(result)
+
+
+def run_workflow_autopilot_tick(
+    state: State,
+    *,
+    dry_run: bool = False,
+    run_ids: Optional[list[str]] = None,
+    limit: int = 25,
+    source_command: str = "/workflow tick",
+) -> tuple[dict[str, Any], str]:
+    plan = workflow_autopilot_tick_plan(
+        workflow_run_records(),
+        task_rows=read_jsonl(AGENT_TASK_LEDGER_PATH),
+        approval_rows=read_jsonl(AGENT_APPROVALS_PATH),
+        run_ids=run_ids or [],
+        limit=limit,
+    )
+    if dry_run:
+        return plan, format_workflow_autopilot_tick_plan(plan, dry_run=True)
+
+    latest_rows = latest_workflow_run_records()
+    event_count = 0
+    continued_count = 0
+    items = plan.get("items") if isinstance(plan.get("items"), list) else []
+    first_event_row: dict[str, Any] | None = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        run_id = str(item.get("run_id") or "").strip()
+        latest = latest_rows.get(run_id)
+        if not isinstance(latest, dict):
+            continue
+        if first_event_row is None:
+            first_event_row = latest
+        selected = bool(item.get("selected"))
+        event_type = "autopilot_tick_selected" if selected else "autopilot_tick_skipped"
+        if append_workflow_run_event(
+            latest,
+            event_type=event_type,
+            source_command=source_command,
+            message=str(item.get("reason") or event_type),
+        ):
+            event_count += 1
+        if not selected:
+            continue
+        row, message = continue_workflow_run_v0(run_id, state=state)
+        if row is None:
+            latest_after = latest_workflow_run_records().get(run_id) or latest
+            if append_workflow_run_event(
+                latest_after,
+                event_type="autopilot_tick_no_progress",
+                source_command=source_command,
+                message=message.splitlines()[0] if message else "workflow autopilot made no progress",
+            ):
+                event_count += 1
+            continue
+        continued_count += 1
+        if append_workflow_run_event(
+            row,
+            event_type="autopilot_tick_continued",
+            source_command=source_command,
+            message="workflow autopilot continued run",
+        ):
+            event_count += 1
+
+    if first_event_row is not None:
+        summary = (
+            f"workflow autopilot tick summary: selected={plan.get('selected_count') or 0} "
+            f"continued={continued_count} skipped={plan.get('skipped_count') or 0}"
+        )
+        if append_workflow_run_event(
+            first_event_row,
+            event_type="autopilot_tick_summary",
+            source_command=source_command,
+            message=summary,
+        ):
+            event_count += 1
+    return plan, format_workflow_autopilot_tick_plan(
+        plan,
+        dry_run=False,
+        continued_count=continued_count,
+        event_count=event_count,
+    )
 
 
 def cancel_workflow_run_v0(run_id: str, reason: str = "") -> tuple[dict[str, Any] | None, str]:
@@ -23503,6 +23628,21 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if raw in {"/workflows", "/workflow", "/workflow list"}:
         add_system(state, format_workflow_list(user_plugin_registry(force=True)))
         return True
+    m_tick = re.match(r"/workflows?\s+(?:tick|autopilot)(?:\s+([\s\S]*?))?\s*$", raw, re.I)
+    if m_tick:
+        dry_run, run_ids, limit, error = parse_workflow_tick_command_args(m_tick.group(1) or "")
+        if error:
+            add_system(state, error + "\n用法：/workflow tick [--dry-run] [--limit N] [run-id ...]")
+        else:
+            _plan, message = run_workflow_autopilot_tick(
+                state,
+                dry_run=dry_run,
+                run_ids=run_ids,
+                limit=limit,
+                source_command=raw,
+            )
+            add_system(state, message)
+        return True
     m_auto = re.match(r"/workflows?\s+auto\s+([\s\S]+?)\s*$", raw, re.I)
     if m_auto:
         ref, goal, inputs, error = parse_workflow_auto_command_args(m_auto.group(1))
@@ -23613,6 +23753,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             state,
             "未知 /workflow 命令。\n"
             "用法：/workflows、/workflow do <goal> [-- key=value ...]、"
+            "/workflow tick [--dry-run] [--limit N] [run-id ...]、"
             "/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]、"
             "/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
             "/workflow run-last <plugin-id>/<workflow-id>、"

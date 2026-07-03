@@ -3297,6 +3297,87 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow next-json wfr_123 -> read ledgers -> workflow_run_next_action_projection(...) -> {"next_action":"continue","commands":["/workflow continue wfr_123"],"rows_appended":false}
 ```
 
+## Scenario: Workflow Autopilot Tick V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users want Shuheng to automatically advance workflow runs that are already safe to continue, without turning workflows into an unbounded executor or bypassing human/task gates.
+- Applies to: `/workflow tick`, `/workflow autopilot`, `workflows.workflow_autopilot_tick_plan(...)`, `workflows.format_workflow_autopilot_tick_plan(...)`, `app.parse_workflow_tick_command_args(...)`, `app.run_workflow_autopilot_tick(...)`, `app.continue_workflow_run_v0(...)`, `workflow_runs.jsonl`, `workflow_events.jsonl`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add a daemon, background thread, timer, watcher, cron loop, workflow-owned executor, direct model/tool/shell/plugin-code execution, approval bypass, Secret Vault workflow execution, parallel/fan-out/fan-in scheduler, or A2A/MCP workflow service exposure.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow tick [--dry-run] [--limit N] [run-id ...]`
+  - `/workflow autopilot [--dry-run] [--limit N] [run-id ...]`
+- Pure projection:
+  - `workflows.workflow_autopilot_tick_plan(workflow_rows, task_rows=..., approval_rows=..., run_ids=None, limit=25) -> dict`
+- Pure formatter:
+  - `workflows.format_workflow_autopilot_tick_plan(plan, dry_run=False, continued_count=0, event_count=0) -> str`
+- JSON schema:
+  - `schema_version: "shuheng.workflow_autopilot_tick.v1"`
+  - `candidate_count`, `considered_count`, `selected_count`, `skipped_count`, `limit`, `run_ids`, `items`, `read_only`, and `rows_appended`.
+- App owner:
+  - `app.run_workflow_autopilot_tick(...)` reads ledgers, executes only selected items through `continue_workflow_run_v0(...)`, appends workflow event rows, and renders the bounded result.
+
+### 3. Contracts
+
+- The pure tick plan must derive each item from `workflow_run_next_action_projection(...)` so autopilot and diagnostics cannot drift.
+- The only selected runs are those with `next_action == "continue"`.
+- Runs with `next_action == "approve_or_reject"`, `wait_task`, `cancel_or_edit`, `inspect_trace`, or `none` must be skipped with a visible reason and command guidance where available.
+- `/workflow tick --dry-run` must append no workflow, task, progress, approval, artifact, trace, or workflow event rows.
+- Mutating `/workflow tick` and `/workflow autopilot` may append workflow event rows for selected/skipped/continued/no-progress/summary audit events.
+- Mutating tick must call `continue_workflow_run_v0(run_id, state=state)` for actual progression. It must not duplicate runner, approval bridge, agent-task bridge, retry, or condition logic.
+- Approval creation, approval decision application, subagent task dispatch, task retry, task-result application, and safe-step advancement remain owned by the existing app Orchestrator bridge functions.
+- Pending approvals must remain pending until `/approve` or `/reject` changes the approval row. Tick must not self-approve or reject.
+- Non-terminal subagent tasks must remain waiting. Tick must not dispatch duplicates for a working task.
+- Completed and terminal runs must be skipped without calling continue.
+- `workflows.py` remains pure. It may project and format tick plans from row lists, but must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- No workflow runs -> tick reports zero considered and appends no events.
+- Planned run -> selected, then app mutating tick calls `/workflow continue` bridge semantics for that run.
+- Waiting approval with pending approval row -> skipped with approval id/status and approve/reject command guidance; no workflow run row appended for that run.
+- Waiting approval with approved/rejected approval row -> selected; actual decision handling remains inside `continue_workflow_run_v0(...)`.
+- Waiting task with working task row -> skipped with task id/status; no duplicate task dispatch.
+- Waiting task with terminal task row -> selected; actual result/retry handling remains inside `continue_workflow_run_v0(...)`.
+- Blocked condition/unsupported step -> skipped with cancel/edit guidance.
+- Completed run -> skipped as `next_action:none`.
+- Failed/rejected/cancelled/aborted run -> skipped as `inspect_trace`.
+- Invalid tick CLI option -> usage message, no mutation.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow tick --dry-run` shows that one planned run would continue and one approval run would be skipped, with no ledger changes.
+- Good: `/workflow autopilot` continues only the selected planned/approved/task-terminal runs and appends audit events.
+- Good: A pending approval remains pending after tick and still requires `/approve <approval_id>` or `/reject <approval_id>`.
+- Base: Tick is an explicit user command, not an always-on worker. A future scheduler can call the same app helper after its own governance gate.
+- Bad: Tick scans workflow rows and directly calls `advance_workflow_run_v0(...)`, bypassing app-owned approval and task bridge behavior.
+- Bad: Tick auto-approves a pending approval because the workflow definition says it is safe.
+- Bad: Tick dispatches another subagent task while the existing task row is still `working`.
+- Bad: `workflows.workflow_autopilot_tick_plan(...)` imports `app.py` or reads JSONL files.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert pure plan selection/skipping, dry-run no-mutation behavior, mutating tick continuation, skipped approval/task/terminal behavior, command alias, and event append behavior.
+- `scripts/check_policy_gates.py` must assert `/workflow tick` and `/workflow autopilot` exist, the pure plan helper consumes `workflow_run_next_action_projection(...)`, app execution calls `continue_workflow_run_v0(...)`, dry-run appends no rows, pending approvals/tasks are skipped, mutating tick appends audit events, and `workflows.py` purity holds.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow tick -> advance_workflow_run_v0(...) directly -> dispatch task / approve gate from tick logic
+```
+
+#### Correct
+
+```text
+/workflow tick -> workflow_autopilot_tick_plan(...) -> selected next_action=continue -> continue_workflow_run_v0(...)
+```
+
 ## Scenario: Workflow Run Panel V1
 
 ### 1. Scope / Trigger

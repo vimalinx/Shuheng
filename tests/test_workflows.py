@@ -1763,6 +1763,90 @@ def test_workflow_run_next_action_classifies_current_blocker() -> None:
     ]
 
 
+def test_workflow_autopilot_tick_plan_selects_only_continue_actions() -> None:
+    rows = [
+        {
+            "run_id": "wfr-planned",
+            "status": "planned",
+            "workflow_ref": "plugin://research-pack/workflows/planned-flow",
+            "steps": [],
+        },
+        {
+            "run_id": "wfr-completed",
+            "status": "completed",
+            "workflow_ref": "plugin://research-pack/workflows/completed-flow",
+            "steps": [],
+        },
+        {
+            "run_id": "wfr-approval",
+            "status": "waiting_approval",
+            "workflow_ref": "plugin://research-pack/workflows/approval-flow",
+            "approval": {"approval_id": "appr_tick", "approval_status": "pending"},
+            "execution": {"blocked_step_id": "gate", "blocked_step_type": "approval"},
+            "steps": [
+                {
+                    "step_id": "gate",
+                    "type": "approval",
+                    "status": "waiting_approval",
+                    "approval_id": "appr_tick",
+                }
+            ],
+        },
+        {
+            "run_id": "wfr-task",
+            "status": "waiting_task",
+            "workflow_ref": "plugin://research-pack/workflows/task-flow",
+            "execution": {"blocked_step_id": "review", "blocked_step_type": "agent_task"},
+            "steps": [
+                {
+                    "step_id": "review",
+                    "type": "agent_task",
+                    "status": "waiting_task",
+                    "task_id": "task_tick",
+                    "task_status": "working",
+                }
+            ],
+        },
+        {
+            "run_id": "wfr-finished-task",
+            "status": "waiting_task",
+            "workflow_ref": "plugin://research-pack/workflows/task-flow",
+            "execution": {"blocked_step_id": "review", "blocked_step_type": "agent_task"},
+            "steps": [
+                {
+                    "step_id": "review",
+                    "type": "agent_task",
+                    "status": "waiting_task",
+                    "task_id": "task_done_tick",
+                    "task_status": "working",
+                }
+            ],
+        },
+    ]
+
+    plan = workflows.workflow_autopilot_tick_plan(
+        rows,
+        task_rows=[
+            {"task_id": "task_tick", "status": "working"},
+            {"task_id": "task_done_tick", "status": "completed"},
+        ],
+        approval_rows=[{"approval_id": "appr_tick", "status": "pending"}],
+    )
+    rendered = workflows.format_workflow_autopilot_tick_plan(plan, dry_run=True)
+    selected = [item["run_id"] for item in plan["items"] if item["selected"]]
+    skipped = {item["run_id"]: item["reason"] for item in plan["items"] if not item["selected"]}
+
+    assert plan["schema_version"] == "shuheng.workflow_autopilot_tick.v1"
+    assert selected == ["wfr-planned", "wfr-finished-task"]
+    assert plan["selected_count"] == 2
+    assert plan["skipped_count"] == 3
+    assert "waiting for approval appr_tick (pending)" == skipped["wfr-approval"]
+    assert "waiting for task task_tick (working)" == skipped["wfr-task"]
+    assert skipped["wfr-completed"] == "workflow run is completed"
+    assert "Workflow autopilot dry-run" in rendered
+    assert "No workflow, task, progress, approval, artifact, trace, or workflow event rows were appended." in rendered
+
+
 def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -2105,6 +2189,83 @@ def test_workflow_cancel_command_appends_once_and_keeps_side_effects_free(tmp_pa
     assert len(events_after_completed_cancel) == len(events_after_terminal_cancel) + 1
     assert events_after_completed_cancel[-1]["event_type"] == "cancel_already_completed"
     assert events_after_completed_cancel[-1]["run_id"] == "wfr-completed-cancel-noop"
+
+
+def test_workflow_autopilot_tick_command_dry_runs_and_continues_ready_runs(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    safe_result = workflows.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "safe-flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+            ],
+        },
+        plugin_id="research-pack",
+        workflow_id="safe-flow",
+    )
+    approval_result = workflows.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "approval-flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "gate", "type": "approval", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["gate"]},
+            ],
+        },
+        plugin_id="research-pack",
+        workflow_id="approval-flow",
+    )
+
+    planned_row, _message = app_module.create_planned_workflow_run(safe_result)
+    approval_row, _message = app_module.create_workflow_run_v0(approval_result, state=state)
+    assert planned_row is not None
+    assert approval_row is not None
+    planned_run_id = planned_row["run_id"]
+    approval_run_id = approval_row["run_id"]
+    approval_id = approval_row["approval"]["approval_id"]
+    rows_before = app_module.workflow_run_records()
+    events_before = app_module.workflow_event_records()
+    task_rows_before = app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)
+    progress_rows_before = app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)
+    approval_rows_before = app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)
+    artifact_rows_before = app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)
+
+    assert app_module.handle_workflow_command(state, "/workflow tick --dry-run") is True
+    assert "Workflow autopilot dry-run" in state.messages[-1].content
+    assert f"{planned_run_id} | action=continue" in state.messages[-1].content
+    assert f"{approval_run_id} | action=skip" in state.messages[-1].content
+    assert approval_id in state.messages[-1].content
+    assert app_module.workflow_run_records() == rows_before
+    assert app_module.workflow_event_records() == events_before
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == task_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == progress_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == approval_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == artifact_rows_before
+
+    assert app_module.handle_workflow_command(state, "/workflow autopilot") is True
+    assert "Workflow autopilot tick" in state.messages[-1].content
+    assert "selected: 1" in state.messages[-1].content
+    assert "skipped: 1" in state.messages[-1].content
+    assert "continued: 1" in state.messages[-1].content
+    rows_after = app_module.workflow_run_records()
+    latest_by_id = {row["run_id"]: row for row in rows_after}
+    assert latest_by_id[planned_run_id]["status"] == "completed"
+    assert latest_by_id[approval_run_id]["status"] == "waiting_approval"
+    assert len(rows_after) == len(rows_before) + 1
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == task_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == progress_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == approval_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == artifact_rows_before
+    event_types = [row["event_type"] for row in app_module.workflow_event_records()]
+    assert "autopilot_tick_selected" in event_types
+    assert "autopilot_tick_skipped" in event_types
+    assert "autopilot_tick_continued" in event_types
+    assert "autopilot_tick_summary" in event_types
+    assert "continue_completed" in event_types
 
 
 def test_workflow_run_command_resolves_inputs_and_condition_v1(tmp_path: Path, monkeypatch) -> None:

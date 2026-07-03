@@ -8792,9 +8792,13 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "WorkflowRunCancelResult" in workflow_source, workflow_source
     assert "cancel_workflow_run_v0" in workflow_source and "format_workflow_cancel_result" in workflow_source, workflow_source
     assert "WORKFLOW_EVENT_SCHEMA_VERSION" in workflow_source, workflow_source
+    assert "WORKFLOW_AUTOPILOT_TICK_SCHEMA_VERSION" in workflow_source, workflow_source
     assert "WorkflowRunEventBuildResult" in workflow_source, workflow_source
     assert "build_workflow_run_event" in workflow_source, workflow_source
     assert "workflow_run_event_idempotency_key" in workflow_source, workflow_source
+    assert "workflow_autopilot_tick_plan" in workflow_source, workflow_source
+    assert "format_workflow_autopilot_tick_plan" in workflow_source, workflow_source
+    assert "workflow_run_next_action_projection(" in workflow_source, workflow_source
     assert "_workflow_dependency_issues" in workflow_source, workflow_source
     assert "workflow dependency cycle detected" in workflow_source, workflow_source
     assert "artifact contents are not loaded" in workflow_source, workflow_source
@@ -8976,8 +8980,11 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "workflow_event_rows=workflow_event_records()" in app_source, app_source
     assert "m_next = re.match" in app_source and "next|diagnose" in app_source, app_source
     assert "m_next_json = re.match" in app_source and "next-json|diagnose-json" in app_source, app_source
+    assert "m_tick = re.match" in app_source and "tick|autopilot" in app_source, app_source
     assert "format_workflow_run_next_action(" in app_source, app_source
     assert "workflow_run_next_action_projection(" in app_source, app_source
+    assert "run_workflow_autopilot_tick(" in app_source, app_source
+    assert "continue_workflow_run_v0(run_id, state=state)" in app_source, app_source
     trace_rows_before_inspection = len(a.read_jsonl(a.AGENT_TRACES_PATH))
     assert a.handle_workflow_command(state, f"/workflow trace {run_id}") is True
     assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
@@ -9156,17 +9163,37 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     planned_continue_row, planned_continue_message = a.create_planned_workflow_run(condition_workflow_result)
     assert planned_continue_row is not None, planned_continue_message
     planned_continue_id = planned_continue_row["run_id"]
-    assert a.handle_workflow_command(state, f"/workflow resume {planned_continue_id}") is True
-    assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
-    assert "safe steps completed: 1" in state.messages[-1].content, state.messages[-1].content
-    assert "requires condition evaluation" in state.messages[-1].content, state.messages[-1].content
+    workflow_rows_before_tick = len(a.workflow_run_records())
+    workflow_events_before_tick = len(a.workflow_event_records())
+    task_rows_before_tick = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_tick = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_tick = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    artifact_rows_before_tick = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    assert a.handle_workflow_command(state, f"/workflow tick --dry-run {planned_continue_id}") is True
+    assert "Workflow autopilot dry-run" in state.messages[-1].content, state.messages[-1].content
+    assert "selected: 1" in state.messages[-1].content, state.messages[-1].content
+    assert f"{planned_continue_id} | action=continue" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == workflow_rows_before_tick, a.workflow_run_records()
+    assert len(a.workflow_event_records()) == workflow_events_before_tick, a.workflow_event_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_tick
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_tick
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_tick
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_tick
+    assert a.handle_workflow_command(state, f"/workflow autopilot {planned_continue_id}") is True
+    assert "Workflow autopilot tick" in state.messages[-1].content, state.messages[-1].content
+    assert "selected: 1" in state.messages[-1].content, state.messages[-1].content
+    assert "continued: 1" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_continue = a.workflow_run_records()
-    assert len(workflow_run_rows_after_continue) == 5, workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[3]["status"] == "planned", workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[4]["run_id"] == planned_continue_id, workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[4]["status"] == "blocked", workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[4]["steps"][0]["status"] == "completed", workflow_run_rows_after_continue[4]
-    assert workflow_run_rows_after_continue[4]["steps"][1]["status"] == "blocked", workflow_run_rows_after_continue[4]
+    assert len(workflow_run_rows_after_continue) == workflow_rows_before_tick + 1, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[-2]["status"] == "planned", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[-1]["run_id"] == planned_continue_id, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[-1]["status"] == "blocked", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[-1]["steps"][0]["status"] == "completed", workflow_run_rows_after_continue[-1]
+    assert workflow_run_rows_after_continue[-1]["steps"][1]["status"] == "blocked", workflow_run_rows_after_continue[-1]
+    workflow_event_types_after_tick = [row["event_type"] for row in a.workflow_event_records()]
+    assert "autopilot_tick_selected" in workflow_event_types_after_tick, workflow_event_types_after_tick
+    assert "autopilot_tick_continued" in workflow_event_types_after_tick, workflow_event_types_after_tick
+    assert "autopilot_tick_summary" in workflow_event_types_after_tick, workflow_event_types_after_tick
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_after_agent_completion
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_agent_completion
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
@@ -9221,6 +9248,23 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert workflow_approval["payload"]["workflow_ref"] == approval_workflow_ref, workflow_approval
     assert workflow_approval["payload"]["step_id"] == "deploy_gate", workflow_approval
     assert approval_id in a.format_approvals(state), a.format_approvals(state)
+    approval_tick_workflow_rows_before = len(a.workflow_run_records())
+    approval_tick_events_before = len(a.workflow_event_records())
+    assert a.handle_workflow_command(state, f"/workflow tick --dry-run {approval_run_id}") is True
+    assert "Workflow autopilot dry-run" in state.messages[-1].content, state.messages[-1].content
+    assert f"{approval_run_id} | action=skip" in state.messages[-1].content, state.messages[-1].content
+    assert approval_id in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == approval_tick_workflow_rows_before, a.workflow_run_records()
+    assert len(a.workflow_event_records()) == approval_tick_events_before, a.workflow_event_records()
+    assert a.handle_workflow_command(state, f"/workflow tick {approval_run_id}") is True
+    assert "Workflow autopilot tick" in state.messages[-1].content, state.messages[-1].content
+    assert "selected: 0" in state.messages[-1].content, state.messages[-1].content
+    assert "skipped: 1" in state.messages[-1].content, state.messages[-1].content
+    assert "continued: 0" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == approval_tick_workflow_rows_before, a.workflow_run_records()
+    approval_tick_event_types = [row["event_type"] for row in a.workflow_event_records()]
+    assert "autopilot_tick_skipped" in approval_tick_event_types, approval_tick_event_types
+    assert "autopilot_tick_summary" in approval_tick_event_types, approval_tick_event_types
     assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
     assert "Workflow run waiting for approval:" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 8, a.workflow_run_records()

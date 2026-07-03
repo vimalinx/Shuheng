@@ -19,6 +19,7 @@ WORKFLOW_SCHEMA_VERSION = "shuheng.workflow.v1"
 WORKFLOW_RUN_SCHEMA_VERSION = "shuheng.workflow_run.v1"
 WORKFLOW_EVENT_SCHEMA_VERSION = "shuheng.workflow_event.v1"
 WORKFLOW_NEXT_ACTION_SCHEMA_VERSION = "shuheng.workflow_next_action.v1"
+WORKFLOW_AUTOPILOT_TICK_SCHEMA_VERSION = "shuheng.workflow_autopilot_tick.v1"
 WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES = frozenset({
     "prompt",
     "artifact_summary",
@@ -2364,6 +2365,146 @@ def format_workflow_run_next_action(
     if projection["next_action"] == "cancel_or_edit":
         lines.append("notes: edit the workflow definition before rerunning if the blocker is a condition or unsupported step.")
     lines.append("No workflow, task, progress, approval, artifact, or trace rows were appended.")
+    return "\n".join(lines)
+
+
+def _latest_workflow_run_ids(rows: list[dict[str, Any]]) -> list[str]:
+    run_ids: list[str] = []
+    for row in rows:
+        run_id = _workflow_run_id(row)
+        if not run_id:
+            continue
+        if run_id in run_ids:
+            run_ids.remove(run_id)
+        run_ids.append(run_id)
+    return run_ids
+
+
+def _workflow_autopilot_item_reason(projection: dict[str, Any]) -> str:
+    action = str(projection.get("next_action") or "").strip()
+    if action == "continue":
+        return "ready to continue"
+    if action == "approve_or_reject":
+        approval = projection.get("approval") if isinstance(projection.get("approval"), dict) else {}
+        approval_id = str(approval.get("approval_id") or "").strip()
+        status = str(approval.get("status") or "").strip()
+        if approval_id:
+            return f"waiting for approval {approval_id} ({status or 'unknown'})"
+        return "waiting for approval"
+    if action == "wait_task":
+        task = projection.get("task") if isinstance(projection.get("task"), dict) else {}
+        task_id = str(task.get("task_id") or "").strip()
+        status = str(task.get("status") or "").strip()
+        if task_id:
+            return f"waiting for task {task_id} ({status or 'unknown'})"
+        return "waiting for subagent task"
+    if action == "cancel_or_edit":
+        return str(projection.get("stop_reason") or "workflow requires cancel or edit before it can continue")
+    if action == "none":
+        return "workflow run is completed"
+    if action == "inspect_trace":
+        return str(projection.get("error") or projection.get("stop_reason") or "inspect workflow trace")
+    return action or "no supported autopilot action"
+
+
+def workflow_autopilot_tick_plan(
+    workflow_rows: list[dict[str, Any]],
+    *,
+    task_rows: list[dict[str, Any]] | None = None,
+    approval_rows: list[dict[str, Any]] | None = None,
+    run_ids: list[str] | tuple[str, ...] | None = None,
+    limit: int = 25,
+) -> dict[str, Any]:
+    requested = _unique_strings(run_ids or [])
+    candidate_ids = requested or _latest_workflow_run_ids(workflow_rows)
+    max_items = _at_least_int(limit, 25)
+    if max_items <= 0:
+        max_items = 25
+    max_items = min(max_items, 100)
+    items: list[dict[str, Any]] = []
+    selected = 0
+    skipped = 0
+    for run_id in candidate_ids[-max_items:]:
+        projection = workflow_run_next_action_projection(
+            run_id,
+            workflow_rows,
+            task_rows=task_rows,
+            approval_rows=approval_rows,
+        )
+        action = str(projection.get("next_action") or "").strip()
+        should_continue = bool(projection.get("found")) and action == "continue"
+        if should_continue:
+            selected += 1
+        else:
+            skipped += 1
+        items.append({
+            "run_id": str(projection.get("run_id") or run_id),
+            "workflow_ref": str(projection.get("workflow_ref") or ""),
+            "status": str(projection.get("status") or ""),
+            "history_rows": _at_least_int(projection.get("history_rows"), 0),
+            "next_action": action or "inspect_trace",
+            "selected": should_continue,
+            "reason": _workflow_autopilot_item_reason(projection),
+            "commands": list(projection.get("commands") or []),
+            "blocked_step": projection.get("blocked_step") if isinstance(projection.get("blocked_step"), dict) else {"step_id": "", "type": ""},
+            "approval": projection.get("approval") if isinstance(projection.get("approval"), dict) else {"approval_id": "", "status": ""},
+            "task": projection.get("task") if isinstance(projection.get("task"), dict) else {"task_id": "", "status": ""},
+        })
+    return {
+        "schema_version": WORKFLOW_AUTOPILOT_TICK_SCHEMA_VERSION,
+        "candidate_count": len(candidate_ids),
+        "considered_count": len(items),
+        "selected_count": selected,
+        "skipped_count": skipped,
+        "limit": max_items,
+        "run_ids": [item["run_id"] for item in items],
+        "items": items,
+        "read_only": True,
+        "rows_appended": False,
+    }
+
+
+def format_workflow_autopilot_tick_plan(
+    plan: dict[str, Any],
+    *,
+    dry_run: bool = False,
+    continued_count: int = 0,
+    event_count: int = 0,
+) -> str:
+    items = plan.get("items") if isinstance(plan.get("items"), list) else []
+    title = "Workflow autopilot dry-run" if dry_run else "Workflow autopilot tick"
+    lines = [
+        title,
+        f"considered: {_at_least_int(plan.get('considered_count'), len(items))}",
+        f"selected: {_at_least_int(plan.get('selected_count'), 0)}",
+        f"skipped: {_at_least_int(plan.get('skipped_count'), 0)}",
+        f"continued: {_at_least_int(continued_count, 0)}",
+    ]
+    if not dry_run:
+        lines.append(f"events_appended: {_at_least_int(event_count, 0)}")
+    if not items:
+        lines.append("runs: (none)")
+    else:
+        lines.append("runs:")
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            marker = "continue" if item.get("selected") else "skip"
+            pieces = [
+                f"- {item.get('run_id') or '-'}",
+                f"action={marker}",
+                f"status={item.get('status') or 'unknown'}",
+                f"next={item.get('next_action') or 'inspect_trace'}",
+            ]
+            reason = str(item.get("reason") or "").strip()
+            if reason:
+                pieces.append(f"reason={reason}")
+            lines.append(" | ".join(pieces))
+            commands = item.get("commands") if isinstance(item.get("commands"), list) else []
+            if commands and not item.get("selected"):
+                lines.extend(f"  command: {command}" for command in commands[:3])
+    if dry_run:
+        lines.append("No workflow, task, progress, approval, artifact, trace, or workflow event rows were appended.")
     return "\n".join(lines)
 
 
