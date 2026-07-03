@@ -276,6 +276,77 @@ def test_workflow_generate_and_save_last_persists_manifest_backed_workflow(tmp_p
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
 
 
+def test_workflow_run_last_saves_and_runs_safe_generated_draft(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    state = app_module.State(agent=SequencedWorkflowAgent([]))
+    state.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-safe-flow",
+        "name": "Draft Safe Flow",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan."},
+            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+        ],
+    }
+
+    assert app_module.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow") is True
+
+    assert "Workflow draft saved and run started." in state.messages[-1].content
+    assert "Workflow draft saved." in state.messages[-1].content
+    assert "Workflow run advanced:" in state.messages[-1].content
+    assert "status: completed" in state.messages[-1].content
+    workflow_path = plugin_root / "generated-pack" / "workflows" / "safe-flow.json"
+    assert workflow_path.exists()
+    assert json.loads(workflow_path.read_text(encoding="utf-8"))["id"] == "safe-flow"
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["status"] == "planned"
+    assert rows[1]["status"] == "completed"
+    assert rows[0]["workflow_ref"] == "plugin://generated-pack/workflows/safe-flow"
+    assert rows[1]["run_id"] == rows[0]["run_id"]
+    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed"]
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_workflow_run_last_uses_existing_approval_bridge(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    state = app_module.State(agent=SequencedWorkflowAgent([]))
+    state.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-approval-flow",
+        "name": "Draft Approval Flow",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan."},
+            {"id": "approve", "type": "approval", "depends_on": ["plan"]},
+            {"id": "notify", "type": "notify", "depends_on": ["approve"]},
+        ],
+    }
+
+    assert app_module.handle_workflow_command(state, "/workflow run-last generated-pack/approval-flow") is True
+
+    assert "Workflow draft saved and run started." in state.messages[-1].content
+    assert "Approvals created: 1" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[-1]["status"] == "waiting_approval"
+    approval_id = rows[-1]["approval"]["approval_id"]
+    assert approval_id
+    approval_rows = app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)
+    assert len(approval_rows) == 1
+    assert approval_rows[0]["approval_id"] == approval_id
+    assert approval_rows[0]["type"] == "workflow_step_approval"
+    assert approval_rows[0]["payload"]["workflow_ref"] == "plugin://generated-pack/workflows/approval-flow"
+    assert approval_rows[0]["payload"]["source_command"] == "/workflow run-last plugin://generated-pack/workflows/approval-flow"
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
 def test_workflow_generate_invalid_output_does_not_overwrite_previous_valid_draft(tmp_path: Path, monkeypatch) -> None:
     configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
     valid_payload = {
@@ -308,6 +379,9 @@ def test_workflow_save_last_without_draft_and_unsafe_ids_write_no_files(tmp_path
 
     assert app_module.handle_workflow_command(state, "/workflow save-last generated-pack/saved-flow") is True
     assert "No valid workflow draft is available" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow run-last generated-pack/saved-flow") is True
+    assert "Workflow draft was not run." in state.messages[-1].content
+    assert "No valid workflow draft is available" in state.messages[-1].content
     assert not plugin_root.exists()
 
     state.workflow_draft_payload = {
@@ -316,6 +390,9 @@ def test_workflow_save_last_without_draft_and_unsafe_ids_write_no_files(tmp_path
         "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
     }
     assert app_module.handle_workflow_command(state, "/workflow save-last ../escape/saved-flow") is True
+    assert "filesystem-safe" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow run-last ../escape/saved-flow") is True
+    assert "Workflow draft was not run." in state.messages[-1].content
     assert "filesystem-safe" in state.messages[-1].content
     assert not plugin_root.exists()
     assert app_module.workflow_run_records() == []

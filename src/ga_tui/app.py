@@ -4789,6 +4789,7 @@ def format_workflow_draft_ready(result: workflow_helpers.WorkflowLoadResult, goa
     lines.extend([
         "",
         f"Save it with: /workflow save-last <plugin-id>/{definition.workflow_id}",
+        f"Or save and run it with: /workflow run-last <plugin-id>/{definition.workflow_id}",
         "Then inspect or run it with:",
         f"- /workflow info <plugin-id>/{definition.workflow_id}",
         f"- /workflow dry-run <plugin-id>/{definition.workflow_id}",
@@ -4858,11 +4859,16 @@ def _plugin_manifest_with_workflow(
 
 
 def save_latest_workflow_draft(state: State, ref: str) -> str:
+    _saved_ref, message = save_latest_workflow_draft_result(state, ref)
+    return message
+
+
+def save_latest_workflow_draft_result(state: State, ref: str) -> tuple[str, str]:
     plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
     if not plugin_id or not workflow_id:
-        return "用法：/workflow save-last <plugin-id>/<workflow-id>\nplugin-id 和 workflow-id 必须是 filesystem-safe id。"
+        return "", "用法：/workflow save-last <plugin-id>/<workflow-id>\nplugin-id 和 workflow-id 必须是 filesystem-safe id。"
     if not state.workflow_draft_payload:
-        return "No valid workflow draft is available. Run /workflow generate <goal> first."
+        return "", "No valid workflow draft is available. Run /workflow generate <goal> first."
     payload = copy.deepcopy(state.workflow_draft_payload)
     payload["schema_version"] = workflow_helpers.WORKFLOW_SCHEMA_VERSION
     payload["id"] = workflow_id
@@ -4879,7 +4885,7 @@ def save_latest_workflow_draft(state: State, ref: str) -> str:
         path=workflow_path,
     )
     if preflight.definition is None or preflight.issues:
-        return format_workflow_draft_rejected(preflight)
+        return "", format_workflow_draft_rejected(preflight)
     manifest = _plugin_manifest_with_workflow(read_json_dict_file(manifest_path), plugin_id, workflow_id, payload)
     os.makedirs(os.path.dirname(workflow_path), exist_ok=True)
     write_text_atomic(workflow_path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
@@ -4887,10 +4893,10 @@ def save_latest_workflow_draft(state: State, ref: str) -> str:
     clear_plugin_registry_cache()
     result = workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
     if result.definition is None or result.issues:
-        return "Workflow draft saved but failed registry validation:\n" + format_workflow_info(result)
+        return "", "Workflow draft saved but failed registry validation:\n" + format_workflow_info(result)
     state.workflow_draft_ref = workflow_ref
     mark_dirty(state)
-    return (
+    return workflow_ref, (
         "Workflow draft saved.\n"
         f"ref: {workflow_ref}\n"
         f"workflow: {workflow_path}\n"
@@ -4900,6 +4906,21 @@ def save_latest_workflow_draft(state: State, ref: str) -> str:
         f"Dry-run: /workflow dry-run {plugin_id}/{workflow_id}\n"
         f"Run: /workflow run {plugin_id}/{workflow_id}"
     )
+
+
+def run_latest_workflow_draft(state: State, ref: str) -> str:
+    saved_ref, save_message = save_latest_workflow_draft_result(state, ref)
+    if not saved_ref:
+        return "Workflow draft was not run.\n" + save_message
+    result = workflow_load_result_for_ref(saved_ref, user_plugin_registry(force=True))
+    row, run_message = create_workflow_run_v0(
+        result,
+        state=state,
+        source_command=f"/workflow run-last {saved_ref}",
+    )
+    if row is None:
+        return "Workflow draft saved but not run.\n\n[Save]\n" + save_message + "\n\n[Run]\n" + run_message
+    return "Workflow draft saved and run started.\n\n[Save]\n" + save_message + "\n\n[Run]\n" + run_message
 
 
 def workflow_run_records(limit: int = 0) -> list[dict[str, Any]]:
@@ -5117,7 +5138,9 @@ def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> 
 def create_workflow_run_v0(
     result: workflow_helpers.WorkflowLoadResult,
     state: Optional[State] = None,
+    source_command: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
+    command = source_command or f"/workflow run {result.workflow_ref}"
     built = build_workflow_run_record(
         result,
         run_id=short_uid("wfr"),
@@ -5131,13 +5154,13 @@ def create_workflow_run_v0(
     advanced = advance_workflow_run_v0(built.record, timestamp=now_iso())
     row, _approval_id = bridge_workflow_step_approval(
         advanced.record,
-        source_command=f"/workflow run {result.workflow_ref}",
+        source_command=command,
         state=state,
     )
     if _approval_id == "":
         row, _task_id, _task_message = bridge_workflow_agent_task(
             row,
-            source_command=f"/workflow run {result.workflow_ref}",
+            source_command=command,
             state=state,
         )
     row = append_workflow_run(row)
@@ -22704,6 +22727,10 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if m_save_last:
         add_system(state, save_latest_workflow_draft(state, m_save_last.group(1)))
         return True
+    m_run_last = re.match(r"/workflows?\s+run-last\s+(\S+)\s*$", raw, re.I)
+    if m_run_last:
+        add_system(state, run_latest_workflow_draft(state, m_run_last.group(1)))
+        return True
     if re.match(r"/workflows?\s+runs\s*$", raw, re.I):
         add_system(state, format_workflow_runs(workflow_run_records()))
         return True
@@ -22737,6 +22764,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             state,
             "未知 /workflow 命令。\n"
             "用法：/workflows、/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
+            "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>、"
             "/workflow runs、/workflow show <run-id>、/workflow continue|resume <run-id>",

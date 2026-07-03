@@ -8955,6 +8955,49 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.normalize_subagent_skill_refs(skilled.skill_refs) == [], skilled.skill_refs
 
 
+def assert_workflow_run_last_generated_draft_contract() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_workflow_run_last_")
+    retarget_harness(root)
+    state = a.State(agent=SequencedFakeAgent([]))
+    state.running = True
+    state.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-safe-flow",
+        "name": "Draft Safe Flow",
+        "description": "Policy gate draft saved and run through the normal runner.",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan generated work."},
+            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+        ],
+    }
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "/workflow run-last" in app_source and "run_latest_workflow_draft" in app_source, app_source
+    assert "create_workflow_run_v0(" in app_source and "save_latest_workflow_draft_result" in app_source, app_source
+    assert a.handle_workflow_command(state, "/workflow run-last generated-pack/safe-flow") is True
+    assert "Workflow draft saved and run started." in state.messages[-1].content, state.messages[-1].content
+    assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
+    assert "status: completed" in state.messages[-1].content, state.messages[-1].content
+    generated_ref = "plugin://generated-pack/workflows/safe-flow"
+    generated_result = a.workflow_load_result_for_ref(generated_ref, a.user_plugin_registry(force=True))
+    assert generated_result.definition is not None, generated_result
+    assert not generated_result.issues, generated_result.issues
+    workflow_rows = a.workflow_run_records()
+    assert len(workflow_rows) == 2, workflow_rows
+    assert workflow_rows[0]["status"] == "planned", workflow_rows
+    assert workflow_rows[1]["status"] == "completed", workflow_rows
+    assert workflow_rows[0]["workflow_ref"] == generated_ref, workflow_rows
+    assert workflow_rows[1]["run_id"] == workflow_rows[0]["run_id"], workflow_rows
+    assert [step["status"] for step in workflow_rows[1]["steps"]] == ["completed", "completed"], workflow_rows
+    assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
+    assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
+
+    no_draft = a.State(agent=SequencedFakeAgent([]))
+    assert a.handle_workflow_command(no_draft, "/workflow run-last generated-pack/no-draft") is True
+    assert "Workflow draft was not run." in no_draft.messages[-1].content, no_draft.messages[-1].content
+
+
 def assert_persistent_agent_dashboard_home_pages() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
     retarget_harness(root)
@@ -10349,6 +10392,7 @@ def run_checks() -> None:
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
     assert_subagent_dedicated_skills_are_agent_scoped()
     assert_declarative_plugins_are_agent_scoped()
+    assert_workflow_run_last_generated_draft_contract()
     assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()
     assert_tui_query_tools_expose_dashboard_state()
