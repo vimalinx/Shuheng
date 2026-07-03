@@ -46,6 +46,44 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 43: Run workflow definitions from panel
+
+**Date**: 2026-07-03
+**Task**: Add workflow panel definition run action v1
+**Branch**: `main`
+
+### Summary
+
+Made `/workflows` a control surface for workflow definitions: selecting a valid definition row and pressing Enter/c now starts a normal workflow run through the manifest-backed loader and existing app-owned runner. Run rows keep existing continue/cancel behavior.
+
+### Main Changes
+
+- Definition-row detail now shows `/workflow run <ref>` and the Enter/c panel action.
+- Definition-row Enter/c reloads the workflow through the plugin registry and delegates to `create_workflow_run_v0(...)`.
+- Definition-row x remains a visible no-op; run-row Enter/c and x still delegate to the existing continue/cancel helpers.
+- Tests, policy gates, and backend spec now lock the panel definition-run contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bb06e75` | feat: run workflow definitions from panel |
+| `08c3168` | chore(task): archive 07-03-add-workflow-panel-run-definition-v1 |
+
+### Testing
+
+- [OK] Targeted compile/Ruff, `tests/test_workflows.py` 48 passed, and `scripts/check_policy_gates.py`.
+- [OK] Full gate: Ruff over `src tests scripts`, release hygiene, runtime smoke, compileall, `git diff --check`, full pytest 549 passed, build, wheel smoke, and `shuheng-check`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue workflow usability work; the next high-value gap is definition-run input handling from the panel.
+
+
 ## Session 43: Add scheduled workflow run trigger
 
 **Date**: 2026-07-03
