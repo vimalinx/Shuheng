@@ -186,6 +186,9 @@ class State:
     active_task_id: Optional[int] = None
     active_task_source: str = ""
     active_stream_target: Optional[StreamTarget] = None
+    workflow_draft_payload: dict[str, Any] | None = None
+    workflow_draft_goal: str = ""
+    workflow_draft_ref: str = ""
     background_sessions: dict[str, BackgroundSession] = field(default_factory=dict)
     background_counter: int = 0
     subagents: dict[str, SubAgentRuntime] = field(default_factory=dict)

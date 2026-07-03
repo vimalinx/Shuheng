@@ -93,6 +93,12 @@ class WorkflowLoadResult:
 
 
 @dataclass(frozen=True)
+class WorkflowDraftResult:
+    payload: dict[str, Any] | None
+    load_result: WorkflowLoadResult
+
+
+@dataclass(frozen=True)
 class WorkflowRunBuildResult:
     record: dict[str, Any] | None = None
     issues: tuple[WorkflowIssue, ...] = ()
@@ -158,6 +164,82 @@ def _payload_from_text(text: str, workflow_ref: str, path: str) -> tuple[dict[st
     if not isinstance(payload, dict):
         return None, (workflow_issue(workflow_ref, path, "workflow JSON fence must contain an object"),)
     return payload, ()
+
+
+def workflow_load_result_from_payload(
+    payload: dict[str, Any],
+    *,
+    plugin_id: str,
+    workflow_id: str,
+    workflow_ref: str = "",
+    path: str = "(draft)",
+    name: str = "",
+    description: str = "",
+) -> WorkflowLoadResult:
+    target_workflow_id = plugin_helpers.safe_plugin_id(workflow_id)
+    target_plugin_id = plugin_helpers.safe_plugin_id(plugin_id)
+    ref = workflow_ref or plugin_helpers.plugin_workflow_ref(target_plugin_id, target_workflow_id)
+    issues: list[WorkflowIssue] = []
+    if not isinstance(payload, dict):
+        return WorkflowLoadResult(
+            workflow_ref=ref or "(draft)",
+            path=path,
+            issues=(workflow_issue(ref or "(draft)", path, "workflow payload must contain a JSON object"),),
+        )
+    if payload.get("schema_version") != WORKFLOW_SCHEMA_VERSION:
+        issues.append(workflow_issue(ref, path, f"schema_version must be {WORKFLOW_SCHEMA_VERSION}"))
+    parsed_workflow_id = plugin_helpers.safe_plugin_id(payload.get("id"))
+    if not parsed_workflow_id:
+        issues.append(workflow_issue(ref, path, "workflow id is required and must be filesystem-safe"))
+        parsed_workflow_id = target_workflow_id
+    elif target_workflow_id and parsed_workflow_id != target_workflow_id:
+        issues.append(workflow_issue(ref, path, f"workflow id {parsed_workflow_id} does not match manifest id {target_workflow_id}"))
+    inputs, input_issues = _parse_inputs(payload.get("inputs"), ref, path)
+    issues.extend(input_issues)
+    steps, step_issues = _parse_steps(payload.get("steps"), ref, path)
+    issues.extend(step_issues)
+    permissions = payload.get("permissions") if isinstance(payload.get("permissions"), dict) else {}
+    resolved_workflow_id = parsed_workflow_id or target_workflow_id
+    definition = WorkflowDefinition(
+        workflow_ref=ref,
+        plugin_id=target_plugin_id,
+        workflow_id=resolved_workflow_id,
+        name=str(payload.get("name") or name or resolved_workflow_id).strip() or resolved_workflow_id,
+        description=str(payload.get("description") or description or "").strip(),
+        path=path,
+        inputs=inputs,
+        steps=steps,
+        permissions=dict(permissions),
+    )
+    return WorkflowLoadResult(workflow_ref=ref, path=path, definition=definition, issues=tuple(issues))
+
+
+def workflow_draft_load_result_from_text(text: str, *, workflow_ref: str = "workflow-draft", path: str = "(model)") -> WorkflowLoadResult:
+    return workflow_draft_result_from_text(text, workflow_ref=workflow_ref, path=path).load_result
+
+
+def workflow_draft_result_from_text(text: str, *, workflow_ref: str = "workflow-draft", path: str = "(model)") -> WorkflowDraftResult:
+    payload, payload_issues = _payload_from_text(text, workflow_ref, path)
+    if payload is None:
+        return WorkflowDraftResult(
+            payload=None,
+            load_result=WorkflowLoadResult(workflow_ref=workflow_ref, path=path, issues=payload_issues),
+        )
+    workflow_id = plugin_helpers.safe_plugin_id(payload.get("id")) or "generated-workflow"
+    plugin_id, parsed_workflow_id = plugin_helpers.parse_plugin_workflow_ref(workflow_ref)
+    if parsed_workflow_id:
+        workflow_id = parsed_workflow_id
+    result_ref = workflow_ref if plugin_id and parsed_workflow_id else f"draft://workflow/{workflow_id}"
+    return WorkflowDraftResult(
+        payload=payload,
+        load_result=workflow_load_result_from_payload(
+            payload,
+            plugin_id=plugin_id or "draft",
+            workflow_id=workflow_id,
+            workflow_ref=result_ref,
+            path=path,
+        ),
+    )
 
 
 def _parse_inputs(value: Any, workflow_ref: str, path: str) -> tuple[tuple[WorkflowInput, ...], list[WorkflowIssue]]:
@@ -267,32 +349,15 @@ def load_workflow_definition(workflow: plugin_helpers.PluginWorkflow) -> Workflo
     payload, payload_issues = _payload_from_text(text, workflow_ref, path)
     if payload is None:
         return WorkflowLoadResult(workflow_ref=workflow_ref, path=path, issues=payload_issues)
-    issues = list(payload_issues)
-    if payload.get("schema_version") != WORKFLOW_SCHEMA_VERSION:
-        issues.append(workflow_issue(workflow_ref, path, f"schema_version must be {WORKFLOW_SCHEMA_VERSION}"))
-    workflow_id = plugin_helpers.safe_plugin_id(payload.get("id"))
-    if not workflow_id:
-        issues.append(workflow_issue(workflow_ref, path, "workflow id is required and must be filesystem-safe"))
-        workflow_id = workflow.workflow_id
-    elif workflow_id != workflow.workflow_id:
-        issues.append(workflow_issue(workflow_ref, path, f"workflow id {workflow_id} does not match manifest id {workflow.workflow_id}"))
-    inputs, input_issues = _parse_inputs(payload.get("inputs"), workflow_ref, path)
-    issues.extend(input_issues)
-    steps, step_issues = _parse_steps(payload.get("steps"), workflow_ref, path)
-    issues.extend(step_issues)
-    permissions = payload.get("permissions") if isinstance(payload.get("permissions"), dict) else {}
-    definition = WorkflowDefinition(
-        workflow_ref=workflow_ref,
+    return workflow_load_result_from_payload(
+        payload,
         plugin_id=workflow.plugin_id,
-        workflow_id=workflow_id,
-        name=str(payload.get("name") or workflow.name or workflow_id).strip() or workflow_id,
-        description=str(payload.get("description") or workflow.description or "").strip(),
+        workflow_id=workflow.workflow_id,
+        workflow_ref=workflow_ref,
         path=path,
-        inputs=inputs,
-        steps=steps,
-        permissions=dict(permissions),
+        name=workflow.name,
+        description=workflow.description,
     )
-    return WorkflowLoadResult(workflow_ref=workflow_ref, path=path, definition=definition, issues=tuple(issues))
 
 
 def workflow_load_result_for_ref(ref: Any, registry: plugin_helpers.PluginRegistry) -> WorkflowLoadResult:

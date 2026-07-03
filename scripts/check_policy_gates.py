@@ -8654,6 +8654,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert 'if panel == "workflows"' in app_source, app_source
     assert '"/plugins"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
     assert '"/workflows"' in app_source and "open_harness_panel(stdscr, state, panel)" in app_source, app_source
+    assert "/workflow generate" in app_source and "/workflow save-last" in app_source, app_source
+    assert "is_workflow_generation_source" in app_source and "save_latest_workflow_draft" in app_source, app_source
     workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
     forbidden_workflow_imports = [
         "app",
@@ -8665,6 +8667,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         "subprocess",
     ]
     assert not any(f"import {name}" in workflow_source or f"from . import {name}" in workflow_source for name in forbidden_workflow_imports), workflow_source
+    assert "WorkflowDraftResult" in workflow_source and "workflow_draft_result_from_text" in workflow_source, workflow_source
     assert "start_subagent" not in workflow_source and "append_task_ledger" not in workflow_source, workflow_source
     panel_items = a.plugin_panel_items()
     plugin_item = next(item for item in panel_items if item.key == "research-pack")
@@ -8712,6 +8715,54 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, f"/workflow dry-run {workflow_ref}") is True
     assert "No execution occurred." in state.messages[-1].content, state.messages[-1].content
     assert workflow_marker in state.messages[-1].content, state.messages[-1].content
+    generated_workflow_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "generated-review-flow",
+        "name": "Generated Review Flow",
+        "description": "Policy gate generated workflow draft.",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan generated review."},
+            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+        ],
+    }
+    draft_task_rows_before = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    draft_progress_rows_before = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    draft_approval_rows_before = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    draft_artifact_rows_before = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    draft_workflow_rows_before = len(a.workflow_run_records())
+    state.agent = SequencedFakeAgent([json.dumps(generated_workflow_payload)])
+    assert a.handle_workflow_command(state, "/workflow generate create a two step review workflow") is True
+    assert state.agent.prompts and state.agent.prompts[0][1].startswith("workflow_generate"), state.agent.prompts
+    assert "Return ONLY one JSON object" in state.agent.prompts[0][0], state.agent.prompts[0][0]
+    drain_ui(state)
+    assert state.workflow_draft_payload is not None, state.messages[-1].content
+    assert "Workflow draft ready." in state.messages[-1].content, state.messages[-1].content
+    assert "No workflow was saved or executed." in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == draft_workflow_rows_before, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == draft_task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == draft_progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == draft_approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == draft_artifact_rows_before
+    assert a.handle_workflow_command(state, "/workflow save-last generated-pack/generated-review") is True
+    assert "Workflow draft saved." in state.messages[-1].content, state.messages[-1].content
+    generated_ref = "plugin://generated-pack/workflows/generated-review"
+    generated_result = a.workflow_load_result_for_ref(generated_ref, a.user_plugin_registry(force=True))
+    assert generated_result.definition is not None, generated_result
+    assert not generated_result.issues, generated_result.issues
+    assert generated_result.definition.workflow_id == "generated-review", generated_result.definition
+    assert "No execution occurred." in a.format_workflow_dry_run(generated_result)
+    generated_manifest = Path(a.SHUHENG_PLUGINS_DIR, "generated-pack", "plugin.json")
+    generated_workflow = Path(a.SHUHENG_PLUGINS_DIR, "generated-pack", "workflows", "generated-review.json")
+    assert generated_manifest.exists(), generated_manifest
+    assert generated_workflow.exists(), generated_workflow
+    assert json.loads(generated_workflow.read_text(encoding="utf-8"))["id"] == "generated-review"
+    assert len(a.workflow_run_records()) == draft_workflow_rows_before, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == draft_task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == draft_progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == draft_approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == draft_artifact_rows_before
+    assert a.handle_workflow_command(state, "/workflow save-last ../escape/generated-review") is True
+    assert "filesystem-safe" in state.messages[-1].content, state.messages[-1].content
     task_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
     progress_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
     approval_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))

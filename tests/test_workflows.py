@@ -217,6 +217,114 @@ def test_workflow_definition_rejects_non_json_bodies(tmp_path: Path) -> None:
     assert "must be JSON" in result.issues[0].message
 
 
+def test_workflow_generate_and_save_last_persists_manifest_backed_workflow(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "generated-flow",
+        "name": "Generated Flow",
+        "description": "Generated from natural language.",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan the work."},
+            {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+        ],
+    }
+    state = app_module.State(agent=SequencedWorkflowAgent([json.dumps(draft_payload)]))
+
+    assert app_module.handle_workflow_command(state, "/workflow generate summarize a research project") is True
+    assert state.agent.prompts
+    assert state.agent.prompts[0][1].startswith("workflow_generate")
+    assert "Return ONLY one JSON object" in state.agent.prompts[0][0]
+    assert "summarize a research project" in state.agent.prompts[0][0]
+
+    drain_app_ui_queue(state)
+
+    assert state.workflow_draft_payload is not None
+    assert state.workflow_draft_payload["id"] == "generated-flow"
+    assert "Workflow draft ready." in state.messages[-1].content
+    assert "No workflow was saved or executed." in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+    assert app_module.handle_workflow_command(state, "/workflow save-last generated-pack/saved-flow") is True
+
+    manifest_path = plugin_root / "generated-pack" / "plugin.json"
+    workflow_path = plugin_root / "generated-pack" / "workflows" / "saved-flow.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    saved_workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == "shuheng.plugin.v1"
+    assert manifest["id"] == "generated-pack"
+    assert manifest["contributes"]["workflows"][0]["id"] == "saved-flow"
+    assert manifest["contributes"]["workflows"][0]["path"] == "workflows/saved-flow.json"
+    assert saved_workflow["id"] == "saved-flow"
+    assert "Workflow draft saved." in state.messages[-1].content
+    result = app_module.workflow_load_result_for_ref(
+        "generated-pack/saved-flow",
+        app_module.user_plugin_registry(force=True),
+    )
+    assert result.definition is not None
+    assert not result.issues
+    assert "No execution occurred." in app_module.format_workflow_dry_run(result)
+    assert app_module.workflow_run_records() == []
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_workflow_generate_invalid_output_does_not_overwrite_previous_valid_draft(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    valid_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "valid-draft",
+        "name": "Valid Draft",
+        "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+    }
+    state = app_module.State(agent=SequencedWorkflowAgent([json.dumps(valid_payload)]))
+
+    assert app_module.handle_workflow_command(state, "/workflow generate valid workflow") is True
+    drain_app_ui_queue(state)
+    assert state.workflow_draft_payload is not None
+    previous = dict(state.workflow_draft_payload)
+
+    state.agent = SequencedWorkflowAgent(["not workflow json"])
+    assert app_module.handle_workflow_command(state, "/workflow generate invalid workflow") is True
+    drain_app_ui_queue(state)
+
+    assert state.workflow_draft_payload == previous
+    assert "Workflow draft rejected." in state.messages[-1].content
+    assert "No workflow was saved or executed." in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+
+
+def test_workflow_save_last_without_draft_and_unsafe_ids_write_no_files(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    state = app_module.State(agent=SequencedWorkflowAgent([]))
+
+    assert app_module.handle_workflow_command(state, "/workflow save-last generated-pack/saved-flow") is True
+    assert "No valid workflow draft is available" in state.messages[-1].content
+    assert not plugin_root.exists()
+
+    state.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "valid-draft",
+        "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+    }
+    assert app_module.handle_workflow_command(state, "/workflow save-last ../escape/saved-flow") is True
+    assert "filesystem-safe" in state.messages[-1].content
+    assert not plugin_root.exists()
+    assert app_module.workflow_run_records() == []
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
 def test_workflow_run_record_is_planned_only(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,

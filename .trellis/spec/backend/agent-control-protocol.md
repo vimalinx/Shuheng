@@ -2296,6 +2296,88 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /workflow dry-run research-pack/compare-sources -> renders plan preview and says "No execution occurred."
 ```
 
+## Scenario: Workflow AI Draft Generation
+
+### 1. Scope / Trigger
+
+- Trigger: Users want Shuheng to turn a natural-language workflow goal into a reusable declarative plugin workflow without hand-writing JSON.
+- Applies to: `/workflow generate <goal>`, model-output workflow JSON parsing, latest workflow draft state, `/workflow save-last <plugin-id>/<workflow-id>`, user plugin manifests, plugin registry refresh, `workflows.py`, `app.py`, `tests/test_workflows.py`, and policy gates.
+- Non-goal: Generation and save do not run workflows, dispatch subagents, create approvals, write workflow run rows, mutate task/progress/artifact ledgers, call tools, execute plugin code, publish plugins, schedule workflows, touch Secret Vault, or expose remote A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow generate <goal>`
+  - `/workflow save-last <plugin-id>/<workflow-id>`
+- Generated workflow schema version: `shuheng.workflow.v1`.
+- Saved plugin manifest schema version: `shuheng.plugin.v1`.
+- Draft source tag prefix: `workflow_generate`.
+- Pure helper ownership:
+  - `workflows.workflow_draft_result_from_text(...)`
+  - `workflows.workflow_draft_load_result_from_text(...)`
+  - `workflows.workflow_load_result_from_payload(...)`
+- App ownership:
+  - `app.workflow_generation_prompt(...)`
+  - `app.handle_completed_workflow_generation(...)`
+  - `app.save_latest_workflow_draft(...)`
+
+### 3. Contracts
+
+- `/workflow generate <goal>` starts a normal main-agent task with a bounded prompt that asks for exactly one declarative workflow JSON object.
+- A completed generation task must parse raw model text through the pure workflow parser and store only the latest valid draft payload in `State`.
+- Invalid generation output must be reported visibly and must not overwrite the previous valid draft.
+- Generation output must not execute TUI controls, interaction payloads, workflow steps, subagent tasks, tools, approval requests, plugin code, or shell/Python/JavaScript.
+- `/workflow save-last <plugin-id>/<workflow-id>` must write the latest valid draft into `SHUHENG_PLUGINS_DIR/<plugin-id>/workflows/<workflow-id>.json` and create or update `<plugin-id>/plugin.json`.
+- The save target controls the saved plugin id and workflow id. The saved workflow payload id must match `<workflow-id>`.
+- Saving must preserve unrelated manifest metadata where possible and only add or update the target `contributes.workflows` entry.
+- Saved workflows must immediately load through the normal manifest-backed plugin registry and become visible to `/workflows`, `/workflow info`, `/workflow dry-run`, and `/workflow run`.
+- `workflows.py` remains pure. It may parse and validate model text/payloads, but must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
+- `app.py` remains the Orchestrator owner for model calls, state mutation, user-visible messages, file writes, and registry refresh.
+
+### 4. Validation & Error Matrix
+
+- Blank generation goal -> usage message, no model task.
+- Valid JSON workflow draft -> latest draft payload stored, visible preview shown, no save or run.
+- Fenced JSON workflow draft -> accepted through the same parser used by workflow files.
+- Invalid JSON or non-object output -> visible rejection, previous valid draft remains unchanged.
+- Wrong schema, unsafe id, duplicate step/input id, unsupported step type, or missing dependency -> visible validation rejection, previous valid draft remains unchanged.
+- Save with no valid latest draft -> visible no-op, no files written.
+- Save with unsafe plugin id or workflow id -> visible rejection, no files written.
+- Save with valid draft and safe target -> plugin manifest and workflow file written, registry refreshes, normal workflow load succeeds.
+- Generate or save attempts to include TUI controls or interaction payloads -> controls are ignored on the workflow generation source path.
+- Generate/save must leave workflow runs, task ledger, progress ledger, approvals, and artifact index unchanged.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow generate "research and summarize sources"` stores a validated draft and tells the user to run `/workflow save-last research-pack/source-summary`.
+- Good: `/workflow save-last research-pack/source-summary` writes `plugin.json` plus `workflows/source-summary.json`, then `/workflow dry-run research-pack/source-summary` shows `No execution occurred.`
+- Base: A generated `agent_task` step may target an existing subagent name or plugin agent template ref; actual dispatch happens only later through `/workflow run`.
+- Base: The save command may update an existing manifest workflow entry for the same workflow id.
+- Bad: `/workflow generate ...` immediately calls `/workflow run` or `start_subagent_task_structured(...)`.
+- Bad: Saving creates a hidden draft registry outside the plugin manifest model.
+- Bad: Model output containing a TUI control block is executed during workflow generation.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert valid generation stores a draft, invalid generation does not overwrite a valid draft, save-last writes manifest-backed plugin files, saved workflows load and dry-run, no-draft save is no-op, unsafe ids are rejected, and generate/save do not write workflow/task/progress/approval/artifact ledgers.
+- `scripts/check_policy_gates.py` must assert `/workflow generate` and `/workflow save-last` exist, generation uses a `workflow_generate` source, saved workflows are visible through the registry, and generate/save leave execution ledgers unchanged.
+- Policy gates must keep asserting `workflows.py` has no app/runtime/UI/governance imports.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow generate "compare sources" -> model returns JSON -> app dispatches agent_task and appends workflow run rows
+```
+
+#### Correct
+
+```text
+/workflow generate "compare sources" -> validated draft in State -> /workflow save-last research-pack/compare-sources -> normal manifest-backed workflow file
+```
+
 ## Scenario: Planned Workflow Run Ledger Skeleton
 
 ### 1. Scope / Trigger

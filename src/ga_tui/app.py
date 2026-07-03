@@ -705,7 +705,7 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/plugins", "", "列出本地声明式插件", True),
     ("/plugin", "<cmd>", "查看插件详情或创建插件 agent", False),
     ("/workflows", "", "查看声明式 workflow 注册表", True),
-    ("/workflow", "<cmd>", "查看或 dry-run 声明式 workflow", False),
+    ("/workflow", "<cmd>", "生成、保存、查看或运行声明式 workflow", False),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
@@ -964,6 +964,7 @@ plugin_skill_file_for_ref = plugin_helpers.plugin_skill_file_for_ref
 plugin_skill_ref_from_token = plugin_helpers.plugin_skill_ref_from_token
 plugin_workflow_file_for_ref = plugin_helpers.plugin_workflow_file_for_ref
 plugin_workflow_for_ref = plugin_helpers.plugin_workflow_for_ref
+plugin_workflow_ref = plugin_helpers.plugin_workflow_ref
 parse_plugin_workflow_ref = plugin_helpers.parse_plugin_workflow_ref
 format_workflow_dry_run = workflow_helpers.format_workflow_dry_run
 format_workflow_info = workflow_helpers.format_workflow_info
@@ -986,6 +987,9 @@ pending_workflow_approval_step = workflow_helpers.pending_workflow_approval_step
 workflow_agent_task_id = workflow_helpers.workflow_agent_task_id
 workflow_run_has_meaningful_transition = workflow_helpers.workflow_run_has_meaningful_transition
 workflow_approval_id = workflow_helpers.workflow_approval_id
+workflow_draft_load_result_from_text = workflow_helpers.workflow_draft_load_result_from_text
+workflow_draft_result_from_text = workflow_helpers.workflow_draft_result_from_text
+workflow_load_result_from_payload = workflow_helpers.workflow_load_result_from_payload
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
 
@@ -4702,6 +4706,200 @@ def append_progress_ledger(
 
 def latest_progress_records() -> dict[str, dict[str, Any]]:
     return latest_records_by_id(AGENT_PROGRESS_LEDGER_PATH, "progress_id")
+
+
+WORKFLOW_GENERATE_SOURCE_PREFIX = "workflow_generate"
+
+
+def is_workflow_generation_source(source: str) -> bool:
+    text = str(source or "").strip()
+    return text == WORKFLOW_GENERATE_SOURCE_PREFIX or text.startswith(f"{WORKFLOW_GENERATE_SOURCE_PREFIX}:")
+
+
+def workflow_generation_prompt(goal: str) -> str:
+    clean_goal = str(goal or "").strip()
+    supported_types = ", ".join(sorted(workflow_helpers.WORKFLOW_STEP_TYPES))
+    return (
+        "You are designing a Shuheng declarative workflow.\n"
+        "Return ONLY one JSON object. Do not include Markdown, prose, comments, or code fences.\n"
+        "The JSON object must use schema_version \"shuheng.workflow.v1\" and include: "
+        "id, name, description, steps.\n"
+        f"Supported step types are: {supported_types}.\n"
+        "Each step must have a filesystem-safe id and type. Use depends_on for ordering.\n"
+        "Use agent_task only when a subagent should do bounded work; include agent and prompt.\n"
+        "Use approval when a human gate is required. Use condition only as a blocking placeholder; "
+        "do not invent executable expressions that must run now.\n"
+        "Never include shell, Python, JavaScript, plugin code, tool execution fields, permission bypasses, "
+        "secrets, credentials, or requests to run the workflow.\n"
+        "The workflow is a reusable declarative plan only; Shuheng will validate it before any save or run.\n\n"
+        f"User goal:\n{clean_goal}\n"
+    )
+
+
+def start_workflow_generation(state: State, goal: str) -> bool:
+    clean_goal = str(goal or "").strip()
+    if not clean_goal:
+        add_system(state, "用法：/workflow generate <goal>")
+        return True
+    digest = hashlib.sha1(clean_goal.encode("utf-8")).hexdigest()[:10]
+    source = f"{WORKFLOW_GENERATE_SOURCE_PREFIX}:{digest}"
+    ok = start_main_agent_task(
+        state,
+        workflow_generation_prompt(clean_goal),
+        source=source,
+        visible_user_text=f"/workflow generate {clean_goal}",
+        remember_user=True,
+        clear_history=False,
+        runtime_context_mode="lean",
+    )
+    if ok:
+        state.workflow_draft_goal = clean_goal
+        state.workflow_draft_ref = ""
+        mark_dirty(state)
+    return True
+
+
+def format_workflow_draft_rejected(result: workflow_helpers.WorkflowLoadResult) -> str:
+    lines = [
+        "Workflow draft rejected.",
+        "No workflow was saved or executed.",
+        "Validation issues:",
+    ]
+    if result.issues:
+        for issue in result.issues[:20]:
+            lines.append(f"- {issue.message}")
+    else:
+        lines.append("- workflow draft is invalid")
+    return "\n".join(lines)
+
+
+def format_workflow_draft_ready(result: workflow_helpers.WorkflowLoadResult, goal: str) -> str:
+    definition = result.definition
+    if definition is None:
+        return format_workflow_draft_rejected(result)
+    lines = [
+        "Workflow draft ready.",
+        "No workflow was saved or executed.",
+        f"name: {definition.name}",
+        f"id: {definition.workflow_id}",
+        f"steps: {len(definition.steps)}",
+    ]
+    if goal:
+        lines.append(f"goal: {truncate_cells(clean_text(goal), 240)}")
+    lines.extend([
+        "",
+        f"Save it with: /workflow save-last <plugin-id>/{definition.workflow_id}",
+        "Then inspect or run it with:",
+        f"- /workflow info <plugin-id>/{definition.workflow_id}",
+        f"- /workflow dry-run <plugin-id>/{definition.workflow_id}",
+        f"- /workflow run <plugin-id>/{definition.workflow_id}",
+    ])
+    return "\n".join(lines)
+
+
+def handle_completed_workflow_generation(state: State, text: str, *, source: str = "") -> bool:
+    if not is_workflow_generation_source(source):
+        return False
+    draft = workflow_draft_result_from_text(text, workflow_ref="workflow-draft", path="(model)")
+    result = draft.load_result
+    if draft.payload is None or result.definition is None or result.issues:
+        add_system(state, format_workflow_draft_rejected(result), kind="workflow_draft_rejected")
+        return True
+    state.workflow_draft_payload = copy.deepcopy(draft.payload)
+    state.workflow_draft_ref = result.definition.workflow_id
+    add_system(
+        state,
+        format_workflow_draft_ready(result, state.workflow_draft_goal),
+        kind="workflow_draft_ready",
+    )
+    mark_dirty(state)
+    return True
+
+
+def _workflow_entry_for_payload(workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": workflow_id,
+        "name": str(payload.get("name") or workflow_id).strip() or workflow_id,
+        "description": str(payload.get("description") or "").strip(),
+        "path": f"workflows/{workflow_id}.json",
+    }
+
+
+def _plugin_manifest_with_workflow(
+    manifest: dict[str, Any],
+    plugin_id: str,
+    workflow_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(manifest)
+    updated["schema_version"] = plugin_helpers.PLUGIN_SCHEMA_VERSION
+    updated["id"] = plugin_id
+    updated.setdefault("name", plugin_id)
+    contributes = updated.get("contributes") if isinstance(updated.get("contributes"), dict) else {}
+    contributes = dict(contributes)
+    raw_workflows = contributes.get("workflows")
+    workflow_entries = list(raw_workflows) if isinstance(raw_workflows, list) else []
+    next_entry = _workflow_entry_for_payload(workflow_id, payload)
+    replaced = False
+    merged_entries: list[Any] = []
+    for entry in workflow_entries:
+        if isinstance(entry, dict) and plugin_helpers.safe_plugin_id(entry.get("id")) == workflow_id:
+            merged = dict(entry)
+            merged.update(next_entry)
+            merged_entries.append(merged)
+            replaced = True
+        else:
+            merged_entries.append(entry)
+    if not replaced:
+        merged_entries.append(next_entry)
+    contributes["workflows"] = merged_entries
+    updated["contributes"] = contributes
+    return updated
+
+
+def save_latest_workflow_draft(state: State, ref: str) -> str:
+    plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
+    if not plugin_id or not workflow_id:
+        return "用法：/workflow save-last <plugin-id>/<workflow-id>\nplugin-id 和 workflow-id 必须是 filesystem-safe id。"
+    if not state.workflow_draft_payload:
+        return "No valid workflow draft is available. Run /workflow generate <goal> first."
+    payload = copy.deepcopy(state.workflow_draft_payload)
+    payload["schema_version"] = workflow_helpers.WORKFLOW_SCHEMA_VERSION
+    payload["id"] = workflow_id
+    workflow_rel_path = f"workflows/{workflow_id}.json"
+    plugin_root = os.path.join(SHUHENG_PLUGINS_DIR, plugin_id)
+    workflow_path = os.path.join(plugin_root, workflow_rel_path)
+    manifest_path = os.path.join(plugin_root, "plugin.json")
+    workflow_ref = plugin_workflow_ref(plugin_id, workflow_id)
+    preflight = workflow_load_result_from_payload(
+        payload,
+        plugin_id=plugin_id,
+        workflow_id=workflow_id,
+        workflow_ref=workflow_ref,
+        path=workflow_path,
+    )
+    if preflight.definition is None or preflight.issues:
+        return format_workflow_draft_rejected(preflight)
+    manifest = _plugin_manifest_with_workflow(read_json_dict_file(manifest_path), plugin_id, workflow_id, payload)
+    os.makedirs(os.path.dirname(workflow_path), exist_ok=True)
+    write_text_atomic(workflow_path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    write_text_atomic(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    clear_plugin_registry_cache()
+    result = workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
+    if result.definition is None or result.issues:
+        return "Workflow draft saved but failed registry validation:\n" + format_workflow_info(result)
+    state.workflow_draft_ref = workflow_ref
+    mark_dirty(state)
+    return (
+        "Workflow draft saved.\n"
+        f"ref: {workflow_ref}\n"
+        f"workflow: {workflow_path}\n"
+        f"manifest: {manifest_path}\n"
+        "No workflow was run.\n\n"
+        f"Inspect: /workflow info {plugin_id}/{workflow_id}\n"
+        f"Dry-run: /workflow dry-run {plugin_id}/{workflow_id}\n"
+        f"Run: /workflow run {plugin_id}/{workflow_id}"
+    )
 
 
 def workflow_run_records(limit: int = 0) -> list[dict[str, Any]]:
@@ -22499,6 +22697,13 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if raw in {"/workflows", "/workflow", "/workflow list"}:
         add_system(state, format_workflow_list(user_plugin_registry(force=True)))
         return True
+    m_generate = re.match(r"/workflows?\s+generate\s+([\s\S]+?)\s*$", raw, re.I)
+    if m_generate:
+        return start_workflow_generation(state, m_generate.group(1))
+    m_save_last = re.match(r"/workflows?\s+save-last\s+(\S+)\s*$", raw, re.I)
+    if m_save_last:
+        add_system(state, save_latest_workflow_draft(state, m_save_last.group(1)))
+        return True
     if re.match(r"/workflows?\s+runs\s*$", raw, re.I):
         add_system(state, format_workflow_runs(workflow_run_records()))
         return True
@@ -22531,7 +22736,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
         add_system(
             state,
             "未知 /workflow 命令。\n"
-            "用法：/workflows、/workflow info <plugin-id>/<workflow-id>、"
+            "用法：/workflows、/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
+            "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>、"
             "/workflow runs、/workflow show <run-id>、/workflow continue|resume <run-id>",
         )
@@ -25002,16 +25208,21 @@ def process_ui_queue(state: State) -> bool:
             bg = state.background_sessions.get(target_key)
             if bg is None or task_id != bg.active_task_id:
                 continue
+            background_workflow_generation = (
+                bg.security_context != "secret"
+                and is_workflow_generation_source(bg.active_task_source)
+            )
             display_text = strip_tui_controls(text, allow_json_fences=bg.security_context == "secret")
             if bg.messages and bg.messages[-1].role == "assistant":
                 bg.messages[-1].content = display_text
                 bg.messages[-1].done = bool(done)
                 changed = True
-            payload = extract_interaction_request(text)
+            payload = None if background_workflow_generation else extract_interaction_request(text)
             if payload:
                 bg.pending_interaction = normalize_interaction_payload(payload)
                 changed = True
             if done:
+                workflow_generation_done = background_workflow_generation
                 bg.status = "idle"
                 bg.active_task_id = None
                 bg.stream_target = None
@@ -25055,7 +25266,10 @@ def process_ui_queue(state: State) -> bool:
                         temporary_session=bg.temporary_session,
                     )
                     remember_ohmypi_native_session_for_path(state, bg.agent, agent_log_path(bg.agent))
-                    apply_tui_controls_from_text(state, text, source="background-agent", default_target=getattr(bg.agent, "log_path", "") or "current")
+                    if not workflow_generation_done:
+                        apply_tui_controls_from_text(state, text, source="background-agent", default_target=getattr(bg.agent, "log_path", "") or "current")
+                    else:
+                        handle_completed_workflow_generation(state, text, source=bg.active_task_source)
                     if maybe_autoname_background_session(state, bg):
                         changed = True
                     if load_history(state, force=True):
@@ -25064,22 +25278,24 @@ def process_ui_queue(state: State) -> bool:
             continue
         if task_id != state.active_task_id:
             continue
+        active_workflow_generation = (not state.active_task_secret) and is_workflow_generation_source(state.active_task_source)
         display_text = strip_tui_controls(text, allow_json_fences=state.active_task_secret)
         if state.messages and state.messages[-1].role == "assistant":
             state.messages[-1].content = display_text
             state.messages[-1].done = bool(done)
             mark_messages_changed(state)
             changed = True
-        payload = extract_interaction_request(text)
+        payload = None if active_workflow_generation else extract_interaction_request(text)
         if payload:
             set_pending_interaction(state, payload)
             changed = True
         if done:
             finished_source = state.active_task_source
             finished_secret = state.active_task_secret
+            workflow_generation_done = active_workflow_generation
             secret_user_text = state.active_secret_user_text
             secret_session_id = state.active_secret_session_id
-            tui_controls = extract_tui_controls(text, allow_json_fences=state.active_task_secret)
+            tui_controls = [] if workflow_generation_done else extract_tui_controls(text, allow_json_fences=state.active_task_secret)
             had_tui_controls = bool(tui_controls)
             control_results: list[str] = []
             state.status = "idle"
@@ -25123,7 +25339,10 @@ def process_ui_queue(state: State) -> bool:
                     temporary_session=state.temporary_session,
                 )
                 remember_ohmypi_native_session_for_path(state, state.agent, agent_log_path(state.agent))
-                control_results = apply_tui_controls_from_text(state, text, source="agent", default_target="current")
+                if not workflow_generation_done:
+                    control_results = apply_tui_controls_from_text(state, text, source="agent", default_target="current")
+                else:
+                    handle_completed_workflow_generation(state, text, source=finished_source)
                 if maybe_autoname_current_session(state):
                     state.dirty = True
                 if load_history(state, force=True):
