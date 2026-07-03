@@ -1299,3 +1299,36 @@ Added /workflow generate and /workflow save-last so natural-language goals can b
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: Add workflow generated draft run-last command
+
+**Date**: 2026-07-03
+**Task**: Add workflow generated draft run-last command
+**Branch**: `main`
+
+### Summary
+
+Added explicit /workflow run-last to save the latest valid AI workflow draft as a manifest-backed plugin workflow, reload it through the registry, and run it through the governed workflow runner while preserving approval/subagent bridge ownership.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `43b2e08` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
