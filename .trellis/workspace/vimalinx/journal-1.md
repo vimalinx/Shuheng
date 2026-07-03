@@ -184,6 +184,57 @@ Turned `/workflows` from a definition-only registry panel into a workflow run co
 - Next workflow slice should focus on one governed capability at a time: retry/timeout policy, scheduled triggers, or graph visualization. Avoid adding a second executor path.
 
 
+## Session 45: Add workflow retry policy
+
+**Date**: 2026-07-03
+**Task**: Add workflow retry policy v1
+**Branch**: `main`
+
+### Summary
+
+Added bounded retry policy for workflow `agent_task` steps. A workflow step can declare `retry.max_attempts`; failed terminal subagent tasks now preserve prior attempt provenance and redispatch the next attempt through the existing governed subagent task bridge when attempts remain.
+
+### Main Changes
+
+- Added retry policy validation, normalized run-step retry state, attempt counters, previous task-attempt provenance, and retry detail formatting in `workflows.py`.
+- Updated `app.continue_workflow_run_v0(...)` so failed/rejected/cancelled task results can prepare a retry row and call `bridge_workflow_agent_task(...)`; exhausted attempts keep the existing terminal behavior.
+- Updated `/workflow auto` generation guidance so AI-generated workflows may include bounded retry for fragile `agent_task` steps.
+- Added workflow tests, policy gate coverage, and a backend spec scenario for `Workflow Retry Policy V1`.
+- Architecture comparison: this moves closer to `docs/agent-harness-architecture.md` by making failure recovery explicit, bounded, append-only, ledger-backed, and auditable. It keeps one strong Orchestrator, preserves restricted subagent execution through task/progress ledgers, stores artifact refs/provenance, and avoids a hidden workflow executor. Remaining gaps: timeout timers, backoff/scheduling policy, graph visualization, richer checkpoint/eval trace, and A2A/MCP workflow service exposure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `436b7db` | feat: add workflow retry policy |
+| `99d88ed` | chore(task): archive 07-03-add-workflow-retry-policy-v1 |
+
+### Testing
+
+- [OK] `python3 -m py_compile src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `ruff check src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `PYTHONPATH=. pytest -q tests/test_workflows.py -p no:cacheprovider` - 44 passed
+- [OK] `python3 scripts/check_policy_gates.py`
+- [OK] `ruff check src scripts tests`
+- [OK] `python3 scripts/check_release_hygiene.py`
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=. pytest -q -p no:cacheprovider` - 540 passed
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-retry`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `PYTHONPATH=src python3 -m ga_tui.integration doctor --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-retry`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue with workflow timeout/backoff or scheduled workflow triggers. Keep all new automation behind explicit ledger and Orchestrator contracts.
+
+
 ## Session 2: Clean control ontology
 
 **Date**: 2026-06-04
