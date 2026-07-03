@@ -46,6 +46,49 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 43: Add workflow cancel command
+
+**Date**: 2026-07-03
+**Task**: Add workflow cancel command v1
+**Branch**: `main`
+
+### Summary
+
+Added `/workflow cancel <run_id> [reason...]` as a manual workflow lifecycle control. Cancellation appends one canonical `cancelled` workflow row for non-terminal runs, keeps pending future steps unadvanced, treats unknown/completed/terminal runs as no-op, and does not mutate task/progress/approval/artifact ledgers or subagent state.
+
+### Main Changes
+
+- Added pure workflow cancellation result/helper/formatter in `workflows.py`.
+- Wired app-level latest-row lookup, append-only cancellation, command routing, and help text in `app.py`.
+- Covered blocked condition cancellation, waiting agent-task cancellation, no-op terminal/completed cases, and side-effect ledger invariants.
+- Added policy gate coverage and backend spec source-of-truth for Workflow Cancel Command V1.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `49b2f86` | feat: add workflow cancel command |
+| `4643e99` | chore(task): archive 07-03-add-workflow-cancel-command-v1 |
+
+### Testing
+
+- [OK] Targeted py_compile, Ruff, `tests/test_workflows.py` (36 passed), and policy gates.
+- [OK] Release hygiene, compileall, diff check, project-source Ruff, full pytest (532 passed), build, wheel smoke, runtime smoke, integration doctor, and `shuheng-check`.
+- [INFO] `ruff check .` still hits existing `.trellis/scripts` template lint outside this task; project-source Ruff passed.
+
+### Architecture Baseline
+
+Moves the system closer to `docs/agent-harness-architecture.md`: strong Orchestrator owns ledger lookup/append, `workflows.py` remains pure, cancellation is append-only and auditable, and subagent tasks/approvals/artifacts stay governed by their existing ledgers rather than hidden workflow side effects.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Consider workflow timeout/retry or cooperative task abort only after defining their ledger and approval contracts.
+
+
 ## Session 2: Clean control ontology
 
 **Date**: 2026-06-04
