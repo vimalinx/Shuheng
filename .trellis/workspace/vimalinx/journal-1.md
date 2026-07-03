@@ -1101,3 +1101,36 @@ Implemented workflow runner v0 as append-only workflow_runs ledger progression f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: Add workflow run inspection commands
+
+**Date**: 2026-07-03
+**Task**: Add workflow run inspection commands
+**Branch**: `main`
+
+### Summary
+
+Added read-only workflow run inspection commands for the append-only workflow_runs ledger, with pure formatters, command routing, tests, policy gates, backend spec updates, and full release smoke verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd61911` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
