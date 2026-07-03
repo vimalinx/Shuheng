@@ -189,6 +189,10 @@ class State:
     workflow_draft_payload: dict[str, Any] | None = None
     workflow_draft_goal: str = ""
     workflow_draft_ref: str = ""
+    workflow_auto_run_ref: str = ""
+    workflow_auto_run_inputs: dict[str, Any] = field(default_factory=dict)
+    workflow_auto_run_source: str = ""
+    workflow_auto_run_command: str = ""
     background_sessions: dict[str, BackgroundSession] = field(default_factory=dict)
     background_counter: int = 0
     subagents: dict[str, SubAgentRuntime] = field(default_factory=dict)

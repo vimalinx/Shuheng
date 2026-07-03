@@ -9225,6 +9225,63 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert a.handle_workflow_command(no_draft, "/workflow run-last generated-pack/no-draft") is True
     assert "Workflow draft was not run." in no_draft.messages[-1].content, no_draft.messages[-1].content
 
+    auto_root = tempfile.mkdtemp(prefix="ga_tui_workflow_auto_")
+    retarget_harness(auto_root)
+    auto_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-auto-flow",
+        "name": "Draft Auto Flow",
+        "description": "Policy gate draft generated and run automatically.",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan generated work."},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
+        ],
+    }
+    auto_state = a.State(agent=SequencedFakeAgent([json.dumps(auto_payload)]))
+    assert "/workflow auto" in app_source and "start_workflow_auto_run_generation" in app_source, app_source
+    assert "WORKFLOW_GENERATE_SOURCE_PREFIX}:auto" in app_source and "run_latest_workflow_draft" in app_source, app_source
+    assert a.handle_workflow_command(
+        auto_state,
+        "/workflow auto generated-pack/auto-flow summarize generated work -- ready=true",
+    ) is True
+    assert auto_state.agent.prompts and auto_state.agent.prompts[0][1].startswith("workflow_generate:auto:"), auto_state.agent.prompts
+    assert auto_state.workflow_auto_run_ref == "plugin://generated-pack/workflows/auto-flow", auto_state.workflow_auto_run_ref
+    drain_ui(auto_state)
+    assert "Workflow auto generated and run started." in auto_state.messages[-1].content, auto_state.messages[-1].content
+    assert "Workflow draft saved and run started." in auto_state.messages[-1].content, auto_state.messages[-1].content
+    assert auto_state.workflow_auto_run_ref == "", auto_state.workflow_auto_run_ref
+    auto_ref = "plugin://generated-pack/workflows/auto-flow"
+    auto_result = a.workflow_load_result_for_ref(auto_ref, a.user_plugin_registry(force=True))
+    assert auto_result.definition is not None, auto_result
+    assert not auto_result.issues, auto_result.issues
+    auto_rows = a.workflow_run_records()
+    assert len(auto_rows) == 2, auto_rows
+    assert auto_rows[0]["workflow_ref"] == auto_ref, auto_rows
+    assert auto_rows[0]["inputs"] == {"ready": True}, auto_rows
+    assert auto_rows[1]["status"] == "completed", auto_rows
+    assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
+    assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
+
+    invalid_auto_root = tempfile.mkdtemp(prefix="ga_tui_workflow_auto_invalid_")
+    retarget_harness(invalid_auto_root)
+    invalid_auto = a.State(agent=SequencedFakeAgent(["not workflow json"]))
+    invalid_auto.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "previous-valid",
+        "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+    }
+    previous_payload = dict(invalid_auto.workflow_draft_payload)
+    assert a.handle_workflow_command(invalid_auto, "/workflow auto generated-pack/bad-flow invalid output") is True
+    drain_ui(invalid_auto)
+    assert "Workflow draft rejected." in invalid_auto.messages[-1].content, invalid_auto.messages[-1].content
+    assert invalid_auto.workflow_draft_payload == previous_payload, invalid_auto.workflow_draft_payload
+    assert invalid_auto.workflow_auto_run_ref == "", invalid_auto.workflow_auto_run_ref
+    assert a.workflow_run_records() == []
+
 
 def assert_persistent_agent_dashboard_home_pages() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")

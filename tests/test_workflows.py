@@ -398,6 +398,133 @@ def test_workflow_run_last_uses_existing_approval_bridge(tmp_path: Path, monkeyp
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
 
 
+def test_workflow_auto_generates_saves_and_runs_safe_workflow(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-auto-flow",
+        "name": "Draft Auto Flow",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan."},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
+        ],
+    }
+    state = app_module.State(agent=SequencedWorkflowAgent([json.dumps(draft_payload)]))
+
+    assert app_module.handle_workflow_command(
+        state,
+        "/workflow auto generated-pack/auto-flow summarize sources -- ready=true",
+    ) is True
+
+    assert state.agent.prompts
+    assert state.agent.prompts[0][1].startswith("workflow_generate:auto:")
+    assert "summarize sources" in state.agent.prompts[0][0]
+    assert state.workflow_auto_run_ref == "plugin://generated-pack/workflows/auto-flow"
+    assert state.workflow_auto_run_inputs == {"ready": True}
+
+    drain_app_ui_queue(state)
+
+    assert state.workflow_auto_run_ref == ""
+    assert state.workflow_auto_run_inputs == {}
+    assert "Workflow auto generated and run started." in state.messages[-1].content
+    assert "Workflow draft saved and run started." in state.messages[-1].content
+    assert "Workflow run advanced:" in state.messages[-1].content
+    assert "status: completed" in state.messages[-1].content
+    workflow_path = plugin_root / "generated-pack" / "workflows" / "auto-flow.json"
+    assert workflow_path.exists()
+    assert json.loads(workflow_path.read_text(encoding="utf-8"))["id"] == "auto-flow"
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["workflow_ref"] == "plugin://generated-pack/workflows/auto-flow"
+    assert rows[0]["inputs"] == {"ready": True}
+    assert rows[0]["status"] == "planned"
+    assert rows[1]["status"] == "completed"
+    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed", "completed"]
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_workflow_auto_uses_existing_approval_bridge(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-auto-approval",
+        "name": "Draft Auto Approval",
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan."},
+            {"id": "approve", "type": "approval", "depends_on": ["plan"]},
+            {"id": "notify", "type": "notify", "depends_on": ["approve"]},
+        ],
+    }
+    state = app_module.State(agent=SequencedWorkflowAgent([json.dumps(draft_payload)]))
+
+    assert app_module.handle_workflow_command(
+        state,
+        "/workflow auto generated-pack/auto-approval deploy after review",
+    ) is True
+    drain_app_ui_queue(state)
+
+    assert "Workflow auto generated and run started." in state.messages[-1].content
+    assert "Approvals created: 1" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[-1]["status"] == "waiting_approval"
+    approval_id = rows[-1]["approval"]["approval_id"]
+    approval_rows = app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)
+    assert len(approval_rows) == 1
+    assert approval_rows[0]["approval_id"] == approval_id
+    assert approval_rows[0]["payload"]["workflow_ref"] == "plugin://generated-pack/workflows/auto-approval"
+    assert approval_rows[0]["payload"]["source_command"] == "/workflow auto generated-pack/auto-approval deploy after review"
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_workflow_auto_invalid_output_and_unsafe_ref_are_noops(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    state = app_module.State(agent=SequencedWorkflowAgent(["not workflow json"]))
+    state.workflow_draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "previous-valid",
+        "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+    }
+    previous = dict(state.workflow_draft_payload)
+
+    assert app_module.handle_workflow_command(state, "/workflow auto ../escape/auto-flow summarize sources") is True
+    assert "用法：/workflow auto" in state.messages[-1].content
+    assert state.agent.prompts == []
+    assert app_module.workflow_run_records() == []
+    assert not plugin_root.exists()
+
+    assert app_module.handle_workflow_command(state, "/workflow auto generated-pack/auto-flow summarize sources") is True
+    drain_app_ui_queue(state)
+
+    assert state.workflow_draft_payload == previous
+    assert state.workflow_auto_run_ref == ""
+    assert "Workflow draft rejected." in state.messages[-1].content
+    assert "No workflow was saved or executed." in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+    state.agent = SequencedWorkflowAgent([json.dumps(previous)])
+    assert app_module.handle_workflow_command(state, "/workflow generate ordinary draft only") is True
+    assert state.workflow_auto_run_ref == ""
+    drain_app_ui_queue(state)
+    assert "Workflow draft ready." in state.messages[-1].content
+    assert "No workflow was saved or executed." in state.messages[-1].content
+    assert app_module.workflow_run_records() == []
+
+
 def test_workflow_generate_invalid_output_does_not_overwrite_previous_valid_draft(tmp_path: Path, monkeypatch) -> None:
     configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
     valid_payload = {

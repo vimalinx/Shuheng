@@ -4740,6 +4740,56 @@ def workflow_generation_prompt(goal: str) -> str:
     )
 
 
+def clear_workflow_auto_run_request(state: State) -> None:
+    state.workflow_auto_run_ref = ""
+    state.workflow_auto_run_inputs = {}
+    state.workflow_auto_run_source = ""
+    state.workflow_auto_run_command = ""
+
+
+def parse_workflow_auto_command_args(tail: str) -> tuple[str, str, dict[str, Any], str]:
+    text = str(tail or "").strip()
+    if not text:
+        return "", "", {}, "Missing workflow auto target and goal."
+    parts = text.split(maxsplit=1)
+    ref = parts[0].strip()
+    if len(parts) < 2 or not parts[1].strip():
+        return ref, "", {}, "Missing workflow auto goal."
+    plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
+    if not plugin_id or not workflow_id:
+        return ref, "", {}, "用法：/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]"
+    goal_and_inputs = parts[1].strip()
+    m_inputs = re.search(r"\s--\s", goal_and_inputs)
+    if m_inputs:
+        goal = goal_and_inputs[:m_inputs.start()].strip()
+        input_tail = goal_and_inputs[m_inputs.end():].strip()
+        if not goal:
+            return ref, "", {}, "Missing workflow auto goal."
+        _parsed_ref, inputs, error = parse_workflow_run_command_args(f"{ref} {input_tail}")
+        if error:
+            return ref, goal, {}, error
+        return ref, goal, inputs, ""
+    return ref, goal_and_inputs, {}, ""
+
+
+def _start_workflow_generation_task(
+    state: State,
+    goal: str,
+    *,
+    source: str,
+    visible_user_text: str,
+) -> bool:
+    return start_main_agent_task(
+        state,
+        workflow_generation_prompt(goal),
+        source=source,
+        visible_user_text=visible_user_text,
+        remember_user=True,
+        clear_history=False,
+        runtime_context_mode="lean",
+    )
+
+
 def start_workflow_generation(state: State, goal: str) -> bool:
     clean_goal = str(goal or "").strip()
     if not clean_goal:
@@ -4747,18 +4797,51 @@ def start_workflow_generation(state: State, goal: str) -> bool:
         return True
     digest = hashlib.sha1(clean_goal.encode("utf-8")).hexdigest()[:10]
     source = f"{WORKFLOW_GENERATE_SOURCE_PREFIX}:{digest}"
-    ok = start_main_agent_task(
+    ok = _start_workflow_generation_task(
         state,
-        workflow_generation_prompt(clean_goal),
+        clean_goal,
         source=source,
         visible_user_text=f"/workflow generate {clean_goal}",
-        remember_user=True,
-        clear_history=False,
-        runtime_context_mode="lean",
     )
     if ok:
         state.workflow_draft_goal = clean_goal
         state.workflow_draft_ref = ""
+        clear_workflow_auto_run_request(state)
+        mark_dirty(state)
+    return True
+
+
+def start_workflow_auto_run_generation(
+    state: State,
+    ref: str,
+    goal: str,
+    *,
+    inputs: dict[str, Any] | None = None,
+    source_command: str = "",
+) -> bool:
+    clean_goal = str(goal or "").strip()
+    plugin_id, workflow_id = parse_plugin_workflow_ref(ref)
+    if not plugin_id or not workflow_id or not clean_goal:
+        add_system(state, "用法：/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]")
+        return True
+    workflow_ref = plugin_workflow_ref(plugin_id, workflow_id)
+    source_material = f"{workflow_ref}\n{clean_goal}\n{json.dumps(inputs or {}, ensure_ascii=False, sort_keys=True)}"
+    digest = hashlib.sha1(source_material.encode("utf-8")).hexdigest()[:10]
+    source = f"{WORKFLOW_GENERATE_SOURCE_PREFIX}:auto:{digest}"
+    command = source_command or f"/workflow auto {plugin_id}/{workflow_id} {clean_goal}"
+    ok = _start_workflow_generation_task(
+        state,
+        clean_goal,
+        source=source,
+        visible_user_text=command,
+    )
+    if ok:
+        state.workflow_draft_goal = clean_goal
+        state.workflow_draft_ref = ""
+        state.workflow_auto_run_ref = workflow_ref
+        state.workflow_auto_run_inputs = dict(inputs or {})
+        state.workflow_auto_run_source = source
+        state.workflow_auto_run_command = command
         mark_dirty(state)
     return True
 
@@ -4805,18 +4888,34 @@ def format_workflow_draft_ready(result: workflow_helpers.WorkflowLoadResult, goa
 def handle_completed_workflow_generation(state: State, text: str, *, source: str = "") -> bool:
     if not is_workflow_generation_source(source):
         return False
+    auto_run_pending = bool(state.workflow_auto_run_source and state.workflow_auto_run_source == str(source or "").strip())
     draft = workflow_draft_result_from_text(text, workflow_ref="workflow-draft", path="(model)")
     result = draft.load_result
     if draft.payload is None or result.definition is None or result.issues:
         add_system(state, format_workflow_draft_rejected(result), kind="workflow_draft_rejected")
+        if auto_run_pending:
+            clear_workflow_auto_run_request(state)
+            mark_dirty(state)
         return True
     state.workflow_draft_payload = copy.deepcopy(draft.payload)
     state.workflow_draft_ref = result.definition.workflow_id
-    add_system(
-        state,
-        format_workflow_draft_ready(result, state.workflow_draft_goal),
-        kind="workflow_draft_ready",
-    )
+    if auto_run_pending:
+        target_ref = state.workflow_auto_run_ref
+        inputs = dict(state.workflow_auto_run_inputs)
+        command = state.workflow_auto_run_command or f"/workflow auto {target_ref} {state.workflow_draft_goal}"
+        message = run_latest_workflow_draft(state, target_ref, inputs=inputs, source_command=command)
+        clear_workflow_auto_run_request(state)
+        add_system(
+            state,
+            "Workflow auto generated and run started.\n\n" + message,
+            kind="workflow_auto_run",
+        )
+    else:
+        add_system(
+            state,
+            format_workflow_draft_ready(result, state.workflow_draft_goal),
+            kind="workflow_draft_ready",
+        )
     mark_dirty(state)
     return True
 
@@ -22829,6 +22928,14 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if raw in {"/workflows", "/workflow", "/workflow list"}:
         add_system(state, format_workflow_list(user_plugin_registry(force=True)))
         return True
+    m_auto = re.match(r"/workflows?\s+auto\s+([\s\S]+?)\s*$", raw, re.I)
+    if m_auto:
+        ref, goal, inputs, error = parse_workflow_auto_command_args(m_auto.group(1))
+        if error:
+            add_system(state, error + "\n用法：/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]")
+        else:
+            return start_workflow_auto_run_generation(state, ref, goal, inputs=inputs, source_command=raw)
+        return True
     m_generate = re.match(r"/workflows?\s+generate\s+([\s\S]+?)\s*$", raw, re.I)
     if m_generate:
         return start_workflow_generation(state, m_generate.group(1))
@@ -22885,7 +22992,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
         add_system(
             state,
             "未知 /workflow 命令。\n"
-            "用法：/workflows、/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
+            "用法：/workflows、/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]、"
+            "/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for verification context."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify auto-run preserves workflow generation, manifest save, runner, approval, and agent-task bridge contracts."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for check phase."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify implementation uses existing helpers and does not create a second runner path."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify end-to-end command/completion/state/file/ledger/test consistency."}
