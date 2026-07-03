@@ -1233,3 +1233,36 @@ Implemented workflow agent_task bridge through the existing governed subagent ta
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: Add workflow auto-continue on agent task completion
+
+**Date**: 2026-07-03
+**Task**: Add workflow auto-continue on agent task completion
+**Branch**: `main`
+
+### Summary
+
+Added an app-owned workflow auto-continue event bridge after terminal non-Secret subagent task ledger writes. The bridge finds workflow runs waiting on the completed task id and reuses continue_workflow_run_v0, keeping workflows.py pure and preserving explicit approval waits. Added terminal workflow continue no-op handling, tests, policy gates, and backend spec coverage.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb19d63` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
