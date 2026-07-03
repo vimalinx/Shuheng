@@ -1398,3 +1398,36 @@ Added reference-only upstream workflow step context for later agent_task prompts
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: Add workflow DAG validation
+
+**Date**: 2026-07-03
+**Task**: Add workflow DAG validation
+**Branch**: `main`
+
+### Summary
+
+Added workflow dependency DAG validation for self-dependencies, duplicate dependencies, and cycles before run rows are created, with unit tests, policy gates, spec scenario, full pytest, build smoke, wheel smoke, and shuheng-check verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b5c2657` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
