@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 42
+- **Total Sessions**: 43
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1433 | Active |
+| `journal-1.md` | ~1916 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 43 | 2026-07-03 | Add workflow next action diagnostics | `4213ec8`, `3c72777` | `main` |
 | 42 | 2026-07-03 | Add workflow DAG validation | `b5c2657` | `main` |
 | 41 | 2026-07-03 | Add workflow upstream artifact context | `09a0a95` | `main` |
 | 40 | 2026-07-03 | Workflow inputs and condition v1 | `83f3792` | `main` |

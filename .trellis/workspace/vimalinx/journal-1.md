@@ -1880,3 +1880,37 @@ Added workflow dependency DAG validation for self-dependencies, duplicate depend
 ### Next Steps
 
 - None - task complete
+
+
+## Session 43: Add workflow next action diagnostics
+
+**Date**: 2026-07-03
+**Task**: Add workflow next action diagnostics
+**Branch**: `main`
+
+### Summary
+
+Added read-only /workflow next and /workflow diagnose diagnostics that classify the current workflow blocker and suggest existing commands without appending ledger rows. Locked the formatter ownership, command aliases, side-effect invariants, tests, policy gate, and backend spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4213ec8` | (see git log) |
+| `3c72777` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
