@@ -46,6 +46,55 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 43: Add workflow panel run input prompt
+
+**Date**: 2026-07-03
+**Task**: Add workflow panel run input prompt v1
+**Branch**: `main`
+
+### Summary
+
+Added a `/workflows` panel input prompt for manifest-backed workflow definitions with missing required inputs. The prompt reuses the existing `/workflow run` key/value parser, validates missing required values before closing, and still delegates execution to `create_workflow_run_v0(...)`. Captured external workflow capability references in the task research notes and updated the backend protocol spec.
+
+### Main Changes
+
+- `/workflows` definition rows now show required run inputs and open a panel-local prompt only when required inputs are missing.
+- Prompt cancel and parse/validation errors append no workflow/task/progress/approval/artifact rows.
+- Valid prompted inputs are passed through the existing manifest-backed runner; no new executor was added.
+- Tests, policy gates, and backend spec now lock the input-prompt ownership boundary.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f9b5b67` | feat: prompt for workflow panel run inputs |
+| `efd1ef8` | chore(task): archive 07-03-add-workflow-panel-run-input-prompt-v1 |
+
+### Testing
+
+- [OK] `python3 -m py_compile src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `ruff check src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `PYTHONPATH=. pytest -q tests/test_workflows.py -p no:cacheprovider` (49 passed)
+- [OK] `python3 scripts/check_policy_gates.py`
+- [OK] `ruff check src tests scripts`
+- [OK] `python3 scripts/check_release_hygiene.py`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=. pytest -q -p no:cacheprovider` (550 passed)
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-panel-input-prompt`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-panel-input-prompt`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Analyze the remaining workflow gaps against durable workflow engines and agent orchestration baselines before adding graph editing or arbitrary tool execution.
+
+
 ## Session 43: Run workflow definitions from panel
 
 **Date**: 2026-07-03
