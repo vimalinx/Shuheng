@@ -1914,3 +1914,36 @@ Added read-only /workflow next and /workflow diagnose diagnostics that classify 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 44: Add workflow next action JSON diagnostics
+
+**Date**: 2026-07-03
+**Task**: Add workflow next action JSON diagnostics
+**Branch**: `main`
+
+### Summary
+
+Added machine-readable /workflow next-json and /workflow diagnose-json diagnostics backed by a pure workflow_run_next_action_projection helper. Text next-action output now renders from the same structured source of truth, preserving read-only ledger invariants and command suggestions for AI automation.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4752e0d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
