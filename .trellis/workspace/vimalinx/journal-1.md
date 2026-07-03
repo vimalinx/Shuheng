@@ -80,6 +80,49 @@ Moves the system closer to the baseline: the scheduler remains an auditable trig
 - None - task complete
 
 
+## Session 46: Add built-in example workflow pack
+
+**Date**: 2026-07-03
+**Task**: Add Built-In Example Workflow Pack V1
+**Branch**: `main`
+
+### Summary
+
+Added a read-only built-in `shuheng-examples/daily-briefing` workflow pack so fresh Shuheng installs can immediately discover, inspect, dry-run, and run a safe manifest-backed workflow without creating a user plugin first.
+
+### Main Changes
+
+- Added `plugins.builtin_plugin_root()` and app-level discovery that includes both `SHUHENG_PLUGINS_DIR` and packaged built-in plugin data.
+- Added the built-in `shuheng.plugin.v1` manifest plus safe-only `shuheng.workflow.v1` daily briefing workflow.
+- Updated package data, release hygiene, wheel smoke, workflow/plugin tests, policy gates, and backend spec to lock manifest-backed loading, no user-root mutation, and no side-effect ledgers.
+- Architecture baseline: moves closer to the governed harness baseline by making the workflow surface usable while preserving the strong Orchestrator boundary, manifest registry ownership, append-only workflow run ledger, and restricted side-effect gates. Remaining gaps are still graph UI, richer checkpoint/eval trace, workflow timeout/backoff, and A2A/MCP workflow service compatibility.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6885a54` | feat: add built-in example workflow pack |
+| `51d3cf4` | chore(task): archive 07-03-add-built-in-example-workflow-pack-v1 |
+
+### Testing
+
+- [OK] Targeted py_compile, Ruff, `tests/test_plugins.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`
+- [OK] `python3 scripts/check_release_hygiene.py`, `python3 -m compileall -q src scripts`, and `git diff --check`
+- [OK] Full pytest: `548 passed`
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-builtin-workflow`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-builtin-workflow`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue with workflow usability/UI slices without adding hidden executor paths or bypassing the manifest registry.
+
+
 ## Session 43: Add workflow auto run command
 
 **Date**: 2026-07-03
