@@ -1266,3 +1266,36 @@ Added an app-owned workflow auto-continue event bridge after terminal non-Secret
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: Add AI-assisted workflow generation
+
+**Date**: 2026-07-03
+**Task**: Add AI-assisted workflow generation
+**Branch**: `main`
+
+### Summary
+
+Added /workflow generate and /workflow save-last so natural-language goals can become validated manifest-backed plugin workflows. Generation now parses model output through pure workflow helpers, caches only valid drafts in app state, blocks TUI controls/interaction payloads on the generation source path, and save-last writes plugin.json plus workflows/<id>.json without execution ledgers. Covered by workflow tests, policy gates, backend spec, full pytest, build, wheel smoke, and shuheng-check.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `117bd3c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
