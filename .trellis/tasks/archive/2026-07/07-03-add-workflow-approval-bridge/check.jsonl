@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality and spec coverage index."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow approval bridge invariants to verify."}
+{"file": ".trellis/tasks/07-03-add-workflow-approval-bridge/research/workflow-approval-bridge-design.md", "reason": "Approval bridge guardrails and out-of-scope boundaries to verify."}
