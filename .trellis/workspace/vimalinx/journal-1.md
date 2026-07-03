@@ -136,6 +136,54 @@ Moves the system closer to `docs/agent-harness-architecture.md`: strong Orchestr
 - Consider workflow timeout/retry or cooperative task abort only after defining their ledger and approval contracts.
 
 
+## Session 44: Add workflow run panel
+
+**Date**: 2026-07-03
+**Task**: Add workflow run panel v1
+**Branch**: `main`
+
+### Summary
+
+Turned `/workflows` from a definition-only registry panel into a workflow run control center. The panel now shows latest workflow run rows from the append-only run ledger, exposes run details with step/task/approval/artifact references, and delegates explicit continue/cancel actions to existing governed helpers.
+
+### Main Changes
+
+- Added pure workflow run projection helpers and artifact-ref detail formatting in `workflows.py`.
+- Added workflow run `PanelItem` rows, stable payload fields, and Enter/c continue plus x cancel actions in `app.py`.
+- Added tests, policy-gate coverage, and executable backend spec for the panel contract.
+- Architecture comparison: this moves closer to `docs/agent-harness-architecture.md` because the UI is a read model over ledgers, side effects stay behind the strong Orchestrator helpers, workflow communication remains auditable, and `workflows.py` stays pure. Remaining gaps: retry/timeout/scheduling controls, graph visualization, richer checkpoint/eval trace, and A2A/MCP workflow service exposure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0fa56fe` | feat: add workflow run panel |
+| `1a2f607` | chore(task): archive 07-03-add-workflow-run-panel-v1 |
+
+### Testing
+
+- [OK] `ruff check src scripts tests`
+- [OK] `python3 scripts/check_release_hygiene.py`
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=. pytest -q -p no:cacheprovider` - 537 passed
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-panel`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `PYTHONPATH=src python3 -m ga_tui.integration doctor --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-panel`
+- [OK] `python3 scripts/check_policy_gates.py`
+- [OK] `PYTHONPATH=. pytest -q tests/test_workflows.py -p no:cacheprovider` - 41 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Next workflow slice should focus on one governed capability at a time: retry/timeout policy, scheduled triggers, or graph visualization. Avoid adding a second executor path.
+
+
 ## Session 2: Clean control ontology
 
 **Date**: 2026-06-04
