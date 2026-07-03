@@ -1947,3 +1947,36 @@ Added machine-readable /workflow next-json and /workflow diagnose-json diagnosti
 ### Next Steps
 
 - None - task complete
+
+
+## Session 45: Scheduled workflow autopilot
+
+**Date**: 2026-07-03
+**Task**: Scheduled workflow autopilot
+**Branch**: `main`
+
+### Summary
+
+Added scheduler execution mode workflow_autopilot, wired it through the app-owned workflow autopilot tick, recorded counts in schedule-run audit rows, updated specs/policy gates/tests, and verified full quality gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b969211` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
