@@ -669,6 +669,53 @@ def test_workflow_auto_generates_saves_and_runs_safe_workflow(tmp_path: Path, mo
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
 
 
+def test_workflow_do_generates_default_ref_saves_and_runs_safe_workflow(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    draft_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-do-flow",
+        "name": "Draft Do Flow",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan."},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
+        ],
+    }
+    state = app_module.State(agent=SequencedWorkflowAgent([json.dumps(draft_payload)]))
+    goal = "summarize sources"
+    expected_ref = app_module.workflow_do_ref_for_goal(goal)
+    plugin_id, workflow_id = app_module.parse_plugin_workflow_ref(expected_ref)
+
+    assert app_module.handle_workflow_command(state, "/workflow do summarize sources -- ready=true") is True
+
+    assert state.agent.prompts
+    assert state.agent.prompts[0][1].startswith("workflow_generate:auto:")
+    assert goal in state.agent.prompts[0][0]
+    assert state.workflow_auto_run_ref == expected_ref
+    assert state.workflow_auto_run_inputs == {"ready": True}
+
+    drain_app_ui_queue(state)
+
+    assert state.workflow_auto_run_ref == ""
+    assert "Workflow auto generated and run started." in state.messages[-1].content
+    workflow_path = plugin_root / plugin_id / "workflows" / f"{workflow_id}.json"
+    assert workflow_path.exists()
+    saved_payload = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert saved_payload["id"] == workflow_id
+    assert plugin_id == app_module.WORKFLOW_DO_DEFAULT_PLUGIN_ID
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["workflow_ref"] == expected_ref
+    assert rows[0]["inputs"] == {"ready": True}
+    assert rows[1]["status"] == "completed"
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
 def test_workflow_auto_uses_existing_approval_bridge(tmp_path: Path, monkeypatch) -> None:
     plugin_root = tmp_path / "plugins"
     configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
@@ -722,6 +769,14 @@ def test_workflow_auto_invalid_output_and_unsafe_ref_are_noops(tmp_path: Path, m
     assert state.agent.prompts == []
     assert app_module.workflow_run_records() == []
     assert not plugin_root.exists()
+
+    assert app_module.handle_workflow_command(state, "/workflow do") is True
+    assert "用法：/workflow do" in state.messages[-1].content
+    assert state.agent.prompts == []
+
+    assert app_module.handle_workflow_command(state, "/workflow do summarize sources -- bad-input") is True
+    assert "Invalid workflow input override" in state.messages[-1].content
+    assert state.agent.prompts == []
 
     assert app_module.handle_workflow_command(state, "/workflow auto generated-pack/auto-flow summarize sources") is True
     drain_app_ui_queue(state)

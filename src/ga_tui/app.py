@@ -4720,6 +4720,7 @@ def latest_progress_records() -> dict[str, dict[str, Any]]:
 
 
 WORKFLOW_GENERATE_SOURCE_PREFIX = "workflow_generate"
+WORKFLOW_DO_DEFAULT_PLUGIN_ID = "shuheng-auto-workflows"
 
 
 def is_workflow_generation_source(source: str) -> bool:
@@ -4753,6 +4754,42 @@ def clear_workflow_auto_run_request(state: State) -> None:
     state.workflow_auto_run_inputs = {}
     state.workflow_auto_run_source = ""
     state.workflow_auto_run_command = ""
+
+
+def workflow_do_workflow_id_for_goal(goal: str) -> str:
+    clean_goal = str(goal or "").strip()
+    if not clean_goal:
+        return ""
+    digest = hashlib.sha1(clean_goal.encode("utf-8")).hexdigest()[:10]
+    ascii_text = unicodedata.normalize("NFKD", clean_goal).encode("ascii", "ignore").decode("ascii")
+    slug = normalized_workspace_id(ascii_text) or "workflow"
+    max_slug_len = max(1, 80 - len(digest) - 1)
+    slug = slug[:max_slug_len].strip("._-") or "workflow"
+    return f"{slug}-{digest}"
+
+
+def workflow_do_ref_for_goal(goal: str) -> str:
+    workflow_id = workflow_do_workflow_id_for_goal(goal)
+    return plugin_workflow_ref(WORKFLOW_DO_DEFAULT_PLUGIN_ID, workflow_id) if workflow_id else ""
+
+
+def parse_workflow_do_command_args(tail: str) -> tuple[str, str, dict[str, Any], str]:
+    text = str(tail or "").strip()
+    if not text:
+        return "", "", {}, "Missing workflow do goal."
+    m_inputs = re.search(r"\s--\s", text)
+    if m_inputs:
+        goal = text[:m_inputs.start()].strip()
+        input_tail = text[m_inputs.end():].strip()
+        if not goal:
+            return "", "", {}, "Missing workflow do goal."
+        ref = workflow_do_ref_for_goal(goal)
+        _parsed_ref, inputs, error = parse_workflow_run_command_args(f"{ref} {input_tail}")
+        if error:
+            return ref, goal, {}, error
+        return ref, goal, inputs, ""
+    ref = workflow_do_ref_for_goal(text)
+    return ref, text, {}, "" if ref else "Missing workflow do goal."
 
 
 def parse_workflow_auto_command_args(tail: str) -> tuple[str, str, dict[str, Any], str]:
@@ -23068,6 +23105,14 @@ def handle_workflow_command(state: State, text: str) -> bool:
         else:
             return start_workflow_auto_run_generation(state, ref, goal, inputs=inputs, source_command=raw)
         return True
+    m_do = re.match(r"/workflows?\s+do(?:\s+([\s\S]*))?\s*$", raw, re.I)
+    if m_do:
+        ref, goal, inputs, error = parse_workflow_do_command_args(m_do.group(1) or "")
+        if error:
+            add_system(state, error + "\n用法：/workflow do <goal> [-- key=value ...]")
+        else:
+            return start_workflow_auto_run_generation(state, ref, goal, inputs=inputs, source_command=raw)
+        return True
     m_generate = re.match(r"/workflows?\s+generate\s+([\s\S]+?)\s*$", raw, re.I)
     if m_generate:
         return start_workflow_generation(state, m_generate.group(1))
@@ -23124,7 +23169,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
         add_system(
             state,
             "未知 /workflow 命令。\n"
-            "用法：/workflows、/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]、"
+            "用法：/workflows、/workflow do <goal> [-- key=value ...]、"
+            "/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]、"
             "/workflow generate <goal>、/workflow save-last <plugin-id>/<workflow-id>、"
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"

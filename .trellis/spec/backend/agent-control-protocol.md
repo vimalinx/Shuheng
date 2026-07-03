@@ -2671,6 +2671,80 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /workflow auto generated-pack/source-summary summarize -> validated draft -> save plugin workflow -> load via registry -> create_workflow_run_v0(...)
 ```
 
+## Scenario: Workflow Do One-Command Generate-And-Run
+
+### 1. Scope / Trigger
+
+- Trigger: Users want AI to build and run a workflow from natural language without first selecting a plugin id or workflow id.
+- Applies to: `/workflow do <goal> [-- key=value ...]`, generated workflow refs, user plugin manifests, workflow-generation completion, `app.workflow_do_ref_for_goal(...)`, `app.start_workflow_auto_run_generation(...)`, `app.run_latest_workflow_draft(...)`, `tests/test_workflows.py`, and policy gates.
+- Non-goal: This does not replace `/workflow auto`, add an in-memory executor, mutate built-in plugin data, bypass manifest-backed workflow files, retry invalid model output, schedule workflows, run plugin code directly, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public command:
+  - `/workflow do <goal> [-- key=value ...]`
+- Default user plugin id:
+  - `shuheng-auto-workflows`
+- Generated workflow id shape:
+  - Filesystem-safe slug from the goal plus a stable digest suffix.
+- Existing helpers reused:
+  - `app.workflow_do_ref_for_goal(goal)`
+  - `app.parse_workflow_do_command_args(...)`
+  - `app.start_workflow_auto_run_generation(...)`
+  - `app.run_latest_workflow_draft(...)`
+  - `app.create_workflow_run_v0(...)`
+
+### 3. Contracts
+
+- `/workflow do ...` must derive a safe workflow ref automatically under the normal user plugin root.
+- The derived ref must be stable for the same goal and must not point at the read-only built-in plugin root.
+- The command must parse optional run inputs after `--` with the same grammar as `/workflow run` and `/workflow auto`.
+- The command must start the same bounded workflow-generation task used by `/workflow auto`, with a `workflow_generate:auto:<digest>` source and pending auto-run state.
+- No file or ledger row may be written until generated model output validates as a workflow draft.
+- On valid output, the draft must be saved as a normal manifest-backed user plugin workflow, loaded through the plugin registry, and run through `create_workflow_run_v0(...)`.
+- On invalid output, the pending auto-run request is cleared, the previous valid draft is preserved, and no workflow/plugin files or ledgers are written.
+- Existing `/workflow auto <plugin-id>/<workflow-id> ...` behavior remains compatible and continues to let users choose explicit refs.
+- Approval and agent-task side effects, if any, remain owned by the existing Workflow Approval Bridge and Workflow Agent Task Bridge.
+
+### 4. Validation & Error Matrix
+
+- `/workflow do` with no goal -> usage message, no model task.
+- `/workflow do summarize sources -- ready=true` -> pending auto-run ref under `plugin://shuheng-auto-workflows/workflows/...` and parsed inputs `{"ready":true}`.
+- Valid safe generated draft -> workflow JSON and plugin manifest saved under `SHUHENG_PLUGINS_DIR/shuheng-auto-workflows`, then normal workflow run rows appended.
+- Valid approval or agent-task generated draft -> side effects go only through existing approval/task bridges.
+- Invalid generated output -> no save, no run, no non-workflow side effects, previous valid draft preserved.
+- Built-in plugin root -> unchanged by `/workflow do`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow do summarize sources -- ready=true` generates a stable `shuheng-auto-workflows/<slug>-<digest>` workflow, saves it as a user plugin, and starts a governed workflow run.
+- Good: `/workflow auto generated-pack/source-summary ...` still works for users who want explicit package ids.
+- Base: A non-ASCII goal may fall back to `workflow-<digest>` for the workflow id while preserving stable ref generation.
+- Bad: `/workflow do ...` writes to `src/ga_tui/builtin_plugins`.
+- Bad: `/workflow do ...` executes model output directly from `State.workflow_draft_payload`.
+- Bad: `/workflow do ...` appends workflow rows without first saving and reloading a manifest-backed workflow.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert `/workflow do` derives a default ref, starts `workflow_generate:auto`, saves to the user plugin root, runs through the normal workflow runner, and accepts input overrides.
+- `tests/test_workflows.py` must assert blank goals and invalid input overrides are no-ops with usage or parse errors.
+- `scripts/check_policy_gates.py` must assert `/workflow do` exists, uses `workflow_do_ref_for_goal(...)`, starts a workflow-generation auto source, saves to `SHUHENG_PLUGINS_DIR`, and keeps task/progress/approval/artifact ledgers unchanged for safe workflows.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow do summarize -> model JSON -> direct run rows from in-memory draft
+```
+
+#### Correct
+
+```text
+/workflow do summarize -> generated safe ref -> validated draft -> save user plugin workflow -> load via registry -> create_workflow_run_v0(...)
+```
+
 ## Scenario: Workflow Inputs and Condition V1
 
 ### 1. Scope / Trigger

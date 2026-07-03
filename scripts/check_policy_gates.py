@@ -9522,6 +9522,45 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
     assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
 
+    do_root = tempfile.mkdtemp(prefix="ga_tui_workflow_do_")
+    retarget_harness(do_root)
+    do_payload = {
+        "schema_version": "shuheng.workflow.v1",
+        "id": "draft-do-flow",
+        "name": "Draft Do Flow",
+        "description": "Policy gate draft generated from one natural-language command.",
+        "inputs": {"ready": {"type": "boolean", "required": True}},
+        "steps": [
+            {"id": "plan", "type": "prompt", "prompt": "Plan generated work."},
+            {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+            {"id": "notify", "type": "notify", "depends_on": ["check"]},
+        ],
+    }
+    do_state = a.State(agent=SequencedFakeAgent([json.dumps(do_payload)]))
+    do_goal = "summarize generated work"
+    do_ref = a.workflow_do_ref_for_goal(do_goal)
+    do_plugin_id, do_workflow_id = a.parse_plugin_workflow_ref(do_ref)
+    assert do_plugin_id == a.WORKFLOW_DO_DEFAULT_PLUGIN_ID, do_ref
+    assert "/workflow do" in app_source and "workflow_do_ref_for_goal" in app_source, app_source
+    assert a.handle_workflow_command(do_state, "/workflow do summarize generated work -- ready=true") is True
+    assert do_state.agent.prompts and do_state.agent.prompts[0][1].startswith("workflow_generate:auto:"), do_state.agent.prompts
+    assert do_state.workflow_auto_run_ref == do_ref, do_state.workflow_auto_run_ref
+    drain_ui(do_state)
+    assert "Workflow auto generated and run started." in do_state.messages[-1].content, do_state.messages[-1].content
+    assert "Workflow draft saved and run started." in do_state.messages[-1].content, do_state.messages[-1].content
+    do_workflow_path = Path(a.SHUHENG_PLUGINS_DIR, do_plugin_id, "workflows", f"{do_workflow_id}.json")
+    assert do_workflow_path.exists(), do_workflow_path
+    assert json.loads(do_workflow_path.read_text(encoding="utf-8"))["id"] == do_workflow_id
+    do_rows = a.workflow_run_records()
+    assert len(do_rows) == 2, do_rows
+    assert do_rows[0]["workflow_ref"] == do_ref, do_rows
+    assert do_rows[0]["inputs"] == {"ready": True}, do_rows
+    assert do_rows[1]["status"] == "completed", do_rows
+    assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
+    assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
+
     invalid_auto_root = tempfile.mkdtemp(prefix="ga_tui_workflow_auto_invalid_")
     retarget_harness(invalid_auto_root)
     invalid_auto = a.State(agent=SequencedFakeAgent(["not workflow json"]))
