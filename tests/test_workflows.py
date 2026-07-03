@@ -389,6 +389,68 @@ def test_workflow_run_inspection_formatters_show_latest_rows(tmp_path: Path) -> 
     assert "Workflow run not found: missing-run" in missing
 
 
+def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-continue",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+    repeated = workflows.advance_workflow_run_v0(
+        advanced.record,
+        timestamp="2026-07-03T00:00:02+0800",
+    )
+
+    continued = workflows.format_workflow_continue_result(
+        workflows.WorkflowRunContinueResult(
+            run_id="wfr-continue",
+            status="continued",
+            record=advanced.record,
+            advanced=advanced,
+            history_rows=2,
+        )
+    )
+    no_progress = workflows.format_workflow_continue_result(
+        workflows.WorkflowRunContinueResult(
+            run_id="wfr-continue",
+            status="no_progress",
+            record=advanced.record,
+            history_rows=2,
+            reason=advanced.blocked_reason,
+        )
+    )
+
+    assert workflows.workflow_run_has_meaningful_transition(built.record, advanced.record)
+    assert not workflows.workflow_run_has_meaningful_transition(advanced.record, repeated.record)
+    assert "Workflow run continued: wfr-continue" in continued
+    assert "history_rows: 2" in continued
+    assert "requires subagent dispatch" in continued
+    assert "Workflow run cannot continue with runner v0: wfr-continue" in no_progress
+    assert "No workflow run row was appended." in no_progress
+
+
 def test_workflow_run_record_rejects_invalid_workflow(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -496,9 +558,90 @@ def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, m
     assert "2:review" in state.messages[-1].content
     assert app_module.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow continue {rows[1]['run_id']}") is True
+    assert "Workflow run cannot continue with runner v0" in state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 2
     assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
+    assert len(state.subagents) == 0
+
+
+def test_workflow_continue_command_advances_planned_run_only(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    workflow_plugin_root = plugin_root / "research-pack"
+    workflow_path = workflow_plugin_root / "workflows" / "safe-steps.json"
+    workflow_path.parent.mkdir(parents=True)
+    write_json(
+        workflow_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "safe-steps",
+            "name": "Safe Steps",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "pause", "type": "pause", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["pause"]},
+            ],
+        },
+    )
+    write_json(
+        workflow_plugin_root / "plugin.json",
+        {
+            "schema_version": "shuheng.plugin.v1",
+            "id": "research-pack",
+            "name": "Research Pack",
+            "contributes": {
+                "workflows": [
+                    {"id": "safe-steps", "path": "workflows/safe-steps.json"}
+                ]
+            },
+        },
+    )
+    harness_dir = tmp_path / "harness"
+    monkeypatch.setattr(app_module, "SHUHENG_PLUGINS_DIR", str(plugin_root))
+    monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness_dir / "tasks.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness_dir / "progress.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness_dir / "approvals.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_ARTIFACT_INDEX_PATH", str(harness_dir / "artifacts.jsonl"))
+    app_module.clear_plugin_registry_cache()
+    state = app_module.State(agent=None)
+
+    result = app_module.workflow_load_result_for_ref(
+        "research-pack/safe-steps",
+        app_module.user_plugin_registry(force=True),
+    )
+    planned, planned_message = app_module.create_planned_workflow_run(result)
+    assert planned is not None
+    assert "Workflow run planned:" in planned_message
+    run_id = planned["run_id"]
+    task_rows_before_continue = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_continue = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_continue = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_before_continue = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run continued:" in state.messages[-1].content
+    assert "status: completed" in state.messages[-1].content
+    assert "safe steps completed: 3" in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["status"] == "planned"
+    assert rows[1]["run_id"] == run_id
+    assert rows[1]["status"] == "completed"
+    assert [step["status"] for step in rows[1]["steps"]] == ["completed", "completed", "completed"]
+
+    assert app_module.handle_workflow_command(state, f"/workflow resume {run_id}") is True
+    assert "Workflow run already completed:" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow continue missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 2
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_continue
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_continue
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_continue
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_continue
     assert len(state.subagents) == 0

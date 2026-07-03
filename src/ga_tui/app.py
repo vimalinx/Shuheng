@@ -970,11 +970,13 @@ format_workflow_info = workflow_helpers.format_workflow_info
 format_workflow_list = workflow_helpers.format_workflow_list
 format_workflow_run_created = workflow_helpers.format_workflow_run_created
 format_workflow_run_advanced = workflow_helpers.format_workflow_run_advanced
+format_workflow_continue_result = workflow_helpers.format_workflow_continue_result
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
+workflow_run_has_meaningful_transition = workflow_helpers.workflow_run_has_meaningful_transition
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
 
@@ -4734,6 +4736,48 @@ def create_workflow_run_v0(result: workflow_helpers.WorkflowLoadResult) -> tuple
     advanced = advance_workflow_run_v0(built.record, timestamp=now_iso())
     row = append_workflow_run(advanced.record)
     return row, format_workflow_run_advanced(advanced)
+
+
+def continue_workflow_run_v0(run_id: str) -> tuple[dict[str, Any] | None, str]:
+    target = str(run_id or "").strip()
+    if not target:
+        result = workflow_helpers.WorkflowRunContinueResult(run_id="", status="not_found")
+        return None, format_workflow_continue_result(result)
+    rows = workflow_run_records()
+    history = [row for row in rows if str(row.get("run_id") or "").strip() == target]
+    if not history:
+        result = workflow_helpers.WorkflowRunContinueResult(run_id=target, status="not_found")
+        return None, format_workflow_continue_result(result)
+    latest = history[-1]
+    if str(latest.get("status") or "").strip() == "completed":
+        result = workflow_helpers.WorkflowRunContinueResult(
+            run_id=target,
+            status="already_completed",
+            record=latest,
+            history_rows=len(history),
+        )
+        return None, format_workflow_continue_result(result)
+    advanced = advance_workflow_run_v0(latest, timestamp=now_iso())
+    if not workflow_run_has_meaningful_transition(latest, advanced.record):
+        execution = latest.get("execution") if isinstance(latest.get("execution"), dict) else {}
+        reason = str(execution.get("blocked_reason") or latest.get("error") or "no runner-v0 safe progress is available")
+        result = workflow_helpers.WorkflowRunContinueResult(
+            run_id=target,
+            status="no_progress",
+            record=latest,
+            history_rows=len(history),
+            reason=reason,
+        )
+        return None, format_workflow_continue_result(result)
+    row = append_workflow_run(advanced.record)
+    result = workflow_helpers.WorkflowRunContinueResult(
+        run_id=target,
+        status="continued",
+        record=row,
+        advanced=advanced,
+        history_rows=len(history) + 1,
+    )
+    return row, format_workflow_continue_result(result)
 
 
 def progress_history(task_id: str) -> list[dict[str, Any]]:
@@ -22070,6 +22114,11 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if m_show:
         add_system(state, format_workflow_run_detail(m_show.group(1), workflow_run_records()))
         return True
+    m_continue = re.match(r"/workflows?\s+(?:continue|resume)\s+(\S+)\s*$", raw, re.I)
+    if m_continue:
+        _row, message = continue_workflow_run_v0(m_continue.group(1))
+        add_system(state, message)
+        return True
     m_info = re.match(r"/workflows?\s+info\s+(\S+)\s*$", raw, re.I)
     if m_info:
         result = workflow_load_result_for_ref(m_info.group(1), user_plugin_registry(force=True))
@@ -22092,7 +22141,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "未知 /workflow 命令。\n"
             "用法：/workflows、/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>、"
-            "/workflow runs、/workflow show <run-id>",
+            "/workflow runs、/workflow show <run-id>、/workflow continue|resume <run-id>",
         )
         return True
     return False

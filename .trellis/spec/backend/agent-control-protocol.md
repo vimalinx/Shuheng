@@ -2524,6 +2524,81 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow show wfr_123 -> reads workflow_runs.jsonl and renders the latest row plus history count without side effects
 ```
 
+## Scenario: Workflow Continue Command
+
+### 1. Scope / Trigger
+
+- Trigger: Users need to resume a durable append-only workflow run from its latest `workflow_runs.jsonl` row before Shuheng adds real approval bridge, agent dispatch, or external schedulers.
+- Applies to: `/workflow continue <run_id>`, `/workflow resume <run_id>`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.WorkflowRunContinueResult`, `workflows.workflow_run_has_meaningful_transition(...)`, `workflows.format_workflow_continue_result(...)`, `app.continue_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: Continue commands do not dispatch subagents, create approvals, call model providers, execute tools, run shell commands, execute plugin code, evaluate conditions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow continue <run_id>`
+  - `/workflow resume <run_id>`
+- App ownership:
+  - `app.continue_workflow_run_v0(run_id)` reads all workflow run rows, selects the latest row for the run id by ledger order, and appends at most one advanced row.
+- Pure helper ownership:
+  - `workflows.workflow_run_has_meaningful_transition(before, after)`
+  - `workflows.format_workflow_continue_result(result)`
+  - `workflows.WorkflowRunContinueResult(...)`
+- Runner ownership:
+  - `workflows.advance_workflow_run_v0(row, timestamp=...)` remains the only runner-v0 state transition helper.
+
+### 3. Contracts
+
+- `/workflow continue <run_id>` must resume from the latest row for the given `run_id`, not from the first row and not from a user-supplied workflow ref.
+- Unknown or blank run id must render a not-found message and append no workflow run row.
+- A latest row with `status=completed` must render an already-completed message and append no workflow run row.
+- A latest row that cannot make runner-v0 safe progress must render a no-progress message and append no workflow run row.
+- A latest row that can make runner-v0 safe progress must append exactly one new row with the same `run_id`.
+- Meaningful continuation is defined by status, completed/error state, step status/artifact/approval/task/error fields, blocked-step metadata, or approval metadata changing. Timestamp-only updates are not meaningful and must not create a duplicate row.
+- Continue uses runner-v0 semantics only: safe steps may complete; `approval`, `agent_task`, `condition`, unsupported step types, and unmet dependencies still block.
+- Continue output must report whether a row was appended, latest status, safe-step count when progressed, history row count, and stop reason when present.
+- Continue must not mutate task/progress/approval/artifact ledgers and must not change `state.subagents`.
+- `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
+
+### 4. Validation & Error Matrix
+
+- Missing run id -> visible not-found message, no row append.
+- Unknown run id -> visible not-found message, no row append.
+- Latest row already completed -> visible already-completed message, no row append.
+- Latest row blocked at `agent_task` -> visible no-progress message, no subagent/task/progress rows, no workflow row append.
+- Latest row waiting at `approval` without an approval bridge row -> visible no-progress message, no approval row, no workflow row append.
+- Latest row planned with safe steps -> append exactly one runner-v0 row and complete safe steps until completion or first blocked step.
+- Latest row with timestamp-only runner-v0 output -> no workflow row append.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A planned safe-only run continued with `/workflow continue wfr_...` appends one completed row and leaves side-effect ledgers empty.
+- Good: A planned run with `prompt -> agent_task` appends one blocked row, completing only the prompt step and creating no subagent.
+- Base: `/workflow resume <run_id>` is a command alias for `/workflow continue <run_id>`.
+- Base: Future approval bridge work may create a new latest row that unblocks later safe steps; this command can then advance only those safe steps.
+- Bad: Continuing a blocked `agent_task` run creates a subagent or task/progress ledger rows.
+- Bad: Continuing a `waiting_approval` run creates approval rows or self-approves.
+- Bad: Continuing an unchanged blocked row appends another row only to update timestamps.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert meaningful-transition detection, continuation formatting, planned run continuation, completed no-op, unknown run no-op, blocked no-progress, alias behavior, and side-effect ledger invariants.
+- `scripts/check_policy_gates.py` must assert continue/resume can advance a planned row, cannot advance a blocked `agent_task` row, appends at most one workflow row, and leaves subagents plus task/progress/approval/artifact ledgers unchanged.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow continue wfr_123 -> starts the blocked agent_task and writes tasks.jsonl/progress.jsonl
+```
+
+#### Correct
+
+```text
+/workflow continue wfr_123 -> appends one runner-v0 row only when safe workflow state changes; otherwise reports no progress
+```
+
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger

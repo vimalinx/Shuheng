@@ -100,6 +100,16 @@ class WorkflowRunAdvanceResult:
     blocked_reason: str = ""
 
 
+@dataclass(frozen=True)
+class WorkflowRunContinueResult:
+    run_id: str
+    status: str
+    record: dict[str, Any] | None = None
+    advanced: WorkflowRunAdvanceResult | None = None
+    history_rows: int = 0
+    reason: str = ""
+
+
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
     return WorkflowIssue(workflow_ref=workflow_ref or "(unknown)", path=path, message=message)
 
@@ -657,6 +667,83 @@ def format_workflow_run_advanced(result: WorkflowRunAdvanceResult) -> str:
         lines.append(f"stopped_at: {result.blocked_step_id} [{result.blocked_step_type or 'unknown'}]")
         lines.append(f"reason: {result.blocked_reason}")
     elif result.status == "completed":
+        lines.append("All workflow runner v0 safe steps completed.")
+    lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
+    return "\n".join(lines)
+
+
+def _workflow_step_signature(step: Any) -> tuple[Any, ...]:
+    if not isinstance(step, dict):
+        return ()
+    return (
+        step.get("step_id"),
+        step.get("status"),
+        step.get("started_at"),
+        step.get("completed_at"),
+        step.get("artifact_refs"),
+        step.get("approval_id"),
+        step.get("task_id"),
+        step.get("error"),
+    )
+
+
+def workflow_run_has_meaningful_transition(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    before_steps = before.get("steps") if isinstance(before.get("steps"), list) else []
+    after_steps = after.get("steps") if isinstance(after.get("steps"), list) else []
+    before_execution = before.get("execution") if isinstance(before.get("execution"), dict) else {}
+    after_execution = after.get("execution") if isinstance(after.get("execution"), dict) else {}
+    before_approval = before.get("approval") if isinstance(before.get("approval"), dict) else {}
+    after_approval = after.get("approval") if isinstance(after.get("approval"), dict) else {}
+    return (
+        before.get("status") != after.get("status")
+        or before.get("completed_at") != after.get("completed_at")
+        or before.get("error") != after.get("error")
+        or [_workflow_step_signature(step) for step in before_steps] != [
+            _workflow_step_signature(step) for step in after_steps
+        ]
+        or before_execution.get("blocked_step_id") != after_execution.get("blocked_step_id")
+        or before_execution.get("blocked_step_type") != after_execution.get("blocked_step_type")
+        or before_execution.get("blocked_reason") != after_execution.get("blocked_reason")
+        or before_approval != after_approval
+    )
+
+
+def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
+    run_id = result.run_id or "(missing)"
+    if result.status == "not_found":
+        return f"Workflow run not found: {run_id}"
+    if result.status == "already_completed":
+        return "\n".join([
+            f"Workflow run already completed: {run_id}",
+            f"history_rows: {result.history_rows}",
+            "No workflow run row was appended.",
+        ])
+    if result.status == "no_progress":
+        lines = [
+            f"Workflow run cannot continue with runner v0: {run_id}",
+            f"history_rows: {result.history_rows}",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        lines.append("No workflow run row was appended.")
+        return "\n".join(lines)
+    if result.advanced is None or result.record is None:
+        return f"Workflow run continuation failed: {run_id}"
+    advanced = result.advanced
+    row = result.record
+    lines = [
+        f"Workflow run continued: {run_id}",
+        f"status: {advanced.status}",
+        f"workflow: {row.get('workflow_ref') or '-'}",
+        f"history_rows: {result.history_rows}",
+        f"safe steps completed: {len(advanced.completed_step_ids)}",
+    ]
+    if advanced.completed_step_ids:
+        lines.append("completed: " + ", ".join(advanced.completed_step_ids))
+    if advanced.blocked_step_id:
+        lines.append(f"stopped_at: {advanced.blocked_step_id} [{advanced.blocked_step_type or 'unknown'}]")
+        lines.append(f"reason: {advanced.blocked_reason}")
+    elif advanced.status == "completed":
         lines.append("All workflow runner v0 safe steps completed.")
     lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
     return "\n".join(lines)

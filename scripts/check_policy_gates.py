@@ -8688,6 +8688,23 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
+    assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run cannot continue with runner v0" in state.messages[-1].content, state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
+    planned_continue_row, planned_continue_message = a.create_planned_workflow_run(workflow_result)
+    assert planned_continue_row is not None, planned_continue_message
+    planned_continue_id = planned_continue_row["run_id"]
+    assert a.handle_workflow_command(state, f"/workflow resume {planned_continue_id}") is True
+    assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
+    assert "safe steps completed: 1" in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows_after_continue = a.workflow_run_records()
+    assert len(workflow_run_rows_after_continue) == 4, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[2]["status"] == "planned", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[3]["run_id"] == planned_continue_id, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[3]["status"] == "blocked", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[3]["steps"][0]["status"] == "completed", workflow_run_rows_after_continue[3]
+    assert workflow_run_rows_after_continue[3]["steps"][1]["status"] == "blocked", workflow_run_rows_after_continue[3]
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
