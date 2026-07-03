@@ -5836,6 +5836,98 @@ schedule workflow_run -> scheduler.py loads plugin workflow, advances steps, wri
 schedule workflow_run -> scheduler.py writes scheduledtask.run.v1 starting -> injected app callback -> create_workflow_run_v0(...) -> final schedule-run row links workflow_run_id
 ```
 
+## Scenario: Scheduled Workflow Autopilot Trigger V1
+
+### 1. Scope / Trigger
+
+- Trigger: A `scheduledtask.v1` row should periodically run the existing workflow autopilot tick so ready workflow runs can advance without adding a workflow daemon or weakening Orchestrator ownership.
+- Applies to: `execution.mode:"workflow_autopilot"`, `dispatch_contract:"workflow_autopilot.v1"`, `src/ga_tui/scheduler.py`, `src/ga_tui/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `workflow_events.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add a new daemon, background thread, timer owner, workflow-specific executor, approval auto-resume, approval auto-decision, duplicate subagent dispatch, workflow retry engine, direct model/tool/plugin-code execution, or A2A/MCP workflow service exposure.
+
+### 2. Signatures
+
+- Schedule execution shape:
+  - `{"mode":"workflow_autopilot","run_ids":["<run-id>", "..."],"limit":25,"dry_run":false}`
+- `run_ids` is optional. When omitted or empty, the app helper considers latest workflow run ids up to `limit`.
+- `limit` defaults to `25` and must be greater than zero.
+- `dry_run` defaults to `false`. When `true`, the schedule appends only schedule-run audit rows.
+- Schedule record dispatch contract: `workflow_autopilot.v1`.
+- Scheduler callback injection:
+  - `SchedulerRuntime.dispatch_workflow_autopilot(state, schedule_row, source, schedule_id, execution) -> SchedulerDispatchResult`
+- App-owned callback:
+  - `_scheduler_dispatch_workflow_autopilot(...)` calls `run_workflow_autopilot_tick(state, dry_run=..., run_ids=..., limit=..., source_command=f"/scheduler run {schedule_id}")`.
+- Schedule final run rows must include:
+  - `workflow_run_ids`
+  - `selected_count`
+  - `considered_count`
+  - `continued_count`
+  - `skipped_count`
+  - `workflow_event_count`
+  - `result`
+  - `runtime_provider_id`
+  - existing trigger, idempotency, provider, source, and dispatch contract metadata.
+
+### 3. Contracts
+
+- `scheduler.py` owns parsing, validation, due/idempotency handling, and schedule-run audit rows only.
+- `scheduler.py` must not import `app.py`, `workflows.py`, plugin helpers, curses, mutable TUI `State`, runtime provider classes, approval queues, task/progress/artifact ledgers, workflow ledgers, or governance owners.
+- `scheduler.py` must not resolve workflow refs, append workflow run/event rows, inspect workflow/task/approval rows, dispatch subagents, queue approvals, apply approval decisions, evaluate workflow steps, or duplicate workflow runner behavior.
+- `app.py` remains the strong Orchestrator owner for reading workflow/task/approval ledgers, appending workflow run/event rows, approval bridging, agent-task bridging, retries, artifact refs, and the call to `continue_workflow_run_v0(...)`.
+- `workflows.py` remains pure. It may project and format autopilot tick plans from row lists, but must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+- Scheduled autopilot must use the same app helper as `/workflow tick` and `/workflow autopilot`; it must not implement a parallel selection or continuation path.
+- Only runs selected by `workflow_autopilot_tick_plan(...)` with `next_action:"continue"` may call `continue_workflow_run_v0(...)`.
+- Pending approvals must remain pending until `/approve` or `/reject` changes the approval row. Scheduled autopilot must not self-approve or reject.
+- Non-terminal subagent tasks must remain waiting. Scheduled autopilot must not dispatch duplicate tasks while an existing task row is non-terminal.
+- Existing `execution.mode:"workflow_run"`, `tui_action`, and `agent_task` behavior remains compatible.
+
+### 4. Validation & Error Matrix
+
+- Valid workflow-autopilot schedule -> schedule record `dispatch_contract:"workflow_autopilot.v1"` and empty `target`.
+- Hyphenated mode `workflow-autopilot` -> normalized to `workflow_autopilot`.
+- `run_ids` as a list or string -> normalized to a JSON-safe list of non-empty unique strings.
+- Missing `limit` -> default `25`.
+- `limit <= 0` -> visible create/update validation error and no schedule record append.
+- Invalid non-integer `limit` -> visible create/update validation error and no schedule record append.
+- Forced `/scheduler run <id>` for dry-run autopilot -> starting and final schedule-run rows only; no workflow run, workflow event, task, progress, approval, or artifact rows are appended.
+- Forced `/scheduler run <id>` for mutating autopilot -> starting and final schedule-run rows plus app-owned workflow event rows and any workflow run rows produced by `continue_workflow_run_v0(...)`.
+- Ready planned run -> selected and continued through app helper.
+- Waiting approval with pending approval row -> skipped; approval row remains pending.
+- Waiting task with non-terminal task row -> skipped; no duplicate task dispatch.
+- Completed or terminal run -> skipped without calling continue.
+- Scheduler runtime callback missing -> final failed schedule-run row; no workflow ledger rows are appended.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `interval:"5m"` plus `execution.mode:"workflow_autopilot"` dry-run reports one ready run and one pending approval run while appending no workflow/event/task/progress/approval/artifact rows.
+- Good: Mutating scheduled autopilot continues only a planned run and records selected/continued/skipped/event counts in `schedule_runs.jsonl`.
+- Good: A pending approval remains pending and still requires `/approve <approval_id>` or `/reject <approval_id>`.
+- Base: Scheduled autopilot is a scheduler trigger for the existing app-owned tick helper, not a new always-on workflow worker.
+- Bad: `scheduler.py` imports `workflows.py`, scans `workflow_runs.jsonl`, and calls `advance_workflow_run_v0(...)`.
+- Bad: Scheduler appends workflow event rows directly or decides that a pending approval is safe to approve.
+- Bad: Scheduled autopilot dispatches another subagent task while the latest task row is still working.
+
+### 6. Tests Required
+
+- `tests/test_scheduler_parsing.py` must assert workflow-autopilot execution parsing, hyphen normalization, JSON-safe `run_ids`, `limit` and `dry_run` preservation, invalid `limit <= 0`, create/update `dispatch_contract:"workflow_autopilot.v1"`, and empty scheduler target.
+- `tests/test_workflows.py` must assert a forced scheduler dry-run appends only schedule-run rows and no workflow run/event/task/progress/approval/artifact rows.
+- `tests/test_workflows.py` must assert a forced mutating scheduler run continues only ready runs, skips pending approval/task runs, and writes selected/continued/skipped/event counts in the final schedule-run row.
+- `scripts/check_policy_gates.py` must assert scheduler module ownership remains pure, scheduler exposes `workflow_autopilot.v1`, scheduler runtime retargeting injects `dispatch_workflow_autopilot`, app owns `_scheduler_dispatch_workflow_autopilot`, dry-run is no-mutation outside schedule-run rows, and mutating scheduled autopilot does not bypass approvals or duplicate tasks.
+- Keep targeted compile/Ruff, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+schedule workflow_autopilot -> scheduler.py reads workflow_runs.jsonl -> scheduler.py advances ready rows and auto-approves gates
+```
+
+#### Correct
+
+```text
+schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting -> injected app callback -> run_workflow_autopilot_tick(...) -> continue_workflow_run_v0(...) only for selected ready runs -> final schedule-run row records counts
+```
+
 ## Scenario: Shuheng-Owned Storage And Archive-Backed Sidebar Rows
 
 ### 1. Scope / Trigger

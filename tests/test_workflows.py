@@ -116,6 +116,7 @@ def configure_app_workflow_harness(tmp_path: Path, monkeypatch, plugin_root: Pat
         resolve_subagent=app_module.resolve_subagent,
         dispatch_subagent_task=app_module._scheduler_dispatch_subagent_task,
         dispatch_workflow_run=app_module._scheduler_dispatch_workflow_run,
+        dispatch_workflow_autopilot=app_module._scheduler_dispatch_workflow_autopilot,
     )
     return harness_dir
 
@@ -617,6 +618,157 @@ def test_scheduler_workflow_run_missing_ref_fails_without_workflow_rows(tmp_path
     assert runs[-1]["workflow_ref"] == "research-pack/missing-flow"
     assert not runs[-1]["workflow_run_id"]
     assert "Workflow" in runs[-1]["error"]
+
+
+def test_scheduler_can_trigger_existing_workflow_autopilot_tick(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    safe_result = workflows.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "scheduled-autopilot-safe",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+            ],
+        },
+        plugin_id="research-pack",
+        workflow_id="scheduled-autopilot-safe",
+    )
+    approval_result = workflows.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "scheduled-autopilot-approval",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "gate", "type": "approval", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["gate"]},
+            ],
+        },
+        plugin_id="research-pack",
+        workflow_id="scheduled-autopilot-approval",
+    )
+
+    planned_row, _message = app_module.create_planned_workflow_run(safe_result)
+    approval_row, _message = app_module.create_workflow_run_v0(approval_result, state=state)
+    assert planned_row is not None
+    assert approval_row is not None
+    planned_run_id = planned_row["run_id"]
+    approval_run_id = approval_row["run_id"]
+    run_ids = [planned_run_id, approval_run_id]
+    rows_before = app_module.workflow_run_records()
+    events_before = app_module.workflow_event_records()
+    task_rows_before = app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)
+    progress_rows_before = app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)
+    approval_rows_before = app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)
+    artifact_rows_before = app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)
+
+    dry_message = app_module.apply_schedule_control(
+        state,
+        "schedule_create",
+        "",
+        "",
+        {
+            "schedule_id": "sched_autopilot_dry",
+            "name": "Scheduled Autopilot Dry Run",
+            "interval": "5m",
+            "execution": {
+                "mode": "workflow_autopilot",
+                "run_ids": run_ids,
+                "limit": 2,
+                "dry_run": True,
+            },
+        },
+        source="test",
+    )
+    assert dry_message and "已登记定时任务" in dry_message
+    dry_schedule = app_module.latest_schedule_records()["sched_autopilot_dry"]
+    assert dry_schedule["dispatch_contract"] == "workflow_autopilot.v1"
+    assert dry_schedule["target"] == ""
+    dry_tick = app_module.scheduler_tick(
+        state,
+        now_epoch=1780000000.0,
+        source="test:scheduler_autopilot_dry",
+        target_schedule_id="sched_autopilot_dry",
+        force=True,
+    )
+
+    assert dry_tick["due"] == 1 and dry_tick["dispatched"] == 1
+    assert app_module.workflow_run_records() == rows_before
+    assert app_module.workflow_event_records() == events_before
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == task_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == progress_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == approval_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == artifact_rows_before
+    dry_runs = [
+        row for row in app_module.read_jsonl(app_module.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_autopilot_dry"
+    ]
+    assert [row["status"] for row in dry_runs] == ["starting", "dispatched"]
+    dry_final = dry_runs[-1]
+    assert dry_final["dispatch_contract"] == "workflow_autopilot.v1"
+    assert dry_final["workflow_run_ids"] == run_ids
+    assert dry_final["selected_count"] == 1
+    assert dry_final["considered_count"] == 2
+    assert dry_final["continued_count"] == 0
+    assert dry_final["skipped_count"] == 1
+    assert dry_final["workflow_event_count"] == 0
+    assert "Workflow autopilot dry-run" in dry_final["result"]
+
+    run_message = app_module.apply_schedule_control(
+        state,
+        "schedule_create",
+        "",
+        "",
+        {
+            "schedule_id": "sched_autopilot_run",
+            "name": "Scheduled Autopilot",
+            "interval": "5m",
+            "execution": {
+                "mode": "workflow_autopilot",
+                "run_ids": run_ids,
+                "limit": 2,
+            },
+        },
+        source="test",
+    )
+    assert run_message and "已登记定时任务" in run_message
+    run_tick = app_module.scheduler_tick(
+        state,
+        now_epoch=1780000100.0,
+        source="test:scheduler_autopilot",
+        target_schedule_id="sched_autopilot_run",
+        force=True,
+    )
+
+    assert run_tick["due"] == 1 and run_tick["dispatched"] == 1
+    rows_after = app_module.workflow_run_records()
+    latest_by_id = {row["run_id"]: row for row in rows_after}
+    assert latest_by_id[planned_run_id]["status"] == "completed"
+    assert latest_by_id[approval_run_id]["status"] == "waiting_approval"
+    assert len(rows_after) == len(rows_before) + 1
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == task_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == progress_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == approval_rows_before
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == artifact_rows_before
+    run_schedule_runs = [
+        row for row in app_module.read_jsonl(app_module.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_autopilot_run"
+    ]
+    assert [row["status"] for row in run_schedule_runs] == ["starting", "dispatched"]
+    run_final = run_schedule_runs[-1]
+    assert run_final["workflow_run_ids"] == run_ids
+    assert run_final["selected_count"] == 1
+    assert run_final["continued_count"] == 1
+    assert run_final["skipped_count"] == 1
+    assert run_final["workflow_event_count"] > 0
+    assert "continued: 1" in run_final["result"]
+    scheduled_events = [
+        row for row in app_module.workflow_event_records()
+        if str(row.get("source_command") or "") == "/scheduler run sched_autopilot_run"
+    ]
+    assert any(row.get("event_type") == "autopilot_tick_selected" for row in scheduled_events)
+    assert any(row.get("event_type") == "autopilot_tick_skipped" for row in scheduled_events)
 
 
 def test_workflow_auto_generates_saves_and_runs_safe_workflow(tmp_path: Path, monkeypatch) -> None:

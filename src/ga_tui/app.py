@@ -328,6 +328,7 @@ cron_field_matches = scheduler_runtime.cron_field_matches
 cron_matches_now = scheduler_runtime.cron_matches_now
 dispatch_schedule_run = scheduler_runtime.dispatch_schedule_run
 dispatch_schedule_tui_action = scheduler_runtime.dispatch_schedule_tui_action
+dispatch_schedule_workflow_autopilot = scheduler_runtime.dispatch_schedule_workflow_autopilot
 dispatch_schedule_workflow_run = scheduler_runtime.dispatch_schedule_workflow_run
 format_scheduled_task_registry = scheduler_runtime.format_scheduled_task_registry
 format_scheduler_tick_result = scheduler_runtime.format_scheduler_tick_result
@@ -5854,6 +5855,13 @@ def run_workflow_autopilot_tick(
         limit=limit,
     )
     if dry_run:
+        plan = dict(plan)
+        plan.update({
+            "continued_count": 0,
+            "event_count": 0,
+            "workflow_event_count": 0,
+            "rows_appended": False,
+        })
         return plan, format_workflow_autopilot_tick_plan(plan, dry_run=True)
 
     latest_rows = latest_workflow_run_records()
@@ -5913,6 +5921,13 @@ def run_workflow_autopilot_tick(
             message=summary,
         ):
             event_count += 1
+    plan = dict(plan)
+    plan.update({
+        "continued_count": continued_count,
+        "event_count": event_count,
+        "workflow_event_count": event_count,
+        "rows_appended": bool(event_count or continued_count),
+    })
     return plan, format_workflow_autopilot_tick_plan(
         plan,
         dry_run=False,
@@ -14399,9 +14414,12 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
                         "type": "object",
                         "additionalProperties": True,
                         "properties": {
-                            "mode": {"type": "string", "enum": ["tui_action", "agent_task", "workflow_run"]},
+                            "mode": {"type": "string", "enum": ["tui_action", "agent_task", "workflow_run", "workflow_autopilot"]},
                             "workflow_ref": {"type": "string"},
                             "inputs": {"type": "object", "additionalProperties": True},
+                            "run_ids": {"type": "array", "items": {"type": "string"}},
+                            "limit": {"type": "integer"},
+                            "dry_run": {"type": "boolean"},
                         },
                     },
                 },
@@ -25046,6 +25064,43 @@ def _scheduler_dispatch_workflow_run(
     )
 
 
+def _scheduler_dispatch_workflow_autopilot(
+    state: State,
+    row: dict[str, Any],
+    source: str,
+    schedule_id: str,
+    execution: dict[str, Any],
+) -> SchedulerDispatchResult:
+    del source
+    raw_run_ids = execution.get("run_ids") if isinstance(execution.get("run_ids"), list) else []
+    run_ids = [str(item or "").strip() for item in raw_run_ids if str(item or "").strip()]
+    raw_limit = execution.get("limit", 25)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        limit = 25
+    dry_run = bool(execution.get("dry_run"))
+    plan, message = run_workflow_autopilot_tick(
+        state,
+        dry_run=dry_run,
+        run_ids=run_ids,
+        limit=limit,
+        source_command=f"/scheduler run {schedule_id}",
+    )
+    workflow_run_ids = tuple(str(item or "").strip() for item in plan.get("run_ids", []) if str(item or "").strip())
+    return SchedulerDispatchResult(
+        status="dispatched",
+        message=message,
+        workflow_run_ids=workflow_run_ids,
+        selected_count=int(plan.get("selected_count") or 0),
+        considered_count=int(plan.get("considered_count") or 0),
+        continued_count=int(plan.get("continued_count") or 0),
+        skipped_count=int(plan.get("skipped_count") or 0),
+        event_count=int(plan.get("workflow_event_count") or plan.get("event_count") or 0),
+        provider_id=str(row.get("provider_id") or _scheduler_default_provider_id()),
+    )
+
+
 configure_scheduler_runtime(
     schedules_path=AGENT_SCHEDULES_PATH,
     runs_path=AGENT_SCHEDULE_RUNS_PATH,
@@ -25061,6 +25116,7 @@ configure_scheduler_runtime(
     resolve_subagent=resolve_subagent,
     dispatch_subagent_task=_scheduler_dispatch_subagent_task,
     dispatch_workflow_run=_scheduler_dispatch_workflow_run,
+    dispatch_workflow_autopilot=_scheduler_dispatch_workflow_autopilot,
 )
 
 

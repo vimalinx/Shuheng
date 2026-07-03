@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify scheduled autopilot preserves Orchestrator, approval, task, ledger, and audit boundaries"}

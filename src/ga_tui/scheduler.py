@@ -31,9 +31,15 @@ class SchedulerDispatchResult:
     task_id: str = ""
     approval_id: str = ""
     workflow_run_id: str = ""
+    workflow_run_ids: tuple[str, ...] = ()
     workflow_ref: str = ""
     error: str = ""
     provider_id: str = ""
+    selected_count: int = 0
+    considered_count: int = 0
+    continued_count: int = 0
+    skipped_count: int = 0
+    event_count: int = 0
 
 
 @dataclass
@@ -52,6 +58,7 @@ class SchedulerRuntime:
     resolve_subagent: Optional[Callable[[Any, str], Any]] = None
     dispatch_subagent_task: Optional[Callable[[Any, Any, dict[str, Any], str, str, dict[str, Any]], SchedulerDispatchResult]] = None
     dispatch_workflow_run: Optional[Callable[[Any, dict[str, Any], str, str, dict[str, Any]], SchedulerDispatchResult]] = None
+    dispatch_workflow_autopilot: Optional[Callable[[Any, dict[str, Any], str, str, dict[str, Any]], SchedulerDispatchResult]] = None
 
 
 _runtime = SchedulerRuntime()
@@ -147,7 +154,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
         "jobs": jobs[-50:],
         "dispatch": {
             "contract": "agenttask.v2",
-            "supported_contracts": ["tui_action.v1", "agenttask.v2", "workflow_run.v1"],
+            "supported_contracts": ["tui_action.v1", "agenttask.v2", "workflow_run.v1", "workflow_autopilot.v1"],
             "runtime_provider_selection": "explicit provider_id or registry default",
             "task_ledger": _runtime.task_ledger_path,
             "agent_mail": _runtime.agent_mail_path,
@@ -158,6 +165,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
             "register_recurring_jobs": True,
             "dispatch_to_runtime_provider": True,
             "dispatch_workflow_runs": True,
+            "dispatch_workflow_autopilot": True,
             "audit_each_run": True,
             "approval_gates_before_risky_runs": True,
         },
@@ -461,6 +469,46 @@ def schedule_trigger_from_control(control: dict[str, Any]) -> str:
     return ""
 
 
+def _schedule_run_id_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = re.split(r"[\s,]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        items = [value]
+    run_ids: list[str] = []
+    for item in items:
+        run_id = str(item or "").strip()
+        if run_id and run_id not in run_ids:
+            run_ids.append(run_id)
+    return run_ids
+
+
+def _schedule_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
+def _schedule_int_or_raw(value: Any, default: int) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return value
+
+
 def schedule_execution_from_control(control: dict[str, Any]) -> dict[str, Any]:
     raw = control.get("execution") if isinstance(control.get("execution"), dict) else {}
     mode = str(raw.get("mode") or "").strip().lower().replace("-", "_")
@@ -488,6 +536,14 @@ def schedule_execution_from_control(control: dict[str, Any]) -> dict[str, Any]:
             "mode": "workflow_run",
             "workflow_ref": str(raw.get("workflow_ref") or "").strip(),
             "inputs": raw.get("inputs") if isinstance(raw.get("inputs"), dict) else {},
+        }
+        return _runtime.json_safe(execution)
+    if mode == "workflow_autopilot":
+        execution = {
+            "mode": "workflow_autopilot",
+            "run_ids": _schedule_run_id_list(raw.get("run_ids")),
+            "limit": _schedule_int_or_raw(raw.get("limit"), 25),
+            "dry_run": _schedule_bool(raw.get("dry_run")) if "dry_run" in raw else False,
         }
         return _runtime.json_safe(execution)
     return {}
@@ -523,6 +579,21 @@ def schedule_execution_error(execution: dict[str, Any]) -> str:
         if not str(execution.get("workflow_ref") or "").strip():
             return "schedule execution missing workflow_ref."
         return ""
+    if mode == "workflow_autopilot":
+        limit = execution.get("limit", 25)
+        if isinstance(limit, bool):
+            limit_value = int(limit)
+        else:
+            try:
+                limit_value = int(str(limit).strip())
+            except (TypeError, ValueError):
+                return "schedule execution workflow_autopilot limit must be an integer."
+        if limit_value <= 0:
+            return "schedule execution workflow_autopilot limit must be greater than zero."
+        run_ids = execution.get("run_ids", [])
+        if not isinstance(run_ids, list):
+            return "schedule execution workflow_autopilot run_ids must be a list."
+        return ""
     return "schedule execution mode is required."
 
 
@@ -532,6 +603,8 @@ def schedule_dispatch_contract_for_execution(execution: dict[str, Any]) -> str:
         return "tui_action.v1"
     if mode == "workflow_run":
         return "workflow_run.v1"
+    if mode == "workflow_autopilot":
+        return "workflow_autopilot.v1"
     return "agenttask.v2"
 
 
@@ -775,6 +848,47 @@ def dispatch_schedule_workflow_run(row: dict[str, Any], started: dict[str, Any],
     return finished
 
 
+def dispatch_schedule_workflow_autopilot(row: dict[str, Any], started: dict[str, Any], state: Any, *, source: str) -> Optional[dict[str, Any]]:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    if str(execution.get("mode") or "").strip().lower() != "workflow_autopilot":
+        return None
+    schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
+    if _runtime.dispatch_workflow_autopilot is None:
+        dispatch = SchedulerDispatchResult(
+            status="failed",
+            message="scheduler dispatch_workflow_autopilot callback is not configured",
+            error="scheduler dispatch_workflow_autopilot callback is not configured",
+        )
+    else:
+        try:
+            dispatch = _runtime.dispatch_workflow_autopilot(state, row, source, schedule_id, execution)
+        except Exception as exc:
+            dispatch = SchedulerDispatchResult(
+                status="failed",
+                message=f"{type(exc).__name__}: {exc}",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+    finished = dict(started)
+    finished.update({
+        "status": dispatch.status,
+        "finished_at": _now_iso(),
+        "execution": _runtime.json_safe(execution),
+        "workflow_run_ids": list(dispatch.workflow_run_ids),
+        "selected_count": int(dispatch.selected_count or 0),
+        "considered_count": int(dispatch.considered_count or 0),
+        "continued_count": int(dispatch.continued_count or 0),
+        "skipped_count": int(dispatch.skipped_count or 0),
+        "workflow_event_count": int(dispatch.event_count or 0),
+        "result": dispatch.message,
+        "runtime_provider_id": dispatch.provider_id or str(row.get("provider_id") or _runtime.default_provider_id() or "ohmypi"),
+    })
+    if dispatch.status in {"failed", "rejected"}:
+        finished["error"] = dispatch.error or dispatch.message
+    append_schedule_run(finished)
+    update_schedule_last_run(row, finished)
+    return finished
+
+
 def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any], *, source: str = "scheduler") -> dict[str, Any]:
     schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
     idempotency_key = str(info.get("idempotency_key") or "").strip()
@@ -814,6 +928,9 @@ def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any],
     workflow_run = dispatch_schedule_workflow_run(row, started, state, source=source)
     if workflow_run is not None:
         return workflow_run
+    workflow_autopilot = dispatch_schedule_workflow_autopilot(row, started, state, source=source)
+    if workflow_autopilot is not None:
+        return workflow_autopilot
     control = schedule_agenttask_control(row)
     work_order = control.get("work_order") if isinstance(control.get("work_order"), dict) else {}
     if not str(work_order.get("objective") or "").strip():

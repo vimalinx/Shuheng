@@ -341,3 +341,82 @@ class TestWorkflowRunExecution:
         assert updates["dispatch_contract"] == "workflow_run.v1"
         assert updates["target"] == ""
         assert updates["execution"]["inputs"] == {}
+
+
+class TestWorkflowAutopilotExecution:
+    def test_workflow_autopilot_execution_parses_fields(self) -> None:
+        execution = schedule_execution_from_control({
+            "execution": {
+                "mode": "workflow-autopilot",
+                "run_ids": ["wfr_ready", "", "wfr_pending", "wfr_ready"],
+                "limit": "3",
+                "dry_run": True,
+            }
+        })
+
+        assert execution == {
+            "mode": "workflow_autopilot",
+            "run_ids": ["wfr_ready", "wfr_pending"],
+            "limit": 3,
+            "dry_run": True,
+        }
+        assert schedule_execution_error(execution) == ""
+        assert schedule_dispatch_contract_for_execution(execution) == "workflow_autopilot.v1"
+
+    def test_workflow_autopilot_execution_splits_string_run_ids(self) -> None:
+        execution = schedule_execution_from_control({
+            "execution": {
+                "mode": "workflow_autopilot",
+                "run_ids": "wfr_one, wfr_two\nwfr_three",
+                "dry_run": "yes",
+            }
+        })
+
+        assert execution["run_ids"] == ["wfr_one", "wfr_two", "wfr_three"]
+        assert execution["limit"] == 25
+        assert execution["dry_run"] is True
+
+    def test_workflow_autopilot_execution_rejects_invalid_limit(self) -> None:
+        zero = schedule_execution_from_control({"execution": {"mode": "workflow_autopilot", "limit": 0}})
+        invalid = schedule_execution_from_control({"execution": {"mode": "workflow_autopilot", "limit": "many"}})
+
+        assert schedule_execution_error(zero) == "schedule execution workflow_autopilot limit must be greater than zero."
+        assert schedule_execution_error(invalid) == "schedule execution workflow_autopilot limit must be an integer."
+
+    def test_workflow_autopilot_schedule_record_uses_autopilot_dispatch_contract(self) -> None:
+        record = schedule_record_from_control(
+            {
+                "name": "Continue Ready Workflows",
+                "interval": "5m",
+                "execution": {
+                    "mode": "workflow_autopilot",
+                    "run_ids": ["wfr_ready"],
+                    "limit": 10,
+                    "dry_run": False,
+                },
+            },
+            schedule_id="sched_workflow_autopilot",
+            status="enabled",
+            source="test",
+        )
+
+        assert record["dispatch_contract"] == "workflow_autopilot.v1"
+        assert record["target"] == ""
+        assert record["execution"]["run_ids"] == ["wfr_ready"]
+        assert record["execution"]["limit"] == 10
+        assert record["execution"]["dry_run"] is False
+
+    def test_workflow_autopilot_schedule_update_preserves_contract(self) -> None:
+        updates = schedule_record_updates_from_control(
+            {
+                "execution": {
+                    "mode": "workflow_autopilot",
+                    "limit": 5,
+                }
+            },
+            source="test",
+        )
+
+        assert updates["dispatch_contract"] == "workflow_autopilot.v1"
+        assert updates["target"] == ""
+        assert updates["execution"]["run_ids"] == []

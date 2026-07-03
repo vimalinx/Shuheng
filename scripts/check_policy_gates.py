@@ -142,6 +142,7 @@ def retarget_harness(root: str) -> None:
             ).__dict__
         ),
         dispatch_workflow_run=a._scheduler_dispatch_workflow_run,
+        dispatch_workflow_autopilot=a._scheduler_dispatch_workflow_autopilot,
     )
 
 
@@ -224,6 +225,7 @@ def assert_scheduler_module_boundary() -> None:
         "append_schedule_skip_run",
         "dispatch_schedule_tui_action",
         "dispatch_schedule_workflow_run",
+        "dispatch_schedule_workflow_autopilot",
         "dispatch_schedule_run",
         "scheduler_tick",
         "schedule_dispatch_contract_for_execution",
@@ -243,6 +245,8 @@ def assert_scheduler_module_boundary() -> None:
         "ga_tui.app",
         "from .app",
         "import app",
+        "from .workflows",
+        "import workflows",
         "GenericAgent",
         "GenericAgentHandler",
         "StepOutcome",
@@ -10234,7 +10238,12 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
     schema = next(tool for tool in a.TUI_SCHEDULE_TOOL_SCHEMAS if tool["function"]["name"] == "schedule_create")
     execution_schema = schema["function"]["parameters"]["properties"]["execution"]
     assert execution_schema["required"] == ["mode"], execution_schema
-    assert set(execution_schema["properties"]["mode"]["enum"]) == {"tui_action", "agent_task", "workflow_run"}, execution_schema
+    assert set(execution_schema["properties"]["mode"]["enum"]) == {
+        "tui_action",
+        "agent_task",
+        "workflow_run",
+        "workflow_autopilot",
+    }, execution_schema
     assert "workflow_ref" in execution_schema["properties"], execution_schema
     assert "inputs" in execution_schema["properties"], execution_schema
     schedule_list = a.tui_tool_schedule_list(state, {})
@@ -12340,12 +12349,24 @@ def run_checks() -> None:
     assert a.split_schedule_trigger(updated_daily) == ("interval", "10m"), updated_daily
     a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
     assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
-    for prompt_token in ("ScheduleCreate", "schedule_create", "schedule_list", "execution", "tui_action", "agent_task", "workflow_run", "workflow_ref"):
+    for prompt_token in (
+        "ScheduleCreate",
+        "schedule_create",
+        "schedule_list",
+        "execution",
+        "tui_action",
+        "agent_task",
+        "workflow_run",
+        "workflow_autopilot",
+        "workflow_ref",
+    ):
         assert prompt_token in a.TUI_AGENT_CONTROL_HINT, prompt_token
     schedule_tool = next(tool for tool in a.TUI_SCHEDULE_TOOL_SCHEMAS if tool.get("function", {}).get("name") == "schedule_create")
     execution_schema = schedule_tool["function"]["parameters"]["properties"]["execution"]["properties"]
     assert "workflow_run" in execution_schema["mode"]["enum"], schedule_tool
+    assert "workflow_autopilot" in execution_schema["mode"]["enum"], schedule_tool
     assert "workflow_ref" in execution_schema and "inputs" in execution_schema, schedule_tool
+    assert {"run_ids", "limit", "dry_run"} <= set(execution_schema), schedule_tool
     assert a.split_schedule_trigger({"cron": "0 8 * * *"}) == ("cron", "0 8 * * *")
     assert a.split_schedule_trigger({"interval": "1m"}) == ("interval", "1m")
     assert a.split_schedule_trigger({"at": "2026-01-01T00:00:00+0800"}) == ("at", "2026-01-01T00:00:00+0800")
@@ -12440,6 +12461,129 @@ def run_checks() -> None:
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_scheduled_workflow
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_scheduled_workflow
     assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_scheduled_workflow
+    scheduler_source = Path(sched.__file__).read_text(encoding="utf-8")
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "workflow_autopilot" in scheduler_source and "workflow_autopilot.v1" in scheduler_source, scheduler_source
+    assert "dispatch_workflow_autopilot" in scheduler_source, scheduler_source
+    assert "_scheduler_dispatch_workflow_autopilot" in app_source, app_source
+    autopilot_safe_result = a.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "scheduled-autopilot-safe",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan autopilot."},
+                {"id": "notify", "type": "notify", "depends_on": ["plan"]},
+            ],
+        },
+        plugin_id="schedule-pack",
+        workflow_id="scheduled-autopilot-safe",
+    )
+    autopilot_approval_result = a.workflow_load_result_from_payload(
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "scheduled-autopilot-approval",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan approval."},
+                {"id": "gate", "type": "approval", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["gate"]},
+            ],
+        },
+        plugin_id="schedule-pack",
+        workflow_id="scheduled-autopilot-approval",
+    )
+    autopilot_planned, _autopilot_planned_message = a.create_planned_workflow_run(autopilot_safe_result)
+    autopilot_approval, _autopilot_approval_message = a.create_workflow_run_v0(
+        autopilot_approval_result,
+        state=state,
+    )
+    assert autopilot_planned is not None and autopilot_approval is not None
+    autopilot_run_ids = [autopilot_planned["run_id"], autopilot_approval["run_id"]]
+    autopilot_workflow_rows_before = len(a.workflow_run_records())
+    autopilot_events_before = len(a.workflow_event_records())
+    autopilot_task_rows_before = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    autopilot_progress_rows_before = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    autopilot_approval_rows_before = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    autopilot_artifact_rows_before = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    a.apply_tui_controls_from_text(
+        state,
+        ga_control({
+            "action": "schedule.create",
+            "schedule_id": "sched_workflow_autopilot_dry",
+            "name": "Workflow Autopilot Dry",
+            "interval": "5m",
+            "execution": {
+                "mode": "workflow_autopilot",
+                "run_ids": autopilot_run_ids,
+                "limit": 2,
+                "dry_run": True,
+            },
+        }),
+        source="agent",
+    )
+    autopilot_dry_schedule = a.latest_schedule_records()["sched_workflow_autopilot_dry"]
+    assert autopilot_dry_schedule["dispatch_contract"] == "workflow_autopilot.v1", autopilot_dry_schedule
+    autopilot_dry_tick = a.scheduler_tick(
+        state,
+        now_epoch=1780000200.0,
+        source="test:scheduler_autopilot_dry",
+        target_schedule_id="sched_workflow_autopilot_dry",
+        force=True,
+    )
+    assert autopilot_dry_tick["due"] == 1 and autopilot_dry_tick["dispatched"] == 1, autopilot_dry_tick
+    assert len(a.workflow_run_records()) == autopilot_workflow_rows_before, a.workflow_run_records()
+    assert len(a.workflow_event_records()) == autopilot_events_before, a.workflow_event_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == autopilot_task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == autopilot_progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == autopilot_approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == autopilot_artifact_rows_before
+    autopilot_dry_final = [
+        row for row in a.read_jsonl(a.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_workflow_autopilot_dry"
+    ][-1]
+    assert autopilot_dry_final["selected_count"] == 1, autopilot_dry_final
+    assert autopilot_dry_final["continued_count"] == 0, autopilot_dry_final
+    assert autopilot_dry_final["skipped_count"] == 1, autopilot_dry_final
+    assert autopilot_dry_final["workflow_event_count"] == 0, autopilot_dry_final
+    a.apply_tui_controls_from_text(
+        state,
+        ga_control({
+            "action": "schedule.create",
+            "schedule_id": "sched_workflow_autopilot_run",
+            "name": "Workflow Autopilot Run",
+            "interval": "5m",
+            "execution": {
+                "mode": "workflow_autopilot",
+                "run_ids": autopilot_run_ids,
+                "limit": 2,
+            },
+        }),
+        source="agent",
+    )
+    autopilot_run_tick = a.scheduler_tick(
+        state,
+        now_epoch=1780000300.0,
+        source="test:scheduler_autopilot_run",
+        target_schedule_id="sched_workflow_autopilot_run",
+        force=True,
+    )
+    assert autopilot_run_tick["due"] == 1 and autopilot_run_tick["dispatched"] == 1, autopilot_run_tick
+    autopilot_latest = {row["run_id"]: row for row in a.workflow_run_records()}
+    assert autopilot_latest[autopilot_run_ids[0]]["status"] == "completed", autopilot_latest
+    assert autopilot_latest[autopilot_run_ids[1]]["status"] == "waiting_approval", autopilot_latest
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == autopilot_task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == autopilot_progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == autopilot_approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == autopilot_artifact_rows_before
+    autopilot_run_final = [
+        row for row in a.read_jsonl(a.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_workflow_autopilot_run"
+    ][-1]
+    assert autopilot_run_final["dispatch_contract"] == "workflow_autopilot.v1", autopilot_run_final
+    assert autopilot_run_final["workflow_run_ids"] == autopilot_run_ids, autopilot_run_final
+    assert autopilot_run_final["selected_count"] == 1, autopilot_run_final
+    assert autopilot_run_final["continued_count"] == 1, autopilot_run_final
+    assert autopilot_run_final["skipped_count"] == 1, autopilot_run_final
+    assert autopilot_run_final["workflow_event_count"] > 0, autopilot_run_final
     interval_anchor_row = a.append_schedule_record({
         "schedule_id": "sched_interval_anchor",
         "name": "Interval Anchor",
@@ -12641,6 +12785,7 @@ def run_checks() -> None:
     schedule_text = a.format_scheduled_task_registry(registry["scheduled_task_registry"])
     assert "Scheduled Tasks" in schedule_text and "agenttask.v2" in schedule_text and "schedule_runs.jsonl" in schedule_text, schedule_text
     assert "workflow_run.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
+    assert "workflow_autopilot.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
     model_text = a.format_model_orchestration_registry(registry["model_orchestration"])
     assert "Model Orchestration" in model_text, model_text
     gateway_panel_keys = {item.key for item in a.gateway_panel_items(state)}
