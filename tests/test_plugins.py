@@ -99,8 +99,10 @@ def test_discover_plugins_reports_invalid_paths_without_resolving_outside_files(
 
 def test_plugin_ref_parsing_and_roots_are_stable(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SHUHENG_HOME", str(tmp_path / "home"))
+    builtin_root = plugins.builtin_plugin_root()
 
     assert plugins.plugin_roots() == [str(tmp_path / "home" / "plugins")]
+    assert plugins.plugin_roots(include_builtin=True) == [str(tmp_path / "home" / "plugins"), builtin_root]
     assert plugins.plugin_roots(str(tmp_path), str(tmp_path)) == [str(tmp_path)]
     assert plugins.plugin_skill_ref("research-pack", "source-review") == "plugin://research-pack/skills/source-review"
     assert plugins.plugin_skill_ref("bad/id", "source-review") == ""
@@ -134,4 +136,18 @@ def test_plugin_ref_parsing_and_roots_are_stable(tmp_path: Path, monkeypatch) ->
     assert plugins.parse_plugin_agent_template_ref("research-pack/evidence-researcher") == (
         "research-pack",
         "evidence-researcher",
+    )
+
+
+def test_builtin_example_workflow_pack_is_manifest_backed() -> None:
+    builtin_root = Path(plugins.builtin_plugin_root())
+    registry = plugins.discover_plugins([str(builtin_root)])
+
+    assert builtin_root.is_dir()
+    assert not registry.issues
+    plugin = registry.plugins["shuheng-examples"]
+    assert plugin.root == str(builtin_root / "shuheng-examples")
+    assert plugin.workflows[0].ref == "plugin://shuheng-examples/workflows/daily-briefing"
+    assert plugins.plugin_workflow_file_for_ref("shuheng-examples/daily-briefing", registry).endswith(
+        "builtin_plugins/shuheng-examples/workflows/daily-briefing.json"
     )

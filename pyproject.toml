@@ -63,6 +63,12 @@ shuheng-integration = "ga_tui.integration:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"ga_tui" = [
+    "builtin_plugins/shuheng-examples/plugin.json",
+    "builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

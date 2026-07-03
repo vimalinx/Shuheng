@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover - script-mode compatibility
     from path_utils import normalized_path, path_is_within  # type: ignore
 
 PLUGIN_SCHEMA_VERSION = "shuheng.plugin.v1"
+BUILTIN_PLUGINS_DIRNAME = "builtin_plugins"
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 _PLUGIN_SKILL_REF_RE = re.compile(
     r"^plugin://(?P<plugin>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})/skills/(?P<skill>[A-Za-z0-9][A-Za-z0-9_.-]{0,79})$"
@@ -161,13 +162,19 @@ def plugin_skill_ref_from_token(token: Any) -> str:
     return ""
 
 
-def plugin_roots(*roots: str) -> list[str]:
+def builtin_plugin_root() -> str:
+    return normalized_path(os.path.join(os.path.dirname(__file__), BUILTIN_PLUGINS_DIRNAME))
+
+
+def plugin_roots(*roots: str, include_builtin: bool = False) -> list[str]:
     raw_roots = list(roots)
     if not raw_roots:
         shuheng_home = os.path.abspath(
             os.path.expanduser(os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME") or "~/.shuheng")
         )
         raw_roots = [os.path.join(shuheng_home, "plugins")]
+    if include_builtin:
+        raw_roots.append(builtin_plugin_root())
     normalized: list[str] = []
     seen: set[str] = set()
     for root in raw_roots:

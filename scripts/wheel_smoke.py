@@ -74,6 +74,8 @@ SDIST_REQUIRED_MEMBERS = (
     "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
+    "src/ga_tui/builtin_plugins/shuheng-examples/plugin.json",
+    "src/ga_tui/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
     "src/ga_tui/app.py",
     "src/shuheng.egg-info/PKG-INFO",
     SDIST_SOURCES_MEMBER,
@@ -110,6 +112,8 @@ WHEEL_REQUIRED_PACKAGE_MEMBERS = (
     "ga_tui/__init__.py",
     "ga_tui/__main__.py",
     "ga_tui/app.py",
+    "ga_tui/builtin_plugins/shuheng-examples/plugin.json",
+    "ga_tui/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
     "ga_tui/integration.py",
     "ga_tui/release_readiness.py",
 )

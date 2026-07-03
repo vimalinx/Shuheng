@@ -8421,9 +8421,49 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
 def assert_declarative_plugins_are_agent_scoped() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
     retarget_harness(root)
+    builtin_root = a.plugin_helpers.builtin_plugin_root()
+    assert a.user_plugin_roots() == [a.SHUHENG_PLUGINS_DIR, builtin_root], a.user_plugin_roots()
+    assert not Path(a.SHUHENG_PLUGINS_DIR, "shuheng-examples").exists()
+    builtin_registry = a.user_plugin_registry(force=True)
+    assert "shuheng-examples" in builtin_registry.plugins, builtin_registry
+    builtin_result = a.workflow_load_result_for_ref("shuheng-examples/daily-briefing", builtin_registry)
+    assert builtin_result.definition is not None, builtin_result
+    assert not builtin_result.issues, builtin_result.issues
+    assert builtin_result.definition.workflow_ref == "plugin://shuheng-examples/workflows/daily-briefing"
+    builtin_dry_run = a.format_workflow_dry_run(builtin_result)
+    assert "Daily Briefing" in a.format_workflow_info(builtin_result), builtin_result
+    assert "No execution occurred." in builtin_dry_run, builtin_dry_run
+    assert "plan - type=prompt" in builtin_dry_run, builtin_dry_run
+    builtin_state = a.State(agent=ContextFakeAgent())
+    builtin_row, builtin_message = a.create_workflow_run_v0(
+        builtin_result,
+        state=builtin_state,
+        source_command="/workflow run shuheng-examples/daily-briefing",
+    )
+    assert builtin_row is not None, builtin_message
+    builtin_rows = a.workflow_run_records()
+    assert len(builtin_rows) == 2, builtin_rows
+    assert builtin_rows[0]["status"] == "planned", builtin_rows
+    assert builtin_rows[0]["inputs"] == {"topic": "daily priorities", "include_notify": True}, builtin_rows[0]
+    assert builtin_rows[1]["status"] == "completed", builtin_rows
+    assert [step["status"] for step in builtin_rows[1]["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+    ], builtin_rows[1]
+    assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
+    assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
+    assert not Path(a.SHUHENG_PLUGINS_DIR, "shuheng-examples").exists()
+
+    root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
+    retarget_harness(root)
     empty_items = a.plugin_panel_items()
-    assert len(empty_items) == 1 and empty_items[0].key == "no-plugins", empty_items
-    assert a.SHUHENG_PLUGINS_DIR in empty_items[0].detail, empty_items[0].detail
+    assert not any(item.key == "no-plugins" for item in empty_items), empty_items
+    builtin_panel_item = next(item for item in empty_items if item.key == "shuheng-examples")
+    assert "daily-briefing" in builtin_panel_item.detail, builtin_panel_item.detail
     plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
     skill_dir = plugin_root / "skills" / "source-review"
     skill_dir.mkdir(parents=True, exist_ok=True)

@@ -88,6 +88,7 @@ REQUIRED_MANIFEST_LINES = (
     "include CHANGELOG.md",
     "recursive-include docs *.md",
     "recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts",
+    "recursive-include src/ga_tui/builtin_plugins *.json",
     "recursive-include tests *.py",
     "include scripts/check_policy_gates.py",
     "include scripts/check_release_hygiene.py",

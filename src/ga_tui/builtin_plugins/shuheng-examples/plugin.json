@@ -1,0 +1,21 @@
+{
+  "schema_version": "shuheng.plugin.v1",
+  "id": "shuheng-examples",
+  "name": "Shuheng Examples",
+  "version": "0.1.0",
+  "description": "Read-only starter workflows shipped with Shuheng.",
+  "contributes": {
+    "workflows": [
+      {
+        "id": "daily-briefing",
+        "name": "Daily Briefing",
+        "description": "A safe starter workflow that plans a daily briefing without dispatching subagents or tools.",
+        "path": "workflows/daily-briefing.json"
+      }
+    ]
+  },
+  "permissions": {
+    "requested_tools": [],
+    "write_policy": "none"
+  }
+}

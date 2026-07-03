@@ -126,6 +126,55 @@ def drain_app_ui_queue(state: app_module.State, *, attempts: int = 20) -> None:
         time.sleep(0.01)
 
 
+def test_builtin_example_workflow_is_available_without_user_plugins(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    state = app_module.State(agent=None)
+
+    roots = app_module.user_plugin_roots()
+    assert str(plugin_root) in roots
+    assert app_module.plugin_helpers.builtin_plugin_root() in roots
+    assert not plugin_root.exists()
+
+    registry = app_module.user_plugin_registry(force=True)
+    assert "shuheng-examples" in registry.plugins
+    result = app_module.workflow_load_result_for_ref("shuheng-examples/daily-briefing", registry)
+    assert result.definition is not None
+    assert not result.issues
+    assert result.definition.workflow_ref == "plugin://shuheng-examples/workflows/daily-briefing"
+
+    info = app_module.format_workflow_info(result)
+    dry_run = app_module.format_workflow_dry_run(result)
+    assert "Daily Briefing" in info
+    assert "No execution occurred." in dry_run
+    assert "plan - type=prompt" in dry_run
+
+    row, message = app_module.create_workflow_run_v0(
+        result,
+        state=state,
+        source_command="/workflow run shuheng-examples/daily-briefing",
+    )
+
+    assert row is not None, message
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 2
+    assert rows[0]["status"] == "planned"
+    assert rows[0]["inputs"] == {"topic": "daily priorities", "include_notify": True}
+    assert rows[1]["run_id"] == rows[0]["run_id"]
+    assert rows[1]["status"] == "completed"
+    assert [step["status"] for step in rows[1]["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+    ]
+    assert not (plugin_root / "shuheng-examples").exists()
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
 def test_workflow_definition_loads_from_manifest_declared_file(tmp_path: Path) -> None:
     marker = "WORKFLOW_DRY_RUN_TEST_MARKER"
     registry, workflow_path = create_workflow_plugin(

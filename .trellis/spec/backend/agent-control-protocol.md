@@ -2296,6 +2296,75 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /workflow dry-run research-pack/compare-sources -> renders plan preview and says "No execution occurred."
 ```
 
+## Scenario: Built-In Example Workflow Pack V1
+
+### 1. Scope / Trigger
+
+- Trigger: A fresh Shuheng install should expose at least one useful workflow without requiring the user to hand-create a plugin package.
+- Applies to: package-data plugin roots, `src/ga_tui/builtin_plugins/**`, `plugins.py`, `app.user_plugin_roots()`, `/plugins`, `/workflows`, `/workflow info <ref>`, `/workflow dry-run <ref>`, `/workflow run <ref>`, release hygiene, wheel smoke, `tests/test_plugins.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add executable plugin code, remote marketplace install, starter-file copying into user plugin roots, workflow daemon ownership, hidden model/tool/shell calls, subagent dispatch, or approval/task/artifact side effects from the built-in example.
+
+### 2. Signatures
+
+- Built-in package root helper: `plugins.builtin_plugin_root()`.
+- App discovery wrapper: `app.user_plugin_roots()` returns the user plugin root plus the built-in package root.
+- Built-in plugin root: `src/ga_tui/builtin_plugins`.
+- Built-in plugin id: `shuheng-examples`.
+- Built-in workflow ref: `plugin://shuheng-examples/workflows/daily-briefing`.
+- Distribution manifest entries:
+  - `MANIFEST.in` includes `recursive-include src/ga_tui/builtin_plugins *.json`.
+  - `pyproject.toml` package data includes the built-in plugin manifest and workflow JSON.
+
+### 3. Contracts
+
+- Built-in workflows are read-only package data. Shuheng must not copy, mutate, or scaffold them into `SHUHENG_PLUGINS_DIR` during discovery, info, dry-run, run, panel rendering, package smoke, or policy gates.
+- Built-in workflows must be loaded only through the normal `shuheng.plugin.v1` manifest registry and `PluginWorkflow` records. App code must not special-case a built-in workflow ref into a guessed filesystem path.
+- User plugin discovery remains unchanged: custom plugins under `SHUHENG_PLUGINS_DIR` still load through the same registry, and user-created workflow saves still write only under `SHUHENG_PLUGINS_DIR`.
+- The built-in example workflow must stay safe-only. Running it may append normal planned and completed `shuheng.workflow_run.v1` rows, but it must not create subagents, task rows, progress rows, approval rows, artifact index rows, plugin-code calls, shell calls, tool calls, or provider calls.
+- Empty user plugin roots should still make `/plugins`, `/workflows`, `/workflow info shuheng-examples/daily-briefing`, `/workflow dry-run shuheng-examples/daily-briefing`, and `/workflow run shuheng-examples/daily-briefing` useful.
+- Package builds must include the built-in plugin manifest and workflow JSON in both sdist and wheel artifacts.
+
+### 4. Validation & Error Matrix
+
+- Empty `SHUHENG_PLUGINS_DIR` -> registry includes `shuheng-examples` from the built-in package root.
+- Empty `SHUHENG_PLUGINS_DIR` -> `/plugins` and the Plugins panel show the built-in plugin instead of a no-plugin empty state.
+- `/workflow dry-run shuheng-examples/daily-briefing` -> plan preview includes `Daily Briefing`, ordered safe steps, and `No execution occurred.`
+- `/workflow run shuheng-examples/daily-briefing` -> exactly normal planned and completed workflow rows are appended, with default inputs applied.
+- `/workflow run shuheng-examples/daily-briefing` -> task/progress/approval/artifact ledgers stay unchanged.
+- Built-in discovery -> `SHUHENG_PLUGINS_DIR/shuheng-examples` is not created.
+- Distribution build omits built-in JSON files -> release hygiene or wheel smoke fails.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A clean install can run `/workflow dry-run shuheng-examples/daily-briefing` and see a safe plan before creating any local plugin.
+- Good: A user later runs `/workflow save-last my-pack/my-flow`; the generated files are written under the user plugin root, not into `src/ga_tui/builtin_plugins`.
+- Base: The built-in root is appended by the app-level discovery wrapper. Low-level `plugins.plugin_roots()` remains compatible unless `include_builtin=True` is requested.
+- Bad: Writing starter plugin files into `~/.shuheng/plugins/shuheng-examples` on first launch.
+- Bad: Hard-coding `daily-briefing.json` lookup in app command handlers instead of resolving the workflow through the plugin manifest.
+- Bad: The built-in workflow dispatches an `agent_task`, queues an approval, writes an artifact, calls a provider, or executes plugin code.
+
+### 6. Tests Required
+
+- `tests/test_plugins.py` must assert `plugins.builtin_plugin_root()`, `plugin_roots(include_builtin=True)`, and the built-in example workflow pack load through manifest-backed discovery.
+- `tests/test_workflows.py` must assert the built-in example is available without user plugins, info/dry-run works, running it writes only workflow-run rows, and no `SHUHENG_PLUGINS_DIR/shuheng-examples` directory is created.
+- `scripts/check_policy_gates.py` must assert app discovery includes the built-in root, the built-in workflow loads through `user_plugin_registry(force=True)`, the Plugins panel shows the built-in plugin for an otherwise empty user root, and safe built-in runs do not write task/progress/approval/artifact ledgers.
+- `scripts/check_release_hygiene.py` and `scripts/wheel_smoke.py` must assert the built-in plugin manifest and workflow JSON are included in package distributions.
+- Keep targeted compile/Ruff, `tests/test_plugins.py`, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, release hygiene, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow run shuheng-examples/daily-briefing -> app writes ~/.shuheng/plugins/shuheng-examples and dispatches a hidden agent task
+```
+
+#### Correct
+
+```text
+/workflow run shuheng-examples/daily-briefing -> manifest-backed built-in package data -> planned/completed workflow rows only
+```
+
 ## Scenario: Workflow DAG Validation V1
 
 ### 1. Scope / Trigger

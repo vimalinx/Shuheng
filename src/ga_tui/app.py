@@ -10721,7 +10721,7 @@ def clear_plugin_registry_cache() -> None:
 
 
 def user_plugin_roots() -> list[str]:
-    return plugin_roots(SHUHENG_PLUGINS_DIR)
+    return plugin_roots(SHUHENG_PLUGINS_DIR, include_builtin=True)
 
 
 def user_plugin_registry(*, force: bool = False) -> PluginRegistry:

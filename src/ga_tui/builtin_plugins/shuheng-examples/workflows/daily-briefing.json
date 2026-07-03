@@ -1,0 +1,58 @@
+{
+  "schema_version": "shuheng.workflow.v1",
+  "id": "daily-briefing",
+  "name": "Daily Briefing",
+  "description": "Safe example workflow for planning a daily briefing from user-provided context.",
+  "inputs": {
+    "topic": {
+      "type": "string",
+      "required": false,
+      "default": "daily priorities",
+      "description": "Briefing topic or focus area."
+    },
+    "include_notify": {
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "Whether to include a final notification checkpoint."
+    }
+  },
+  "permissions": {
+    "requested_tools": [],
+    "write_policy": "none"
+  },
+  "steps": [
+    {
+      "id": "plan",
+      "type": "prompt",
+      "name": "Plan briefing",
+      "description": "Create a concise plan for the briefing.",
+      "prompt": "Plan a concise daily briefing for the requested topic. Do not call tools or write files."
+    },
+    {
+      "id": "check_notify",
+      "type": "condition",
+      "name": "Check notification preference",
+      "description": "Continue only when the caller wants a notification checkpoint.",
+      "depends_on": ["plan"],
+      "condition": {
+        "ref": "inputs.include_notify",
+        "equals": true
+      }
+    },
+    {
+      "id": "notify",
+      "type": "notify",
+      "name": "Notify ready",
+      "description": "Record that the briefing plan is ready.",
+      "depends_on": ["check_notify"]
+    },
+    {
+      "id": "summary",
+      "type": "artifact_summary",
+      "name": "Summarize expected artifact",
+      "description": "Ledger-only checkpoint for the expected briefing summary.",
+      "depends_on": ["notify"]
+    }
+  ]
+}
