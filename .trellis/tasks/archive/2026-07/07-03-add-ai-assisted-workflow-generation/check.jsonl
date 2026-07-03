@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for quality verification."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow AI draft, registry, runner, bridge, and purity contracts to verify."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared code reuse and cross-layer thinking guide for verification."}
+{"file": ".trellis/tasks/07-03-add-ai-assisted-workflow-generation/research/ai-workflow-generation-design.md", "reason": "Task design guardrails for checking the implementation does not create hidden execution."}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Shuheng workflow and plugin contracts."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow registry, runner, bridge, auto-continue, and Orchestrator boundary contracts."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared code reuse and cross-layer thinking guide for implementation."}
+{"file": ".trellis/tasks/07-03-add-ai-assisted-workflow-generation/research/ai-workflow-generation-design.md", "reason": "Design guardrails for AI-generated workflow drafts and save boundaries."}
+{"file": ".trellis/tasks/archive/2026-07/07-03-add-workflow-registry-dry-run/research/workflow-design.md", "reason": "Prior workflow registry and data-only workflow design research."}
+{"file": ".trellis/tasks/archive/2026-07/07-03-add-workflow-runner-v0/research/workflow-runner-v0-design.md", "reason": "Prior workflow runner v0 design constraints for governed execution."}
