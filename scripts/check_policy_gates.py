@@ -9294,25 +9294,39 @@ def assert_workflow_run_panel_contract() -> None:
 
     panel_items = a.workflow_panel_items()
     definition_item = next(item for item in panel_items if item.key == workflow_ref)
+    safe_definition_item = next(
+        item for item in panel_items
+        if item.key == "plugin://shuheng-examples/workflows/daily-briefing"
+    )
     run_item = next(item for item in panel_items if item.key == f"workflow-run:{run_id}")
     assert definition_item.payload["item_type"] == "workflow_definition", definition_item
+    assert safe_definition_item.payload["item_type"] == "workflow_definition", safe_definition_item
     assert run_item.payload["item_type"] == "workflow_run", run_item
     assert run_item.payload["run_id"] == run_id, run_item
     assert run_item.payload["workflow_ref"] == workflow_ref, run_item
     assert run_item.payload["history_rows"] == 2, run_item
     assert run_item.payload["steps_completed"] == 1, run_item
+    assert "Enter/c: run this workflow definition" in safe_definition_item.detail, safe_definition_item.detail
     assert "Panel actions:" in run_item.detail and f"/workflow continue {run_id}" in run_item.detail, run_item.detail
     assert f"Workflow run: {run_id}" in run_item.detail and "2:review" in run_item.detail, run_item.detail
 
-    workflow_rows_before_noop = len(a.workflow_run_records())
-    noop_message = a.workflow_panel_run_action(state, definition_item, "continue")
-    assert "只读预览" in noop_message, noop_message
-    assert len(a.workflow_run_records()) == workflow_rows_before_noop, a.workflow_run_records()
+    workflow_rows_before_definition_run = len(a.workflow_run_records())
+    definition_run_message = a.workflow_panel_run_action(state, safe_definition_item, "continue")
+    assert "Workflow run started from panel." in definition_run_message, definition_run_message
+    assert "status: completed" in definition_run_message, definition_run_message
+    workflow_rows_after_definition_run = a.workflow_run_records()
+    assert len(workflow_rows_after_definition_run) == workflow_rows_before_definition_run + 2, workflow_rows_after_definition_run
+    assert workflow_rows_after_definition_run[-1]["workflow_ref"] == "plugin://shuheng-examples/workflows/daily-briefing"
+    assert workflow_rows_after_definition_run[-1]["status"] == "completed", workflow_rows_after_definition_run[-1]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before
 
     cancel_message = a.workflow_panel_run_action(state, run_item, "cancel")
     assert "Workflow run cancelled:" in cancel_message, cancel_message
     workflow_rows_after_cancel = a.workflow_run_records()
-    assert len(workflow_rows_after_cancel) == workflow_rows_before_noop + 1, workflow_rows_after_cancel
+    assert len(workflow_rows_after_cancel) == workflow_rows_before_definition_run + 3, workflow_rows_after_cancel
     assert workflow_rows_after_cancel[-1]["run_id"] == run_id, workflow_rows_after_cancel[-1]
     assert workflow_rows_after_cancel[-1]["status"] == "cancelled", workflow_rows_after_cancel[-1]
     assert workflow_rows_after_cancel[-1]["error"] == "cancelled from workflow panel", workflow_rows_after_cancel[-1]
@@ -9323,7 +9337,7 @@ def assert_workflow_run_panel_contract() -> None:
 
     continue_message = a.workflow_panel_run_action(state, run_item, "continue")
     assert "Workflow run already terminal:" in continue_message, continue_message
-    assert len(a.workflow_run_records()) == workflow_rows_before_noop + 1, a.workflow_run_records()
+    assert len(a.workflow_run_records()) == workflow_rows_before_definition_run + 3, a.workflow_run_records()
 
 
 def assert_workflow_retry_policy_contract() -> None:

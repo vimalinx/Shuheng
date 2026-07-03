@@ -1253,9 +1253,14 @@ def test_workflow_panel_items_include_run_rows_and_delegate_actions(tmp_path: Pa
 
     items = app_module.workflow_panel_items()
     definition_item = next(item for item in items if item.key == "plugin://research-pack/workflows/compare-sources")
+    safe_definition_item = next(
+        item for item in items
+        if item.key == "plugin://shuheng-examples/workflows/daily-briefing"
+    )
     run_item = next(item for item in items if item.key == f"workflow-run:{run_id}")
 
     assert definition_item.payload["item_type"] == "workflow_definition"
+    assert safe_definition_item.payload["item_type"] == "workflow_definition"
     assert run_item.payload["item_type"] == "workflow_run"
     assert run_item.payload["run_id"] == run_id
     assert run_item.payload["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
@@ -1266,23 +1271,36 @@ def test_workflow_panel_items_include_run_rows_and_delegate_actions(tmp_path: Pa
     assert "2:review" in run_item.detail
     assert "Panel actions:" in run_item.detail
     assert f"/workflow continue {run_id}" in run_item.detail
+    assert "Enter/c: run this workflow definition" in safe_definition_item.detail
 
     rows_before_definition_action = len(app_module.workflow_run_records())
-    definition_action = app_module.workflow_panel_run_action(state, definition_item, "continue")
-    assert "只读预览" in definition_action
-    assert len(app_module.workflow_run_records()) == rows_before_definition_action
+    task_rows_before_definition_action = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_definition_action = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_definition_action = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_before_definition_action = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+    definition_action = app_module.workflow_panel_run_action(state, safe_definition_item, "continue")
+    assert "Workflow run started from panel." in definition_action
+    assert "status: completed" in definition_action
+    rows_after_definition_action = app_module.workflow_run_records()
+    assert len(rows_after_definition_action) == rows_before_definition_action + 2
+    assert rows_after_definition_action[-1]["workflow_ref"] == "plugin://shuheng-examples/workflows/daily-briefing"
+    assert rows_after_definition_action[-1]["status"] == "completed"
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_definition_action
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_definition_action
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_definition_action
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_definition_action
 
     cancel_message = app_module.workflow_panel_run_action(state, run_item, "cancel")
     assert "Workflow run cancelled:" in cancel_message
     rows_after_cancel = app_module.workflow_run_records()
-    assert len(rows_after_cancel) == rows_before_definition_action + 1
+    assert len(rows_after_cancel) == rows_before_definition_action + 3
     assert rows_after_cancel[-1]["run_id"] == run_id
     assert rows_after_cancel[-1]["status"] == "cancelled"
     assert rows_after_cancel[-1]["error"] == "cancelled from workflow panel"
 
     continue_message = app_module.workflow_panel_run_action(state, run_item, "continue")
     assert "Workflow run already terminal:" in continue_message
-    assert len(app_module.workflow_run_records()) == rows_before_definition_action + 1
+    assert len(app_module.workflow_run_records()) == rows_before_definition_action + 3
 
 
 def test_workflow_run_detail_includes_artifact_refs(tmp_path: Path) -> None:

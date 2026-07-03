@@ -21651,6 +21651,10 @@ def workflow_panel_items() -> list[PanelItem]:
                 "Commands:",
                 f"- /workflow info {definition.workflow_ref}",
                 f"- /workflow dry-run {definition.workflow_ref}",
+                f"- /workflow run {definition.workflow_ref}",
+                "",
+                "Panel actions:",
+                "- Enter/c: run this workflow definition",
             ])
             key = definition.workflow_ref
             path = definition.path
@@ -21730,9 +21734,22 @@ def workflow_panel_run_action(state: State, item: PanelItem, action: str) -> str
     run_id = workflow_panel_item_run_id(item)
     verb = str(action or "").strip().lower()
     if not run_id:
+        payload = item.payload if isinstance(item.payload, dict) else {}
+        if payload.get("item_type") == "workflow_definition":
+            if verb == "cancel":
+                return "请选择 workflow run 行再取消；workflow 定义行不能取消。"
+            if verb in {"continue", "resume"}:
+                workflow_ref = str(payload.get("workflow_ref") or item.key or "").strip()
+                result = workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
+                _row, message = create_workflow_run_v0(
+                    result,
+                    state=state,
+                    source_command=f"/workflows panel run {workflow_ref}",
+                )
+                return "Workflow run started from panel.\n\n" + message
         if verb == "cancel":
-            return "请选择 workflow run 行再取消；workflow 定义行是只读预览。"
-        return "请选择 workflow run 行再继续；workflow 定义行是只读预览。"
+            return "请选择 workflow run 行再取消。"
+        return "请选择 workflow 定义行或 workflow run 行。"
     if verb == "cancel":
         _row, message = cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")
         return message
@@ -21825,7 +21842,7 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
         if panel == "plugins":
             return "Plugins", plugin_panel_items(), "r 刷新插件 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "workflows":
-            return "Workflows", workflow_panel_items(), "Enter/c 继续 run  x 取消 run  r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+            return "Workflows", workflow_panel_items(), "Enter/c 运行定义或继续 run  x 取消 run  r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         return "Harness", [], "Esc/q 关闭"
 
     try:
