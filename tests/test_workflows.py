@@ -1417,6 +1417,117 @@ def test_workflow_run_detail_includes_artifact_refs(tmp_path: Path) -> None:
     assert "artifact_refs=artifact://step/report.md" in detail
 
 
+def test_workflow_run_trace_links_task_approval_artifact_and_trace_refs(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "trace-flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                    "retry": {"max_attempts": 2},
+                },
+            ],
+        },
+        workflow_name="trace-flow",
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/trace-flow", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-trace",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+    bridged = workflows.attach_workflow_agent_task(
+        advanced.record,
+        task_id="task_trace",
+        agent_id="agent_trace",
+        timestamp="2026-07-03T00:00:02+0800",
+        message="review task dispatched",
+    )
+    bridged["artifact_refs"] = ["artifact://run/report.md"]
+    bridged["approval"] = {
+        "approval_status": "pending",
+        "approval_id": "appr_trace",
+        "approval_required_for": ["review"],
+    }
+    bridged["steps"][1]["artifact_refs"] = ["artifact://step/report.md"]
+
+    rendered = workflows.format_workflow_run_trace(
+        "wfr-trace",
+        [built.record, advanced.record, bridged],
+        task_rows=[
+            {
+                "task_id": "task_trace",
+                "status": "completed",
+                "assigned_agent": "agent_trace",
+                "summary": "Reviewed workflow evidence.",
+                "artifact_refs": ["artifact://task/result.md"],
+            }
+        ],
+        approval_rows=[
+            {
+                "approval_id": "appr_trace",
+                "status": "pending",
+                "type": "workflow_step_approval",
+                "source": "workflow_runner_v0",
+                "target": "wfr-trace",
+                "summary": "Review gate",
+            }
+        ],
+        artifact_rows=[
+            {
+                "uri": "artifact://task/result.md",
+                "kind": "markdown",
+                "provenance": {"generated_by": "agent_trace"},
+            },
+            {
+                "uri": "artifact://step/report.md",
+                "kind": "markdown",
+                "provenance": {"generated_by": "workflow"},
+            },
+        ],
+        trace_rows=[
+            {
+                "trace_id": "trace_task",
+                "task_id": "task_trace",
+                "event": "completed",
+                "status": "completed",
+                "payload": {"raw": "SHOULD_NOT_INLINE"},
+            }
+        ],
+    )
+    missing = workflows.format_workflow_run_trace("missing-run", [built.record, advanced.record])
+
+    assert "Workflow run trace: wfr-trace" in rendered
+    assert "history_rows: 3" in rendered
+    assert "timeline:" in rendered and "#3 status=waiting_task" in rendered
+    assert "latest_steps:" in rendered
+    assert "task_id=task_trace" in rendered
+    assert "agent_id=agent_trace" in rendered
+    assert "retry=1/2" in rendered
+    assert "linked_tasks:" in rendered
+    assert "task_trace | status=completed | agent=agent_trace" in rendered
+    assert "linked_approvals:" in rendered
+    assert "appr_trace | status=pending | type=workflow_step_approval" in rendered
+    assert "artifact://run/report.md" in rendered
+    assert "artifact://step/report.md | kind=markdown | generated_by=workflow" in rendered
+    assert "artifact://task/result.md | kind=markdown | generated_by=agent_trace" in rendered
+    assert "trace_task | task=task_trace | event=completed | status=completed" in rendered
+    assert "SHOULD_NOT_INLINE" not in rendered
+    assert "Workflow run not found: missing-run" in missing
+
+
 def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -1599,6 +1710,7 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     progress_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
     approval_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
     artifact_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+    trace_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_TRACES_PATH))
 
     assert app_module.handle_workflow_command(state, "/workflow runs") is True
     assert rows[1]["run_id"] in state.messages[-1].content
@@ -1610,6 +1722,24 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert "2:check" in state.messages[-1].content
     assert app_module.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow trace {rows[1]['run_id']}") is True
+    assert f"Workflow run trace: {rows[1]['run_id']}" in state.messages[-1].content
+    assert "timeline:" in state.messages[-1].content
+    assert "#1 status=planned" in state.messages[-1].content
+    assert "#2 status=blocked" in state.messages[-1].content
+    assert "latest_steps:" in state.messages[-1].content
+    assert "linked_tasks:" in state.messages[-1].content
+    assert "Raw artifact content and raw trace payloads are not inlined." in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow provenance {rows[1]['run_id']}") is True
+    assert f"Workflow run trace: {rows[1]['run_id']}" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow trace missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 2
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_TRACES_PATH)) == trace_rows_after_run
     assert app_module.handle_workflow_command(state, f"/workflow continue {rows[1]['run_id']}") is True
     assert "Workflow run cannot continue with runner v0" in state.messages[-1].content
     assert "requires condition evaluation" in state.messages[-1].content
@@ -1618,6 +1748,7 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_TRACES_PATH)) == trace_rows_after_run
     assert len(state.subagents) == 0
 
 

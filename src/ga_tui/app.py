@@ -979,6 +979,7 @@ format_workflow_continue_result = workflow_helpers.format_workflow_continue_resu
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
+format_workflow_run_trace = workflow_helpers.format_workflow_run_trace
 format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
 latest_workflow_run_rows_for_panel = workflow_helpers.latest_workflow_run_rows
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
@@ -23348,6 +23349,20 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if m_show:
         add_system(state, format_workflow_run_detail(m_show.group(1), workflow_run_records()))
         return True
+    m_trace = re.match(r"/workflows?\s+(?:trace|provenance)\s+(\S+)\s*$", raw, re.I)
+    if m_trace:
+        add_system(
+            state,
+            format_workflow_run_trace(
+                m_trace.group(1),
+                workflow_run_records(),
+                task_rows=read_jsonl(AGENT_TASK_LEDGER_PATH),
+                approval_rows=read_jsonl(AGENT_APPROVALS_PATH),
+                artifact_rows=read_jsonl(AGENT_ARTIFACT_INDEX_PATH),
+                trace_rows=read_jsonl(AGENT_TRACES_PATH),
+            ),
+        )
+        return True
     m_cancel = re.match(r"/workflows?\s+cancel\s+(\S+)(?:\s+([\s\S]+?))?\s*$", raw, re.I)
     if m_cancel:
         _row, message = cancel_workflow_run_v0(m_cancel.group(1), reason=m_cancel.group(2) or "")
@@ -23388,7 +23403,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"
-            "/workflow runs、/workflow show <run-id>、/workflow cancel <run-id> [reason]、"
+            "/workflow runs、/workflow show <run-id>、/workflow trace <run-id>、/workflow cancel <run-id> [reason]、"
             "/workflow continue|resume <run-id>",
         )
         return True

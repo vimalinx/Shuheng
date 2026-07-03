@@ -3065,6 +3065,80 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow show wfr_123 -> reads workflow_runs.jsonl and renders the latest row plus history count without side effects
 ```
 
+## Scenario: Workflow Run Trace / Provenance View V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users need an auditable per-run trace view that links workflow run history to task, approval, artifact, and trace ledgers without manually joining JSONL files.
+- Applies to: `/workflow trace <run_id>`, `/workflow provenance <run_id>`, `workflow_runs.jsonl`, `tasks.jsonl`, `approvals.jsonl`, `artifacts.jsonl`, `traces.jsonl`, `workflows.format_workflow_run_trace(...)`, `app.handle_workflow_command(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: Trace/provenance inspection does not continue, cancel, retry, approve, reject, dispatch subagents, execute tools, call providers, inline raw artifacts, inline raw trace payloads, write memory, mutate plugin files, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow trace <run_id>`
+  - `/workflow provenance <run_id>`
+- Pure formatter:
+  - `workflows.format_workflow_run_trace(run_id, workflow_rows, task_rows=..., approval_rows=..., artifact_rows=..., trace_rows=...) -> str`
+- App command ownership:
+  - `app.handle_workflow_command(...)` reads the relevant ledgers and passes row lists into the pure formatter.
+
+### 3. Contracts
+
+- `/workflow trace <run_id>` and `/workflow provenance <run_id>` are aliases for the same read-only projection.
+- Unknown or blank run ids must render `Workflow run not found: <run_id>` and append no ledger rows.
+- The trace view must render latest workflow status, workflow ref, history row count, timestamps, completed/total step count, and stop reason when present.
+- The trace view must render the append-only run timeline in history order. Each timeline row must include row index, status, update timestamp, completed/total step count, blocked step/type, and reason.
+- The trace view must render latest step state, including task ids, task status, agent ids, approval ids, retry counters, artifact refs, and errors when present.
+- The trace view must link task rows by task ids referenced from workflow steps, including retry attempt task ids.
+- The trace view must link approval rows by approval ids referenced from workflow run approval metadata or step metadata.
+- The trace view must link artifact refs from workflow rows, workflow steps, and linked task rows, then show matching artifact index rows by URI/ref.
+- The trace view must link trace refs by task ids referenced from workflow steps.
+- The trace view must not inline raw artifact content or raw trace payloads. It may show refs, ids, statuses, summaries, kinds, provenance summaries, and bounded metadata.
+- `workflows.py` remains pure. `format_workflow_run_trace(...)` accepts row lists as parameters and must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- Missing run id -> visible not-found message, no ledger writes.
+- Unknown run id -> visible not-found message, no ledger writes.
+- Known run with one row -> timeline has one row and latest step projection.
+- Known run with multiple rows -> timeline shows append-only row order and latest step state comes from the latest row.
+- Run references a task id -> linked task row is shown if present; missing task row leaves linked task section empty.
+- Run references an approval id -> linked approval row is shown if present; missing approval row leaves linked approval section empty.
+- Run and linked task rows reference artifact refs -> refs are listed; matching artifact index rows are listed by URI without body content.
+- Linked task has trace rows -> trace refs are listed by trace id/event/status without raw payload.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow trace wfr_...` shows `timeline`, `latest_steps`, `linked_tasks`, `linked_approvals`, `artifact_refs`, `artifact_index`, and `trace_refs`.
+- Good: A workflow run waiting on `task_...` links the latest task row and trace refs for that task.
+- Good: A completed workflow with artifact refs shows artifact URIs and provenance summaries without opening artifact files.
+- Base: The trace view is a command-stream text projection. A future panel or web timeline should reuse the same pure formatter or projection helpers.
+- Bad: `/workflow trace <run_id>` calls `continue_workflow_run_v0(...)` to refresh status.
+- Bad: `/workflow trace <run_id>` appends a new trace row saying it was inspected.
+- Bad: `format_workflow_run_trace(...)` reads `AGENT_TRACES_PATH` or imports `app.py`.
+- Bad: The trace view inlines raw artifact bodies or trace payloads into the chat.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert missing-run formatting, timeline formatting, latest-step projection, linked task rows, linked approval rows, artifact refs/index rows, trace refs, raw payload exclusion, and `/workflow trace|provenance` command read-only behavior.
+- `scripts/check_policy_gates.py` must assert command aliases route to the pure formatter, the app reads trace/artifact/task/approval ledgers only for projection, inspection appends no workflow/task/progress/approval/artifact/trace rows, and `workflows.py` remains side-effect-free.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow trace wfr_123 -> append_trace(..., event="workflow_inspected")
+```
+
+#### Correct
+
+```text
+/workflow trace wfr_123 -> read ledgers -> format_workflow_run_trace(...)
+```
+
 ## Scenario: Workflow Run Panel V1
 
 ### 1. Scope / Trigger

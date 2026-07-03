@@ -2011,6 +2011,233 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _workflow_step_task_ids(step: dict[str, Any]) -> list[str]:
+    retry = workflow_step_retry_state(step)
+    retry_task_ids = [
+        str(attempt.get("task_id") or "")
+        for attempt in retry["task_attempts"]
+        if isinstance(attempt, dict)
+    ]
+    return _unique_strings(step.get("task_id"), retry_task_ids)
+
+
+def _workflow_trace_task_ids(rows: list[dict[str, Any]]) -> list[str]:
+    task_ids: list[str] = []
+    for row in rows:
+        steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+        for step in steps:
+            if isinstance(step, dict):
+                task_ids.extend(_workflow_step_task_ids(step))
+    return _unique_strings(task_ids)
+
+
+def _workflow_trace_approval_ids(rows: list[dict[str, Any]]) -> list[str]:
+    approval_ids: list[str] = []
+    for row in rows:
+        approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
+        approval_ids.append(str(approval.get("approval_id") or ""))
+        steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+        for step in steps:
+            if isinstance(step, dict):
+                approval_ids.append(str(step.get("approval_id") or ""))
+    return _unique_strings(approval_ids)
+
+
+def _workflow_trace_artifact_refs(rows: list[dict[str, Any]], task_rows: list[dict[str, Any]]) -> list[str]:
+    refs: list[str] = []
+    for row in rows:
+        refs.extend(_unique_strings(row.get("artifact_refs")))
+        steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+        for step in steps:
+            if isinstance(step, dict):
+                refs.extend(_unique_strings(step.get("artifact_refs")))
+    for row in task_rows:
+        refs.extend(_unique_strings(row.get("artifact_refs")))
+    return _unique_strings(refs)
+
+
+def _latest_rows_by_id(rows: list[dict[str, Any]], key: str, wanted: list[str]) -> list[dict[str, Any]]:
+    wanted_set = set(wanted)
+    latest: dict[str, dict[str, Any]] = {}
+    order: dict[str, int] = {}
+    for index, row in enumerate(rows):
+        row_id = str(row.get(key) or "").strip()
+        if not row_id or row_id not in wanted_set:
+            continue
+        latest[row_id] = row
+        order[row_id] = index
+    return [latest[row_id] for row_id in sorted(order, key=lambda item: order[item])]
+
+
+def _artifact_uri(row: dict[str, Any]) -> str:
+    return str(row.get("uri") or row.get("artifact_ref") or row.get("ref") or "").strip()
+
+
+def format_workflow_run_trace(
+    run_id: str,
+    workflow_rows: list[dict[str, Any]],
+    *,
+    task_rows: list[dict[str, Any]] | None = None,
+    approval_rows: list[dict[str, Any]] | None = None,
+    artifact_rows: list[dict[str, Any]] | None = None,
+    trace_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    target = str(run_id or "").strip()
+    if not target:
+        return "Workflow run not found: (missing)"
+    history = [row for row in workflow_rows if _workflow_run_id(row) == target]
+    if not history:
+        return f"Workflow run not found: {target}"
+
+    task_rows = task_rows or []
+    approval_rows = approval_rows or []
+    artifact_rows = artifact_rows or []
+    trace_rows = trace_rows or []
+    latest = history[-1]
+    completed, total = workflow_run_step_counts(latest)
+    reason = workflow_run_stop_reason(latest)
+    task_ids = _workflow_trace_task_ids(history)
+    approval_ids = _workflow_trace_approval_ids(history)
+    linked_tasks = _latest_rows_by_id(task_rows, "task_id", task_ids)
+    linked_approvals = _latest_rows_by_id(approval_rows, "approval_id", approval_ids)
+    artifact_refs = _workflow_trace_artifact_refs(history, linked_tasks)
+    linked_artifacts = [
+        row for row in artifact_rows
+        if _artifact_uri(row) in set(artifact_refs)
+    ]
+    linked_traces = [
+        row for row in trace_rows
+        if str(row.get("task_id") or "").strip() in set(task_ids)
+    ]
+
+    lines = [
+        f"Workflow run trace: {target}",
+        f"status: {latest.get('status') or 'unknown'}",
+        f"workflow: {latest.get('workflow_ref') or '-'}",
+        f"history_rows: {len(history)}",
+        f"timestamp: {latest.get('timestamp') or ''}",
+        f"updated_at: {latest.get('updated_at') or ''}",
+        f"completed_at: {latest.get('completed_at') or ''}",
+        f"steps: {completed}/{total} completed",
+    ]
+    if reason:
+        lines.append(f"stop_reason: {reason}")
+
+    lines.append("timeline:")
+    for index, row in enumerate(history, 1):
+        row_completed, row_total = workflow_run_step_counts(row)
+        execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+        blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+        blocked_step_type = str(execution.get("blocked_step_type") or "").strip()
+        blocked = f"{blocked_step_id}[{blocked_step_type or 'unknown'}]" if blocked_step_id else "-"
+        row_reason = workflow_run_stop_reason(row) or "-"
+        updated_at = str(row.get("updated_at") or row.get("completed_at") or row.get("timestamp") or "")
+        lines.append(
+            f"- #{index} status={row.get('status') or 'unknown'} "
+            f"updated={updated_at or '-'} steps={row_completed}/{row_total} "
+            f"blocked={blocked} reason={row_reason}"
+        )
+
+    lines.append("latest_steps:")
+    steps = latest.get("steps") if isinstance(latest.get("steps"), list) else []
+    if not steps:
+        lines.append("- (none)")
+    else:
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            pieces = [
+                f"- {step.get('order') or '?'}:{step.get('step_id') or '(missing)'}",
+                f"type={step.get('type') or ''}",
+                f"status={step.get('status') or 'unknown'}",
+            ]
+            if step.get("task_id"):
+                pieces.append(f"task_id={step.get('task_id')}")
+            if step.get("task_status"):
+                pieces.append(f"task_status={step.get('task_status')}")
+            if step.get("agent_id"):
+                pieces.append(f"agent_id={step.get('agent_id')}")
+            if step.get("approval_id"):
+                pieces.append(f"approval_id={step.get('approval_id')}")
+            retry = workflow_step_retry_state(step)
+            if retry["max_attempts"] > 1 or retry["attempt"]:
+                pieces.append(f"retry={retry['attempt']}/{retry['max_attempts']}")
+                if retry["remaining_attempts"]:
+                    pieces.append(f"retry_remaining={retry['remaining_attempts']}")
+                if retry["task_attempts"]:
+                    pieces.append(f"previous_attempts={len(retry['task_attempts'])}")
+            step_artifact_refs = _unique_strings(step.get("artifact_refs"))
+            if step_artifact_refs:
+                pieces.append("artifact_refs=" + ",".join(step_artifact_refs))
+            if step.get("error"):
+                pieces.append(f"error={step.get('error')}")
+            lines.append(" | ".join(pieces))
+
+    lines.append("linked_tasks:")
+    if not linked_tasks:
+        lines.append("- (none)")
+    else:
+        for row in linked_tasks:
+            task_id = str(row.get("task_id") or "-")
+            assigned = str(row.get("assigned_agent") or row.get("agent_id") or "-")
+            status = str(row.get("status") or "-")
+            summary = str(row.get("summary") or row.get("error") or "")
+            refs = _unique_strings(row.get("artifact_refs"))
+            line = f"- {task_id} | status={status} | agent={assigned}"
+            if summary:
+                line += f" | summary={summary}"
+            if refs:
+                line += " | artifact_refs=" + ",".join(refs)
+            lines.append(line)
+
+    lines.append("linked_approvals:")
+    if not linked_approvals:
+        lines.append("- (none)")
+    else:
+        for row in linked_approvals:
+            approval_id = str(row.get("approval_id") or "-")
+            status = str(row.get("status") or "-")
+            approval_type = str(row.get("type") or row.get("approval_type") or "-")
+            source = str(row.get("source") or "-")
+            target_task = str(row.get("task_id") or row.get("target") or "-")
+            summary = str(row.get("summary") or "")
+            line = f"- {approval_id} | status={status} | type={approval_type} | source={source} | task={target_task}"
+            if summary:
+                line += f" | summary={summary}"
+            lines.append(line)
+
+    lines.append("artifact_refs:")
+    if artifact_refs:
+        lines.extend(f"- {ref}" for ref in artifact_refs)
+    else:
+        lines.append("- (none)")
+
+    lines.append("artifact_index:")
+    if not linked_artifacts:
+        lines.append("- (none)")
+    else:
+        for row in linked_artifacts:
+            uri = _artifact_uri(row) or "-"
+            kind = str(row.get("kind") or row.get("artifact_kind") or "-")
+            provenance = row.get("provenance") if isinstance(row.get("provenance"), dict) else {}
+            generated_by = str(provenance.get("generated_by") or provenance.get("source") or "")
+            suffix = f" | generated_by={generated_by}" if generated_by else ""
+            lines.append(f"- {uri} | kind={kind}{suffix}")
+
+    lines.append("trace_refs:")
+    if not linked_traces:
+        lines.append("- (none)")
+    else:
+        for row in linked_traces[-20:]:
+            trace_id = str(row.get("trace_id") or "-")
+            task_id = str(row.get("task_id") or "-")
+            event = str(row.get("event") or "-")
+            status = str(row.get("status") or "-")
+            lines.append(f"- {trace_id} | task={task_id} | event={event} | status={status}")
+    lines.append("Raw artifact content and raw trace payloads are not inlined.")
+    return "\n".join(lines)
+
+
 def format_workflow_run_rejected(result: WorkflowLoadResult, issues: tuple[WorkflowIssue, ...]) -> str:
     lines = [
         f"Workflow run rejected: {result.workflow_ref}",

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Workflow trace view must preserve existing workflow runner, ledger, and orchestration contracts."}
+{"file": ".trellis/tasks/07-03-add-workflow-run-trace-view-v1/research/workflow-trace-design.md", "reason": "Trace view design boundary and MVP scope."}

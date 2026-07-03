@@ -8946,14 +8946,39 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "history_rows: 2" in state.messages[-1].content, state.messages[-1].content
     assert "2:review" in state.messages[-1].content, state.messages[-1].content
     assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
+    workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    assert "format_workflow_run_trace" in workflow_source, workflow_source
+    assert "task_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
+    assert "read_jsonl(AGENT_TRACES_PATH)" in app_source, app_source
+    trace_rows_before_inspection = len(a.read_jsonl(a.AGENT_TRACES_PATH))
+    assert a.handle_workflow_command(state, f"/workflow trace {run_id}") is True
+    assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
+    assert "timeline:" in state.messages[-1].content, state.messages[-1].content
+    assert "#1 status=planned" in state.messages[-1].content, state.messages[-1].content
+    assert "#2 status=waiting_task" in state.messages[-1].content, state.messages[-1].content
+    assert "linked_tasks:" in state.messages[-1].content, state.messages[-1].content
+    assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
+    assert "trace_refs:" in state.messages[-1].content, state.messages[-1].content
+    assert "Raw artifact content and raw trace payloads are not inlined." in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow provenance {run_id}") is True
+    assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
     assert a.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, "/workflow trace missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) >= artifact_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_TRACES_PATH)) == trace_rows_before_inspection
     assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
     assert "Workflow run waiting for subagent task:" in state.messages[-1].content, state.messages[-1].content
     assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_TRACES_PATH)) == trace_rows_before_inspection
     assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents
     workflow_runtime_sub = next(sub for sub in state.subagents.values() if sub.active_bus_task_id == workflow_task_id)
     assert workflow_runtime_sub.active_task_id is not None, workflow_runtime_sub
