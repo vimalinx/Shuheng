@@ -975,10 +975,15 @@ format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
+apply_workflow_agent_task_result = workflow_helpers.apply_workflow_agent_task_result
 apply_workflow_step_approval_decision = workflow_helpers.apply_workflow_step_approval_decision
+attach_workflow_agent_task = workflow_helpers.attach_workflow_agent_task
 attach_workflow_step_approval = workflow_helpers.attach_workflow_step_approval
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
+fail_workflow_agent_task_dispatch = workflow_helpers.fail_workflow_agent_task_dispatch
+pending_workflow_agent_task_step = workflow_helpers.pending_workflow_agent_task_step
 pending_workflow_approval_step = workflow_helpers.pending_workflow_approval_step
+workflow_agent_task_id = workflow_helpers.workflow_agent_task_id
 workflow_run_has_meaningful_transition = workflow_helpers.workflow_run_has_meaningful_transition
 workflow_approval_id = workflow_helpers.workflow_approval_id
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
@@ -4766,6 +4771,88 @@ def workflow_approval_latest_record(approval_id: str) -> dict[str, Any] | None:
     return approval_latest_records().get(target)
 
 
+def resolve_workflow_agent_task_subagent(state: State, step: dict[str, Any]) -> tuple[Optional[SubAgentRuntime], str]:
+    agent_ref = str(step.get("agent") or "").strip()
+    if not agent_ref:
+        return None, "workflow agent_task step is missing agent target"
+    sub = resolve_subagent(state, agent_ref)
+    if sub is not None:
+        return sub, ""
+    template = plugin_agent_template_for_ref(agent_ref, user_plugin_registry(force=True))
+    if template is None:
+        return None, f"workflow agent_task target not found: {agent_ref}"
+    reusable = find_reusable_subagent(
+        state,
+        template.name or template.template_id,
+        template.profile or template.description,
+        template.role,
+        require_persistent=template.persistent,
+    )
+    if reusable is not None:
+        return reusable, ""
+    sub, _message = create_subagent_from_plugin_template(state, template)
+    return sub, ""
+
+
+def workflow_agent_task_prompt(row: dict[str, Any], step: dict[str, Any]) -> str:
+    prompt = str(step.get("prompt") or "").strip()
+    if prompt:
+        return prompt
+    description = str(step.get("description") or "").strip()
+    if description:
+        return description
+    return str(row.get("workflow_description") or row.get("workflow_name") or "").strip()
+
+
+def bridge_workflow_agent_task(
+    row: dict[str, Any],
+    *,
+    state: Optional[State],
+    source_command: str,
+) -> tuple[dict[str, Any], str, str]:
+    step = pending_workflow_agent_task_step(row)
+    if state is None or step is None or workflow_agent_task_id(row):
+        return row, "", ""
+    sub, error = resolve_workflow_agent_task_subagent(state, step)
+    if sub is None:
+        failed = fail_workflow_agent_task_dispatch(row, timestamp=now_iso(), error=error)
+        return failed, "", error
+    if sub.security_context == "secret":
+        error = "Secret Vault workflow agent_task is out of scope for this bridge"
+        failed = fail_workflow_agent_task_dispatch(row, timestamp=now_iso(), error=error)
+        return failed, "", error
+    if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
+        return row, "", f"target subagent is busy: {sub.name}"
+    prompt = workflow_agent_task_prompt(row, step)
+    if not prompt:
+        error = "workflow agent_task step is missing prompt"
+        failed = fail_workflow_agent_task_dispatch(row, timestamp=now_iso(), error=error)
+        return failed, "", error
+    step_id = str(step.get("step_id") or "agent_task")
+    workflow_name = str(row.get("workflow_name") or row.get("workflow_id") or row.get("workflow_ref") or "workflow")
+    dispatch_source = source_command or f"workflow:{row.get('run_id') or ''}"
+    dispatch = start_subagent_task_structured(
+        state,
+        sub,
+        prompt,
+        source=dispatch_source,
+        task_title=str(step.get("name") or f"{workflow_name}: {step_id}"),
+    )
+    if not dispatch.task_id:
+        error = dispatch.error or dispatch.message or "workflow agent_task dispatch did not return a task_id"
+        failed = fail_workflow_agent_task_dispatch(row, timestamp=now_iso(), error=error)
+        return failed, "", error
+    waiting = attach_workflow_agent_task(
+        row,
+        task_id=dispatch.task_id,
+        timestamp=now_iso(),
+        agent_id=sub.agent_id,
+        task_status=dispatch.status,
+        message=dispatch.message,
+    )
+    return waiting, dispatch.task_id, dispatch.message
+
+
 def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
     built = build_workflow_run_record(
         result,
@@ -4800,6 +4887,12 @@ def create_workflow_run_v0(
         source_command=f"/workflow run {result.workflow_ref}",
         state=state,
     )
+    if _approval_id == "":
+        row, _task_id, _task_message = bridge_workflow_agent_task(
+            row,
+            source_command=f"/workflow run {result.workflow_ref}",
+            state=state,
+        )
     row = append_workflow_run(row)
     advanced_for_format = workflow_helpers.WorkflowRunAdvanceResult(
         record=row,
@@ -4914,6 +5007,86 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             advanced=advanced,
             history_rows=len(history) + 1,
             approval_id=approval_id,
+        )
+        return row, format_workflow_continue_result(result)
+    if pending_workflow_agent_task_step(latest):
+        task_id = workflow_agent_task_id(latest)
+        if not task_id:
+            bridged, task_id, dispatch_message = bridge_workflow_agent_task(
+                latest,
+                source_command=f"/workflow continue {target}",
+                state=state,
+            )
+            if workflow_run_has_meaningful_transition(latest, bridged):
+                row = append_workflow_run(bridged)
+                result_status = "task_dispatched" if task_id else "task_terminal"
+                result = workflow_helpers.WorkflowRunContinueResult(
+                    run_id=target,
+                    status=result_status,
+                    record=row,
+                    history_rows=len(history) + 1,
+                    reason=dispatch_message or str(row.get("error") or ""),
+                    task_id=task_id,
+                    task_status=str((pending_workflow_agent_task_step(row) or {}).get("task_status") or row.get("status") or ""),
+                )
+                return row, format_workflow_continue_result(result)
+        task_row = latest_task_records().get(task_id) if task_id else None
+        if not isinstance(task_row, dict):
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="no_progress",
+                record=latest,
+                history_rows=len(history),
+                reason=f"workflow subagent task row is missing: {task_id or '(missing)'}",
+                task_id=task_id,
+            )
+            return None, format_workflow_continue_result(result)
+        task_status = str(task_row.get("status") or "").strip().lower()
+        if not terminal_task_status(task_status):
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="task_pending",
+                record=latest,
+                history_rows=len(history),
+                reason=str(task_row.get("summary") or task_row.get("error") or ""),
+                task_id=task_id,
+                task_status=task_status,
+            )
+            return None, format_workflow_continue_result(result)
+        applied = apply_workflow_agent_task_result(latest, task_row=task_row, timestamp=now_iso())
+        if task_status != "completed":
+            row = append_workflow_run(applied)
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="task_terminal",
+                record=row,
+                history_rows=len(history) + 1,
+                reason=str(row.get("error") or ""),
+                task_id=task_id,
+                task_status=task_status,
+            )
+            return row, format_workflow_continue_result(result)
+        advanced = advance_workflow_run_v0(applied, timestamp=now_iso())
+        if not workflow_run_has_meaningful_transition(latest, advanced.record):
+            result = workflow_helpers.WorkflowRunContinueResult(
+                run_id=target,
+                status="no_progress",
+                record=latest,
+                history_rows=len(history),
+                reason="completed subagent task did not produce runner-v0 progress",
+                task_id=task_id,
+                task_status=task_status,
+            )
+            return None, format_workflow_continue_result(result)
+        row = append_workflow_run(advanced.record)
+        result = workflow_helpers.WorkflowRunContinueResult(
+            run_id=target,
+            status="continued",
+            record=row,
+            advanced=advanced,
+            history_rows=len(history) + 1,
+            task_id=task_id,
+            task_status=task_status,
         )
         return row, format_workflow_continue_result(result)
     advanced = advance_workflow_run_v0(latest, timestamp=now_iso())

@@ -109,6 +109,8 @@ class WorkflowRunContinueResult:
     history_rows: int = 0
     reason: str = ""
     approval_id: str = ""
+    task_id: str = ""
+    task_status: str = ""
 
 
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
@@ -677,6 +679,33 @@ def workflow_approval_id(row: dict[str, Any]) -> str:
     return str(step.get("approval_id") or "").strip() if step else ""
 
 
+def pending_workflow_agent_task_step(row: dict[str, Any]) -> dict[str, Any] | None:
+    status = str(row.get("status") or "").strip()
+    if status not in {"blocked", "waiting_task"}:
+        return None
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    fallback: dict[str, Any] | None = None
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("type") or "").strip() != "agent_task":
+            continue
+        if str(step.get("status") or "").strip() not in {"blocked", "waiting_task"}:
+            continue
+        if blocked_step_id and str(step.get("step_id") or "").strip() == blocked_step_id:
+            return step
+        if fallback is None:
+            fallback = step
+    return fallback
+
+
+def workflow_agent_task_id(row: dict[str, Any]) -> str:
+    step = pending_workflow_agent_task_step(row)
+    return str(step.get("task_id") or "").strip() if step else ""
+
+
 def _at_least_int(value: Any, minimum: int) -> int:
     try:
         parsed = int(value)
@@ -715,6 +744,149 @@ def attach_workflow_step_approval(row: dict[str, Any], *, approval_id: str, time
     updated["status"] = "waiting_approval"
     updated["completed_at"] = ""
     updated["error"] = str(execution.get("blocked_reason") or "")
+    return updated
+
+
+def attach_workflow_agent_task(
+    row: dict[str, Any],
+    *,
+    task_id: str,
+    timestamp: str,
+    agent_id: str = "",
+    task_status: str = "working",
+    message: str = "",
+) -> dict[str, Any]:
+    safe_task_id = str(task_id or "").strip()
+    updated = deepcopy(row)
+    if not safe_task_id:
+        return updated
+    step = pending_workflow_agent_task_step(updated)
+    if step is None:
+        return updated
+    step_id = str(step.get("step_id") or "").strip()
+    step["task_id"] = safe_task_id
+    if agent_id:
+        step["agent_id"] = str(agent_id)
+    step["task_status"] = str(task_status or "working")
+    step["status"] = "waiting_task"
+    step["error"] = ""
+    if not step.get("started_at"):
+        step["started_at"] = timestamp
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["subagents_dispatched"] = _at_least_int(execution.get("subagents_dispatched"), 1)
+    execution["task_ledger_rows_written"] = _at_least_int(execution.get("task_ledger_rows_written"), 1)
+    execution["progress_ledger_rows_written"] = _at_least_int(execution.get("progress_ledger_rows_written"), 1)
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "agent_task"
+    execution["blocked_reason"] = message or (
+        f"step {step_id} is waiting for subagent task {safe_task_id}"
+        if step_id else f"workflow is waiting for subagent task {safe_task_id}"
+    )
+    updated["execution"] = execution
+    updated["status"] = "waiting_task"
+    updated["updated_at"] = timestamp
+    updated["completed_at"] = ""
+    updated["error"] = str(execution.get("blocked_reason") or "")
+    return updated
+
+
+def fail_workflow_agent_task_dispatch(
+    row: dict[str, Any],
+    *,
+    timestamp: str,
+    error: str,
+    status: str = "failed",
+) -> dict[str, Any]:
+    updated = deepcopy(row)
+    step = pending_workflow_agent_task_step(updated)
+    if step is None:
+        return updated
+    terminal_status = str(status or "failed").strip() or "failed"
+    step_id = str(step.get("step_id") or "").strip()
+    reason = str(error or "workflow agent_task dispatch failed")
+    step["status"] = terminal_status
+    step["task_status"] = terminal_status
+    step["completed_at"] = timestamp
+    step["error"] = reason
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "agent_task"
+    execution["blocked_reason"] = reason
+    updated["execution"] = execution
+    updated["status"] = terminal_status
+    updated["updated_at"] = timestamp
+    updated["completed_at"] = timestamp
+    updated["error"] = reason
+    return updated
+
+
+def _unique_strings(*groups: Any) -> list[str]:
+    seen: set[str] = set()
+    values: list[str] = []
+    for group in groups:
+        if isinstance(group, str):
+            iterable = [group]
+        elif isinstance(group, (list, tuple, set)):
+            iterable = group
+        else:
+            iterable = []
+        for raw in iterable:
+            value = str(raw or "").strip()
+            if value and value not in seen:
+                seen.add(value)
+                values.append(value)
+    return values
+
+
+def apply_workflow_agent_task_result(
+    row: dict[str, Any],
+    *,
+    task_row: dict[str, Any],
+    timestamp: str,
+) -> dict[str, Any]:
+    updated = deepcopy(row)
+    step = pending_workflow_agent_task_step(updated)
+    if step is None:
+        return updated
+    step_id = str(step.get("step_id") or "").strip()
+    task_id = str(task_row.get("task_id") or step.get("task_id") or "").strip()
+    task_status = str(task_row.get("status") or "").strip().lower()
+    artifacts = _unique_strings(step.get("artifact_refs"), task_row.get("artifact_refs"))
+    step["task_id"] = task_id
+    step["task_status"] = task_status
+    step["artifact_refs"] = artifacts
+    if str(task_row.get("assigned_agent") or "").strip():
+        step["agent_id"] = str(task_row.get("assigned_agent") or "").strip()
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["subagents_dispatched"] = _at_least_int(execution.get("subagents_dispatched"), 1)
+    execution["task_ledger_rows_written"] = _at_least_int(execution.get("task_ledger_rows_written"), 1)
+    execution["progress_ledger_rows_written"] = _at_least_int(execution.get("progress_ledger_rows_written"), 1)
+    updated["artifact_refs"] = _unique_strings(updated.get("artifact_refs"), artifacts)
+    if task_status == "completed":
+        step["status"] = "completed"
+        step["started_at"] = step.get("started_at") or str(task_row.get("timestamp") or timestamp)
+        step["completed_at"] = timestamp
+        step["error"] = ""
+        execution["blocked_step_id"] = ""
+        execution["blocked_step_type"] = ""
+        execution["blocked_reason"] = ""
+        updated["execution"] = execution
+        updated["error"] = ""
+        updated["updated_at"] = timestamp
+        return updated
+    terminal_status = "cancelled" if task_status == "canceled" else (task_status or "failed")
+    reason = str(task_row.get("error") or task_row.get("summary") or f"subagent task {task_id} ended with {terminal_status}")
+    step["status"] = terminal_status
+    step["completed_at"] = timestamp
+    step["error"] = reason
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "agent_task"
+    execution["blocked_reason"] = reason
+    updated["execution"] = execution
+    updated["status"] = terminal_status
+    updated["updated_at"] = timestamp
+    updated["completed_at"] = timestamp
+    updated["error"] = reason
     return updated
 
 
@@ -774,6 +946,14 @@ def apply_workflow_step_approval_decision(
 def _workflow_side_effect_footer(row: dict[str, Any]) -> str:
     execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
     approvals_created = _at_least_int(execution.get("approvals_created"), 0)
+    subagents_dispatched = _at_least_int(execution.get("subagents_dispatched"), 0)
+    if subagents_dispatched:
+        approval_note = f" Approvals created: {approvals_created}." if approvals_created else ""
+        return (
+            f"Subagents dispatched: {subagents_dispatched}."
+            f"{approval_note} "
+            "Subagent task pipeline owns task/progress/artifact ledgers; no workflow-owned tools were called."
+        )
     if approvals_created:
         return (
             f"Approvals created: {approvals_created}. "
@@ -828,6 +1008,8 @@ def _workflow_step_signature(step: Any) -> tuple[Any, ...]:
         step.get("artifact_refs"),
         step.get("approval_id"),
         step.get("task_id"),
+        step.get("task_status"),
+        step.get("agent_id"),
         step.get("error"),
     )
 
@@ -900,6 +1082,39 @@ def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
         if result.reason:
             lines.append(f"reason: {result.reason}")
         lines.append("No later workflow steps were continued.")
+        return "\n".join(lines)
+    if result.status == "task_dispatched":
+        lines = [
+            f"Workflow agent task dispatched: {run_id}",
+            f"task_id: {result.task_id or '-'}",
+            f"task_status: {result.task_status or '-'}",
+            f"history_rows: {result.history_rows}",
+            "Run /workflow continue <run_id> after the subagent task reaches a terminal status.",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        return "\n".join(lines)
+    if result.status == "task_pending":
+        lines = [
+            f"Workflow run waiting for subagent task: {run_id}",
+            f"task_id: {result.task_id or '-'}",
+            f"task_status: {result.task_status or '-'}",
+            f"history_rows: {result.history_rows}",
+            "No workflow run row was appended.",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        return "\n".join(lines)
+    if result.status == "task_terminal":
+        lines = [
+            f"Workflow run stopped by subagent task: {run_id}",
+            f"task_id: {result.task_id or '-'}",
+            f"task_status: {result.task_status or '-'}",
+            f"history_rows: {result.history_rows}",
+            "No later workflow steps were continued.",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
         return "\n".join(lines)
     if result.advanced is None or result.record is None:
         return f"Workflow run continuation failed: {run_id}"
@@ -1043,6 +1258,10 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
                 pieces.append(f"agent={step.get('agent')}")
             if step.get("task_id"):
                 pieces.append(f"task_id={step.get('task_id')}")
+            if step.get("task_status"):
+                pieces.append(f"task_status={step.get('task_status')}")
+            if step.get("agent_id"):
+                pieces.append(f"agent_id={step.get('agent_id')}")
             if step.get("approval_id"):
                 pieces.append(f"approval_id={step.get('approval_id')}")
             if step.get("error"):

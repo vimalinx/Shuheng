@@ -8512,6 +8512,32 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         ),
         encoding="utf-8",
     )
+    workflow_dir.joinpath("condition-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "condition-flow",
+                "name": "Condition Flow",
+                "description": "Exercise the non-executing condition boundary.",
+                "steps": [
+                    {
+                        "id": "plan",
+                        "type": "prompt",
+                        "prompt": "Plan condition-gated work.",
+                    },
+                    {
+                        "id": "check",
+                        "type": "condition",
+                        "depends_on": ["plan"],
+                        "expression": "inputs.ready == true",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     outside_file = Path(root, "outside-plugin-skill.md")
     outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
     outside_file.write_text(outside_marker, encoding="utf-8")
@@ -8550,6 +8576,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
                     "workflows": [
                         {"id": "compare-sources", "path": "workflows/compare-sources.json"},
                         {"id": "approval-flow", "path": "workflows/approval-flow.json"},
+                        {"id": "condition-flow", "path": "workflows/condition-flow.json"},
                     ],
                 },
                 "permissions": {
@@ -8689,65 +8716,110 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     progress_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
     approval_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
     artifact_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
-    assert a.handle_workflow_command(state, f"/workflow run {workflow_ref}") is True
+    workflow_fake_agent = SequencedFakeAgent(["workflow bridge result"])
+    old_new_agent = a.new_agent
+    try:
+        a.new_agent = lambda log_path=None: workflow_fake_agent
+        assert a.handle_workflow_command(state, f"/workflow run {workflow_ref}") is True
+    finally:
+        a.new_agent = old_new_agent
     assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
     assert "safe steps completed: 1" in state.messages[-1].content, state.messages[-1].content
     assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
+    assert "Subagents dispatched: 1." in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows = a.workflow_run_records()
     assert len(workflow_run_rows) == 2, workflow_run_rows
     assert workflow_run_rows[0]["workflow_ref"] == workflow_ref, workflow_run_rows[0]
     assert workflow_run_rows[0]["status"] == "planned", workflow_run_rows[0]
     assert workflow_run_rows[1]["run_id"] == workflow_run_rows[0]["run_id"], workflow_run_rows
     assert workflow_run_rows[1]["workflow_ref"] == workflow_ref, workflow_run_rows[1]
-    assert workflow_run_rows[1]["status"] == "blocked", workflow_run_rows[1]
+    assert workflow_run_rows[1]["status"] == "waiting_task", workflow_run_rows[1]
     assert workflow_run_rows[1]["steps"][0]["status"] == "completed", workflow_run_rows[1]
-    assert workflow_run_rows[1]["steps"][1]["status"] == "blocked", workflow_run_rows[1]
+    assert workflow_run_rows[1]["steps"][1]["status"] == "waiting_task", workflow_run_rows[1]
+    workflow_task_id = workflow_run_rows[1]["steps"][1]["task_id"]
+    assert workflow_task_id, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["steps_executed"] == 1, workflow_run_rows[1]
-    assert workflow_run_rows[1]["execution"]["subagents_dispatched"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["subagents_dispatched"] == 1, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["approvals_created"] == 0, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["artifacts_written"] == 0, workflow_run_rows[1]
-    assert workflow_run_rows[1]["execution"]["task_ledger_rows_written"] == 0, workflow_run_rows[1]
-    assert workflow_run_rows[1]["execution"]["progress_ledger_rows_written"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["task_ledger_rows_written"] == 1, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["progress_ledger_rows_written"] == 1, workflow_run_rows[1]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run + 1
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) >= artifact_rows_before_workflow_run + 1
+    assert a.latest_task_records()[workflow_task_id]["status"] == "working"
     run_id = workflow_run_rows[1]["run_id"]
     assert a.handle_workflow_command(state, "/workflow runs") is True
     assert run_id in state.messages[-1].content, state.messages[-1].content
     assert "steps:1/3" in state.messages[-1].content, state.messages[-1].content
-    assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
+    assert "waiting_task" in state.messages[-1].content, state.messages[-1].content
     assert a.handle_workflow_command(state, f"/workflow show {run_id}") is True
     assert f"Workflow run: {run_id}" in state.messages[-1].content, state.messages[-1].content
     assert "history_rows: 2" in state.messages[-1].content, state.messages[-1].content
     assert "2:review" in state.messages[-1].content, state.messages[-1].content
+    assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
     assert a.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
     assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
-    assert "Workflow run cannot continue with runner v0" in state.messages[-1].content, state.messages[-1].content
-    assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
+    assert "Workflow run waiting for subagent task:" in state.messages[-1].content, state.messages[-1].content
+    assert workflow_task_id in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
-    planned_continue_row, planned_continue_message = a.create_planned_workflow_run(workflow_result)
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
+    assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents
+    workflow_runtime_sub = next(sub for sub in state.subagents.values() if sub.active_bus_task_id == workflow_task_id)
+    assert workflow_runtime_sub.active_task_id is not None, workflow_runtime_sub
+    state.ui_queue.put((
+        "sub_stream",
+        workflow_runtime_sub.agent_id,
+        workflow_runtime_sub.active_task_id,
+        "workflow bridge result",
+        True,
+    ))
+    assert a.process_ui_queue(state) is True
+    assert a.latest_task_records()[workflow_task_id]["status"] == "completed", a.latest_task_records()[workflow_task_id]
+    assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows_after_task = a.workflow_run_records()
+    assert len(workflow_run_rows_after_task) == 3, workflow_run_rows_after_task
+    workflow_done_row = workflow_run_rows_after_task[-1]
+    assert workflow_done_row["run_id"] == run_id, workflow_done_row
+    assert workflow_done_row["status"] == "completed", workflow_done_row
+    assert [step["status"] for step in workflow_done_row["steps"]] == ["completed", "completed", "completed"], workflow_done_row
+    assert workflow_done_row["steps"][1]["task_id"] == workflow_task_id, workflow_done_row
+    assert workflow_done_row["steps"][1]["task_status"] == "completed", workflow_done_row
+    assert workflow_done_row["steps"][1]["artifact_refs"], workflow_done_row
+    task_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    artifact_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    condition_workflow_ref = "plugin://research-pack/workflows/condition-flow"
+    condition_workflow_result = a.workflow_load_result_for_ref(condition_workflow_ref, registry)
+    planned_continue_row, planned_continue_message = a.create_planned_workflow_run(condition_workflow_result)
     assert planned_continue_row is not None, planned_continue_message
     planned_continue_id = planned_continue_row["run_id"]
     assert a.handle_workflow_command(state, f"/workflow resume {planned_continue_id}") is True
     assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
     assert "safe steps completed: 1" in state.messages[-1].content, state.messages[-1].content
+    assert "requires condition evaluation" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_continue = a.workflow_run_records()
-    assert len(workflow_run_rows_after_continue) == 4, workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[2]["status"] == "planned", workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[3]["run_id"] == planned_continue_id, workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[3]["status"] == "blocked", workflow_run_rows_after_continue
-    assert workflow_run_rows_after_continue[3]["steps"][0]["status"] == "completed", workflow_run_rows_after_continue[3]
-    assert workflow_run_rows_after_continue[3]["steps"][1]["status"] == "blocked", workflow_run_rows_after_continue[3]
-    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
-    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
+    assert len(workflow_run_rows_after_continue) == 5, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[3]["status"] == "planned", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[4]["run_id"] == planned_continue_id, workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[4]["status"] == "blocked", workflow_run_rows_after_continue
+    assert workflow_run_rows_after_continue[4]["steps"][0]["status"] == "completed", workflow_run_rows_after_continue[4]
+    assert workflow_run_rows_after_continue[4]["steps"][1]["status"] == "blocked", workflow_run_rows_after_continue[4]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_after_agent_completion
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_agent_completion
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
-    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_workflow_run
-    assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_agent_completion
+    assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents
     approval_workflow_ref = "plugin://research-pack/workflows/approval-flow"
     assert a.handle_workflow_command(state, f"/workflow run {approval_workflow_ref}") is True
     assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
     assert "Approvals created: 1" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_approval_run = a.workflow_run_records()
-    assert len(workflow_run_rows_after_approval_run) == 6, workflow_run_rows_after_approval_run
+    assert len(workflow_run_rows_after_approval_run) == 7, workflow_run_rows_after_approval_run
     approval_wait_row = workflow_run_rows_after_approval_run[-1]
     approval_run_id = approval_wait_row["run_id"]
     approval_id = approval_wait_row["approval"]["approval_id"]
@@ -8768,25 +8840,28 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert approval_id in a.format_approvals(state), a.format_approvals(state)
     assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
     assert "Workflow run waiting for approval:" in state.messages[-1].content, state.messages[-1].content
-    assert len(a.workflow_run_records()) == 6, a.workflow_run_records()
+    assert len(a.workflow_run_records()) == 7, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run + 1
     assert f"已批准：{approval_id}" in a.decide_approval(state, approval_id, True)
     assert a.approval_latest_records()[approval_id]["status"] == "approved"
     assert a.handle_workflow_command(state, f"/workflow continue {approval_run_id}") is True
     assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_approval_continue = a.workflow_run_records()
-    assert len(workflow_run_rows_after_approval_continue) == 7, workflow_run_rows_after_approval_continue
+    assert len(workflow_run_rows_after_approval_continue) == 8, workflow_run_rows_after_approval_continue
     approval_done_row = workflow_run_rows_after_approval_continue[-1]
     assert approval_done_row["run_id"] == approval_run_id, approval_done_row
     assert approval_done_row["status"] == "completed", approval_done_row
     assert approval_done_row["approval"]["approval_status"] == "approved", approval_done_row
     assert approval_done_row["approval"]["approval_id"] == approval_id, approval_done_row
     assert [step["status"] for step in approval_done_row["steps"]] == ["completed", "completed", "completed"]
-    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
-    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_after_agent_completion
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_agent_completion
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run + 2
-    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_workflow_run
-    assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_agent_completion
+    assert len(state.subagents) == subagent_count_after_plugin_create + 1, state.subagents
+    workflow_templated = a.resolve_subagent(state, "Evidence Researcher")
+    assert workflow_templated is not None, state.subagents
+    assert workflow_templated.role == "researcher", workflow_templated
     templated = a.resolve_subagent(state, "Evidence Plugin Agent")
     assert templated is not None, state.subagents
     assert templated.role == "researcher", templated
