@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index identifies agent-control-protocol as the active workflow contract."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Checker must verify inspection commands match read-only workflow contracts."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for verification scope."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Checker should verify helper boundaries reuse existing workflow logic."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Checker should verify run row state flows correctly through app command output."}
+{"file": ".trellis/tasks/07-03-add-workflow-run-inspection-commands/research/workflow-run-inspection-design.md", "reason": "Checker should enforce the read-only inspection boundary."}
