@@ -418,6 +418,7 @@ TEMP_SUBAGENTS_DIR = os.path.join(SHUHENG_TEMP_DIR, "subagents")
 AGENT_HARNESS_DIR = os.path.abspath(os.path.expanduser(os.environ.get("GA_TUI_HARNESS_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "agent_harness")))
 AGENT_TASK_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "tasks.jsonl")
 AGENT_PROGRESS_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "progress.jsonl")
+AGENT_WORKFLOW_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_runs.jsonl")
 AGENT_MAIL_PATH = os.path.join(AGENT_HARNESS_DIR, "messages.jsonl")
 AGENT_APPROVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "approvals.jsonl")
 AGENT_ARTIFACTS_DIR = os.path.join(AGENT_HARNESS_DIR, "artifacts")
@@ -967,6 +968,9 @@ parse_plugin_workflow_ref = plugin_helpers.parse_plugin_workflow_ref
 format_workflow_dry_run = workflow_helpers.format_workflow_dry_run
 format_workflow_info = workflow_helpers.format_workflow_info
 format_workflow_list = workflow_helpers.format_workflow_list
+format_workflow_run_created = workflow_helpers.format_workflow_run_created
+format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
+build_workflow_run_record = workflow_helpers.build_workflow_run_record
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
 
@@ -4683,6 +4687,33 @@ def append_progress_ledger(
 
 def latest_progress_records() -> dict[str, dict[str, Any]]:
     return latest_records_by_id(AGENT_PROGRESS_LEDGER_PATH, "progress_id")
+
+
+def workflow_run_records(limit: int = 0) -> list[dict[str, Any]]:
+    return read_jsonl(AGENT_WORKFLOW_RUNS_PATH, limit=limit)
+
+
+def latest_workflow_run_records() -> dict[str, dict[str, Any]]:
+    return latest_records_by_id(AGENT_WORKFLOW_RUNS_PATH, "run_id")
+
+
+def append_workflow_run(row: dict[str, Any]) -> dict[str, Any]:
+    append_jsonl(AGENT_WORKFLOW_RUNS_PATH, row)
+    return row
+
+
+def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
+    built = build_workflow_run_record(
+        result,
+        run_id=short_uid("wfr"),
+        timestamp=now_iso(),
+        inputs={},
+        source="workflow_command",
+    )
+    if built.record is None:
+        return None, format_workflow_run_rejected(result, built.issues)
+    row = append_workflow_run(built.record)
+    return row, format_workflow_run_created(row)
 
 
 def progress_history(task_id: str) -> list[dict[str, Any]]:
@@ -22022,12 +22053,18 @@ def handle_workflow_command(state: State, text: str) -> bool:
         result = workflow_load_result_for_ref(m_dry_run.group(1), user_plugin_registry(force=True))
         add_system(state, format_workflow_dry_run(result))
         return True
+    m_run = re.match(r"/workflows?\s+run\s+(\S+)\s*$", raw, re.I)
+    if m_run:
+        result = workflow_load_result_for_ref(m_run.group(1), user_plugin_registry(force=True))
+        _row, message = create_planned_workflow_run(result)
+        add_system(state, message)
+        return True
     if raw.startswith("/workflow"):
         add_system(
             state,
             "未知 /workflow 命令。\n"
             "用法：/workflows、/workflow info <plugin-id>/<workflow-id>、"
-            "/workflow dry-run <plugin-id>/<workflow-id>",
+            "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>",
         )
         return True
     return False

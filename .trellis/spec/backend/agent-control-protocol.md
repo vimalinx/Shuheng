@@ -2296,6 +2296,81 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /workflow dry-run research-pack/compare-sources -> renders plan preview and says "No execution occurred."
 ```
 
+## Scenario: Planned Workflow Run Ledger Skeleton
+
+### 1. Scope / Trigger
+
+- Trigger: Shuheng needs a durable workflow run identity and audit row before adding any workflow runner.
+- Applies to: `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.py` run-record helpers, `/workflow run <ref>`, `app.py` workflow command routing, and policy gates.
+- Non-goal: This does not execute steps, advance step state, dispatch subagents, create approvals, write artifacts, call tools, mutate task/progress ledgers, schedule work, run plugin code, or expose remote A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public command:
+  - `/workflow run <plugin-id>/<workflow-id>`
+  - `/workflow run plugin://<plugin-id>/workflows/<workflow-id>`
+- Ledger path: `AGENT_WORKFLOW_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_runs.jsonl")`.
+- Ledger row schema version: `shuheng.workflow_run.v1`.
+- Initial run status: `planned`.
+- Initial step status: `pending`.
+- Pure helper ownership:
+  - `workflows.build_workflow_run_record(result, run_id, timestamp, inputs=None, source="workflow_command")`
+  - `workflows.format_workflow_run_created(row)`
+  - `workflows.format_workflow_run_rejected(result, issues)`
+- App ownership:
+  - `app.create_planned_workflow_run(result)` chooses run id/timestamp and appends exactly one workflow run row.
+  - `app.workflow_run_records(limit=0)` reads workflow run rows.
+
+### 3. Contracts
+
+- `/workflow run` is planned-only in this scenario. It appends one workflow run row and returns a visible message that no workflow steps executed.
+- Workflow definitions must pass the existing parser/validation path before a run row is appended.
+- Invalid workflow definitions must produce a visible rejection message and must not append a workflow run row.
+- `workflows.py` remains pure. It may build dictionaries from `WorkflowLoadResult`, but must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
+- `app.py` owns the concrete harness path and JSONL append operation.
+- Workflow `permissions` copied into a run row are metadata only. They must not grant tools, write permissions, approval bypasses, Secret Vault access, single-writer locks, or runtime dispatch capability.
+- The run row's `execution` block must explicitly record zero execution side effects for this skeleton: zero steps executed, zero subagents dispatched, zero approvals created, zero tools called, zero artifacts written, zero task/progress ledger rows written, no plugin code executed, and no runner started.
+
+### 4. Validation & Error Matrix
+
+- Missing workflow ref -> visible "Workflow not found" rejection, no run row.
+- Invalid workflow body -> visible validation rejection, no run row.
+- Wrong schema version -> visible validation rejection, no run row.
+- Unsupported step type -> visible validation rejection, no run row.
+- Duplicate step/input id -> visible validation rejection, no run row.
+- Valid workflow -> one `planned` run row with pending step snapshots.
+- Valid workflow containing `agent_task` or `approval` steps -> still only planned; no subagent or approval row is created.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow run research-pack/compare-sources` appends one `workflow_runs.jsonl` row and says no steps executed.
+- Good: A planned row captures workflow ref, source path, permissions metadata, input snapshot, and ordered pending step snapshots.
+- Base: Input snapshot may be `{}` until a later task adds command input binding.
+- Bad: `/workflow run` calls `start_subagent_task(...)`.
+- Bad: `/workflow run` writes `tasks.jsonl`, `progress.jsonl`, `approvals.jsonl`, or `artifacts.jsonl`.
+- Bad: `workflows.py` imports app/runtime/governance modules to append records directly.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert planned run row shape, pending step snapshots, no-op execution counters, and invalid workflow rejection.
+- App command tests or policy gates must assert `/workflow run` appends exactly one workflow run row and leaves subagents, approvals, artifacts, task ledger, and progress ledger unchanged.
+- `scripts/check_policy_gates.py` must assert `shuheng.workflow_run.v1`, `status=planned`, zero execution side effects, and that `workflows.py` remains independent from app/runtime/UI/governance owners.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow run research-pack/compare-sources -> creates subagent task and approval rows immediately
+```
+
+#### Correct
+
+```text
+/workflow run research-pack/compare-sources -> appends one planned workflow run row and says "No workflow steps executed."
+```
+
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger

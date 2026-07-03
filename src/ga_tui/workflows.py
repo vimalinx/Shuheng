@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - script-mode compatibility
 
 
 WORKFLOW_SCHEMA_VERSION = "shuheng.workflow.v1"
+WORKFLOW_RUN_SCHEMA_VERSION = "shuheng.workflow_run.v1"
 WORKFLOW_STEP_TYPES = frozenset({
     "prompt",
     "agent_task",
@@ -73,6 +74,12 @@ class WorkflowLoadResult:
     workflow_ref: str
     path: str
     definition: WorkflowDefinition | None = None
+    issues: tuple[WorkflowIssue, ...] = ()
+
+
+@dataclass(frozen=True)
+class WorkflowRunBuildResult:
+    record: dict[str, Any] | None = None
     issues: tuple[WorkflowIssue, ...] = ()
 
 
@@ -392,4 +399,114 @@ def format_workflow_dry_run(result: WorkflowLoadResult) -> str:
         lines.extend(["", "Validation issues:"])
         for issue in result.issues[:20]:
             lines.append(f"- {issue.message}")
+    return "\n".join(lines)
+
+
+def workflow_step_run_snapshot(step: WorkflowStep, *, order: int) -> dict[str, Any]:
+    return {
+        "step_id": step.step_id,
+        "order": order,
+        "type": step.step_type,
+        "name": step.name,
+        "description": step.description,
+        "depends_on": list(step.depends_on),
+        "agent": step.agent,
+        "ref": step.ref,
+        "prompt": step.prompt,
+        "status": "pending",
+        "started_at": "",
+        "completed_at": "",
+        "artifact_refs": [],
+        "approval_id": "",
+        "task_id": "",
+        "error": "",
+    }
+
+
+def build_workflow_run_record(
+    result: WorkflowLoadResult,
+    *,
+    run_id: str,
+    timestamp: str,
+    inputs: dict[str, Any] | None = None,
+    source: str = "workflow_command",
+) -> WorkflowRunBuildResult:
+    issues = tuple(result.issues)
+    definition = result.definition
+    if definition is None:
+        return WorkflowRunBuildResult(record=None, issues=issues or (
+            workflow_issue(result.workflow_ref, result.path, "workflow definition is missing"),
+        ))
+    if issues:
+        return WorkflowRunBuildResult(record=None, issues=issues)
+    safe_run_id = plugin_helpers.safe_plugin_id(run_id)
+    if not safe_run_id:
+        return WorkflowRunBuildResult(record=None, issues=(
+            workflow_issue(definition.workflow_ref, definition.path, "run_id is required and must be filesystem-safe"),
+        ))
+    row = {
+        "schema_version": WORKFLOW_RUN_SCHEMA_VERSION,
+        "run_id": safe_run_id,
+        "timestamp": timestamp,
+        "status": "planned",
+        "source": source,
+        "workflow_ref": definition.workflow_ref,
+        "plugin_id": definition.plugin_id,
+        "workflow_id": definition.workflow_id,
+        "workflow_name": definition.name,
+        "workflow_description": definition.description,
+        "workflow_path": definition.path,
+        "inputs": dict(inputs or {}),
+        "permissions": dict(definition.permissions or {}),
+        "validation_issues": [],
+        "steps": [
+            workflow_step_run_snapshot(step, order=index)
+            for index, step in enumerate(definition.steps, 1)
+        ],
+        "execution": {
+            "mode": "planned_only",
+            "steps_executed": 0,
+            "subagents_dispatched": 0,
+            "approvals_created": 0,
+            "tools_called": 0,
+            "artifacts_written": 0,
+            "task_ledger_rows_written": 0,
+            "progress_ledger_rows_written": 0,
+            "plugin_code_executed": False,
+            "runner_started": False,
+        },
+        "approval": {
+            "approval_status": "not_required",
+            "approval_id": "",
+            "approval_required_for": [],
+        },
+        "artifact_refs": [],
+        "task_refs": [],
+        "error": "",
+    }
+    return WorkflowRunBuildResult(record=row, issues=())
+
+
+def format_workflow_run_created(row: dict[str, Any]) -> str:
+    run_id = str(row.get("run_id") or "-")
+    workflow_ref = str(row.get("workflow_ref") or "-")
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    return "\n".join([
+        f"Workflow run planned: {run_id}",
+        f"status: {row.get('status') or 'planned'}",
+        f"workflow: {workflow_ref}",
+        f"steps: {len(steps)} pending",
+        "No workflow steps executed.",
+        "No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.",
+    ])
+
+
+def format_workflow_run_rejected(result: WorkflowLoadResult, issues: tuple[WorkflowIssue, ...]) -> str:
+    lines = [
+        f"Workflow run rejected: {result.workflow_ref}",
+        "No workflow run record was created.",
+        "Validation issues:",
+    ]
+    for issue in issues[:20]:
+        lines.append(f"- {issue.message}")
     return "\n".join(lines)

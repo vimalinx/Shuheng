@@ -74,6 +74,7 @@ def retarget_harness(root: str) -> None:
     a.AGENT_HARNESS_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "agent_harness")
     a.AGENT_TASK_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "tasks.jsonl")
     a.AGENT_PROGRESS_LEDGER_PATH = os.path.join(a.AGENT_HARNESS_DIR, "progress.jsonl")
+    a.AGENT_WORKFLOW_RUNS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "workflow_runs.jsonl")
     a.AGENT_MAIL_PATH = os.path.join(a.AGENT_HARNESS_DIR, "messages.jsonl")
     a.AGENT_APPROVALS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "approvals.jsonl")
     a.AGENT_ARTIFACTS_DIR = os.path.join(a.AGENT_HARNESS_DIR, "artifacts")
@@ -8552,6 +8553,20 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert not workflow_result.issues, workflow_result.issues
     assert workflow_marker in a.format_workflow_dry_run(workflow_result), a.format_workflow_dry_run(workflow_result)
     assert "No execution occurred." in a.format_workflow_dry_run(workflow_result)
+    built_workflow_run = a.build_workflow_run_record(
+        workflow_result,
+        run_id="wfr-policy-gate",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built_workflow_run.record is not None, built_workflow_run.issues
+    assert built_workflow_run.record["schema_version"] == "shuheng.workflow_run.v1"
+    assert built_workflow_run.record["status"] == "planned"
+    assert built_workflow_run.record["execution"]["steps_executed"] == 0
+    assert built_workflow_run.record["execution"]["subagents_dispatched"] == 0
+    assert built_workflow_run.record["execution"]["approvals_created"] == 0
+    assert built_workflow_run.record["execution"]["artifacts_written"] == 0
+    assert built_workflow_run.record["execution"]["task_ledger_rows_written"] == 0
+    assert built_workflow_run.record["execution"]["progress_ledger_rows_written"] == 0
     assert "/plugins" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/plugin" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/workflows" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
@@ -8623,6 +8638,21 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, f"/workflow dry-run {workflow_ref}") is True
     assert "No execution occurred." in state.messages[-1].content, state.messages[-1].content
     assert workflow_marker in state.messages[-1].content, state.messages[-1].content
+    task_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    artifact_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    assert a.handle_workflow_command(state, f"/workflow run {workflow_ref}") is True
+    assert "Workflow run planned:" in state.messages[-1].content, state.messages[-1].content
+    assert "No workflow steps executed." in state.messages[-1].content, state.messages[-1].content
+    workflow_run_rows = a.workflow_run_records()
+    assert len(workflow_run_rows) == 1, workflow_run_rows
+    assert workflow_run_rows[0]["workflow_ref"] == workflow_ref, workflow_run_rows[0]
+    assert workflow_run_rows[0]["status"] == "planned", workflow_run_rows[0]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_workflow_run
     assert len(state.subagents) == subagent_count_after_plugin_create, state.subagents
     templated = a.resolve_subagent(state, "Evidence Plugin Agent")
     assert templated is not None, state.subagents

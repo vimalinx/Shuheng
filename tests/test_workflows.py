@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ga_tui import app as app_module
 from ga_tui import plugins, workflows
 
 
@@ -147,3 +148,125 @@ def test_workflow_definition_rejects_non_json_bodies(tmp_path: Path) -> None:
     assert result.definition is None
     assert result.issues
     assert "must be JSON" in result.issues[0].message
+
+
+def test_workflow_run_record_is_planned_only(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "name": "Compare Sources",
+            "inputs": {"topic": {"type": "string", "required": True}},
+            "permissions": {"writes": "none"},
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-test",
+        timestamp="2026-07-03T00:00:00+0800",
+        inputs={"topic": "workflow safety"},
+    )
+
+    assert not built.issues
+    assert built.record is not None
+    assert built.record["schema_version"] == "shuheng.workflow_run.v1"
+    assert built.record["status"] == "planned"
+    assert built.record["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
+    assert built.record["inputs"] == {"topic": "workflow safety"}
+    assert [step["status"] for step in built.record["steps"]] == ["pending", "pending"]
+    assert built.record["steps"][1]["agent"] == "plugin://research-pack/agents/evidence-researcher"
+    assert built.record["execution"]["steps_executed"] == 0
+    assert built.record["execution"]["subagents_dispatched"] == 0
+    assert built.record["execution"]["approvals_created"] == 0
+    assert built.record["execution"]["artifacts_written"] == 0
+    assert built.record["execution"]["task_ledger_rows_written"] == 0
+    assert built.record["execution"]["progress_ledger_rows_written"] == 0
+    assert "No workflow steps executed." in workflows.format_workflow_run_created(built.record)
+
+
+def test_workflow_run_record_rejects_invalid_workflow(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "wrong.version",
+            "id": "compare-sources",
+            "steps": [{"id": "plan", "type": "prompt"}],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-test",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+
+    assert built.record is None
+    assert built.issues
+    assert "schema_version must be shuheng.workflow.v1" in workflows.format_workflow_run_rejected(result, built.issues)
+
+
+def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    workflow_plugin_root = plugin_root / "research-pack"
+    workflow_path = workflow_plugin_root / "workflows" / "compare-sources.json"
+    workflow_path.parent.mkdir(parents=True)
+    write_json(
+        workflow_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "name": "Compare Sources",
+            "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+        },
+    )
+    write_json(
+        workflow_plugin_root / "plugin.json",
+        {
+            "schema_version": "shuheng.plugin.v1",
+            "id": "research-pack",
+            "name": "Research Pack",
+            "contributes": {
+                "workflows": [
+                    {"id": "compare-sources", "path": "workflows/compare-sources.json"}
+                ]
+            },
+        },
+    )
+    harness_dir = tmp_path / "harness"
+    monkeypatch.setattr(app_module, "SHUHENG_PLUGINS_DIR", str(plugin_root))
+    monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness_dir / "tasks.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness_dir / "progress.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness_dir / "approvals.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_ARTIFACT_INDEX_PATH", str(harness_dir / "artifacts.jsonl"))
+    app_module.clear_plugin_registry_cache()
+    state = app_module.State(agent=None)
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/compare-sources") is True
+
+    assert "Workflow run planned:" in state.messages[-1].content
+    assert "No workflow steps executed." in state.messages[-1].content
+    rows = app_module.workflow_run_records()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "planned"
+    assert rows[0]["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+    assert len(state.subagents) == 0
