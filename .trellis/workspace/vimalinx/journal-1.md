@@ -46,6 +46,59 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 44: Add workflow run trace view
+
+**Date**: 2026-07-03
+**Task**: Add workflow run trace view v1
+**Branch**: `main`
+
+### Summary
+
+Added `/workflow trace <run_id>` and `/workflow provenance <run_id>` as read-only workflow run audit views. The formatter joins provided workflow, task, approval, artifact, and trace rows into a bounded provenance projection without inlining raw artifact bodies or trace payloads.
+
+### Main Changes
+
+- Added pure `format_workflow_run_trace(...)` in `workflows.py`.
+- Wired `/workflow trace` and `/workflow provenance` through `handle_workflow_command(...)`.
+- Added unit and app-command tests for timeline, linked task/approval/artifact/trace refs, and read-only side-effect invariants.
+- Updated policy gates and backend protocol spec for the trace/provenance contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bec0efd` | feat: add workflow run trace view |
+| `4b1b507` | chore(task): archive 07-03-add-workflow-run-trace-view-v1 |
+
+### Testing
+
+- [OK] `python3 -m py_compile src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `ruff check src/ga_tui/app.py src/ga_tui/workflows.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `PYTHONPATH=. pytest -q tests/test_workflows.py -p no:cacheprovider` (50 passed)
+- [OK] `python3 scripts/check_policy_gates.py`
+- [OK] `ruff check src tests scripts`
+- [OK] `python3 scripts/check_release_hygiene.py`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=. pytest -q -p no:cacheprovider` (551 passed)
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-trace-view`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-trace-view`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+
+### Architecture Baseline
+
+Moves the system closer to `docs/agent-harness-architecture.md`: it strengthens auditable communication, shared ledger inspection, artifact refs/provenance, trace refs, and strong Orchestrator boundaries without adding uncontrolled execution or multi-agent write paths.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue workflow evolution with recovery/resume diagnostics or parallel/fan-out semantics; avoid graph editor work until trace/recovery contracts are stronger.
+
+
 ## Session 43: Add workflow panel run input prompt
 
 **Date**: 2026-07-03
