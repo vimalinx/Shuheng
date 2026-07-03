@@ -1365,3 +1365,36 @@ Added first-class workflow run inputs, safe condition v1 JSON predicate evaluati
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: Add workflow upstream artifact context
+
+**Date**: 2026-07-03
+**Task**: Add workflow upstream artifact context
+**Branch**: `main`
+
+### Summary
+
+Added reference-only upstream workflow step context for later agent_task prompts, with tests, policy gate coverage, spec scenario, full pytest, package smoke, and shuheng-check verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `09a0a95` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
