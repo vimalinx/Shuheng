@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Shuheng workflow command contracts."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow ledger, runner, inspection, and command boundary contracts."}
+{"file": ".trellis/tasks/07-03-add-workflow-continue-command/research/workflow-continue-design.md", "reason": "Design note for bounded runner-v0 continuation semantics."}
