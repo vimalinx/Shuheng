@@ -197,6 +197,150 @@ def test_workflow_run_record_is_planned_only(tmp_path: Path) -> None:
     assert "No workflow steps executed." in workflows.format_workflow_run_created(built.record)
 
 
+def test_workflow_runner_v0_completes_safe_steps(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "pause", "type": "pause", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["pause"]},
+                {"id": "summary", "type": "artifact_summary", "depends_on": ["notify"]},
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-safe",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    assert advanced.status == "completed"
+    assert advanced.completed_step_ids == ("plan", "pause", "notify", "summary")
+    assert [step["status"] for step in advanced.record["steps"]] == ["completed", "completed", "completed", "completed"]
+    assert advanced.record["execution"]["mode"] == "workflow_runner_v0"
+    assert advanced.record["execution"]["runner_started"] is True
+    assert advanced.record["execution"]["steps_executed"] == 4
+    assert advanced.record["execution"]["subagents_dispatched"] == 0
+    assert advanced.record["execution"]["approvals_created"] == 0
+    assert advanced.record["execution"]["artifacts_written"] == 0
+    assert "safe steps completed: 4" in workflows.format_workflow_run_advanced(advanced)
+
+
+def test_workflow_runner_v0_stops_for_approval_without_approval_row(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {"id": "deploy_gate", "type": "approval", "depends_on": ["plan"]},
+                {"id": "notify", "type": "notify", "depends_on": ["deploy_gate"]},
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-approval",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    assert advanced.status == "waiting_approval"
+    assert advanced.completed_step_ids == ("plan",)
+    assert [step["status"] for step in advanced.record["steps"]] == ["completed", "waiting_approval", "pending"]
+    assert advanced.record["approval"]["approval_status"] == "pending"
+    assert advanced.record["approval"]["approval_required_for"] == ["deploy_gate"]
+    assert advanced.record["execution"]["approvals_created"] == 0
+    assert "requires human approval" in advanced.blocked_reason
+
+
+def test_workflow_runner_v0_blocks_agent_task_and_condition(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+                {"id": "condition", "type": "condition", "depends_on": ["review"]},
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-agent-task",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    assert advanced.status == "blocked"
+    assert advanced.blocked_step_id == "review"
+    assert [step["status"] for step in advanced.record["steps"]] == ["completed", "blocked", "pending"]
+    assert advanced.record["execution"]["subagents_dispatched"] == 0
+    assert advanced.record["execution"]["task_ledger_rows_written"] == 0
+    assert "requires subagent dispatch" in advanced.blocked_reason
+
+    condition_record = dict(built.record)
+    condition_record["steps"] = [
+        {
+            "step_id": "condition",
+            "order": 1,
+            "type": "condition",
+            "name": "condition",
+            "description": "",
+            "depends_on": [],
+            "agent": "",
+            "ref": "",
+            "prompt": "",
+            "status": "pending",
+            "started_at": "",
+            "completed_at": "",
+            "artifact_refs": [],
+            "approval_id": "",
+            "task_id": "",
+            "error": "",
+        }
+    ]
+    condition_advanced = workflows.advance_workflow_run_v0(
+        condition_record,
+        timestamp="2026-07-03T00:00:02+0800",
+    )
+    assert condition_advanced.status == "blocked"
+    assert condition_advanced.blocked_step_id == "condition"
+    assert condition_advanced.record["steps"][0]["status"] == "blocked"
+    assert "requires condition evaluation" in condition_advanced.blocked_reason
+
+
 def test_workflow_run_record_rejects_invalid_workflow(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -230,7 +374,16 @@ def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, m
             "schema_version": "shuheng.workflow.v1",
             "id": "compare-sources",
             "name": "Compare Sources",
-            "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+            ],
         },
     )
     write_json(
@@ -259,12 +412,19 @@ def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, m
 
     assert app_module.handle_workflow_command(state, "/workflow run research-pack/compare-sources") is True
 
-    assert "Workflow run planned:" in state.messages[-1].content
-    assert "No workflow steps executed." in state.messages[-1].content
+    assert "Workflow run advanced:" in state.messages[-1].content
+    assert "safe steps completed: 1" in state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content
     rows = app_module.workflow_run_records()
-    assert len(rows) == 1
+    assert len(rows) == 2
     assert rows[0]["status"] == "planned"
-    assert rows[0]["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
+    assert rows[1]["status"] == "blocked"
+    assert rows[0]["run_id"] == rows[1]["run_id"]
+    assert rows[1]["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
+    assert rows[1]["execution"]["steps_executed"] == 1
+    assert rows[1]["execution"]["subagents_dispatched"] == 0
+    assert rows[1]["execution"]["task_ledger_rows_written"] == 0
+    assert rows[1]["execution"]["progress_ledger_rows_written"] == 0
     assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []

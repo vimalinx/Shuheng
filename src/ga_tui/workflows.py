@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,12 @@ except Exception:  # pragma: no cover - script-mode compatibility
 
 WORKFLOW_SCHEMA_VERSION = "shuheng.workflow.v1"
 WORKFLOW_RUN_SCHEMA_VERSION = "shuheng.workflow_run.v1"
+WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES = frozenset({
+    "prompt",
+    "artifact_summary",
+    "pause",
+    "notify",
+})
 WORKFLOW_STEP_TYPES = frozenset({
     "prompt",
     "agent_task",
@@ -81,6 +88,16 @@ class WorkflowLoadResult:
 class WorkflowRunBuildResult:
     record: dict[str, Any] | None = None
     issues: tuple[WorkflowIssue, ...] = ()
+
+
+@dataclass(frozen=True)
+class WorkflowRunAdvanceResult:
+    record: dict[str, Any]
+    status: str
+    completed_step_ids: tuple[str, ...] = ()
+    blocked_step_id: str = ""
+    blocked_step_type: str = ""
+    blocked_reason: str = ""
 
 
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
@@ -487,6 +504,129 @@ def build_workflow_run_record(
     return WorkflowRunBuildResult(record=row, issues=())
 
 
+def _completed_step_ids(steps: list[Any]) -> set[str]:
+    completed: set[str] = set()
+    for raw in steps:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("status") == "completed" and str(raw.get("step_id") or "").strip():
+            completed.add(str(raw.get("step_id")).strip())
+    return completed
+
+
+def _workflow_run_status_for_blocked_step(step: dict[str, Any]) -> tuple[str, str]:
+    step_id = str(step.get("step_id") or "").strip() or "(unknown)"
+    step_type = str(step.get("type") or "").strip()
+    if step_type == "approval":
+        return "waiting_approval", f"step {step_id} requires human approval"
+    if step_type == "agent_task":
+        return "blocked", f"step {step_id} requires subagent dispatch, which workflow runner v0 does not perform"
+    if step_type == "condition":
+        return "blocked", f"step {step_id} requires condition evaluation, which workflow runner v0 does not perform"
+    return "blocked", f"step {step_id} has unsupported runner v0 type {step_type or '(missing)'}"
+
+
+def advance_workflow_run_v0(row: dict[str, Any], *, timestamp: str) -> WorkflowRunAdvanceResult:
+    advanced = deepcopy(row)
+    steps = advanced.get("steps") if isinstance(advanced.get("steps"), list) else []
+    completed_step_ids: list[str] = []
+    blocked_step: dict[str, Any] | None = None
+    blocked_reason = ""
+    completed = _completed_step_ids(steps)
+    for raw_step in steps:
+        if not isinstance(raw_step, dict):
+            continue
+        step_id = str(raw_step.get("step_id") or "").strip()
+        step_type = str(raw_step.get("type") or "").strip()
+        if not step_id or raw_step.get("status") == "completed":
+            continue
+        dependencies = [
+            str(item or "").strip()
+            for item in raw_step.get("depends_on", [])
+            if str(item or "").strip()
+        ]
+        missing_dependencies = [dependency for dependency in dependencies if dependency not in completed]
+        if missing_dependencies:
+            blocked_step = raw_step
+            blocked_reason = (
+                f"step {step_id} is waiting for incomplete dependencies: "
+                + ", ".join(missing_dependencies)
+            )
+            raw_step["status"] = "blocked"
+            raw_step["error"] = blocked_reason
+            break
+        if step_type in WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES:
+            raw_step["status"] = "completed"
+            raw_step["started_at"] = timestamp
+            raw_step["completed_at"] = timestamp
+            raw_step["error"] = ""
+            completed.add(step_id)
+            completed_step_ids.append(step_id)
+            continue
+        blocked_step = raw_step
+        status, blocked_reason = _workflow_run_status_for_blocked_step(raw_step)
+        raw_step["status"] = status
+        raw_step["error"] = blocked_reason
+        break
+    if blocked_step is None:
+        status = "completed"
+        blocked_step_id = ""
+        blocked_step_type = ""
+        completed_at = timestamp
+    else:
+        status = str(blocked_step.get("status") or "blocked")
+        blocked_step_id = str(blocked_step.get("step_id") or "").strip()
+        blocked_step_type = str(blocked_step.get("type") or "").strip()
+        completed_at = ""
+    execution = dict(advanced.get("execution") if isinstance(advanced.get("execution"), dict) else {})
+    execution.update({
+        "mode": "workflow_runner_v0",
+        "runner_started": True,
+        "runner_version": "workflow_runner_v0",
+        "runner_started_at": timestamp,
+        "runner_updated_at": timestamp,
+        "runner_completed_at": completed_at,
+        "steps_executed": len(completed_step_ids),
+        "subagents_dispatched": 0,
+        "approvals_created": 0,
+        "tools_called": 0,
+        "artifacts_written": 0,
+        "task_ledger_rows_written": 0,
+        "progress_ledger_rows_written": 0,
+        "plugin_code_executed": False,
+        "blocked_step_id": blocked_step_id,
+        "blocked_step_type": blocked_step_type,
+        "blocked_reason": blocked_reason,
+    })
+    advanced["execution"] = execution
+    advanced["status"] = status
+    advanced["updated_at"] = timestamp
+    advanced["completed_at"] = completed_at
+    advanced["error"] = blocked_reason
+    approval = dict(advanced.get("approval") if isinstance(advanced.get("approval"), dict) else {})
+    if status == "waiting_approval":
+        approval.update({
+            "approval_status": "pending",
+            "approval_id": "",
+            "approval_required_for": [blocked_step_id] if blocked_step_id else [],
+        })
+    else:
+        approval.update({
+            "approval_status": "not_required",
+            "approval_id": "",
+            "approval_required_for": [],
+        })
+    advanced["approval"] = approval
+    return WorkflowRunAdvanceResult(
+        record=advanced,
+        status=status,
+        completed_step_ids=tuple(completed_step_ids),
+        blocked_step_id=blocked_step_id,
+        blocked_step_type=blocked_step_type,
+        blocked_reason=blocked_reason,
+    )
+
+
 def format_workflow_run_created(row: dict[str, Any]) -> str:
     run_id = str(row.get("run_id") or "-")
     workflow_ref = str(row.get("workflow_ref") or "-")
@@ -499,6 +639,27 @@ def format_workflow_run_created(row: dict[str, Any]) -> str:
         "No workflow steps executed.",
         "No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.",
     ])
+
+
+def format_workflow_run_advanced(result: WorkflowRunAdvanceResult) -> str:
+    row = result.record
+    run_id = str(row.get("run_id") or "-")
+    workflow_ref = str(row.get("workflow_ref") or "-")
+    lines = [
+        f"Workflow run advanced: {run_id}",
+        f"status: {result.status}",
+        f"workflow: {workflow_ref}",
+        f"safe steps completed: {len(result.completed_step_ids)}",
+    ]
+    if result.completed_step_ids:
+        lines.append("completed: " + ", ".join(result.completed_step_ids))
+    if result.blocked_step_id:
+        lines.append(f"stopped_at: {result.blocked_step_id} [{result.blocked_step_type or 'unknown'}]")
+        lines.append(f"reason: {result.blocked_reason}")
+    elif result.status == "completed":
+        lines.append("All workflow runner v0 safe steps completed.")
+    lines.append("No subagents, approvals, tools, artifacts, task ledger rows, or progress ledger rows were created.")
+    return "\n".join(lines)
 
 
 def format_workflow_run_rejected(result: WorkflowLoadResult, issues: tuple[WorkflowIssue, ...]) -> str:

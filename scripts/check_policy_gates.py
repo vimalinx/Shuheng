@@ -8567,6 +8567,21 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert built_workflow_run.record["execution"]["artifacts_written"] == 0
     assert built_workflow_run.record["execution"]["task_ledger_rows_written"] == 0
     assert built_workflow_run.record["execution"]["progress_ledger_rows_written"] == 0
+    advanced_workflow_run = a.advance_workflow_run_v0(
+        built_workflow_run.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+    assert advanced_workflow_run.status == "blocked", advanced_workflow_run
+    assert advanced_workflow_run.completed_step_ids == ("plan",), advanced_workflow_run
+    assert advanced_workflow_run.blocked_step_id == "review", advanced_workflow_run
+    assert advanced_workflow_run.record["execution"]["mode"] == "workflow_runner_v0", advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["steps_executed"] == 1, advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["subagents_dispatched"] == 0, advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["approvals_created"] == 0, advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["artifacts_written"] == 0, advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["task_ledger_rows_written"] == 0, advanced_workflow_run.record
+    assert advanced_workflow_run.record["execution"]["progress_ledger_rows_written"] == 0, advanced_workflow_run.record
+    assert "requires subagent dispatch" in a.format_workflow_run_advanced(advanced_workflow_run), advanced_workflow_run
     assert "/plugins" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/plugin" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
     assert "/workflows" in {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
@@ -8643,12 +8658,24 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     approval_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
     artifact_rows_before_workflow_run = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
     assert a.handle_workflow_command(state, f"/workflow run {workflow_ref}") is True
-    assert "Workflow run planned:" in state.messages[-1].content, state.messages[-1].content
-    assert "No workflow steps executed." in state.messages[-1].content, state.messages[-1].content
+    assert "Workflow run advanced:" in state.messages[-1].content, state.messages[-1].content
+    assert "safe steps completed: 1" in state.messages[-1].content, state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows = a.workflow_run_records()
-    assert len(workflow_run_rows) == 1, workflow_run_rows
+    assert len(workflow_run_rows) == 2, workflow_run_rows
     assert workflow_run_rows[0]["workflow_ref"] == workflow_ref, workflow_run_rows[0]
     assert workflow_run_rows[0]["status"] == "planned", workflow_run_rows[0]
+    assert workflow_run_rows[1]["run_id"] == workflow_run_rows[0]["run_id"], workflow_run_rows
+    assert workflow_run_rows[1]["workflow_ref"] == workflow_ref, workflow_run_rows[1]
+    assert workflow_run_rows[1]["status"] == "blocked", workflow_run_rows[1]
+    assert workflow_run_rows[1]["steps"][0]["status"] == "completed", workflow_run_rows[1]
+    assert workflow_run_rows[1]["steps"][1]["status"] == "blocked", workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["steps_executed"] == 1, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["subagents_dispatched"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["approvals_created"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["artifacts_written"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["task_ledger_rows_written"] == 0, workflow_run_rows[1]
+    assert workflow_run_rows[1]["execution"]["progress_ledger_rows_written"] == 0, workflow_run_rows[1]
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run

@@ -969,7 +969,9 @@ format_workflow_dry_run = workflow_helpers.format_workflow_dry_run
 format_workflow_info = workflow_helpers.format_workflow_info
 format_workflow_list = workflow_helpers.format_workflow_list
 format_workflow_run_created = workflow_helpers.format_workflow_run_created
+format_workflow_run_advanced = workflow_helpers.format_workflow_run_advanced
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
+advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
 
@@ -4714,6 +4716,22 @@ def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> 
         return None, format_workflow_run_rejected(result, built.issues)
     row = append_workflow_run(built.record)
     return row, format_workflow_run_created(row)
+
+
+def create_workflow_run_v0(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
+    built = build_workflow_run_record(
+        result,
+        run_id=short_uid("wfr"),
+        timestamp=now_iso(),
+        inputs={},
+        source="workflow_command",
+    )
+    if built.record is None:
+        return None, format_workflow_run_rejected(result, built.issues)
+    append_workflow_run(built.record)
+    advanced = advance_workflow_run_v0(built.record, timestamp=now_iso())
+    row = append_workflow_run(advanced.record)
+    return row, format_workflow_run_advanced(advanced)
 
 
 def progress_history(task_id: str) -> list[dict[str, Any]]:
@@ -22056,7 +22074,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
     m_run = re.match(r"/workflows?\s+run\s+(\S+)\s*$", raw, re.I)
     if m_run:
         result = workflow_load_result_for_ref(m_run.group(1), user_plugin_registry(force=True))
-        _row, message = create_planned_workflow_run(result)
+        _row, message = create_workflow_run_v0(result)
         add_system(state, message)
         return True
     if raw.startswith("/workflow"):
