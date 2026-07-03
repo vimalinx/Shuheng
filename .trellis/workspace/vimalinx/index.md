@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
+- **Total Sessions**: 40
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1334 | Active |
+| `journal-1.md` | ~1367 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-07-03 | Workflow inputs and condition v1 | `83f3792` | `main` |
 | 39 | 2026-07-03 | Add workflow generated draft run-last command | `43b2e08` | `main` |
 | 38 | 2026-07-03 | Add AI-assisted workflow generation | `117bd3c` | `main` |
 | 37 | 2026-07-03 | Add workflow auto-continue on agent task completion | `cb19d63` | `main` |

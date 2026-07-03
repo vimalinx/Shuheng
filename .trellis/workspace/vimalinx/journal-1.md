@@ -1332,3 +1332,36 @@ Added explicit /workflow run-last to save the latest valid AI workflow draft as 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: Workflow inputs and condition v1
+
+**Date**: 2026-07-03
+**Task**: Workflow inputs and condition v1
+**Branch**: `main`
+
+### Summary
+
+Added first-class workflow run inputs, safe condition v1 JSON predicate evaluation, command parsing for run/run-last inputs, policy-gate coverage, workflow tests, and backend workflow spec contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `83f3792` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
