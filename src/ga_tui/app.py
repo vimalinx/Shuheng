@@ -21645,8 +21645,16 @@ def workflow_panel_items() -> list[PanelItem]:
         else:
             title = f"{definition.name} · {definition.workflow_ref}"
             subtitle = f"{status} · inputs:{len(definition.inputs)} steps:{len(definition.steps)}"
+            required_input_ids = workflow_panel_required_input_ids(result)
+            required_input_line = (
+                "Required run inputs: " + ", ".join(required_input_ids)
+                if required_input_ids else
+                "Required run inputs: (none)"
+            )
             detail = "\n".join([
                 format_workflow_info(result),
+                "",
+                required_input_line,
                 "",
                 "Commands:",
                 f"- /workflow info {definition.workflow_ref}",
@@ -21655,6 +21663,7 @@ def workflow_panel_items() -> list[PanelItem]:
                 "",
                 "Panel actions:",
                 "- Enter/c: run this workflow definition",
+                "- Required inputs open a local key=value prompt before run",
             ])
             key = definition.workflow_ref
             path = definition.path
@@ -21730,7 +21739,73 @@ def workflow_panel_item_run_id(item: PanelItem) -> str:
     return str(payload.get("run_id") or "").strip()
 
 
-def workflow_panel_run_action(state: State, item: PanelItem, action: str) -> str:
+def workflow_panel_definition_load_result(item: PanelItem) -> workflow_helpers.WorkflowLoadResult:
+    payload = item.payload if isinstance(item.payload, dict) else {}
+    workflow_ref = str(payload.get("workflow_ref") or item.key or "").strip()
+    return workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
+
+
+def workflow_panel_required_input_ids(result: workflow_helpers.WorkflowLoadResult) -> tuple[str, ...]:
+    definition = result.definition
+    if definition is None:
+        return ()
+    return tuple(
+        item.input_id
+        for item in definition.inputs
+        if item.required and item.default is None
+    )
+
+
+def workflow_panel_input_prompt_lines(result: workflow_helpers.WorkflowLoadResult) -> list[str]:
+    definition = result.definition
+    if definition is None:
+        return [f"Workflow: {result.workflow_ref}", "This workflow cannot be loaded."]
+    required_ids = set(workflow_panel_required_input_ids(result))
+    lines = [
+        f"Workflow: {definition.workflow_ref}",
+        "Enter run inputs using the same key=value syntax as /workflow run.",
+        "",
+        "Required inputs:",
+    ]
+    if required_ids:
+        for item in definition.inputs:
+            if item.input_id not in required_ids:
+                continue
+            desc = f" - {item.description}" if item.description else ""
+            lines.append(f"- {item.input_id} ({item.input_type}){desc}")
+    else:
+        lines.append("- (none)")
+    optional = [
+        item
+        for item in definition.inputs
+        if item.input_id not in required_ids
+    ]
+    if optional:
+        lines.append("")
+        lines.append("Optional/defaulted inputs:")
+        for item in optional[:8]:
+            default = "" if item.default is None else f" default={item.default!r}"
+            lines.append(f"- {item.input_id} ({item.input_type}){default}")
+    lines.append("")
+    lines.append("Example: ready=true mode=safe")
+    return lines
+
+
+def parse_workflow_panel_input_tail(workflow_ref: str, text: str) -> tuple[dict[str, Any], str]:
+    tail = str(text or "").strip()
+    ref = str(workflow_ref or "").strip()
+    command_tail = ref if not tail else f"{ref} {tail}"
+    _parsed_ref, inputs, error = parse_workflow_run_command_args(command_tail)
+    return inputs, error
+
+
+def workflow_panel_run_action(
+    state: State,
+    item: PanelItem,
+    action: str,
+    *,
+    inputs: Optional[dict[str, Any]] = None,
+) -> str:
     run_id = workflow_panel_item_run_id(item)
     verb = str(action or "").strip().lower()
     if not run_id:
@@ -21739,11 +21814,12 @@ def workflow_panel_run_action(state: State, item: PanelItem, action: str) -> str
             if verb == "cancel":
                 return "请选择 workflow run 行再取消；workflow 定义行不能取消。"
             if verb in {"continue", "resume"}:
-                workflow_ref = str(payload.get("workflow_ref") or item.key or "").strip()
-                result = workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
+                result = workflow_panel_definition_load_result(item)
+                workflow_ref = result.definition.workflow_ref if result.definition else result.workflow_ref
                 _row, message = create_workflow_run_v0(
                     result,
                     state=state,
+                    inputs=inputs or {},
                     source_command=f"/workflows panel run {workflow_ref}",
                 )
                 return "Workflow run started from panel.\n\n" + message
@@ -21757,6 +21833,126 @@ def workflow_panel_run_action(state: State, item: PanelItem, action: str) -> str
         _row, message = continue_workflow_run_v0(run_id, state=state)
         return message
     return f"未知 workflow run 操作: {action or '(missing)'}"
+
+
+def workflow_panel_continue_action(stdscr, state: State, item: PanelItem) -> str:
+    payload = item.payload if isinstance(item.payload, dict) else {}
+    if payload.get("item_type") != "workflow_definition":
+        return workflow_panel_run_action(state, item, "continue")
+    result = workflow_panel_definition_load_result(item)
+    if workflow_panel_required_input_ids(result):
+        inputs = open_workflow_run_input_prompt(stdscr, state, result)
+        if inputs is None:
+            return "Workflow run input prompt cancelled. No workflow run was started."
+        return workflow_panel_run_action(state, item, "continue", inputs=inputs)
+    return workflow_panel_run_action(state, item, "continue")
+
+
+def draw_workflow_run_input_modal(
+    stdscr,
+    state: State,
+    result: workflow_helpers.WorkflowLoadResult,
+    text: str,
+    cursor: int,
+    message: str = "",
+) -> None:
+    redraw(stdscr, state)
+    height, width = stdscr.getmaxyx()
+    y0, x0, h, w = popup_geometry(height, width, min_h=14, min_w=86)
+    draw_popup(stdscr, y0, x0, h, w, "Workflow Run Inputs")
+    inner_w = w - 4
+    y = y0 + 2
+    max_info_y = y0 + h - 6
+    for raw in workflow_panel_input_prompt_lines(result):
+        for line in wrap_cells(raw, inner_w):
+            if y >= max_info_y:
+                break
+            safe_add(stdscr, y, x0 + 2, line, inner_w, cp(2))
+            y += 1
+        if y >= max_info_y:
+            break
+    field_y = y0 + h - 4
+    label = "inputs> "
+    field_w = max(10, inner_w)
+    safe_add(stdscr, field_y, x0 + 2, " " * inner_w, inner_w, cp(11))
+    lines, cursor_y, cursor_x = input_layout(text, field_w, 1, cursor, prompt=label)
+    safe_add(stdscr, field_y, x0 + 2, truncate_cells(lines[-1], inner_w), inner_w, cp(11))
+    if message:
+        safe_add(stdscr, y0 + h - 3, x0 + 2, truncate_cells(message, inner_w), inner_w, cp(5))
+    safe_add(stdscr, y0 + h - 2, x0 + 2, "Enter 运行  Esc 取消  ←/→ 移动  Backspace 删除", inner_w, cp(1))
+    try:
+        stdscr.move(field_y + cursor_y, x0 + 2 + min(inner_w - 1, cursor_x))
+    except curses.error:
+        pass
+    stdscr.refresh()
+
+
+def open_workflow_run_input_prompt(
+    stdscr,
+    state: State,
+    result: workflow_helpers.WorkflowLoadResult,
+) -> Optional[dict[str, Any]]:
+    definition = result.definition
+    if definition is None:
+        return None
+    text = ""
+    cursor = 0
+    message = ""
+    try:
+        drain_pending_keys(stdscr)
+        stdscr.timeout(-1)
+        while True:
+            cursor = max(0, min(cursor, len(text)))
+            draw_workflow_run_input_modal(stdscr, state, result, text, cursor, message)
+            message = ""
+            try:
+                key = modal_read_key(stdscr)
+            except KeyboardInterrupt:
+                return None
+            except curses.error:
+                continue
+            if key in ("\x1b", 27, "\x03"):
+                return None
+            if key in ("\n", "\r", curses.KEY_ENTER):
+                inputs, error = parse_workflow_panel_input_tail(definition.workflow_ref, text)
+                if error:
+                    message = error
+                    continue
+                resolved = workflow_helpers.resolve_workflow_run_inputs(definition, inputs)
+                if resolved.issues:
+                    message = "; ".join(issue.message for issue in resolved.issues[:3])
+                    continue
+                return inputs
+            if key in (curses.KEY_LEFT,):
+                cursor -= 1
+                continue
+            if key in (curses.KEY_RIGHT,):
+                cursor += 1
+                continue
+            if key in (curses.KEY_HOME,):
+                cursor = 0
+                continue
+            if key in (curses.KEY_END,):
+                cursor = len(text)
+                continue
+            if key in (curses.KEY_BACKSPACE, 127, "\b"):
+                if cursor > 0:
+                    text = text[:cursor - 1] + text[cursor:]
+                    cursor -= 1
+                continue
+            if key in (curses.KEY_DC,):
+                if cursor < len(text):
+                    text = text[:cursor] + text[cursor + 1:]
+                continue
+            if key == "\x15":
+                text = ""
+                cursor = 0
+                continue
+            if isinstance(key, str) and key.isprintable():
+                text = text[:cursor] + key + text[cursor:]
+                cursor += len(key)
+    finally:
+        mark_dirty(state)
 
 
 def draw_panel_browser(
@@ -21905,7 +22101,7 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
                 continue
             current = items[selected]
             if panel == "workflows" and key in ("\n", "\r", curses.KEY_ENTER, "c", "C"):
-                message = workflow_panel_run_action(state, current, "continue")
+                message = workflow_panel_continue_action(stdscr, state, current)
                 detail_scroll = 0
                 continue
             if panel == "workflows" and key in ("x", "X"):

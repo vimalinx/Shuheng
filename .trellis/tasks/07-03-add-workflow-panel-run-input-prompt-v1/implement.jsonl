@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Workflow panel run input prompt must preserve existing workflow runner, ledger, and orchestration contracts."}
+{"file": ".trellis/tasks/07-03-add-workflow-panel-run-input-prompt-v1/research/workflow-benchmark.md", "reason": "External workflow engine and agent orchestration references used to frame capability gaps."}

@@ -3071,7 +3071,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: Users enter `/workflows` and need to inspect both workflow definitions and active/completed workflow runs from the TUI panel instead of command output only.
 - Applies to: `/workflows`, `open_harness_panel(..., "workflows")`, `PanelItem`, `app.workflow_panel_items(...)`, `app.workflow_run_panel_items(...)`, `app.workflow_panel_run_action(...)`, `workflow_runs.jsonl`, `workflows.latest_workflow_run_rows(...)`, `workflows.workflow_run_step_counts(...)`, `workflows.workflow_run_stop_reason(...)`, `workflows.format_workflow_run_detail(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
-- Non-goal: The panel does not create a new workflow executor, edit workflow definitions, visualize a graph canvas, prompt for custom cancel reasons, retry/timeout/schedule runs, auto-approve approvals, dispatch Secret Vault work, execute plugin code, call tools/providers directly, mutate plugin files, prompt for custom run inputs, or expose A2A/MCP workflow services.
+- Non-goal: The panel does not create a new workflow executor, edit workflow definitions, visualize a graph canvas, prompt for custom cancel reasons, retry/timeout/schedule runs, auto-approve approvals, dispatch Secret Vault work, execute plugin code, call tools/providers directly, mutate plugin files, prompt for optional/custom run inputs when required inputs are already satisfied, or expose A2A/MCP workflow services.
 
 ### 2. Signatures
 
@@ -3163,6 +3163,85 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 ```text
 /workflows panel Enter on workflow definition -> workflow_load_result_for_ref(...) -> create_workflow_run_v0(...)
+```
+
+## Scenario: Workflow Panel Run Input Prompt V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users run a manifest-backed workflow definition from `/workflows`, and the definition has required inputs with no defaults.
+- Applies to: `/workflows`, `open_harness_panel(..., "workflows")`, `PanelItem` definition rows, `app.workflow_panel_continue_action(...)`, `app.workflow_panel_definition_load_result(...)`, `app.workflow_panel_required_input_ids(...)`, `app.workflow_panel_input_prompt_lines(...)`, `app.parse_workflow_panel_input_tail(...)`, `app.open_workflow_run_input_prompt(...)`, `app.workflow_panel_run_action(..., inputs=...)`, `workflow_helpers.resolve_workflow_run_inputs(...)`, `parse_workflow_run_command_args(...)`, `create_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: The prompt is not a graph editor, multi-field form system, optional-input editor, plugin mutator, workflow executor, approval bypass, Secret Vault UI, tool runner, provider call path, scheduler, or A2A/MCP workflow service.
+
+### 2. Signatures
+
+- Panel action route:
+  - `app.workflow_panel_continue_action(stdscr, state, item) -> str`
+- Definition loader:
+  - `app.workflow_panel_definition_load_result(item) -> workflow_helpers.WorkflowLoadResult`
+- Required-input projection:
+  - `app.workflow_panel_required_input_ids(result) -> tuple[str, ...]`
+- Prompt copy:
+  - `app.workflow_panel_input_prompt_lines(result) -> list[str]`
+- Prompt parser:
+  - `app.parse_workflow_panel_input_tail(workflow_ref, text) -> tuple[dict[str, Any], str]`
+- Modal entry:
+  - `app.open_workflow_run_input_prompt(stdscr, state, result) -> dict[str, Any] | None`
+- Existing runner bridge:
+  - `app.workflow_panel_run_action(state, item, "continue", inputs=inputs)`
+  - `create_workflow_run_v0(result, state=state, inputs=inputs, source_command=f"/workflows panel run {workflow_ref}")`
+
+### 3. Contracts
+
+- Definition row detail must list required run input ids. If none are required, it must show an explicit none value rather than hiding the field.
+- Pressing Enter or `c` on a workflow definition row must reload the workflow through `workflow_panel_definition_load_result(...)`, which in turn must use `workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))`.
+- If `workflow_panel_required_input_ids(result)` returns an empty tuple, the panel must run immediately through `workflow_panel_run_action(...)` and must not open an input prompt.
+- If required inputs are missing, the panel must open a panel-local prompt that accepts the same key/value tail grammar as `/workflow run`.
+- Prompt parsing must call `parse_workflow_run_command_args(...)` by prepending the workflow ref to the user-entered tail. The panel must not introduce a second input grammar.
+- Prompt submission must validate required inputs with `workflow_helpers.resolve_workflow_run_inputs(...)` before closing the modal. The final authority remains `create_workflow_run_v0(...)`; the modal validation is only user-facing convenience.
+- A submitted prompt must call `workflow_panel_run_action(..., inputs=parsed_inputs)`, and the run action must call only `create_workflow_run_v0(...)` for definition rows.
+- Cancelling the prompt with Escape, Ctrl-C, or equivalent must return `None`, render a visible cancellation message, and append no workflow run row.
+- Parse or validation errors must remain visible inside the prompt and must not append workflow/task/progress/approval/artifact rows.
+- The prompt must not create, continue, cancel, approve, reject, or dispatch workflow runs itself. It only collects input for the existing runner.
+- The prompt must not mutate plugin files, workflow definition files, user registry state beyond the existing forced reload path, task/progress/approval/artifact ledgers, memory, or Secret Vault.
+
+### 4. Validation & Error Matrix
+
+- Definition has no missing required inputs -> no prompt opens; `create_workflow_run_v0(...)` receives `inputs={}` through the existing panel run action.
+- Definition has one required input with no default -> prompt opens; definition row detail includes that input id.
+- User enters valid `key=value` pairs -> parser returns typed inputs from the existing `/workflow run` grammar, and `create_workflow_run_v0(...)` receives the parsed dictionary.
+- User enters malformed input such as a bare key -> visible parse error, prompt remains open, and no ledger is appended.
+- User omits a required input -> visible resolver issue, prompt remains open, and no ledger is appended.
+- User cancels prompt -> visible cancellation message, no workflow run row, no task row, no progress row, no approval row, and no artifact row.
+- Existing runner rejects inputs after prompt validation -> runner message is surfaced by `workflow_panel_run_action(...)`; no panel-specific fallback row is written.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Pressing Enter on `plugin://research-pack/workflows/input-flow` opens a key/value prompt for `ready`, accepts `ready=true mode="panel"`, and appends normal planned/completed workflow rows through `create_workflow_run_v0(...)`.
+- Good: Pressing Escape in the prompt returns `Workflow run input prompt cancelled. No workflow run was started.` and leaves every ledger count unchanged.
+- Base: The prompt is a single text input, not a generated form. This keeps `/workflow run` and `/workflows` on the same grammar.
+- Bad: The prompt writes `workflow_runs.jsonl` directly after parsing inputs.
+- Bad: The panel accepts a separate JSON/YAML input syntax that `/workflow run` does not understand.
+- Bad: The prompt creates task, progress, approval, or artifact rows before `create_workflow_run_v0(...)` receives the inputs.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert required input ids appear in definition detail, prompt lines list required inputs, prompt parser reuses the `/workflow run` grammar for typed values, invalid syntax returns a visible parse error, cancelled prompts append no workflow/task/progress/approval/artifact rows, and prompted runs call the existing runner with parsed inputs.
+- `scripts/check_policy_gates.py` must assert the source contains the prompt/action ownership helpers, a manifest-backed workflow with missing required inputs opens the prompt path, cancel is side-effect-free, valid prompted inputs append normal workflow rows through the existing runner, and side-effect ledgers remain unchanged for safe prompted workflows.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflows panel prompt -> parse custom JSON -> append workflow_runs.jsonl directly
+```
+
+#### Correct
+
+```text
+/workflows panel prompt -> parse_workflow_run_command_args(...) -> create_workflow_run_v0(...)
 ```
 
 ## Scenario: Workflow Continue Command

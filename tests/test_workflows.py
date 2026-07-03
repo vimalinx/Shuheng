@@ -1303,6 +1303,88 @@ def test_workflow_panel_items_include_run_rows_and_delegate_actions(tmp_path: Pa
     assert len(app_module.workflow_run_records()) == rows_before_definition_action + 3
 
 
+def test_workflow_panel_prompts_required_inputs_and_runs_existing_runner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "input-flow",
+            "inputs": {
+                "ready": {
+                    "type": "boolean",
+                    "required": True,
+                    "description": "Whether the workflow should continue.",
+                },
+                "mode": {
+                    "type": "string",
+                    "required": False,
+                    "default": "safe",
+                },
+            },
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "check",
+                    "type": "condition",
+                    "depends_on": ["plan"],
+                    "condition": {"ref": "inputs.ready", "equals": True},
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["check"]},
+            ],
+        },
+        workflow_name="input-flow",
+    )
+    state = app_module.State(agent=SequencedWorkflowAgent([]))
+    item = next(
+        panel_item for panel_item in app_module.workflow_panel_items()
+        if panel_item.key == "plugin://research-pack/workflows/input-flow"
+    )
+    result = app_module.workflow_panel_definition_load_result(item)
+
+    assert app_module.workflow_panel_required_input_ids(result) == ("ready",)
+    assert "Required run inputs: ready" in item.detail
+    assert "Required inputs:" in "\n".join(app_module.workflow_panel_input_prompt_lines(result))
+
+    inputs, error = app_module.parse_workflow_panel_input_tail(item.key, 'ready=true mode="panel"')
+    assert error == ""
+    assert inputs == {"ready": True, "mode": "panel"}
+    _bad_inputs, bad_error = app_module.parse_workflow_panel_input_tail(item.key, "ready")
+    assert "Invalid workflow input override" in bad_error
+
+    workflow_rows_before_cancel = len(app_module.workflow_run_records())
+    task_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_before_cancel = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+    monkeypatch.setattr(app_module, "open_workflow_run_input_prompt", lambda _stdscr, _state, _result: None)
+    cancel_message = app_module.workflow_panel_continue_action(object(), state, item)
+    assert "input prompt cancelled" in cancel_message
+    assert len(app_module.workflow_run_records()) == workflow_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_cancel
+
+    monkeypatch.setattr(app_module, "open_workflow_run_input_prompt", lambda _stdscr, _state, _result: inputs)
+    run_message = app_module.workflow_panel_continue_action(object(), state, item)
+    assert "Workflow run started from panel." in run_message
+    assert "status: completed" in run_message
+    rows = app_module.workflow_run_records()
+    assert len(rows) == workflow_rows_before_cancel + 2
+    assert rows[-2]["inputs"] == {"ready": True, "mode": "panel"}
+    assert rows[-1]["status"] == "completed"
+    assert [step["status"] for step in rows[-1]["steps"]] == ["completed", "completed", "completed"]
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_before_cancel
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_cancel
+
+
 def test_workflow_run_detail_includes_artifact_refs(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,

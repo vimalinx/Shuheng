@@ -9249,6 +9249,38 @@ def assert_workflow_run_panel_contract() -> None:
         ),
         encoding="utf-8",
     )
+    workflow_dir.joinpath("input-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "input-flow",
+                "name": "Input Flow",
+                "inputs": {
+                    "ready": {
+                        "type": "boolean",
+                        "required": True,
+                        "description": "Whether the workflow should continue.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "required": False,
+                        "default": "safe",
+                    },
+                },
+                "steps": [
+                    {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                    {
+                        "id": "check",
+                        "type": "condition",
+                        "depends_on": ["plan"],
+                        "condition": {"ref": "inputs.ready", "equals": True},
+                    },
+                    {"id": "notify", "type": "notify", "depends_on": ["check"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     plugin_root.joinpath("plugin.json").write_text(
         json.dumps(
             {
@@ -9261,6 +9293,11 @@ def assert_workflow_run_panel_contract() -> None:
                             "id": "compare-sources",
                             "name": "Compare Sources",
                             "path": "workflows/compare-sources.json",
+                        },
+                        {
+                            "id": "input-flow",
+                            "name": "Input Flow",
+                            "path": "workflows/input-flow.json",
                         }
                     ]
                 },
@@ -9272,6 +9309,8 @@ def assert_workflow_run_panel_contract() -> None:
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
     assert "workflow_run_panel_items" in app_source and "workflow_panel_run_action" in app_source, app_source
+    assert "workflow_panel_continue_action" in app_source and "open_workflow_run_input_prompt" in app_source, app_source
+    assert "parse_workflow_panel_input_tail" in app_source and "workflow_panel_required_input_ids" in app_source, app_source
     assert "continue_workflow_run_v0(run_id, state=state)" in app_source, app_source
     assert 'cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")' in app_source, app_source
     assert "latest_workflow_run_rows" in workflow_source and "workflow_run_step_counts" in workflow_source, workflow_source
@@ -9338,6 +9377,44 @@ def assert_workflow_run_panel_contract() -> None:
     continue_message = a.workflow_panel_run_action(state, run_item, "continue")
     assert "Workflow run already terminal:" in continue_message, continue_message
     assert len(a.workflow_run_records()) == workflow_rows_before_definition_run + 3, a.workflow_run_records()
+
+    input_item = next(item for item in a.workflow_panel_items() if item.key == "plugin://research-pack/workflows/input-flow")
+    input_result = a.workflow_panel_definition_load_result(input_item)
+    assert a.workflow_panel_required_input_ids(input_result) == ("ready",), input_item.detail
+    assert "Required run inputs: ready" in input_item.detail, input_item.detail
+    prompted_inputs, parse_error = a.parse_workflow_panel_input_tail(input_item.key, 'ready=true mode="panel"')
+    assert parse_error == "" and prompted_inputs == {"ready": True, "mode": "panel"}, (prompted_inputs, parse_error)
+    _invalid_inputs, invalid_error = a.parse_workflow_panel_input_tail(input_item.key, "ready")
+    assert "Invalid workflow input override" in invalid_error, invalid_error
+
+    workflow_rows_before_prompt_cancel = len(a.workflow_run_records())
+    original_prompt = a.open_workflow_run_input_prompt
+    try:
+        a.open_workflow_run_input_prompt = lambda _stdscr, _state, _result: None
+        prompt_cancel_message = a.workflow_panel_continue_action(object(), state, input_item)
+        assert "input prompt cancelled" in prompt_cancel_message, prompt_cancel_message
+        assert len(a.workflow_run_records()) == workflow_rows_before_prompt_cancel, a.workflow_run_records()
+        assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before
+        assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before
+        assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before
+        assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before
+
+        a.open_workflow_run_input_prompt = lambda _stdscr, _state, _result: prompted_inputs
+        prompt_run_message = a.workflow_panel_continue_action(object(), state, input_item)
+        assert "Workflow run started from panel." in prompt_run_message, prompt_run_message
+        assert "status: completed" in prompt_run_message, prompt_run_message
+    finally:
+        a.open_workflow_run_input_prompt = original_prompt
+
+    workflow_rows_after_prompt_run = a.workflow_run_records()
+    assert len(workflow_rows_after_prompt_run) == workflow_rows_before_prompt_cancel + 2, workflow_rows_after_prompt_run
+    assert workflow_rows_after_prompt_run[-2]["inputs"] == {"ready": True, "mode": "panel"}, workflow_rows_after_prompt_run[-2]
+    assert workflow_rows_after_prompt_run[-1]["status"] == "completed", workflow_rows_after_prompt_run[-1]
+    assert [step["status"] for step in workflow_rows_after_prompt_run[-1]["steps"]] == ["completed", "completed", "completed"]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before
 
 
 def assert_workflow_retry_policy_contract() -> None:
