@@ -979,6 +979,7 @@ format_workflow_continue_result = workflow_helpers.format_workflow_continue_resu
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
+format_workflow_run_next_action = workflow_helpers.format_workflow_run_next_action
 format_workflow_run_trace = workflow_helpers.format_workflow_run_trace
 format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
 latest_workflow_run_rows_for_panel = workflow_helpers.latest_workflow_run_rows
@@ -23363,6 +23364,18 @@ def handle_workflow_command(state: State, text: str) -> bool:
             ),
         )
         return True
+    m_next = re.match(r"/workflows?\s+(?:next|diagnose)\s+(\S+)\s*$", raw, re.I)
+    if m_next:
+        add_system(
+            state,
+            format_workflow_run_next_action(
+                m_next.group(1),
+                workflow_run_records(),
+                task_rows=read_jsonl(AGENT_TASK_LEDGER_PATH),
+                approval_rows=read_jsonl(AGENT_APPROVALS_PATH),
+            ),
+        )
+        return True
     m_cancel = re.match(r"/workflows?\s+cancel\s+(\S+)(?:\s+([\s\S]+?))?\s*$", raw, re.I)
     if m_cancel:
         _row, message = cancel_workflow_run_v0(m_cancel.group(1), reason=m_cancel.group(2) or "")
@@ -23403,7 +23416,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "/workflow run-last <plugin-id>/<workflow-id>、"
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"
-            "/workflow runs、/workflow show <run-id>、/workflow trace <run-id>、/workflow cancel <run-id> [reason]、"
+            "/workflow runs、/workflow show <run-id>、/workflow trace <run-id>、/workflow next <run-id>、"
+            "/workflow cancel <run-id> [reason]、"
             "/workflow continue|resume <run-id>",
         )
         return True

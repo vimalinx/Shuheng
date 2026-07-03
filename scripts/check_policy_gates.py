@@ -8949,8 +8949,12 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "format_workflow_run_trace" in workflow_source, workflow_source
+    assert "format_workflow_run_next_action" in workflow_source, workflow_source
     assert "task_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
+    assert "approval_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
     assert "read_jsonl(AGENT_TRACES_PATH)" in app_source, app_source
+    assert "m_next = re.match" in app_source and "next|diagnose" in app_source, app_source
+    assert "format_workflow_run_next_action(" in app_source, app_source
     trace_rows_before_inspection = len(a.read_jsonl(a.AGENT_TRACES_PATH))
     assert a.handle_workflow_command(state, f"/workflow trace {run_id}") is True
     assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
@@ -8966,6 +8970,17 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, "/workflow show missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
     assert a.handle_workflow_command(state, "/workflow trace missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow next {run_id}") is True
+    assert f"Workflow next action: {run_id}" in state.messages[-1].content, state.messages[-1].content
+    assert "next_action: wait_task" in state.messages[-1].content, state.messages[-1].content
+    assert f"task_id: {workflow_task_id}" in state.messages[-1].content, state.messages[-1].content
+    assert f"/workflow trace {run_id}" in state.messages[-1].content, state.messages[-1].content
+    assert "No workflow, task, progress, approval, artifact, or trace rows were appended." in state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow diagnose {run_id}") is True
+    assert f"Workflow next action: {run_id}" in state.messages[-1].content, state.messages[-1].content
+    assert "next_action: wait_task" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, "/workflow next missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1

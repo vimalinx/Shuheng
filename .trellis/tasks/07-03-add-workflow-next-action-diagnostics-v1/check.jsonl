@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Quality check must verify next-action diagnostics are read-only and formatter-owned."}
+{"file": ".trellis/tasks/07-03-add-workflow-next-action-diagnostics-v1/research/workflow-next-action-design.md", "reason": "Quality check should preserve diagnostic classification scope."}

@@ -30,6 +30,14 @@ WORKFLOW_RUN_TERMINAL_STATUSES = frozenset({
     "canceled",
     "aborted",
 })
+WORKFLOW_TASK_TERMINAL_STATUSES = frozenset({
+    "completed",
+    "failed",
+    "rejected",
+    "cancelled",
+    "canceled",
+    "aborted",
+})
 WORKFLOW_STEP_TYPES = frozenset({
     "prompt",
     "agent_task",
@@ -2008,6 +2016,156 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
             if step.get("error"):
                 pieces.append(f"error={step.get('error')}")
             lines.append(" | ".join(pieces))
+    return "\n".join(lines)
+
+
+def workflow_task_terminal_status(status: str) -> bool:
+    return str(status or "").strip().lower() in WORKFLOW_TASK_TERMINAL_STATUSES
+
+
+def _workflow_blocked_step(row: dict[str, Any]) -> tuple[str, str]:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    return (
+        str(execution.get("blocked_step_id") or "").strip(),
+        str(execution.get("blocked_step_type") or "").strip(),
+    )
+
+
+def _latest_row_by_id(rows: list[dict[str, Any]], key: str, wanted: str) -> dict[str, Any] | None:
+    target = str(wanted or "").strip()
+    if not target:
+        return None
+    latest: dict[str, Any] | None = None
+    for row in rows:
+        if str(row.get(key) or "").strip() == target:
+            latest = row
+    return latest
+
+
+def _workflow_next_action_command_lines(
+    *,
+    run_id: str,
+    workflow_ref: str,
+    next_action: str,
+    approval_id: str = "",
+    task_id: str = "",
+) -> list[str]:
+    if next_action == "continue":
+        return [f"- /workflow continue {run_id}"]
+    if next_action == "approve_or_reject":
+        if approval_id:
+            return [
+                f"- /approve {approval_id}",
+                f"- /reject {approval_id}",
+                f"- /workflow continue {run_id}",
+            ]
+        return [f"- /workflow continue {run_id}"]
+    if next_action == "wait_task":
+        waiting = f"- wait for task {task_id} to reach a terminal status" if task_id else "- wait for the subagent task"
+        return [waiting, f"- /workflow trace {run_id}"]
+    if next_action == "cancel_or_edit":
+        return [f"- /workflow trace {run_id}", f"- /workflow cancel {run_id} <reason>"]
+    if next_action == "inspect_trace":
+        commands = [f"- /workflow trace {run_id}"]
+        if workflow_ref and workflow_ref != "-":
+            commands.append(f"- /workflow run {workflow_ref}")
+        return commands
+    if next_action == "none":
+        commands = [f"- /workflow trace {run_id}"]
+        if workflow_ref and workflow_ref != "-":
+            commands.append(f"- /workflow run {workflow_ref}")
+        return commands
+    return [f"- /workflow trace {run_id}"]
+
+
+def format_workflow_run_next_action(
+    run_id: str,
+    workflow_rows: list[dict[str, Any]],
+    *,
+    task_rows: list[dict[str, Any]] | None = None,
+    approval_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    target = str(run_id or "").strip()
+    if not target:
+        return "Workflow run not found: (missing)"
+    history = [row for row in workflow_rows if _workflow_run_id(row) == target]
+    if not history:
+        return f"Workflow run not found: {target}"
+
+    task_rows = task_rows or []
+    approval_rows = approval_rows or []
+    latest = history[-1]
+    status = str(latest.get("status") or "unknown").strip().lower()
+    workflow_ref = str(latest.get("workflow_ref") or "-").strip() or "-"
+    blocked_step_id, blocked_step_type = _workflow_blocked_step(latest)
+    reason = workflow_run_stop_reason(latest)
+    approval_id = workflow_approval_id(latest)
+    approval_row = _latest_row_by_id(approval_rows, "approval_id", approval_id)
+    approval = latest.get("approval") if isinstance(latest.get("approval"), dict) else {}
+    approval_status = str(
+        (approval_row or {}).get("status") or approval.get("approval_status") or ""
+    ).strip().lower()
+    task_id = workflow_agent_task_id(latest)
+    task_row = _latest_row_by_id(task_rows, "task_id", task_id)
+    pending_task_step = pending_workflow_agent_task_step(latest) or {}
+    task_status = str(
+        (task_row or {}).get("status") or pending_task_step.get("task_status") or ""
+    ).strip().lower()
+
+    next_action = "inspect_trace"
+    if status == "planned":
+        next_action = "continue"
+    elif status == "completed":
+        next_action = "none"
+    elif status in WORKFLOW_RUN_TERMINAL_STATUSES:
+        next_action = "inspect_trace"
+    elif status == "waiting_approval":
+        if approval_status == "pending":
+            next_action = "approve_or_reject"
+        elif approval_status in {"approved", "rejected"} or not approval_id:
+            next_action = "continue"
+        else:
+            next_action = "inspect_trace"
+    elif pending_workflow_agent_task_step(latest):
+        if not task_id or workflow_task_terminal_status(task_status):
+            next_action = "continue"
+        elif task_row is None:
+            next_action = "inspect_trace"
+        else:
+            next_action = "wait_task"
+    elif blocked_step_type in {"condition", "unsupported"} or status == "blocked":
+        next_action = "cancel_or_edit"
+
+    lines = [
+        f"Workflow next action: {target}",
+        f"status: {status or 'unknown'}",
+        f"workflow: {workflow_ref}",
+        f"history_rows: {len(history)}",
+    ]
+    if blocked_step_id:
+        lines.append(f"blocked_step: {blocked_step_id} [{blocked_step_type or 'unknown'}]")
+    if reason:
+        lines.append(f"stop_reason: {reason}")
+    if approval_id or approval_status:
+        lines.append(f"approval_id: {approval_id or '-'}")
+        lines.append(f"approval_status: {approval_status or '-'}")
+    if task_id or task_status:
+        lines.append(f"task_id: {task_id or '-'}")
+        lines.append(f"task_status: {task_status or '-'}")
+    lines.append(f"next_action: {next_action}")
+    lines.append("commands:")
+    lines.extend(
+        _workflow_next_action_command_lines(
+            run_id=target,
+            workflow_ref=workflow_ref,
+            next_action=next_action,
+            approval_id=approval_id,
+            task_id=task_id,
+        )
+    )
+    if next_action == "cancel_or_edit":
+        lines.append("notes: edit the workflow definition before rerunning if the blocker is a condition or unsupported step.")
+    lines.append("No workflow, task, progress, approval, artifact, or trace rows were appended.")
     return "\n".join(lines)
 
 

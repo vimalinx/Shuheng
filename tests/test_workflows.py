@@ -1528,6 +1528,134 @@ def test_workflow_run_trace_links_task_approval_artifact_and_trace_refs(tmp_path
     assert "Workflow run not found: missing-run" in missing
 
 
+def test_workflow_run_next_action_classifies_current_blocker() -> None:
+    planned = {
+        "run_id": "wfr-planned",
+        "status": "planned",
+        "workflow_ref": "plugin://research-pack/workflows/planned-flow",
+        "steps": [],
+    }
+    completed = {
+        "run_id": "wfr-completed",
+        "status": "completed",
+        "workflow_ref": "plugin://research-pack/workflows/completed-flow",
+        "steps": [],
+    }
+    terminal = {
+        "run_id": "wfr-failed",
+        "status": "failed",
+        "workflow_ref": "plugin://research-pack/workflows/failed-flow",
+        "error": "task failed",
+        "steps": [],
+    }
+    pending_approval = {
+        "run_id": "wfr-approval",
+        "status": "waiting_approval",
+        "workflow_ref": "plugin://research-pack/workflows/approval-flow",
+        "approval": {
+            "approval_id": "appr_next",
+            "approval_status": "pending",
+            "approval_required_for": ["gate"],
+        },
+        "execution": {
+            "blocked_step_id": "gate",
+            "blocked_step_type": "approval",
+            "blocked_reason": "gate requires approval",
+        },
+        "steps": [
+            {
+                "step_id": "gate",
+                "type": "approval",
+                "status": "waiting_approval",
+                "approval_id": "appr_next",
+            }
+        ],
+    }
+    waiting_task = {
+        "run_id": "wfr-task",
+        "status": "waiting_task",
+        "workflow_ref": "plugin://research-pack/workflows/task-flow",
+        "execution": {
+            "blocked_step_id": "review",
+            "blocked_step_type": "agent_task",
+            "blocked_reason": "waiting for review",
+        },
+        "steps": [
+            {
+                "step_id": "review",
+                "type": "agent_task",
+                "status": "waiting_task",
+                "task_id": "task_next",
+                "task_status": "working",
+            }
+        ],
+    }
+    condition_blocked = {
+        "run_id": "wfr-condition",
+        "status": "blocked",
+        "workflow_ref": "plugin://research-pack/workflows/condition-flow",
+        "execution": {
+            "blocked_step_id": "check",
+            "blocked_step_type": "condition",
+            "blocked_reason": "requires condition evaluation",
+        },
+        "steps": [
+            {
+                "step_id": "check",
+                "type": "condition",
+                "status": "blocked",
+            }
+        ],
+    }
+
+    rows = [planned, completed, terminal, pending_approval, waiting_task, condition_blocked]
+    missing = workflows.format_workflow_run_next_action("", rows)
+    planned_output = workflows.format_workflow_run_next_action("wfr-planned", rows)
+    completed_output = workflows.format_workflow_run_next_action("wfr-completed", rows)
+    terminal_output = workflows.format_workflow_run_next_action("wfr-failed", rows)
+    pending_approval_output = workflows.format_workflow_run_next_action(
+        "wfr-approval",
+        rows,
+        approval_rows=[{"approval_id": "appr_next", "status": "pending"}],
+    )
+    approved_output = workflows.format_workflow_run_next_action(
+        "wfr-approval",
+        rows,
+        approval_rows=[{"approval_id": "appr_next", "status": "approved"}],
+    )
+    waiting_task_output = workflows.format_workflow_run_next_action(
+        "wfr-task",
+        rows,
+        task_rows=[{"task_id": "task_next", "status": "working"}],
+    )
+    completed_task_output = workflows.format_workflow_run_next_action(
+        "wfr-task",
+        rows,
+        task_rows=[{"task_id": "task_next", "status": "completed"}],
+    )
+    condition_output = workflows.format_workflow_run_next_action("wfr-condition", rows)
+
+    assert missing == "Workflow run not found: (missing)"
+    assert "next_action: continue" in planned_output
+    assert "/workflow continue wfr-planned" in planned_output
+    assert "next_action: none" in completed_output
+    assert "/workflow trace wfr-completed" in completed_output
+    assert "next_action: inspect_trace" in terminal_output
+    assert "stop_reason: task failed" in terminal_output
+    assert "next_action: approve_or_reject" in pending_approval_output
+    assert "/approve appr_next" in pending_approval_output
+    assert "/reject appr_next" in pending_approval_output
+    assert "approval_status: approved" in approved_output
+    assert "next_action: continue" in approved_output
+    assert "next_action: wait_task" in waiting_task_output
+    assert "task_status: working" in waiting_task_output
+    assert "next_action: continue" in completed_task_output
+    assert "task_status: completed" in completed_task_output
+    assert "next_action: cancel_or_edit" in condition_output
+    assert "/workflow cancel wfr-condition <reason>" in condition_output
+    assert "No workflow, task, progress, approval, artifact, or trace rows were appended." in condition_output
+
+
 def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -1733,6 +1861,14 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert app_module.handle_workflow_command(state, f"/workflow provenance {rows[1]['run_id']}") is True
     assert f"Workflow run trace: {rows[1]['run_id']}" in state.messages[-1].content
     assert app_module.handle_workflow_command(state, "/workflow trace missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow next {rows[1]['run_id']}") is True
+    assert f"Workflow next action: {rows[1]['run_id']}" in state.messages[-1].content
+    assert "next_action: cancel_or_edit" in state.messages[-1].content
+    assert "No workflow, task, progress, approval, artifact, or trace rows were appended." in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow diagnose {rows[1]['run_id']}") is True
+    assert f"Workflow next action: {rows[1]['run_id']}" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow next missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == 2
     assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run

@@ -3139,6 +3139,82 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow trace wfr_123 -> read ledgers -> format_workflow_run_trace(...)
 ```
 
+## Scenario: Workflow Next Action Diagnostics V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users and AI operators need a concise read-only answer for what an append-only workflow run is waiting on and which existing command should be used next.
+- Applies to: `/workflow next <run_id>`, `/workflow diagnose <run_id>`, `workflow_runs.jsonl`, `tasks.jsonl`, `approvals.jsonl`, `workflows.format_workflow_run_next_action(...)`, `app.handle_workflow_command(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: Diagnostics do not continue, cancel, retry, approve, reject, dispatch subagents, execute tools, call providers, create approvals, append workflow rows, mutate task/progress/artifact/trace ledgers, inline raw artifacts, edit workflow definitions, schedule work, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow next <run_id>`
+  - `/workflow diagnose <run_id>`
+- Pure formatter:
+  - `workflows.format_workflow_run_next_action(run_id, workflow_rows, task_rows=..., approval_rows=...) -> str`
+- App command ownership:
+  - `app.handle_workflow_command(...)` reads workflow/task/approval ledgers and passes row lists into the pure formatter.
+
+### 3. Contracts
+
+- `/workflow next <run_id>` and `/workflow diagnose <run_id>` are aliases for the same read-only projection.
+- Unknown or blank run ids must render `Workflow run not found: <run_id>` and append no ledger rows.
+- The projection must render latest workflow status, workflow ref, append-only history row count, blocked step id/type when present, stop reason when present, and a `next_action:` classification.
+- Valid next-action classifications are text labels for user guidance, not executable state transitions. Current labels include `continue`, `wait_task`, `approve_or_reject`, `inspect_trace`, `cancel_or_edit`, and `none`.
+- Planned runs should recommend `/workflow continue <run_id>`.
+- Completed or terminal runs should recommend `/workflow trace <run_id>` and optional rerun through `/workflow run <workflow-ref>`, never hidden continuation.
+- Waiting approval runs with a pending approval row should recommend `/approve <approval_id>` or `/reject <approval_id>`, then `/workflow continue <run_id>`.
+- Waiting approval runs with an approved or rejected approval row should recommend `/workflow continue <run_id>` so the existing continue command observes the human decision.
+- Waiting agent-task runs with a non-terminal task row should recommend waiting and `/workflow trace <run_id>`.
+- Waiting agent-task runs with a terminal task row, or blocked `agent_task` rows without a task id, should recommend `/workflow continue <run_id>` so the existing Workflow Agent Task Bridge owns dispatch/result handling.
+- Condition or unsupported blockers should recommend trace/cancel/edit guidance, not pretend safe automatic progress exists.
+- `workflows.py` remains pure. `format_workflow_run_next_action(...)` accepts row lists as parameters and must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- Missing run id -> visible not-found message, no ledger writes.
+- Unknown run id -> visible not-found message, no ledger writes.
+- Latest row `planned` -> `next_action: continue`, command `/workflow continue <run_id>`.
+- Latest row `completed` -> `next_action: none`, command `/workflow trace <run_id>`, no continue recommendation.
+- Latest row terminal failed/rejected/cancelled/canceled/aborted -> `next_action: inspect_trace`, command `/workflow trace <run_id>`, no continue recommendation.
+- Latest row `waiting_approval` plus pending approval row -> `next_action: approve_or_reject`, commands `/approve <approval_id>`, `/reject <approval_id>`, and `/workflow continue <run_id>`.
+- Latest row `waiting_approval` plus approved/rejected approval row -> `next_action: continue`, command `/workflow continue <run_id>`.
+- Latest row `waiting_task` plus non-terminal task row -> `next_action: wait_task`, command `/workflow trace <run_id>`, no duplicate dispatch.
+- Latest row `waiting_task` plus terminal task row -> `next_action: continue`, command `/workflow continue <run_id>`.
+- Latest row blocked by condition/unsupported step -> `next_action: cancel_or_edit`, commands `/workflow trace <run_id>` and `/workflow cancel <run_id> <reason>`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflow next wfr_...` on a pending approval shows the approval id and only tells the user to approve/reject through existing approval commands.
+- Good: `/workflow diagnose wfr_...` on a working subagent task shows the task id/status and recommends waiting plus trace inspection.
+- Good: A completed workflow reports `next_action: none` and uses trace/rerun guidance instead of trying to continue a terminal run.
+- Base: Diagnostics are command-stream text projections. A future panel or A2A/MCP gateway can reuse the pure formatter or expose the same classification as structured data.
+- Bad: `/workflow next <run_id>` calls `continue_workflow_run_v0(...)` to refresh the run before rendering.
+- Bad: `/workflow diagnose <run_id>` appends a trace row or approval row saying diagnostics were viewed.
+- Bad: `format_workflow_run_next_action(...)` imports `app.py` to call `terminal_task_status(...)` or read ledger paths.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert missing-run formatting, planned/completed/terminal classifications, pending and approved approval classifications, non-terminal and terminal task classifications, condition-blocked classification, command suggestions, and app command read-only behavior for `/workflow next|diagnose`.
+- `scripts/check_policy_gates.py` must assert command aliases route to the pure formatter, the app reads workflow/task/approval ledgers only for projection, diagnostics append no workflow/task/progress/approval/artifact/trace rows, and `workflows.py` remains side-effect-free.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow next wfr_123 -> continue_workflow_run_v0(...) -> dispatches the blocked subagent task
+```
+
+#### Correct
+
+```text
+/workflow next wfr_123 -> read ledgers -> format_workflow_run_next_action(...) -> suggest /workflow continue wfr_123
+```
+
 ## Scenario: Workflow Run Panel V1
 
 ### 1. Scope / Trigger
