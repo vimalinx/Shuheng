@@ -46,6 +46,53 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 43: Add workflow auto run command
+
+**Date**: 2026-07-03
+**Task**: Add workflow auto run command v1
+**Branch**: `main`
+
+### Summary
+
+Added explicit `/workflow auto <plugin-id>/<workflow-id> <goal> [-- key=value ...]` support. The command asks the main model for a declarative workflow draft, validates it, saves it as a manifest-backed plugin workflow, reloads it through the registry, and starts the existing governed workflow runner.
+
+### Main Changes
+
+Kept `/workflow generate` non-executing, added pending auto-run state to `State`, routed valid auto completions through `run_latest_workflow_draft(...)`, and documented the command in the executable backend spec. This moves the harness closer to `docs/agent-harness-architecture.md`: one strong Orchestrator remains responsible for side effects, restricted subagents still run only through task ledgers, approvals still use human gates, and workflow runs remain append-only/auditable. Remaining gaps are workflow UI, retry/timeout, scheduling, richer trace, and A2A/MCP workflow exposure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ead4030` | feat: add workflow auto run command |
+| `00b5318` | chore(task): archive 07-03-add-workflow-auto-run-command-v1 |
+
+### Testing
+
+- [OK] `python3 -m py_compile src/ga_tui/ui_types.py src/ga_tui/app.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `ruff check src/ga_tui/ui_types.py src/ga_tui/app.py tests/test_workflows.py scripts/check_policy_gates.py`
+- [OK] `PYTHONPATH=. pytest -q tests/test_workflows.py -p no:cacheprovider` - 39 passed
+- [OK] `python3 scripts/check_policy_gates.py`
+- [OK] `ruff check src scripts tests`
+- [OK] `python3 scripts/check_release_hygiene.py`
+- [OK] `python3 -m compileall -q src scripts`
+- [OK] `git diff --check`
+- [OK] `PYTHONPATH=. pytest -q -p no:cacheprovider` - 535 passed
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-auto`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `PYTHONPATH=src python3 -m ga_tui.integration doctor --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-auto`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Implement a dedicated workflow run UI so users can inspect runs, steps, approvals, subagent tasks, and artifact refs without relying on command output only.
+
+
 ## Session 43: Add workflow cancel command
 
 **Date**: 2026-07-03
