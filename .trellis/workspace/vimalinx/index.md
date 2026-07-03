@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
+- **Total Sessions**: 34
 - **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1136 | Active |
+| `journal-1.md` | ~1169 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 34 | 2026-07-03 | Add workflow continue command | `57fdb6c` | `main` |
 | 33 | 2026-07-03 | Add workflow run inspection commands | `bd61911` | `main` |
 | 32 | 2026-07-03 | Add workflow runner v0 | `2347e45` | `main` |
 | 31 | 2026-07-03 | Add workflow run ledger skeleton | `fd65771` | `main` |

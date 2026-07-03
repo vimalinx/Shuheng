@@ -1134,3 +1134,36 @@ Added read-only workflow run inspection commands for the append-only workflow_ru
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: Add workflow continue command
+
+**Date**: 2026-07-03
+**Task**: Add workflow continue command
+**Branch**: `main`
+
+### Summary
+
+Added bounded /workflow continue and /workflow resume commands that resume from the latest workflow run row, append at most one runner-v0 row on meaningful safe progress, no-op for completed/missing/unchanged blocked runs, and preserve side-effect ledger boundaries with tests, policy gates, spec updates, and release smoke verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `57fdb6c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
