@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover - script-mode compatibility
 
 WORKFLOW_SCHEMA_VERSION = "shuheng.workflow.v1"
 WORKFLOW_RUN_SCHEMA_VERSION = "shuheng.workflow_run.v1"
+WORKFLOW_NEXT_ACTION_SCHEMA_VERSION = "shuheng.workflow_next_action.v1"
 WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES = frozenset({
     "prompt",
     "artifact_summary",
@@ -2042,7 +2043,7 @@ def _latest_row_by_id(rows: list[dict[str, Any]], key: str, wanted: str) -> dict
     return latest
 
 
-def _workflow_next_action_command_lines(
+def _workflow_next_action_commands(
     *,
     run_id: str,
     workflow_ref: str,
@@ -2051,46 +2052,78 @@ def _workflow_next_action_command_lines(
     task_id: str = "",
 ) -> list[str]:
     if next_action == "continue":
-        return [f"- /workflow continue {run_id}"]
+        return [f"/workflow continue {run_id}"]
     if next_action == "approve_or_reject":
         if approval_id:
             return [
-                f"- /approve {approval_id}",
-                f"- /reject {approval_id}",
-                f"- /workflow continue {run_id}",
+                f"/approve {approval_id}",
+                f"/reject {approval_id}",
+                f"/workflow continue {run_id}",
             ]
-        return [f"- /workflow continue {run_id}"]
+        return [f"/workflow continue {run_id}"]
     if next_action == "wait_task":
-        waiting = f"- wait for task {task_id} to reach a terminal status" if task_id else "- wait for the subagent task"
-        return [waiting, f"- /workflow trace {run_id}"]
+        waiting = f"wait for task {task_id} to reach a terminal status" if task_id else "wait for the subagent task"
+        return [waiting, f"/workflow trace {run_id}"]
     if next_action == "cancel_or_edit":
-        return [f"- /workflow trace {run_id}", f"- /workflow cancel {run_id} <reason>"]
+        return [f"/workflow trace {run_id}", f"/workflow cancel {run_id} <reason>"]
     if next_action == "inspect_trace":
-        commands = [f"- /workflow trace {run_id}"]
+        commands = [f"/workflow trace {run_id}"]
         if workflow_ref and workflow_ref != "-":
-            commands.append(f"- /workflow run {workflow_ref}")
+            commands.append(f"/workflow run {workflow_ref}")
         return commands
     if next_action == "none":
-        commands = [f"- /workflow trace {run_id}"]
+        commands = [f"/workflow trace {run_id}"]
         if workflow_ref and workflow_ref != "-":
-            commands.append(f"- /workflow run {workflow_ref}")
+            commands.append(f"/workflow run {workflow_ref}")
         return commands
-    return [f"- /workflow trace {run_id}"]
+    return [f"/workflow trace {run_id}"]
 
 
-def format_workflow_run_next_action(
+def workflow_run_next_action_projection(
     run_id: str,
     workflow_rows: list[dict[str, Any]],
     *,
     task_rows: list[dict[str, Any]] | None = None,
     approval_rows: list[dict[str, Any]] | None = None,
-) -> str:
+) -> dict[str, Any]:
     target = str(run_id or "").strip()
     if not target:
-        return "Workflow run not found: (missing)"
+        return {
+            "schema_version": WORKFLOW_NEXT_ACTION_SCHEMA_VERSION,
+            "run_id": "(missing)",
+            "found": False,
+            "status": "",
+            "workflow_ref": "",
+            "history_rows": 0,
+            "blocked_step": {"step_id": "", "type": ""},
+            "stop_reason": "",
+            "next_action": "inspect_trace",
+            "commands": [],
+            "approval": {"approval_id": "", "status": ""},
+            "task": {"task_id": "", "status": ""},
+            "read_only": True,
+            "rows_appended": False,
+            "error": "Workflow run not found: (missing)",
+        }
     history = [row for row in workflow_rows if _workflow_run_id(row) == target]
     if not history:
-        return f"Workflow run not found: {target}"
+        return {
+            "schema_version": WORKFLOW_NEXT_ACTION_SCHEMA_VERSION,
+            "run_id": target,
+            "found": False,
+            "status": "",
+            "workflow_ref": "",
+            "history_rows": 0,
+            "blocked_step": {"step_id": "", "type": ""},
+            "stop_reason": "",
+            "next_action": "inspect_trace",
+            "commands": [],
+            "approval": {"approval_id": "", "status": ""},
+            "task": {"task_id": "", "status": ""},
+            "read_only": True,
+            "rows_appended": False,
+            "error": f"Workflow run not found: {target}",
+        }
 
     task_rows = task_rows or []
     approval_rows = approval_rows or []
@@ -2136,34 +2169,85 @@ def format_workflow_run_next_action(
     elif blocked_step_type in {"condition", "unsupported"} or status == "blocked":
         next_action = "cancel_or_edit"
 
+    commands = _workflow_next_action_commands(
+        run_id=target,
+        workflow_ref=workflow_ref,
+        next_action=next_action,
+        approval_id=approval_id,
+        task_id=task_id,
+    )
+    return {
+        "schema_version": WORKFLOW_NEXT_ACTION_SCHEMA_VERSION,
+        "run_id": target,
+        "found": True,
+        "status": status or "unknown",
+        "workflow_ref": workflow_ref,
+        "history_rows": len(history),
+        "blocked_step": {
+            "step_id": blocked_step_id,
+            "type": blocked_step_type,
+        },
+        "stop_reason": reason,
+        "next_action": next_action,
+        "commands": commands,
+        "approval": {
+            "approval_id": approval_id,
+            "status": approval_status,
+        },
+        "task": {
+            "task_id": task_id,
+            "status": task_status,
+        },
+        "read_only": True,
+        "rows_appended": False,
+    }
+
+
+def format_workflow_run_next_action(
+    run_id: str,
+    workflow_rows: list[dict[str, Any]],
+    *,
+    task_rows: list[dict[str, Any]] | None = None,
+    approval_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    projection = workflow_run_next_action_projection(
+        run_id,
+        workflow_rows,
+        task_rows=task_rows,
+        approval_rows=approval_rows,
+    )
+    if not projection["found"]:
+        return str(projection.get("error") or f"Workflow run not found: {projection['run_id']}")
+
+    blocked_step = projection.get("blocked_step") if isinstance(projection.get("blocked_step"), dict) else {}
+    approval = projection.get("approval") if isinstance(projection.get("approval"), dict) else {}
+    task = projection.get("task") if isinstance(projection.get("task"), dict) else {}
     lines = [
-        f"Workflow next action: {target}",
-        f"status: {status or 'unknown'}",
-        f"workflow: {workflow_ref}",
-        f"history_rows: {len(history)}",
+        f"Workflow next action: {projection['run_id']}",
+        f"status: {projection.get('status') or 'unknown'}",
+        f"workflow: {projection.get('workflow_ref') or '-'}",
+        f"history_rows: {projection.get('history_rows') or 0}",
     ]
+    blocked_step_id = str(blocked_step.get("step_id") or "").strip()
+    blocked_step_type = str(blocked_step.get("type") or "").strip()
     if blocked_step_id:
         lines.append(f"blocked_step: {blocked_step_id} [{blocked_step_type or 'unknown'}]")
-    if reason:
-        lines.append(f"stop_reason: {reason}")
+    if projection.get("stop_reason"):
+        lines.append(f"stop_reason: {projection['stop_reason']}")
+    approval_id = str(approval.get("approval_id") or "").strip()
+    approval_status = str(approval.get("status") or "").strip()
     if approval_id or approval_status:
         lines.append(f"approval_id: {approval_id or '-'}")
         lines.append(f"approval_status: {approval_status or '-'}")
+    task_id = str(task.get("task_id") or "").strip()
+    task_status = str(task.get("status") or "").strip()
     if task_id or task_status:
         lines.append(f"task_id: {task_id or '-'}")
         lines.append(f"task_status: {task_status or '-'}")
-    lines.append(f"next_action: {next_action}")
+    lines.append(f"next_action: {projection['next_action']}")
     lines.append("commands:")
-    lines.extend(
-        _workflow_next_action_command_lines(
-            run_id=target,
-            workflow_ref=workflow_ref,
-            next_action=next_action,
-            approval_id=approval_id,
-            task_id=task_id,
-        )
-    )
-    if next_action == "cancel_or_edit":
+    lines.extend(f"- {command}" for command in projection.get("commands") or [])
+    if projection["next_action"] == "cancel_or_edit":
         lines.append("notes: edit the workflow definition before rerunning if the blocker is a condition or unsupported step.")
     lines.append("No workflow, task, progress, approval, artifact, or trace rows were appended.")
     return "\n".join(lines)

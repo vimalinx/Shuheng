@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Workflow command ownership, read-only diagnostics, and Orchestrator/ledger invariants"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared pre-development guide index"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Require reuse of the existing next-action classification helper"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Command text and JSON projection must share one classification contract"}
+{"file": ".trellis/tasks/07-03-add-workflow-next-action-json-diagnostics-v1/research/workflow-next-action-json-design.md", "reason": "Task-specific design and boundaries"}

@@ -1610,10 +1610,17 @@ def test_workflow_run_next_action_classifies_current_blocker() -> None:
 
     rows = [planned, completed, terminal, pending_approval, waiting_task, condition_blocked]
     missing = workflows.format_workflow_run_next_action("", rows)
+    missing_projection = workflows.workflow_run_next_action_projection("", rows)
     planned_output = workflows.format_workflow_run_next_action("wfr-planned", rows)
+    planned_projection = workflows.workflow_run_next_action_projection("wfr-planned", rows)
     completed_output = workflows.format_workflow_run_next_action("wfr-completed", rows)
     terminal_output = workflows.format_workflow_run_next_action("wfr-failed", rows)
     pending_approval_output = workflows.format_workflow_run_next_action(
+        "wfr-approval",
+        rows,
+        approval_rows=[{"approval_id": "appr_next", "status": "pending"}],
+    )
+    pending_approval_projection = workflows.workflow_run_next_action_projection(
         "wfr-approval",
         rows,
         approval_rows=[{"approval_id": "appr_next", "status": "pending"}],
@@ -1634,10 +1641,18 @@ def test_workflow_run_next_action_classifies_current_blocker() -> None:
         task_rows=[{"task_id": "task_next", "status": "completed"}],
     )
     condition_output = workflows.format_workflow_run_next_action("wfr-condition", rows)
+    condition_projection = workflows.workflow_run_next_action_projection("wfr-condition", rows)
 
     assert missing == "Workflow run not found: (missing)"
+    assert missing_projection["schema_version"] == "shuheng.workflow_next_action.v1"
+    assert missing_projection["found"] is False
+    assert missing_projection["read_only"] is True
+    assert missing_projection["rows_appended"] is False
     assert "next_action: continue" in planned_output
     assert "/workflow continue wfr-planned" in planned_output
+    assert planned_projection["found"] is True
+    assert planned_projection["next_action"] == "continue"
+    assert planned_projection["commands"] == ["/workflow continue wfr-planned"]
     assert "next_action: none" in completed_output
     assert "/workflow trace wfr-completed" in completed_output
     assert "next_action: inspect_trace" in terminal_output
@@ -1645,6 +1660,8 @@ def test_workflow_run_next_action_classifies_current_blocker() -> None:
     assert "next_action: approve_or_reject" in pending_approval_output
     assert "/approve appr_next" in pending_approval_output
     assert "/reject appr_next" in pending_approval_output
+    assert pending_approval_projection["approval"] == {"approval_id": "appr_next", "status": "pending"}
+    assert pending_approval_projection["next_action"] == "approve_or_reject"
     assert "approval_status: approved" in approved_output
     assert "next_action: continue" in approved_output
     assert "next_action: wait_task" in waiting_task_output
@@ -1654,6 +1671,11 @@ def test_workflow_run_next_action_classifies_current_blocker() -> None:
     assert "next_action: cancel_or_edit" in condition_output
     assert "/workflow cancel wfr-condition <reason>" in condition_output
     assert "No workflow, task, progress, approval, artifact, or trace rows were appended." in condition_output
+    assert condition_projection["blocked_step"] == {"step_id": "check", "type": "condition"}
+    assert condition_projection["commands"] == [
+        "/workflow trace wfr-condition",
+        "/workflow cancel wfr-condition <reason>",
+    ]
 
 
 def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
@@ -1868,8 +1890,27 @@ def test_workflow_run_command_keeps_condition_side_effect_free(tmp_path: Path, m
     assert "No workflow, task, progress, approval, artifact, or trace rows were appended." in state.messages[-1].content
     assert app_module.handle_workflow_command(state, f"/workflow diagnose {rows[1]['run_id']}") is True
     assert f"Workflow next action: {rows[1]['run_id']}" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow next-json {rows[1]['run_id']}") is True
+    next_json = json.loads(state.messages[-1].content)
+    assert next_json["schema_version"] == "shuheng.workflow_next_action.v1"
+    assert next_json["run_id"] == rows[1]["run_id"]
+    assert next_json["found"] is True
+    assert next_json["next_action"] == "cancel_or_edit"
+    assert next_json["commands"] == [
+        f"/workflow trace {rows[1]['run_id']}",
+        f"/workflow cancel {rows[1]['run_id']} <reason>",
+    ]
+    assert next_json["read_only"] is True
+    assert next_json["rows_appended"] is False
+    assert app_module.handle_workflow_command(state, f"/workflow diagnose-json {rows[1]['run_id']}") is True
+    diagnose_json = json.loads(state.messages[-1].content)
+    assert diagnose_json["next_action"] == "cancel_or_edit"
     assert app_module.handle_workflow_command(state, "/workflow next missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow next-json missing-run") is True
+    missing_json = json.loads(state.messages[-1].content)
+    assert missing_json["found"] is False
+    assert missing_json["error"] == "Workflow run not found: missing-run"
     assert len(app_module.workflow_run_records()) == 2
     assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
     assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run

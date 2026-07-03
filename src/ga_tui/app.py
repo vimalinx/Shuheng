@@ -982,6 +982,7 @@ format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 format_workflow_run_next_action = workflow_helpers.format_workflow_run_next_action
 format_workflow_run_trace = workflow_helpers.format_workflow_run_trace
 format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
+workflow_run_next_action_projection = workflow_helpers.workflow_run_next_action_projection
 latest_workflow_run_rows_for_panel = workflow_helpers.latest_workflow_run_rows
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 apply_workflow_agent_task_result = workflow_helpers.apply_workflow_agent_task_result
@@ -23376,6 +23377,16 @@ def handle_workflow_command(state: State, text: str) -> bool:
             ),
         )
         return True
+    m_next_json = re.match(r"/workflows?\s+(?:next-json|diagnose-json)\s+(\S+)\s*$", raw, re.I)
+    if m_next_json:
+        projection = workflow_run_next_action_projection(
+            m_next_json.group(1),
+            workflow_run_records(),
+            task_rows=read_jsonl(AGENT_TASK_LEDGER_PATH),
+            approval_rows=read_jsonl(AGENT_APPROVALS_PATH),
+        )
+        add_system(state, json.dumps(tui_query_json_safe(projection), ensure_ascii=False, indent=2, sort_keys=True))
+        return True
     m_cancel = re.match(r"/workflows?\s+cancel\s+(\S+)(?:\s+([\s\S]+?))?\s*$", raw, re.I)
     if m_cancel:
         _row, message = cancel_workflow_run_v0(m_cancel.group(1), reason=m_cancel.group(2) or "")
@@ -23417,6 +23428,7 @@ def handle_workflow_command(state: State, text: str) -> bool:
             "/workflow info <plugin-id>/<workflow-id>、"
             "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id> [key=value ...]、"
             "/workflow runs、/workflow show <run-id>、/workflow trace <run-id>、/workflow next <run-id>、"
+            "/workflow next-json <run-id>、"
             "/workflow cancel <run-id> [reason]、"
             "/workflow continue|resume <run-id>",
         )

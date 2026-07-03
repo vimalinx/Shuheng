@@ -8950,11 +8950,15 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     assert "format_workflow_run_trace" in workflow_source, workflow_source
     assert "format_workflow_run_next_action" in workflow_source, workflow_source
+    assert "workflow_run_next_action_projection" in workflow_source, workflow_source
+    assert "WORKFLOW_NEXT_ACTION_SCHEMA_VERSION" in workflow_source, workflow_source
     assert "task_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
     assert "approval_rows: list[dict[str, Any]] | None = None" in workflow_source, workflow_source
     assert "read_jsonl(AGENT_TRACES_PATH)" in app_source, app_source
     assert "m_next = re.match" in app_source and "next|diagnose" in app_source, app_source
+    assert "m_next_json = re.match" in app_source and "next-json|diagnose-json" in app_source, app_source
     assert "format_workflow_run_next_action(" in app_source, app_source
+    assert "workflow_run_next_action_projection(" in app_source, app_source
     trace_rows_before_inspection = len(a.read_jsonl(a.AGENT_TRACES_PATH))
     assert a.handle_workflow_command(state, f"/workflow trace {run_id}") is True
     assert f"Workflow run trace: {run_id}" in state.messages[-1].content, state.messages[-1].content
@@ -8980,8 +8984,28 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, f"/workflow diagnose {run_id}") is True
     assert f"Workflow next action: {run_id}" in state.messages[-1].content, state.messages[-1].content
     assert "next_action: wait_task" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow next-json {run_id}") is True
+    next_json = json.loads(state.messages[-1].content)
+    assert next_json["schema_version"] == "shuheng.workflow_next_action.v1", next_json
+    assert next_json["run_id"] == run_id, next_json
+    assert next_json["found"] is True, next_json
+    assert next_json["next_action"] == "wait_task", next_json
+    assert next_json["task"]["task_id"] == workflow_task_id, next_json
+    assert next_json["commands"] == [
+        f"wait for task {workflow_task_id} to reach a terminal status",
+        f"/workflow trace {run_id}",
+    ], next_json
+    assert next_json["read_only"] is True and next_json["rows_appended"] is False, next_json
+    assert a.handle_workflow_command(state, f"/workflow diagnose-json {run_id}") is True
+    diagnose_json = json.loads(state.messages[-1].content)
+    assert diagnose_json["schema_version"] == "shuheng.workflow_next_action.v1", diagnose_json
+    assert diagnose_json["next_action"] == "wait_task", diagnose_json
     assert a.handle_workflow_command(state, "/workflow next missing-run") is True
     assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, "/workflow next-json missing-run") is True
+    missing_json = json.loads(state.messages[-1].content)
+    assert missing_json["found"] is False, missing_json
+    assert missing_json["error"] == "Workflow run not found: missing-run", missing_json
     assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run + 1
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run + 1

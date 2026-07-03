@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify workflow command aliases, JSON schema fields, and side-effect invariants"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check text and JSON outputs do not duplicate divergent classification logic"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check app command serialization and workflow helper projection stay aligned"}
+{"file": ".trellis/tasks/07-03-add-workflow-next-action-json-diagnostics-v1/research/workflow-next-action-json-design.md", "reason": "Check implementation matches task-specific design"}

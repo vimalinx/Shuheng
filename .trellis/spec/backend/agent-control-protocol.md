@@ -3144,7 +3144,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 ### 1. Scope / Trigger
 
 - Trigger: Users and AI operators need a concise read-only answer for what an append-only workflow run is waiting on and which existing command should be used next.
-- Applies to: `/workflow next <run_id>`, `/workflow diagnose <run_id>`, `workflow_runs.jsonl`, `tasks.jsonl`, `approvals.jsonl`, `workflows.format_workflow_run_next_action(...)`, `app.handle_workflow_command(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Applies to: `/workflow next <run_id>`, `/workflow diagnose <run_id>`, `/workflow next-json <run_id>`, `/workflow diagnose-json <run_id>`, `workflow_runs.jsonl`, `tasks.jsonl`, `approvals.jsonl`, `workflows.workflow_run_next_action_projection(...)`, `workflows.format_workflow_run_next_action(...)`, `app.handle_workflow_command(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
 - Non-goal: Diagnostics do not continue, cancel, retry, approve, reject, dispatch subagents, execute tools, call providers, create approvals, append workflow rows, mutate task/progress/artifact/trace ledgers, inline raw artifacts, edit workflow definitions, schedule work, or expose A2A/MCP workflow services.
 
 ### 2. Signatures
@@ -3152,16 +3152,27 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Public commands:
   - `/workflow next <run_id>`
   - `/workflow diagnose <run_id>`
+  - `/workflow next-json <run_id>`
+  - `/workflow diagnose-json <run_id>`
+- Pure projection:
+  - `workflows.workflow_run_next_action_projection(run_id, workflow_rows, task_rows=..., approval_rows=...) -> dict`
 - Pure formatter:
   - `workflows.format_workflow_run_next_action(run_id, workflow_rows, task_rows=..., approval_rows=...) -> str`
 - App command ownership:
-  - `app.handle_workflow_command(...)` reads workflow/task/approval ledgers and passes row lists into the pure formatter.
+  - `app.handle_workflow_command(...)` reads workflow/task/approval ledgers and passes row lists into the pure projection or formatter.
+- JSON schema:
+  - `schema_version: "shuheng.workflow_next_action.v1"`
+  - `run_id`, `found`, `status`, `workflow_ref`, `history_rows`, `blocked_step`, `stop_reason`, `next_action`, `commands`, `approval`, `task`, `read_only`, and `rows_appended`.
 
 ### 3. Contracts
 
 - `/workflow next <run_id>` and `/workflow diagnose <run_id>` are aliases for the same read-only projection.
-- Unknown or blank run ids must render `Workflow run not found: <run_id>` and append no ledger rows.
+- `/workflow next-json <run_id>` and `/workflow diagnose-json <run_id>` are aliases for the same machine-readable projection.
+- Unknown or blank run ids in the text command must render `Workflow run not found: <run_id>` and append no ledger rows.
+- Unknown or blank run ids in the JSON command must render valid JSON with `found:false`, `rows_appended:false`, `read_only:true`, and an `error` string.
 - The projection must render latest workflow status, workflow ref, append-only history row count, blocked step id/type when present, stop reason when present, and a `next_action:` classification.
+- The JSON projection must render the same classification as text output without requiring AI agents to parse human prose.
+- `workflows.format_workflow_run_next_action(...)` must derive text output from `workflow_run_next_action_projection(...)` so text and JSON cannot drift.
 - Valid next-action classifications are text labels for user guidance, not executable state transitions. Current labels include `continue`, `wait_task`, `approve_or_reject`, `inspect_trace`, `cancel_or_edit`, and `none`.
 - Planned runs should recommend `/workflow continue <run_id>`.
 - Completed or terminal runs should recommend `/workflow trace <run_id>` and optional rerun through `/workflow run <workflow-ref>`, never hidden continuation.
@@ -3170,12 +3181,13 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Waiting agent-task runs with a non-terminal task row should recommend waiting and `/workflow trace <run_id>`.
 - Waiting agent-task runs with a terminal task row, or blocked `agent_task` rows without a task id, should recommend `/workflow continue <run_id>` so the existing Workflow Agent Task Bridge owns dispatch/result handling.
 - Condition or unsupported blockers should recommend trace/cancel/edit guidance, not pretend safe automatic progress exists.
-- `workflows.py` remains pure. `format_workflow_run_next_action(...)` accepts row lists as parameters and must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+- `workflows.py` remains pure. `workflow_run_next_action_projection(...)` and `format_workflow_run_next_action(...)` accept row lists as parameters and must not read files, import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
 
 ### 4. Validation & Error Matrix
 
 - Missing run id -> visible not-found message, no ledger writes.
 - Unknown run id -> visible not-found message, no ledger writes.
+- Missing or unknown run id through `next-json` / `diagnose-json` -> JSON object with `found:false`, no ledger writes.
 - Latest row `planned` -> `next_action: continue`, command `/workflow continue <run_id>`.
 - Latest row `completed` -> `next_action: none`, command `/workflow trace <run_id>`, no continue recommendation.
 - Latest row terminal failed/rejected/cancelled/canceled/aborted -> `next_action: inspect_trace`, command `/workflow trace <run_id>`, no continue recommendation.
@@ -3184,21 +3196,24 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Latest row `waiting_task` plus non-terminal task row -> `next_action: wait_task`, command `/workflow trace <run_id>`, no duplicate dispatch.
 - Latest row `waiting_task` plus terminal task row -> `next_action: continue`, command `/workflow continue <run_id>`.
 - Latest row blocked by condition/unsupported step -> `next_action: cancel_or_edit`, commands `/workflow trace <run_id>` and `/workflow cancel <run_id> <reason>`.
+- JSON projection commands must be plain command strings such as `/workflow continue <run_id>`, not bullet-prefixed human lines.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `/workflow next wfr_...` on a pending approval shows the approval id and only tells the user to approve/reject through existing approval commands.
+- Good: `/workflow next-json wfr_...` on the same pending approval returns `{"next_action":"approve_or_reject","approval":{"approval_id":"appr_...","status":"pending"},"commands":["/approve appr_...","/reject appr_...","/workflow continue wfr_..."]}`.
 - Good: `/workflow diagnose wfr_...` on a working subagent task shows the task id/status and recommends waiting plus trace inspection.
 - Good: A completed workflow reports `next_action: none` and uses trace/rerun guidance instead of trying to continue a terminal run.
 - Base: Diagnostics are command-stream text projections. A future panel or A2A/MCP gateway can reuse the pure formatter or expose the same classification as structured data.
 - Bad: `/workflow next <run_id>` calls `continue_workflow_run_v0(...)` to refresh the run before rendering.
 - Bad: `/workflow diagnose <run_id>` appends a trace row or approval row saying diagnostics were viewed.
-- Bad: `format_workflow_run_next_action(...)` imports `app.py` to call `terminal_task_status(...)` or read ledger paths.
+- Bad: `/workflow next-json <run_id>` returns text embedded inside a JSON string instead of structured fields.
+- Bad: `workflow_run_next_action_projection(...)` imports `app.py` to call `terminal_task_status(...)` or read ledger paths.
 
 ### 6. Tests Required
 
-- `tests/test_workflows.py` must assert missing-run formatting, planned/completed/terminal classifications, pending and approved approval classifications, non-terminal and terminal task classifications, condition-blocked classification, command suggestions, and app command read-only behavior for `/workflow next|diagnose`.
-- `scripts/check_policy_gates.py` must assert command aliases route to the pure formatter, the app reads workflow/task/approval ledgers only for projection, diagnostics append no workflow/task/progress/approval/artifact/trace rows, and `workflows.py` remains side-effect-free.
+- `tests/test_workflows.py` must assert missing-run formatting, planned/completed/terminal classifications, pending and approved approval classifications, non-terminal and terminal task classifications, condition-blocked classification, command suggestions, JSON schema fields, text/JSON source-of-truth reuse, and app command read-only behavior for `/workflow next|diagnose|next-json|diagnose-json`.
+- `scripts/check_policy_gates.py` must assert command aliases route to the pure projection/formatter, the app reads workflow/task/approval ledgers only for projection, diagnostics append no workflow/task/progress/approval/artifact/trace rows, and `workflows.py` remains side-effect-free.
 - Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
 
 ### 7. Wrong vs Correct
@@ -3207,12 +3222,14 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 ```text
 /workflow next wfr_123 -> continue_workflow_run_v0(...) -> dispatches the blocked subagent task
+/workflow next-json wfr_123 -> {"message":"Workflow next action: ..."}
 ```
 
 #### Correct
 
 ```text
 /workflow next wfr_123 -> read ledgers -> format_workflow_run_next_action(...) -> suggest /workflow continue wfr_123
+/workflow next-json wfr_123 -> read ledgers -> workflow_run_next_action_projection(...) -> {"next_action":"continue","commands":["/workflow continue wfr_123"],"rows_appended":false}
 ```
 
 ## Scenario: Workflow Run Panel V1
