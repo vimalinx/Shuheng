@@ -189,6 +189,54 @@ def test_workflow_definition_reports_validation_issues(tmp_path: Path) -> None:
     assert "No execution occurred." in workflows.format_workflow_dry_run(result)
 
 
+def test_workflow_definition_rejects_self_duplicate_and_cyclic_dependencies(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "cyclic-flow",
+            "steps": [
+                {"id": "self", "type": "prompt", "depends_on": ["self"]},
+                {"id": "collect", "type": "prompt"},
+                {"id": "review", "type": "notify", "depends_on": ["collect", "collect"]},
+                {"id": "cycle_a", "type": "prompt", "depends_on": ["cycle_b"]},
+                {"id": "cycle_b", "type": "notify", "depends_on": ["cycle_a"]},
+            ],
+        },
+        workflow_name="cyclic-flow",
+    )
+
+    result = workflows.workflow_load_result_for_ref("research-pack/workflows/cyclic-flow", registry)
+
+    messages = "\n".join(issue.message for issue in result.issues)
+    assert "steps[self] depends on itself" in messages
+    assert "steps[review] duplicates dependency collect" in messages
+    assert "workflow dependency cycle detected: cycle_a -> cycle_b -> cycle_a" in messages
+    assert "No execution occurred." in workflows.format_workflow_dry_run(result)
+
+
+def test_workflow_definition_accepts_valid_fan_in_dependencies(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "fan-in-flow",
+            "steps": [
+                {"id": "collect_a", "type": "prompt"},
+                {"id": "collect_b", "type": "prompt"},
+                {"id": "review", "type": "notify", "depends_on": ["collect_a", "collect_b"]},
+            ],
+        },
+        workflow_name="fan-in-flow",
+    )
+
+    result = workflows.workflow_load_result_for_ref("research-pack/workflows/fan-in-flow", registry)
+
+    assert not result.issues
+    assert result.definition is not None
+    assert result.definition.steps[2].depends_on == ("collect_a", "collect_b")
+
+
 def test_workflow_definition_accepts_fenced_json(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,

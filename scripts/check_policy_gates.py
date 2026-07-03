@@ -8578,6 +8578,25 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
         ),
         encoding="utf-8",
     )
+    workflow_dir.joinpath("cyclic-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "cyclic-flow",
+                "name": "Cyclic Flow",
+                "description": "Invalid workflow used to prove DAG validation.",
+                "steps": [
+                    {"id": "self", "type": "prompt", "depends_on": ["self"]},
+                    {"id": "first", "type": "prompt", "depends_on": ["second"]},
+                    {"id": "second", "type": "notify", "depends_on": ["first"]},
+                    {"id": "review", "type": "notify", "depends_on": ["first", "first"]},
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     outside_file = Path(root, "outside-plugin-skill.md")
     outside_marker = "OUTSIDE_PLUGIN_SKILL_MUST_NOT_BE_INJECTED"
     outside_file.write_text(outside_marker, encoding="utf-8")
@@ -8618,6 +8637,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
                         {"id": "approval-flow", "path": "workflows/approval-flow.json"},
                         {"id": "condition-flow", "path": "workflows/condition-flow.json"},
                         {"id": "condition-input-flow", "path": "workflows/condition-input-flow.json"},
+                        {"id": "cyclic-flow", "path": "workflows/cyclic-flow.json"},
                     ],
                 },
                 "permissions": {
@@ -8653,6 +8673,14 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert not workflow_result.issues, workflow_result.issues
     assert workflow_marker in a.format_workflow_dry_run(workflow_result), a.format_workflow_dry_run(workflow_result)
     assert "No execution occurred." in a.format_workflow_dry_run(workflow_result)
+    cyclic_workflow_ref = "plugin://research-pack/workflows/cyclic-flow"
+    cyclic_result = a.workflow_load_result_for_ref(cyclic_workflow_ref, registry)
+    cyclic_messages = "\n".join(issue.message for issue in cyclic_result.issues)
+    assert cyclic_result.definition is not None, cyclic_result
+    assert "steps[self] depends on itself" in cyclic_messages, cyclic_messages
+    assert "workflow dependency cycle detected: first -> second -> first" in cyclic_messages, cyclic_messages
+    assert "steps[review] duplicates dependency first" in cyclic_messages, cyclic_messages
+    assert "No execution occurred." in a.format_workflow_dry_run(cyclic_result), a.format_workflow_dry_run(cyclic_result)
     built_workflow_run = a.build_workflow_run_record(
         workflow_result,
         run_id="wfr-policy-gate",
@@ -8713,6 +8741,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert "WorkflowStepOutputContext" in workflow_source, workflow_source
     assert "workflow_upstream_step_output_context" in workflow_source, workflow_source
     assert "format_workflow_step_output_context" in workflow_source, workflow_source
+    assert "_workflow_dependency_issues" in workflow_source, workflow_source
+    assert "workflow dependency cycle detected" in workflow_source, workflow_source
     assert "artifact contents are not loaded" in workflow_source, workflow_source
     assert "start_subagent" not in workflow_source and "append_task_ledger" not in workflow_source, workflow_source
     panel_items = a.plugin_panel_items()
@@ -8731,6 +8761,19 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
 
     state = a.State(agent=ContextFakeAgent())
     state.running = True
+    cyclic_workflow_rows_before = len(a.workflow_run_records())
+    cyclic_task_rows_before = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    cyclic_progress_rows_before = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    cyclic_approval_rows_before = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    cyclic_artifact_rows_before = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    assert a.handle_workflow_command(state, f"/workflow run {cyclic_workflow_ref}") is True
+    assert "Workflow run rejected:" in state.messages[-1].content, state.messages[-1].content
+    assert "workflow dependency cycle detected" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == cyclic_workflow_rows_before, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == cyclic_task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == cyclic_progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == cyclic_approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == cyclic_artifact_rows_before
     skilled = a.create_subagent(
         state,
         "Plugin Scoped Agent",

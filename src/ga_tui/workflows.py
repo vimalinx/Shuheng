@@ -298,6 +298,58 @@ def _parse_inputs(value: Any, workflow_ref: str, path: str) -> tuple[tuple[Workf
     return tuple(inputs), issues
 
 
+def _workflow_dependency_issues(steps: tuple[WorkflowStep, ...], workflow_ref: str, path: str) -> list[WorkflowIssue]:
+    issues: list[WorkflowIssue] = []
+    step_ids = {step.step_id for step in steps}
+    graph: dict[str, list[str]] = {}
+    for step in steps:
+        seen_dependencies: set[str] = set()
+        dependencies: list[str] = []
+        for dependency in step.depends_on:
+            if dependency in seen_dependencies:
+                issues.append(workflow_issue(workflow_ref, path, f"steps[{step.step_id}] duplicates dependency {dependency}"))
+                continue
+            seen_dependencies.add(dependency)
+            if dependency == step.step_id:
+                issues.append(workflow_issue(workflow_ref, path, f"steps[{step.step_id}] depends on itself"))
+                continue
+            if dependency not in step_ids:
+                issues.append(workflow_issue(workflow_ref, path, f"steps[{step.step_id}] depends on missing step {dependency}"))
+                continue
+            dependencies.append(dependency)
+        graph[step.step_id] = dependencies
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    reported_cycles: set[str] = set()
+    stack: list[str] = []
+
+    def visit(step_id: str) -> None:
+        if step_id in visited:
+            return
+        if step_id in visiting:
+            return
+        visiting.add(step_id)
+        stack.append(step_id)
+        for dependency in graph.get(step_id, []):
+            if dependency in visiting:
+                start = stack.index(dependency)
+                cycle = stack[start:] + [dependency]
+                cycle_key = " -> ".join(cycle)
+                if cycle_key not in reported_cycles:
+                    reported_cycles.add(cycle_key)
+                    issues.append(workflow_issue(workflow_ref, path, f"workflow dependency cycle detected: {cycle_key}"))
+                continue
+            visit(dependency)
+        stack.pop()
+        visiting.remove(step_id)
+        visited.add(step_id)
+
+    for step in steps:
+        visit(step.step_id)
+    return issues
+
+
 def _parse_steps(value: Any, workflow_ref: str, path: str) -> tuple[tuple[WorkflowStep, ...], list[WorkflowIssue]]:
     if not isinstance(value, list):
         return (), [workflow_issue(workflow_ref, path, "steps must be a list")]
@@ -333,11 +385,7 @@ def _parse_steps(value: Any, workflow_ref: str, path: str) -> tuple[tuple[Workfl
                 payload=dict(raw),
             )
         )
-    step_ids = {step.step_id for step in steps}
-    for step in steps:
-        for dependency in step.depends_on:
-            if dependency not in step_ids:
-                issues.append(workflow_issue(workflow_ref, path, f"steps[{step.step_id}] depends on missing step {dependency}"))
+    issues.extend(_workflow_dependency_issues(tuple(steps), workflow_ref, path))
     if not steps:
         issues.append(workflow_issue(workflow_ref, path, "steps must include at least one step"))
     return tuple(steps), issues

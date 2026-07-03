@@ -2296,6 +2296,78 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 /workflow dry-run research-pack/compare-sources -> renders plan preview and says "No execution occurred."
 ```
 
+## Scenario: Workflow DAG Validation V1
+
+### 1. Scope / Trigger
+
+- Trigger: A manifest-backed workflow definition declares `depends_on` / `after` relationships that are not a valid directed acyclic graph.
+- Applies to: `workflows._parse_steps(...)`, workflow definition loading, `/workflow info <ref>`, `/workflow dry-run <ref>`, `/workflow run <ref>`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not topologically reorder steps, add parallel fan-out/fan-in execution, add retries, timeout, cancellation, scheduling, checkpoint/replay, artifact hydration, plugin code execution, model/tool calls, or A2A/MCP workflow service exposure.
+
+### 2. Signatures
+
+- Dependency fields accepted from workflow JSON:
+  - `depends_on`
+  - `after`
+- Pure helper ownership:
+  - `workflows._workflow_dependency_issues(steps, workflow_ref, path) -> list[WorkflowIssue]`
+- Error message shapes:
+  - `steps[<step_id>] depends on itself`
+  - `steps[<step_id>] duplicates dependency <dependency_id>`
+  - `steps[<step_id>] depends on missing step <dependency_id>`
+  - `workflow dependency cycle detected: <step_id> -> ... -> <step_id>`
+
+### 3. Contracts
+
+- Workflow definitions must be DAG-valid before any run ledger row can be created.
+- A step must not depend on itself.
+- A step must not list the same dependency id more than once.
+- A step must not depend on a missing step.
+- The full dependency graph must be acyclic, including direct cycles and transitive cycles.
+- Valid fan-in dependency shapes remain accepted. Runner v0 may still execute sequentially in file order until a later fan-out/fan-in executor exists.
+- DAG validation belongs to the pure workflow definition parser. It must not read workflow run ledgers, task ledgers, artifacts, files beyond the manifest-declared workflow file, environment variables, Secret Vault, model outputs, or tools.
+- `workflows.py` remains pure and must not import app/runtime/UI/governance owners, append JSONL rows, dispatch subagents, queue approvals, call providers/tools, or run subprocesses.
+
+### 4. Validation & Error Matrix
+
+- `{"id":"plan","depends_on":["plan"]}` -> validation issue `steps[plan] depends on itself`, no workflow run row on `/workflow run`.
+- `plan depends_on ["review"]` and `review depends_on ["plan"]` -> validation issue `workflow dependency cycle detected: plan -> review -> plan`, no workflow run row on `/workflow run`.
+- `review depends_on ["collect","collect"]` -> validation issue `steps[review] duplicates dependency collect`.
+- `review depends_on ["missing"]` -> existing missing dependency validation remains intact.
+- `collect_a`, `collect_b`, `review depends_on ["collect_a","collect_b"]` -> valid workflow definition with no DAG validation issues.
+- Invalid cyclic workflow shown in `/workflow dry-run` -> dry-run still reports `No execution occurred.` and lists validation issues.
+
+### 5. Good/Base/Bad Cases
+
+- Good: A generated or hand-written workflow with a dependency cycle is rejected before any planned workflow run row is appended.
+- Good: The Workflows panel can surface an invalid cyclic workflow as a validation warning while valid workflows remain runnable.
+- Good: A future fan-in workflow can already declare multiple dependencies and pass validation, even if runner v0 executes sequentially.
+- Base: Step order remains author-defined in v1; DAG validation only rejects invalid graph shapes.
+- Bad: Runner v0 discovers a cycle only after appending a planned run row.
+- Bad: App command code duplicates a second dependency graph validator instead of using the workflow loader result.
+- Bad: `workflows.py` imports app or ledger owners to check historical workflow runs while validating a definition.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert self-dependency, duplicate dependency, direct or transitive cycle, missing dependency preservation, valid fan-in acceptance, and dry-run no-execution wording.
+- `scripts/check_policy_gates.py` must assert an invalid cyclic workflow is rejected by `/workflow run` with no workflow run row and no task/progress/approval/artifact ledger writes.
+- `scripts/check_policy_gates.py` must assert the DAG validation helper remains owned by `workflows.py` and `workflows.py` stays side-effect-free.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow run research-pack/cyclic-flow -> appends planned row, then runner gets stuck because plan depends on review and review depends on plan
+```
+
+#### Correct
+
+```text
+/workflow run research-pack/cyclic-flow -> loader reports dependency cycle, app shows rejection, no workflow run row is appended
+```
+
 ## Scenario: Workflow AI Draft Generation
 
 ### 1. Scope / Trigger
