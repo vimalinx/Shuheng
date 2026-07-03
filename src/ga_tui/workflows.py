@@ -39,6 +39,7 @@ WORKFLOW_STEP_TYPES = frozenset({
     "notify",
     "condition",
 })
+WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT = 5
 _JSON_FENCE_RE = re.compile(r"```(?:json|workflow-json)?\s*(\{[\s\S]*?\})\s*```", re.I)
 
 
@@ -151,6 +152,22 @@ class WorkflowStepOutputContext:
     task_id: str = ""
     agent_id: str = ""
     artifact_refs: tuple[str, ...] = ()
+
+
+def workflow_step_retry_state(step: dict[str, Any]) -> dict[str, Any]:
+    raw_retry = step.get("retry") if isinstance(step.get("retry"), dict) else {}
+    max_attempts = _at_least_int(raw_retry.get("max_attempts"), 1)
+    max_attempts = min(max_attempts, WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT)
+    attempt = _at_least_int(raw_retry.get("attempt"), 0)
+    attempt = min(attempt, max_attempts)
+    task_attempts = raw_retry.get("task_attempts") if isinstance(raw_retry.get("task_attempts"), list) else []
+    normalized = {
+        "max_attempts": max_attempts,
+        "attempt": attempt,
+        "remaining_attempts": max(0, max_attempts - attempt),
+        "task_attempts": [dict(item) for item in task_attempts if isinstance(item, dict)],
+    }
+    return normalized
 
 
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
@@ -360,6 +377,53 @@ def _workflow_dependency_issues(steps: tuple[WorkflowStep, ...], workflow_ref: s
     return issues
 
 
+def _parse_step_retry_policy(
+    raw_step: dict[str, Any],
+    *,
+    index: int,
+    step_id: str,
+    workflow_ref: str,
+    path: str,
+) -> tuple[dict[str, Any], list[WorkflowIssue]]:
+    if "retry" not in raw_step or raw_step.get("retry") in (None, ""):
+        return {"max_attempts": 1}, []
+    raw_retry = raw_step.get("retry")
+    if not isinstance(raw_retry, dict):
+        return {"max_attempts": 1}, [
+            workflow_issue(workflow_ref, path, f"steps[{index}] retry must be an object")
+        ]
+    raw_attempts = raw_retry.get("max_attempts")
+    if isinstance(raw_attempts, bool) or raw_attempts in (None, ""):
+        return {"max_attempts": 1}, [
+            workflow_issue(workflow_ref, path, f"steps[{step_id}] retry.max_attempts must be an integer")
+        ]
+    if isinstance(raw_attempts, str):
+        if not re.fullmatch(r"\d+", raw_attempts.strip()):
+            return {"max_attempts": 1}, [
+                workflow_issue(workflow_ref, path, f"steps[{step_id}] retry.max_attempts must be an integer")
+            ]
+        max_attempts = int(raw_attempts.strip())
+    elif isinstance(raw_attempts, int):
+        max_attempts = int(raw_attempts)
+    else:
+        return {"max_attempts": 1}, [
+            workflow_issue(workflow_ref, path, f"steps[{step_id}] retry.max_attempts must be an integer")
+        ]
+    if max_attempts < 1:
+        return {"max_attempts": 1}, [
+            workflow_issue(workflow_ref, path, f"steps[{step_id}] retry.max_attempts must be at least 1")
+        ]
+    if max_attempts > WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT:
+        return {"max_attempts": 1}, [
+            workflow_issue(
+                workflow_ref,
+                path,
+                f"steps[{step_id}] retry.max_attempts must be <= {WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT}",
+            )
+        ]
+    return {"max_attempts": max_attempts}, []
+
+
 def _parse_steps(value: Any, workflow_ref: str, path: str) -> tuple[tuple[WorkflowStep, ...], list[WorkflowIssue]]:
     if not isinstance(value, list):
         return (), [workflow_issue(workflow_ref, path, "steps must be a list")]
@@ -382,6 +446,16 @@ def _parse_steps(value: Any, workflow_ref: str, path: str) -> tuple[tuple[Workfl
         step_type = str(raw.get("type") or "").strip()
         if step_type not in WORKFLOW_STEP_TYPES:
             issues.append(workflow_issue(workflow_ref, path, f"steps[{index}] has unsupported type {step_type or '(missing)'}"))
+        retry_policy, retry_issues = _parse_step_retry_policy(
+            raw,
+            index=index,
+            step_id=step_id,
+            workflow_ref=workflow_ref,
+            path=path,
+        )
+        issues.extend(retry_issues)
+        payload = dict(raw)
+        payload["retry"] = retry_policy
         steps.append(
             WorkflowStep(
                 step_id=step_id,
@@ -392,7 +466,7 @@ def _parse_steps(value: Any, workflow_ref: str, path: str) -> tuple[tuple[Workfl
                 agent=str(raw.get("agent") or raw.get("target_agent") or "").strip(),
                 prompt=str(raw.get("prompt") or "").strip(),
                 ref=str(raw.get("ref") or raw.get("from") or "").strip(),
-                payload=dict(raw),
+                payload=payload,
             )
         )
     issues.extend(_workflow_dependency_issues(tuple(steps), workflow_ref, path))
@@ -580,6 +654,8 @@ def format_workflow_dry_run(result: WorkflowLoadResult) -> str:
 
 
 def workflow_step_run_snapshot(step: WorkflowStep, *, order: int) -> dict[str, Any]:
+    payload = step.payload if isinstance(step.payload, dict) else {}
+    retry_policy = payload.get("retry") if isinstance(payload.get("retry"), dict) else {"max_attempts": 1}
     snapshot = {
         "step_id": step.step_id,
         "order": order,
@@ -597,8 +673,13 @@ def workflow_step_run_snapshot(step: WorkflowStep, *, order: int) -> dict[str, A
         "approval_id": "",
         "task_id": "",
         "error": "",
+        "retry": {
+            "max_attempts": _at_least_int(retry_policy.get("max_attempts"), 1),
+            "attempt": 0,
+            "remaining_attempts": _at_least_int(retry_policy.get("max_attempts"), 1),
+            "task_attempts": [],
+        },
     }
-    payload = step.payload if isinstance(step.payload, dict) else {}
     for key in ("condition", "when", "expression"):
         if key in payload:
             snapshot[key] = deepcopy(payload.get(key))
@@ -1069,6 +1150,95 @@ def _at_least_int(value: Any, minimum: int) -> int:
     return max(parsed, minimum)
 
 
+def _update_step_retry_attempt_on_dispatch(step: dict[str, Any]) -> None:
+    retry = workflow_step_retry_state(step)
+    attempt = min(retry["attempt"] + 1, retry["max_attempts"])
+    retry["attempt"] = attempt
+    retry["remaining_attempts"] = max(0, retry["max_attempts"] - attempt)
+    step["retry"] = retry
+
+
+def _workflow_agent_task_retry_target(row: dict[str, Any]) -> dict[str, Any] | None:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    blocked_step_id = str(execution.get("blocked_step_id") or "").strip()
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    if blocked_step_id:
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if str(step.get("step_id") or "").strip() != blocked_step_id:
+                continue
+            if str(step.get("type") or "").strip() == "agent_task":
+                return step
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("type") or "").strip() != "agent_task":
+            continue
+        if str(step.get("status") or "").strip().lower() in WORKFLOW_RUN_TERMINAL_STATUSES:
+            return step
+    return None
+
+
+def workflow_agent_task_retry_available(row: dict[str, Any]) -> bool:
+    step = _workflow_agent_task_retry_target(row)
+    if step is None:
+        return False
+    retry = workflow_step_retry_state(step)
+    return retry["attempt"] < retry["max_attempts"]
+
+
+def prepare_workflow_agent_task_retry(
+    row: dict[str, Any],
+    *,
+    timestamp: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    updated = deepcopy(row)
+    step = _workflow_agent_task_retry_target(updated)
+    if step is None:
+        return updated
+    retry = workflow_step_retry_state(step)
+    if retry["attempt"] >= retry["max_attempts"]:
+        return updated
+    step_id = str(step.get("step_id") or "").strip()
+    retry_reason = str(reason or step.get("error") or "workflow agent_task retry requested")
+    prior_attempt = {
+        "attempt": retry["attempt"],
+        "task_id": str(step.get("task_id") or ""),
+        "task_status": str(step.get("task_status") or step.get("status") or ""),
+        "agent_id": str(step.get("agent_id") or ""),
+        "started_at": str(step.get("started_at") or ""),
+        "completed_at": str(step.get("completed_at") or ""),
+        "artifact_refs": _unique_strings(step.get("artifact_refs")),
+        "error": retry_reason,
+    }
+    if prior_attempt["task_id"] or prior_attempt["task_status"] or prior_attempt["error"]:
+        retry["task_attempts"] = [*retry["task_attempts"], prior_attempt]
+    next_attempt = retry["attempt"] + 1
+    step["retry"] = retry
+    step["status"] = "blocked"
+    step["task_id"] = ""
+    step["task_status"] = ""
+    step["agent_id"] = ""
+    step["started_at"] = ""
+    step["completed_at"] = ""
+    step["artifact_refs"] = []
+    step["error"] = f"retry ready after failed attempt {retry['attempt']}/{retry['max_attempts']}: {retry_reason}"
+    execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
+    execution["blocked_step_id"] = step_id
+    execution["blocked_step_type"] = "agent_task"
+    execution["blocked_reason"] = (
+        f"step {step_id or '(unknown)'} retry attempt {next_attempt}/{retry['max_attempts']} is ready"
+    )
+    updated["execution"] = execution
+    updated["status"] = "blocked"
+    updated["updated_at"] = timestamp
+    updated["completed_at"] = ""
+    updated["error"] = str(execution["blocked_reason"])
+    return updated
+
+
 def attach_workflow_step_approval(row: dict[str, Any], *, approval_id: str, timestamp: str) -> dict[str, Any]:
     safe_approval_id = str(approval_id or "").strip()
     updated = deepcopy(row)
@@ -1125,6 +1295,7 @@ def attach_workflow_agent_task(
     step["task_status"] = str(task_status or "working")
     step["status"] = "waiting_task"
     step["error"] = ""
+    _update_step_retry_attempt_on_dispatch(step)
     if not step.get("started_at"):
         step["started_at"] = timestamp
     execution = dict(updated.get("execution") if isinstance(updated.get("execution"), dict) else {})
@@ -1428,6 +1599,7 @@ def _workflow_step_signature(step: Any) -> tuple[Any, ...]:
         step.get("task_status"),
         step.get("agent_id"),
         step.get("error"),
+        step.get("retry"),
     )
 
 
@@ -1626,6 +1798,17 @@ def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
         if result.reason:
             lines.append(f"reason: {result.reason}")
         return "\n".join(lines)
+    if result.status == "task_retried":
+        lines = [
+            f"Workflow agent task retried: {run_id}",
+            f"task_id: {result.task_id or '-'}",
+            f"task_status: {result.task_status or '-'}",
+            f"history_rows: {result.history_rows}",
+            "Retry dispatched through the governed subagent task pipeline.",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        return "\n".join(lines)
     if result.status == "task_pending":
         lines = [
             f"Workflow run waiting for subagent task: {run_id}",
@@ -1812,6 +1995,13 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
                 pieces.append(f"agent_id={step.get('agent_id')}")
             if step.get("approval_id"):
                 pieces.append(f"approval_id={step.get('approval_id')}")
+            retry = workflow_step_retry_state(step)
+            if retry["max_attempts"] > 1 or retry["attempt"]:
+                pieces.append(f"retry={retry['attempt']}/{retry['max_attempts']}")
+                if retry["remaining_attempts"]:
+                    pieces.append(f"retry_remaining={retry['remaining_attempts']}")
+                if retry["task_attempts"]:
+                    pieces.append(f"previous_attempts={len(retry['task_attempts'])}")
             step_artifact_refs = _unique_strings(step.get("artifact_refs"))
             if step_artifact_refs:
                 pieces.append("artifact_refs=" + ",".join(step_artifact_refs))

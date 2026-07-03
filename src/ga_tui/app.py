@@ -986,8 +986,10 @@ attach_workflow_agent_task = workflow_helpers.attach_workflow_agent_task
 attach_workflow_step_approval = workflow_helpers.attach_workflow_step_approval
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
 fail_workflow_agent_task_dispatch = workflow_helpers.fail_workflow_agent_task_dispatch
+prepare_workflow_agent_task_retry = workflow_helpers.prepare_workflow_agent_task_retry
 pending_workflow_agent_task_step = workflow_helpers.pending_workflow_agent_task_step
 pending_workflow_approval_step = workflow_helpers.pending_workflow_approval_step
+workflow_agent_task_retry_available = workflow_helpers.workflow_agent_task_retry_available
 workflow_agent_task_id = workflow_helpers.workflow_agent_task_id
 workflow_run_step_counts = workflow_helpers.workflow_run_step_counts
 workflow_run_stop_reason = workflow_helpers.workflow_run_stop_reason
@@ -4734,6 +4736,7 @@ def workflow_generation_prompt(goal: str) -> str:
         f"Supported step types are: {supported_types}.\n"
         "Each step must have a filesystem-safe id and type. Use depends_on for ordering.\n"
         "Use agent_task only when a subagent should do bounded work; include agent and prompt.\n"
+        "For fragile agent_task steps, optionally include retry:{\"max_attempts\":2}; max_attempts is total dispatch attempts.\n"
         "Use approval when a human gate is required. For condition steps, use only safe JSON predicates "
         "such as {\"condition\":{\"ref\":\"inputs.ready\",\"equals\":true}}; never use expression strings.\n"
         "Never include shell, Python, JavaScript, plugin code, tool execution fields, permission bypasses, "
@@ -5499,6 +5502,30 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
             return None, format_workflow_continue_result(result)
         applied = apply_workflow_agent_task_result(latest, task_row=task_row, timestamp=now_iso())
         if task_status != "completed":
+            if state is not None and workflow_agent_task_retry_available(applied):
+                retry_seed = prepare_workflow_agent_task_retry(
+                    applied,
+                    timestamp=now_iso(),
+                    reason=str(applied.get("error") or task_row.get("error") or task_row.get("summary") or ""),
+                )
+                retried, retry_task_id, retry_message = bridge_workflow_agent_task(
+                    retry_seed,
+                    source_command=f"/workflow continue {target}",
+                    state=state,
+                )
+                if workflow_run_has_meaningful_transition(latest, retried):
+                    row = append_workflow_run(retried)
+                    pending_step = pending_workflow_agent_task_step(row) or {}
+                    result = workflow_helpers.WorkflowRunContinueResult(
+                        run_id=target,
+                        status="task_retried" if retry_task_id else "task_terminal",
+                        record=row,
+                        history_rows=len(history) + 1,
+                        reason=retry_message or str(row.get("error") or ""),
+                        task_id=retry_task_id,
+                        task_status=str(pending_step.get("task_status") or row.get("status") or ""),
+                    )
+                    return row, format_workflow_continue_result(result)
             row = append_workflow_run(applied)
             result = workflow_helpers.WorkflowRunContinueResult(
                 run_id=target,

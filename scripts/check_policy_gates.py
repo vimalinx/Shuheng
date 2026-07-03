@@ -9283,6 +9283,116 @@ def assert_workflow_run_panel_contract() -> None:
     assert len(a.workflow_run_records()) == workflow_rows_before_noop + 1, a.workflow_run_records()
 
 
+def assert_workflow_retry_policy_contract() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_workflow_retry_")
+    retarget_harness(root)
+    plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
+    workflow_dir = plugin_root / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    workflow_dir.joinpath("retry-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "retry-flow",
+                "name": "Retry Flow",
+                "steps": [
+                    {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                    {
+                        "id": "review",
+                        "type": "agent_task",
+                        "agent": "Retry Policy Agent",
+                        "depends_on": ["plan"],
+                        "prompt": "Review.",
+                        "retry": {"max_attempts": 2},
+                    },
+                    {"id": "notify", "type": "notify", "depends_on": ["review"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    workflow_dir.joinpath("invalid-retry.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "invalid-retry",
+                "steps": [
+                    {"id": "review", "type": "agent_task", "agent": "Retry Policy Agent", "retry": {"max_attempts": 99}},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    plugin_root.joinpath("plugin.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.plugin.v1",
+                "id": "research-pack",
+                "name": "Research Pack",
+                "contributes": {
+                    "workflows": [
+                        {"id": "retry-flow", "name": "Retry Flow", "path": "workflows/retry-flow.json"},
+                        {"id": "invalid-retry", "name": "Invalid Retry", "path": "workflows/invalid-retry.json"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
+    assert "prepare_workflow_agent_task_retry(" in app_source, app_source
+    assert "bridge_workflow_agent_task(" in app_source, app_source
+    assert "workflow_agent_task_retry_available(" in app_source, app_source
+    assert "prepare_workflow_agent_task_retry" in workflow_source, workflow_source
+    assert "WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT" in workflow_source, workflow_source
+    assert "PanelItem" not in workflow_source and "start_subagent_task_structured" not in workflow_source, workflow_source
+
+    registry = a.user_plugin_registry(force=True)
+    invalid = a.workflow_load_result_for_ref("research-pack/invalid-retry", registry)
+    invalid_messages = "\n".join(issue.message for issue in invalid.issues)
+    assert "retry.max_attempts must be <=" in invalid_messages, invalid_messages
+
+    state = a.State(agent=SequencedFakeAgent([]))
+    sub = a.create_subagent(state, "Retry Policy Agent", "Fails once, then succeeds.", role="researcher")
+    sub.agent = SequencedFakeAgent(["[ERROR] transient retry failure", "retry success"])
+    assert a.handle_workflow_command(state, "/workflow run research-pack/retry-flow") is True
+    first_waiting = a.workflow_run_records()[-1]
+    run_id = first_waiting["run_id"]
+    first_task_id = first_waiting["steps"][1]["task_id"]
+    assert first_waiting["steps"][1]["retry"]["attempt"] == 1, first_waiting
+    assert first_waiting["steps"][1]["retry"]["remaining_attempts"] == 1, first_waiting
+    task_rows_before_retry = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_retry = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_retry = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+
+    drain_ui(state)
+    retry_history = a.workflow_run_records()
+    retried = next(
+        row for row in retry_history
+        if row["steps"][1].get("task_id") != first_task_id and row["steps"][1]["status"] == "waiting_task"
+    )
+    second_task_id = retried["steps"][1]["task_id"]
+    assert retried["status"] == "waiting_task", retried
+    assert second_task_id and second_task_id != first_task_id, retried
+    assert retried["steps"][1]["retry"]["attempt"] == 2, retried
+    assert retried["steps"][1]["retry"]["remaining_attempts"] == 0, retried
+    assert retried["steps"][1]["retry"]["task_attempts"][0]["task_id"] == first_task_id, retried
+    assert a.latest_task_records()[first_task_id]["status"] == "failed", a.latest_task_records()[first_task_id]
+    assert any("Workflow agent task retried:" in message.content for message in state.messages), [message.content for message in state.messages]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_retry + 3
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_retry + 3
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_retry
+
+    completed = a.workflow_run_records()[-1]
+    assert completed["status"] == "completed", completed
+    assert [step["status"] for step in completed["steps"]] == ["completed", "completed", "completed"], completed
+    assert completed["steps"][1]["task_id"] == second_task_id, completed
+    assert completed["steps"][1]["retry"]["attempt"] == 2, completed
+    assert completed["steps"][1]["retry"]["task_attempts"][0]["task_id"] == first_task_id, completed
+    assert "retry=2/2" in a.format_workflow_run_detail(run_id, a.workflow_run_records())
+
+
 def assert_workflow_run_last_generated_draft_contract() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_workflow_run_last_")
     retarget_harness(root)
@@ -10781,6 +10891,7 @@ def run_checks() -> None:
     assert_subagent_dedicated_skills_are_agent_scoped()
     assert_declarative_plugins_are_agent_scoped()
     assert_workflow_run_panel_contract()
+    assert_workflow_retry_policy_contract()
     assert_workflow_run_last_generated_draft_contract()
     assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()

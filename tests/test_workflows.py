@@ -189,6 +189,41 @@ def test_workflow_definition_reports_validation_issues(tmp_path: Path) -> None:
     assert "No execution occurred." in workflows.format_workflow_dry_run(result)
 
 
+def test_workflow_definition_validates_retry_policy(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "retry-policy-flow",
+            "steps": [
+                {"id": "plan", "type": "prompt"},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "Retry Agent",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                    "retry": {"max_attempts": 2},
+                },
+                {
+                    "id": "bad",
+                    "type": "agent_task",
+                    "agent": "Retry Agent",
+                    "retry": {"max_attempts": 99},
+                },
+            ],
+        },
+        workflow_name="retry-policy-flow",
+    )
+
+    result = workflows.workflow_load_result_for_ref("research-pack/workflows/retry-policy-flow", registry)
+
+    messages = "\n".join(issue.message for issue in result.issues)
+    assert "steps[bad] retry.max_attempts must be <=" in messages
+    assert result.definition is not None
+    assert result.definition.steps[1].payload["retry"]["max_attempts"] == 2
+
+
 def test_workflow_definition_rejects_self_duplicate_and_cyclic_dependencies(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -1745,6 +1780,137 @@ def test_workflow_agent_task_bridge_stops_on_failed_task(tmp_path: Path, monkeyp
     assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
     assert "Workflow run already terminal:" in state.messages[-1].content
     assert "status: failed" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == len(rows)
+
+
+def test_workflow_agent_task_retry_policy_retries_failed_task_once(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "agent-retry-flow",
+            "name": "Agent Retry Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "Retry Workflow Agent",
+                    "depends_on": ["plan"],
+                    "prompt": "Review source quality.",
+                    "retry": {"max_attempts": 2},
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["review"]},
+            ],
+        },
+        workflow_name="agent-retry-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.create_subagent(
+        state,
+        "Retry Workflow Agent",
+        "Retries source review once.",
+        role="researcher",
+        persistent=True,
+    )
+    sub.agent = SequencedWorkflowAgent(["[ERROR] transient", "retry success"])
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/agent-retry-flow") is True
+    first_waiting = app_module.workflow_run_records()[-1]
+    run_id = first_waiting["run_id"]
+    first_task_id = first_waiting["steps"][1]["task_id"]
+    assert first_waiting["steps"][1]["retry"]["attempt"] == 1
+    assert first_waiting["steps"][1]["retry"]["remaining_attempts"] == 1
+
+    drain_app_ui_queue(state)
+
+    rows_after_retry = app_module.workflow_run_records()
+    retried = next(
+        row for row in rows_after_retry
+        if row["steps"][1].get("task_id") != first_task_id and row["steps"][1]["status"] == "waiting_task"
+    )
+    second_task_id = retried["steps"][1]["task_id"]
+    assert retried["run_id"] == run_id
+    assert retried["status"] == "waiting_task"
+    assert second_task_id and second_task_id != first_task_id
+    assert retried["steps"][1]["retry"]["attempt"] == 2
+    assert retried["steps"][1]["retry"]["remaining_attempts"] == 0
+    assert retried["steps"][1]["retry"]["task_attempts"][0]["task_id"] == first_task_id
+    assert retried["steps"][1]["retry"]["task_attempts"][0]["task_status"] == "failed"
+    assert "transient" in retried["steps"][1]["retry"]["task_attempts"][0]["error"]
+    assert app_module.latest_task_records()[first_task_id]["status"] == "failed"
+    assert any("Workflow agent task retried:" in message.content for message in state.messages)
+
+    completed = app_module.workflow_run_records()[-1]
+    assert completed["run_id"] == run_id
+    assert completed["status"] == "completed"
+    assert [step["status"] for step in completed["steps"]] == ["completed", "completed", "completed"]
+    assert completed["steps"][1]["task_id"] == second_task_id
+    assert completed["steps"][1]["task_status"] == "completed"
+    assert completed["steps"][1]["retry"]["attempt"] == 2
+    assert completed["steps"][1]["retry"]["task_attempts"][0]["task_id"] == first_task_id
+    detail = workflows.format_workflow_run_detail(run_id, app_module.workflow_run_records())
+    assert "retry=2/2" in detail
+    assert "previous_attempts=1" in detail
+
+
+def test_workflow_agent_task_retry_policy_stops_after_attempts_exhausted(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "agent-retry-exhausted-flow",
+            "name": "Agent Retry Exhausted Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "Retry Exhausted Agent",
+                    "depends_on": ["plan"],
+                    "prompt": "Review source quality.",
+                    "retry": {"max_attempts": 2},
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["review"]},
+            ],
+        },
+        workflow_name="agent-retry-exhausted-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.create_subagent(
+        state,
+        "Retry Exhausted Agent",
+        "Fails twice.",
+        role="researcher",
+        persistent=True,
+    )
+    sub.agent = SequencedWorkflowAgent(["[ERROR] first", "[ERROR] second"])
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/agent-retry-exhausted-flow") is True
+    first_task_id = app_module.workflow_run_records()[-1]["steps"][1]["task_id"]
+    drain_app_ui_queue(state)
+    rows_after_retry = app_module.workflow_run_records()
+    retry_row = next(
+        row for row in rows_after_retry
+        if row["steps"][1].get("task_id") != first_task_id and row["steps"][1]["status"] == "waiting_task"
+    )
+    second_task_id = retry_row["steps"][1]["task_id"]
+    assert second_task_id and second_task_id != first_task_id
+
+    rows = app_module.workflow_run_records()
+    failed = rows[-1]
+    assert failed["status"] == "failed"
+    assert failed["steps"][1]["status"] == "failed"
+    assert failed["steps"][1]["task_id"] == second_task_id
+    assert failed["steps"][1]["retry"]["attempt"] == 2
+    assert failed["steps"][2]["status"] == "pending"
+    assert "second" in failed["error"]
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == 4
+    assert app_module.handle_workflow_command(state, f"/workflow continue {failed['run_id']}") is True
+    assert "Workflow run already terminal:" in state.messages[-1].content
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == 4
     assert len(app_module.workflow_run_records()) == len(rows)
 
 

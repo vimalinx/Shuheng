@@ -3051,7 +3051,8 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - Latest row blocked at `agent_task` without a `task_id` -> delegated to the Workflow Agent Task Bridge; a successful dispatch appends one `waiting_task` workflow row with the new `task_id`.
 - Latest row waiting at `agent_task` with a non-terminal `task_id` -> visible waiting message, no workflow row append, no duplicate subagent/task dispatch.
 - Latest row waiting at `agent_task` with a completed task row -> append one workflow row that marks the step completed, copies artifact refs, and then advances later runner-v0 safe steps.
-- Latest row waiting at `agent_task` with a failed/rejected/cancelled task row -> append one terminal workflow row and do not continue later steps.
+- Latest row waiting at `agent_task` with a failed/rejected/cancelled task row and no remaining retry attempts -> append one terminal workflow row and do not continue later steps.
+- Latest row waiting at `agent_task` with a failed/rejected/cancelled task row and remaining retry attempts -> prepare one retry row and dispatch the next attempt only through the Workflow Agent Task Bridge.
 - Latest row waiting at `approval` -> handled by the Workflow Approval Bridge contract below; it must not self-approve or skip the human gate.
 - Latest row planned with safe steps -> append exactly one runner-v0 row and complete safe steps until completion or first blocked step.
 - Latest row with timestamp-only runner-v0 output -> no workflow row append.
@@ -3168,7 +3169,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: Workflow `agent_task` steps must run real AI work without bypassing Shuheng's governed subagent task pipeline.
 - Applies to: `/workflow run <ref>`, `/workflow continue <run_id>`, `/workflow resume <run_id>`, `workflow_runs.jsonl`, `tasks.jsonl`, `progress.jsonl`, result artifacts, `shuheng.workflow_run.v1`, plugin agent template refs, `workflows.py` pure task-state helpers, and `app.py` Orchestrator bridge helpers.
-- Non-goal: The bridge does not create a workflow-owned executor, evaluate `condition`, run parallel/fan-out/fan-in graphs, own event-driven auto-continuation, add retry/timeout/scheduling, dispatch Secret Vault subagents, call tools/providers directly, or expose A2A/MCP workflow services. Event-driven continuation after terminal task ledger writes belongs only to the Workflow Auto-Continue Event Bridge below.
+- Non-goal: The bridge does not create a workflow-owned executor, evaluate `condition`, run parallel/fan-out/fan-in graphs, own event-driven auto-continuation, add timeout/scheduling, dispatch Secret Vault subagents, call tools/providers directly, or expose A2A/MCP workflow services. Retry policy belongs only to the Workflow Retry Policy V1 contract below. Event-driven continuation after terminal task ledger writes belongs only to the Workflow Auto-Continue Event Bridge below.
 
 ### 2. Signatures
 
@@ -3202,7 +3203,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - If a workflow step already has `task_id`, continuation must never call `start_subagent_task_structured(...)` again for that step.
 - Non-terminal task statuses such as `working`, `running`, `pending`, `created`, `queued`, and `approval_required` must produce a visible waiting message and append no workflow row.
 - Terminal `completed` task status must mark the step completed, copy `artifact_refs` into the step and top-level workflow row, then advance later runner-v0 safe steps.
-- Terminal `failed`, `rejected`, `cancelled`, `canceled`, or `aborted` task status must append one terminal workflow row and leave later steps pending.
+- Terminal `failed`, `rejected`, `cancelled`, `canceled`, or `aborted` task status must append one terminal workflow row and leave later steps pending unless the Workflow Retry Policy V1 contract prepares a retry attempt and redispatches through this bridge.
 - Plugin template refs may create one concrete subagent through `create_subagent_from_plugin_template(...)` at dispatch time.
 - Secret Vault subagents are out of scope and must fail the workflow step visibly instead of dispatching.
 - `workflows.py` remains pure and must not import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
@@ -3339,7 +3340,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 
 - Trigger: `process_ui_queue(...)` processes a non-Secret `sub_stream` completion and the governed subagent task pipeline has already written the terminal task ledger row, result artifact refs, checkpoint, trace, eval rows, and user-visible result state.
 - Applies to: `process_ui_queue(...)`, `latest_task_records()`, `latest_workflow_run_records()`, `workflow_runs.jsonl`, `tasks.jsonl`, result artifact refs, `app.workflow_run_ids_waiting_on_agent_task(...)`, `app.auto_continue_workflows_for_agent_task(...)`, `app.continue_workflow_run_v0(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
-- Non-goal: The bridge does not create a workflow-owned executor, dispatch subagents, run timers/schedulers, retry failed tasks, evaluate conditions, resume approval waits, self-approve, write workflow-owned artifacts, auto-continue Secret Vault subagents, run parallel/fan-out/fan-in graphs, or expose A2A/MCP workflow services.
+- Non-goal: The bridge does not create a workflow-owned executor, dispatch subagents directly, run timers/schedulers, evaluate conditions, resume approval waits, self-approve, write workflow-owned artifacts, auto-continue Secret Vault subagents, run parallel/fan-out/fan-in graphs, or expose A2A/MCP workflow services. If a failed task is retried, the event bridge still delegates to `continue_workflow_run_v0(...)`; retry decision and redispatch are owned by the Workflow Retry Policy V1 contract and Workflow Agent Task Bridge.
 
 ### 2. Signatures
 
@@ -3362,7 +3363,7 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 - The event bridge must find only latest workflow run rows whose pending `agent_task` step has the exact same `task_id`.
 - The event bridge must call `continue_workflow_run_v0(run_id, state=state)` for each matched workflow run id instead of duplicating task-result, artifact-copy, or runner-v0 logic.
 - A completed task result must append one workflow run row that marks the `agent_task` completed, copies `artifact_refs`, and advances later runner-v0 safe steps.
-- A failed, rejected, cancelled, canceled, or aborted task result must append one terminal workflow run row and leave later workflow steps pending.
+- A failed, rejected, cancelled, canceled, or aborted task result must append one terminal workflow run row and leave later workflow steps pending unless the latest workflow step has remaining retry attempts; retry must still happen only through `continue_workflow_run_v0(...)` and the Workflow Agent Task Bridge.
 - If no workflow run is waiting on the task id, the event bridge must do nothing.
 - If the latest workflow row is already terminal, the event bridge must append no row.
 - If the task row is missing or non-terminal, the event bridge must append no row.
@@ -3416,6 +3417,88 @@ process_ui_queue(task_done) -> workflow bridge starts another agent_task or appe
 
 ```text
 process_ui_queue(task_done) -> terminal task row already exists -> auto_continue_workflows_for_agent_task(...) -> continue_workflow_run_v0(...)
+```
+
+## Scenario: Workflow Retry Policy V1
+
+### 1. Scope / Trigger
+
+- Trigger: AI-generated workflows need bounded recovery from transient `agent_task` failures without users manually reconstructing the run.
+- Applies to: workflow step JSON `retry.max_attempts`, `shuheng.workflow.v1`, `shuheng.workflow_run.v1`, `workflow_runs.jsonl`, `tasks.jsonl`, `workflows.workflow_step_retry_state(...)`, `workflows.workflow_agent_task_retry_available(...)`, `workflows.prepare_workflow_agent_task_retry(...)`, `workflows.attach_workflow_agent_task(...)`, `app.continue_workflow_run_v0(...)`, `app.bridge_workflow_agent_task(...)`, `app.auto_continue_workflows_for_agent_task(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add wall-clock timeout timers, backoff scheduling, task abort/kill, Secret Vault retries, approval retries, condition retries, parallel/fan-out/fan-in execution, plugin code execution, model/tool calls outside subagent tasks, or A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Workflow step declaration:
+  - `{"type": "agent_task", "retry": {"max_attempts": 2}}`
+- Retry policy bound:
+  - `WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT = 5`
+- Run step snapshot fields:
+  - `step.retry.max_attempts`
+  - `step.retry.attempt`
+  - `step.retry.remaining_attempts`
+  - `step.retry.task_attempts[]`
+- Pure helper ownership:
+  - `workflows.workflow_step_retry_state(step) -> dict`
+  - `workflows.workflow_agent_task_retry_available(row) -> bool`
+  - `workflows.prepare_workflow_agent_task_retry(row, timestamp, reason="") -> dict`
+- App ownership:
+  - `app.continue_workflow_run_v0(run_id, state=None)` observes terminal task rows and decides whether to retry.
+  - `app.bridge_workflow_agent_task(row, state, source_command)` remains the only retry dispatch path.
+
+### 3. Contracts
+
+- `retry.max_attempts` means total dispatch attempts for that step, including the first attempt.
+- Omitted retry policy is normalized to `max_attempts=1`, `attempt=0`, `remaining_attempts=1`, and `task_attempts=[]`.
+- Invalid retry policies must make the workflow load result invalid: `retry` must be an object, `max_attempts` must be an integer, must be at least 1, and must be no greater than `WORKFLOW_STEP_RETRY_MAX_ATTEMPTS_LIMIT`.
+- Every `attach_workflow_agent_task(...)` dispatch increments `step.retry.attempt` and recomputes `remaining_attempts`.
+- When a terminal failed/rejected/cancelled/canceled/aborted task row is observed and attempts remain, the workflow must preserve the prior task id/status/error/artifact refs under `retry.task_attempts[]`, clear the current step's `task_id`/`task_status`/`agent_id`/current artifact refs, mark the step `blocked`, then redispatch through `bridge_workflow_agent_task(...)`.
+- Retry must append at most one workflow run row per `continue_workflow_run_v0(...)` call or auto-continue event.
+- Retry must never write task/progress rows directly from `workflows.py`; only `start_subagent_task_structured(...)` inside the Workflow Agent Task Bridge may own those side effects.
+- If attempts are exhausted, the existing terminal failed/rejected/cancelled behavior remains unchanged and later workflow steps remain pending.
+- Cancellation wins over retry: `/workflow cancel <run_id>` on a waiting retry-capable task appends one cancelled workflow row, does not abort the task, and does not prepare a retry.
+- `workflows.py` remains pure and must not import app/runtime/UI/governance owners, append JSONL rows, read task ledgers, dispatch subagents, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- `retry` omitted -> no retry after failed task; one failed workflow row is appended.
+- `retry = 3` -> validation issue, no run creation.
+- `retry.max_attempts = 0` -> validation issue, no run creation.
+- `retry.max_attempts = 99` -> validation issue, no run creation.
+- `retry.max_attempts = 2`, first task fails -> one retry workflow row is appended and a second governed subagent task is dispatched.
+- `retry.max_attempts = 2`, second task completes -> workflow marks the step completed and advances later safe steps.
+- `retry.max_attempts = 2`, second task fails -> one terminal failed workflow row is appended and no third task is dispatched.
+- Explicit `/workflow continue <run_id>` and event-driven auto-continue use the same retry path.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `prompt -> agent_task(retry=2) -> notify`; attempt 1 fails; `process_ui_queue(...)` calls `continue_workflow_run_v0(...)`, records prior task provenance, dispatches attempt 2 through the subagent task pipeline, then completes after attempt 2 succeeds.
+- Good: `/workflow show <run_id>` shows `retry=2/2` and `previous_attempts=1`, so the retry is auditable.
+- Base: A workflow without retry policy keeps the prior fail-fast behavior.
+- Base: Retry is step-local; future graph-level retry policies must get their own contract.
+- Bad: Retry writes synthetic task/progress rows or starts a hidden workflow executor.
+- Bad: Retry silently loops forever or ignores `max_attempts`.
+- Bad: Retry clears prior task provenance instead of preserving task id/status/error/artifact refs.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert retry policy validation, first failure retry dispatch, prior attempt provenance, second-attempt success, attempt-exhausted failure, and no-retry fail-fast compatibility.
+- `tests/test_workflows.py` must assert `/workflow show` includes retry counters for retried runs.
+- `scripts/check_policy_gates.py` must assert app retry dispatch passes through `prepare_workflow_agent_task_retry(...)` and `bridge_workflow_agent_task(...)`, `workflows.py` remains side-effect-free, invalid retry policy is rejected, and terminal task auto-continue can trigger exactly one retry.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+failed task -> workflow retry loop writes tasks.jsonl manually until success
+```
+
+#### Correct
+
+```text
+failed task -> continue_workflow_run_v0(...) -> prepare_workflow_agent_task_retry(...) -> bridge_workflow_agent_task(...) -> start_subagent_task_structured(...)
 ```
 
 ## Scenario: Workflow Approval Bridge
