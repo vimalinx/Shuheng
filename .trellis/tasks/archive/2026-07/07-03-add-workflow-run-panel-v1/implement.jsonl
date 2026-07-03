@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for the active workflow/control-plane package."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable contracts for workflow registry, run ledgers, inspection, continue, cancel, approval, agent-task bridges, and panel routing."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared guide index for required pre-development thinking."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Ensure panel actions reuse existing continue/cancel/run-format helpers instead of creating duplicate workflow execution logic."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Map the workflow run data flow from JSONL ledger to PanelItem payload/detail to UI action helpers and tests."}

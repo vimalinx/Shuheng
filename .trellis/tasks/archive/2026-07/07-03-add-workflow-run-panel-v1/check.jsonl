@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for verification scope."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify workflow panel contract preserves Orchestrator, ledger, approval, task, artifact, and pure-helper boundaries."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for check phase."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify no second workflow executor or duplicate formatter path was introduced."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify definition rows, run rows, payloads, panel actions, messages, and tests agree end-to-end."}
