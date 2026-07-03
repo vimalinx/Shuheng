@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Shuheng workflow command changes."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow generation/run contracts and boundary requirements."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared code reuse and cross-layer thinking guide index."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Requires reuse before adding command/helper logic."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Command touches app state, plugin files, registry, and ledgers."}
+{"file": ".trellis/tasks/07-03-add-workflow-save-run-generated-draft/research/save-run-design.md", "reason": "Task-specific save-and-run design decision."}
