@@ -1035,3 +1035,36 @@ Added declarative workflow parsing, /workflows panel, /workflow info and dry-run
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Add workflow run ledger skeleton
+
+**Date**: 2026-07-03
+**Task**: Add workflow run ledger skeleton
+**Branch**: `main`
+
+### Summary
+
+Added planned-only workflow run ledger records and /workflow run command with tests, policy gates, and backend spec contract; runner execution remains out of scope.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fd65771` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
