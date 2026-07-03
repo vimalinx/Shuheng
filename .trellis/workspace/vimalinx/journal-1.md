@@ -123,6 +123,49 @@ Added a read-only built-in `shuheng-examples/daily-briefing` workflow pack so fr
 - Continue with workflow usability/UI slices without adding hidden executor paths or bypassing the manifest registry.
 
 
+## Session 47: Add workflow do command
+
+**Date**: 2026-07-03
+**Task**: Add Workflow Do Command V1
+**Branch**: `main`
+
+### Summary
+
+Added `/workflow do <goal> [-- key=value ...]`, a one-command AI workflow path that derives a stable safe workflow ref automatically, generates a declarative workflow, saves it as a user plugin workflow, reloads it through the manifest registry, and starts the existing governed runner.
+
+### Main Changes
+
+- Added `workflow_do_ref_for_goal(...)` and `/workflow do` command parsing with default user plugin id `shuheng-auto-workflows`.
+- Reused the existing `/workflow auto` pending generation path and `run_latest_workflow_draft(...)`; no new executor or in-memory run path was added.
+- Added workflow tests, policy gate coverage, and backend spec contract for stable ref generation, user-root save, input parsing, and safe side-effect boundaries.
+- Architecture baseline: moves closer to the governed harness baseline by reducing user friction while preserving one strong Orchestrator, manifest-backed workflow files, append-only workflow run ledgers, existing approval/task bridges, and no built-in plugin mutation. Remaining gaps: graph UI, timeout/backoff controls, richer checkpoint/eval trace, and A2A/MCP workflow service compatibility.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c388ed5` | feat: add workflow do command |
+| `045e29c` | chore(task): archive 07-03-add-workflow-do-command-v1 |
+
+### Testing
+
+- [OK] Targeted py_compile, Ruff, `tests/test_workflows.py` - 48 passed, and `scripts/check_policy_gates.py`
+- [OK] `python3 scripts/check_release_hygiene.py`, `python3 -m compileall -q src scripts`, and `git diff --check`
+- [OK] Full pytest: `549 passed`
+- [OK] `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist-workflow-do`
+- [OK] `python3 scripts/runtime_smoke.py`
+- [OK] `python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist-workflow-do`
+- [OK] `shuheng-check --root /home/vimalinx/Programs/GenericAgent`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Next workflow usability slice should make generated/auto workflows easier to inspect and reuse from the panel without bypassing ledger or manifest contracts.
+
+
 ## Session 43: Add workflow auto run command
 
 **Date**: 2026-07-03
