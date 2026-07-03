@@ -976,6 +976,7 @@ format_workflow_continue_result = workflow_helpers.format_workflow_continue_resu
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
+format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 apply_workflow_agent_task_result = workflow_helpers.apply_workflow_agent_task_result
 apply_workflow_step_approval_decision = workflow_helpers.apply_workflow_step_approval_decision
@@ -992,6 +993,7 @@ workflow_draft_load_result_from_text = workflow_helpers.workflow_draft_load_resu
 workflow_draft_result_from_text = workflow_helpers.workflow_draft_result_from_text
 workflow_load_result_from_payload = workflow_helpers.workflow_load_result_from_payload
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
+workflow_upstream_step_output_context = workflow_helpers.workflow_upstream_step_output_context
 
 
 def is_normal_session_log_path(path: str) -> bool:
@@ -5067,12 +5069,17 @@ def resolve_workflow_agent_task_subagent(state: State, step: dict[str, Any]) -> 
 
 def workflow_agent_task_prompt(row: dict[str, Any], step: dict[str, Any]) -> str:
     prompt = str(step.get("prompt") or "").strip()
-    if prompt:
-        return prompt
-    description = str(step.get("description") or "").strip()
-    if description:
-        return description
-    return str(row.get("workflow_description") or row.get("workflow_name") or "").strip()
+    base_prompt = prompt
+    if not base_prompt:
+        base_prompt = str(step.get("description") or "").strip()
+    if not base_prompt:
+        base_prompt = str(row.get("workflow_description") or row.get("workflow_name") or "").strip()
+    if not base_prompt:
+        return ""
+    context = format_workflow_step_output_context(workflow_upstream_step_output_context(row, step))
+    if not context:
+        return base_prompt
+    return f"{base_prompt}\n\n{context}"
 
 
 def bridge_workflow_agent_task(

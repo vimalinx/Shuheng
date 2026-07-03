@@ -982,6 +982,100 @@ def test_workflow_run_command_resolves_inputs_and_condition_v1(tmp_path: Path, m
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
 
 
+def test_workflow_upstream_step_output_context_scopes_formats_and_dedupes() -> None:
+    row = {
+        "steps": [
+            {"step_id": "plan", "type": "prompt", "status": "completed", "artifact_refs": []},
+            {
+                "step_id": "collect",
+                "type": "agent_task",
+                "status": "completed",
+                "task_id": "task_collect",
+                "agent_id": "agent_collect",
+                "artifact_refs": ["artifact://a", "artifact://dup", "artifact://a"],
+            },
+            {
+                "step_id": "unrelated",
+                "type": "agent_task",
+                "status": "completed",
+                "task_id": "task_unrelated",
+                "agent_id": "agent_unrelated",
+                "artifact_refs": ["artifact://unrelated"],
+            },
+            {
+                "step_id": "review",
+                "type": "agent_task",
+                "status": "blocked",
+                "depends_on": ["collect"],
+                "prompt": "Review source quality.",
+            },
+            {
+                "step_id": "final",
+                "type": "agent_task",
+                "status": "pending",
+                "depends_on": [],
+                "prompt": "Summarize everything.",
+            },
+        ]
+    }
+
+    explicit = workflows.workflow_upstream_step_output_context(row, row["steps"][3])
+    assert len(explicit) == 1
+    assert explicit[0].step_id == "collect"
+    assert explicit[0].task_id == "task_collect"
+    assert explicit[0].agent_id == "agent_collect"
+    assert explicit[0].artifact_refs == ("artifact://a", "artifact://dup")
+
+    formatted = workflows.format_workflow_step_output_context(explicit)
+    assert "Workflow upstream context (reference-only; artifact contents are not loaded):" in formatted
+    assert "step: collect [agent_task]" in formatted
+    assert "task_id: task_collect" in formatted
+    assert "agent_id: agent_collect" in formatted
+    assert "artifact://a" in formatted
+    assert "artifact://unrelated" not in formatted
+
+    fallback = workflows.workflow_upstream_step_output_context(row, row["steps"][4])
+    assert [item.step_id for item in fallback] == ["collect", "unrelated"]
+
+
+def test_workflow_agent_task_prompt_preserves_base_without_upstream_context() -> None:
+    row = {"workflow_description": "Workflow fallback.", "steps": []}
+    step = {"step_id": "review", "type": "agent_task", "prompt": "Review source quality."}
+
+    assert app_module.workflow_agent_task_prompt(row, step) == "Review source quality."
+
+
+def test_workflow_agent_task_prompt_appends_reference_only_context() -> None:
+    row = {
+        "workflow_description": "Workflow fallback.",
+        "steps": [
+            {
+                "step_id": "collect",
+                "type": "agent_task",
+                "status": "completed",
+                "task_id": "task_collect",
+                "agent_id": "agent_collect",
+                "artifact_refs": ["artifact://collect-report"],
+            },
+            {
+                "step_id": "review",
+                "type": "agent_task",
+                "status": "blocked",
+                "depends_on": ["collect"],
+                "prompt": "Review source quality.",
+            },
+        ],
+    }
+
+    prompt = app_module.workflow_agent_task_prompt(row, row["steps"][1])
+
+    assert prompt.startswith("Review source quality.\n\nWorkflow upstream context")
+    assert "step: collect [agent_task]" in prompt
+    assert "task_id: task_collect" in prompt
+    assert "agent_id: agent_collect" in prompt
+    assert "artifact://collect-report" in prompt
+
+
 def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Path, monkeypatch) -> None:
     create_workflow_plugin(
         tmp_path,
@@ -1064,6 +1158,90 @@ def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Pat
     assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
     assert "Workflow run already completed:" in state.messages[-1].content
     assert len(app_module.workflow_run_records()) == rows_after_dispatch + 1
+
+
+def test_workflow_agent_task_bridge_passes_upstream_artifact_context_to_later_agent_task(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "multi-agent-flow",
+            "name": "Multi Agent Flow",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "collect",
+                    "type": "agent_task",
+                    "agent": "Collect Workflow Agent",
+                    "depends_on": ["plan"],
+                    "prompt": "Collect evidence refs.",
+                },
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "Review Workflow Agent",
+                    "depends_on": ["collect"],
+                    "prompt": "Use upstream refs.",
+                },
+                {"id": "notify", "type": "notify", "depends_on": ["review"]},
+            ],
+        },
+        workflow_name="multi-agent-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    collect_sub = app_module.create_subagent(
+        state,
+        "Collect Workflow Agent",
+        "Collects evidence references.",
+        role="researcher",
+        persistent=True,
+    )
+    review_sub = app_module.create_subagent(
+        state,
+        "Review Workflow Agent",
+        "Reviews evidence references.",
+        role="researcher",
+        persistent=True,
+    )
+    collect_sub.agent = SequencedWorkflowAgent(["first upstream result"])
+    review_sub.agent = SequencedWorkflowAgent(["second review result"])
+
+    assert app_module.handle_workflow_command(state, "/workflow run research-pack/multi-agent-flow") is True
+    waiting = app_module.workflow_run_records()[-1]
+    run_id = waiting["run_id"]
+    collect_task_id = waiting["steps"][1]["task_id"]
+    assert waiting["status"] == "waiting_task"
+    assert collect_task_id
+    assert len(collect_sub.agent.prompts) == 1
+    assert len(review_sub.agent.prompts) == 0
+
+    drain_app_ui_queue(state)
+
+    after_collect = app_module.workflow_run_records()[-1]
+    assert after_collect["status"] == "blocked"
+    assert after_collect["steps"][1]["status"] == "completed"
+    assert after_collect["steps"][2]["status"] == "blocked"
+    upstream_refs = after_collect["steps"][1]["artifact_refs"]
+    assert upstream_refs
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    after_review_dispatch = app_module.workflow_run_records()[-1]
+    review_task_id = after_review_dispatch["steps"][2]["task_id"]
+    assert after_review_dispatch["status"] == "waiting_task"
+    assert review_task_id
+    assert len(review_sub.agent.prompts) == 1
+    review_prompt = review_sub.agent.prompts[0][0]
+    assert "Use upstream refs.\n\nWorkflow upstream context" in review_prompt
+    assert "reference-only; artifact contents are not loaded" in review_prompt
+    assert "step: collect [agent_task]" in review_prompt
+    assert f"task_id: {collect_task_id}" in review_prompt
+    assert f"agent_id: {collect_sub.agent_id}" in review_prompt
+    assert upstream_refs[0] in review_prompt
+    assert "first upstream result" not in review_prompt
 
 
 def test_workflow_agent_task_bridge_stops_on_failed_task(tmp_path: Path, monkeypatch) -> None:

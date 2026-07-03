@@ -134,6 +134,15 @@ class WorkflowRunContinueResult:
     run_status: str = ""
 
 
+@dataclass(frozen=True)
+class WorkflowStepOutputContext:
+    step_id: str
+    step_type: str
+    task_id: str = ""
+    agent_id: str = ""
+    artifact_refs: tuple[str, ...] = ()
+
+
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
     return WorkflowIssue(workflow_ref=workflow_ref or "(unknown)", path=path, message=message)
 
@@ -1124,6 +1133,68 @@ def _unique_strings(*groups: Any) -> list[str]:
                 seen.add(value)
                 values.append(value)
     return values
+
+
+def workflow_upstream_step_output_context(
+    row: dict[str, Any],
+    target_step: dict[str, Any],
+) -> tuple[WorkflowStepOutputContext, ...]:
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    target_step_id = str(target_step.get("step_id") or "").strip()
+    explicit_dependencies = [
+        str(item or "").strip()
+        for item in target_step.get("depends_on", [])
+        if str(item or "").strip()
+    ]
+    dependency_set = set(explicit_dependencies)
+    contexts: list[WorkflowStepOutputContext] = []
+    for raw_step in steps:
+        if not isinstance(raw_step, dict):
+            continue
+        step_id = str(raw_step.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        if explicit_dependencies:
+            if step_id not in dependency_set:
+                continue
+        elif target_step_id and step_id == target_step_id:
+            break
+        if str(raw_step.get("status") or "").strip() != "completed":
+            continue
+        task_id = str(raw_step.get("task_id") or "").strip()
+        agent_id = str(raw_step.get("agent_id") or "").strip()
+        artifact_refs = tuple(_unique_strings(raw_step.get("artifact_refs")))
+        if not (task_id or agent_id or artifact_refs):
+            continue
+        contexts.append(
+            WorkflowStepOutputContext(
+                step_id=step_id,
+                step_type=str(raw_step.get("type") or "").strip(),
+                task_id=task_id,
+                agent_id=agent_id,
+                artifact_refs=artifact_refs,
+            )
+        )
+    return tuple(contexts)
+
+
+def format_workflow_step_output_context(contexts: tuple[WorkflowStepOutputContext, ...]) -> str:
+    if not contexts:
+        return ""
+    lines = [
+        "Workflow upstream context (reference-only; artifact contents are not loaded):",
+    ]
+    for context in contexts:
+        step_type = f" [{context.step_type}]" if context.step_type else ""
+        lines.append(f"- step: {context.step_id}{step_type}")
+        if context.task_id:
+            lines.append(f"  task_id: {context.task_id}")
+        if context.agent_id:
+            lines.append(f"  agent_id: {context.agent_id}")
+        if context.artifact_refs:
+            lines.append("  artifact_refs:")
+            lines.extend(f"  - {ref}" for ref in context.artifact_refs)
+    return "\n".join(lines)
 
 
 def apply_workflow_agent_task_result(

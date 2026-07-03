@@ -8710,6 +8710,10 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     ]
     assert not any(f"import {name}" in workflow_source or f"from . import {name}" in workflow_source for name in forbidden_workflow_imports), workflow_source
     assert "WorkflowDraftResult" in workflow_source and "workflow_draft_result_from_text" in workflow_source, workflow_source
+    assert "WorkflowStepOutputContext" in workflow_source, workflow_source
+    assert "workflow_upstream_step_output_context" in workflow_source, workflow_source
+    assert "format_workflow_step_output_context" in workflow_source, workflow_source
+    assert "artifact contents are not loaded" in workflow_source, workflow_source
     assert "start_subagent" not in workflow_source and "append_task_ledger" not in workflow_source, workflow_source
     panel_items = a.plugin_panel_items()
     plugin_item = next(item for item in panel_items if item.key == "research-pack")
@@ -8887,6 +8891,85 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
     assert "Workflow run already completed:" in state.messages[-1].content, state.messages[-1].content
     assert len(a.workflow_run_records()) == 3, a.workflow_run_records()
+    task_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    artifact_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    context_bridge_state = a.State(agent=ContextFakeAgent())
+    context_bridge_sub = a.create_subagent(
+        context_bridge_state,
+        "Context Bridge Agent",
+        "Receives workflow upstream artifact refs by reference only.",
+        role="researcher",
+        persistent=False,
+    )
+    context_bridge_agent = BlockingAbortFakeAgent()
+    context_bridge_sub.agent = context_bridge_agent
+    upstream_body_marker = "UPSTREAM_ARTIFACT_BODY_SENTINEL_MUST_NOT_BE_IN_PROMPT"
+    context_bridge_row = {
+        "schema_version": "shuheng.workflow_run.v1",
+        "run_id": "wfr-context",
+        "status": "blocked",
+        "workflow_ref": "plugin://research-pack/workflows/context-bridge",
+        "workflow_id": "context-bridge",
+        "workflow_name": "Context Bridge",
+        "workflow_description": "Context bridge.",
+        "steps": [
+            {
+                "step_id": "collect",
+                "order": 1,
+                "type": "agent_task",
+                "status": "completed",
+                "task_id": "task_upstream",
+                "agent_id": "agent_upstream",
+                "artifact_refs": [
+                    "artifact://workflow/upstream-report.md",
+                    "artifact://workflow/upstream-report.md",
+                ],
+            },
+            {
+                "step_id": "review",
+                "order": 2,
+                "type": "agent_task",
+                "status": "blocked",
+                "agent": "Context Bridge Agent",
+                "depends_on": ["collect"],
+                "prompt": "Review only the upstream refs.",
+            },
+        ],
+        "execution": {
+            "blocked_step_id": "review",
+            "blocked_step_type": "agent_task",
+            "blocked_reason": "requires subagent dispatch",
+        },
+        "artifact_refs": [],
+        "approval": {"approval_status": "not_required", "approval_id": "", "approval_required_for": []},
+        "error": "requires subagent dispatch",
+    }
+    context_task_rows_before = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    context_progress_rows_before = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    context_workflow_rows_before = len(a.workflow_run_records())
+    direct_context_prompt = a.workflow_agent_task_prompt(context_bridge_row, context_bridge_row["steps"][1])
+    assert direct_context_prompt.count("artifact://workflow/upstream-report.md") == 1, direct_context_prompt
+    bridged_context_row, bridged_context_task_id, _bridged_context_message = a.bridge_workflow_agent_task(
+        context_bridge_row,
+        state=context_bridge_state,
+        source_command="/workflow continue wfr-context",
+    )
+    assert bridged_context_task_id, bridged_context_row
+    assert bridged_context_row["status"] == "waiting_task", bridged_context_row
+    assert bridged_context_row["steps"][1]["task_id"] == bridged_context_task_id, bridged_context_row
+    assert len(context_bridge_agent.prompts) == 1, context_bridge_agent.prompts
+    context_prompt = context_bridge_agent.prompts[0][0]
+    assert "Review only the upstream refs." in context_prompt, context_prompt
+    assert "Workflow upstream context (reference-only; artifact contents are not loaded):" in context_prompt, context_prompt
+    assert "step: collect [agent_task]" in context_prompt, context_prompt
+    assert "task_id: task_upstream" in context_prompt, context_prompt
+    assert "agent_id: agent_upstream" in context_prompt, context_prompt
+    assert "artifact://workflow/upstream-report.md" in context_prompt, context_prompt
+    assert upstream_body_marker not in context_prompt, context_prompt
+    assert len(a.workflow_run_records()) == context_workflow_rows_before, a.workflow_run_records()
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == context_task_rows_before + 1
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == context_progress_rows_before + 1
     task_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
     progress_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
     artifact_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))

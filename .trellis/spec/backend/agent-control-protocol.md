@@ -2946,6 +2946,81 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow continue wfr_agent -> app bridge calls start_subagent_task_structured(...), stores task_id, and later resumes from latest_task_records()
 ```
 
+## Scenario: Workflow Step Output Artifact Context V1
+
+### 1. Scope / Trigger
+
+- Trigger: A workflow `agent_task` step is dispatched after earlier workflow steps have completed with task or artifact references.
+- Applies to: `shuheng.workflow_run.v1`, per-step `task_id`, `agent_id`, and `artifact_refs`, `workflows.workflow_upstream_step_output_context(...)`, `workflows.format_workflow_step_output_context(...)`, `app.workflow_agent_task_prompt(...)`, `app.bridge_workflow_agent_task(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not read artifact files, task output bodies, full subagent transcripts, model response text, Secret Vault plaintext, environment variables, tools, provider state, or arbitrary template expressions. It does not add retry, timeout, fan-out/fan-in, scheduling, webhook triggers, A2A/MCP workflow services, or a new workflow-owned executor.
+
+### 2. Signatures
+
+- Pure context record:
+  - `workflows.WorkflowStepOutputContext(step_id, step_type, task_id="", agent_id="", artifact_refs=())`
+- Pure collection helper:
+  - `workflows.workflow_upstream_step_output_context(row, target_step) -> tuple[WorkflowStepOutputContext, ...]`
+- Pure formatter:
+  - `workflows.format_workflow_step_output_context(contexts) -> str`
+- App-owned prompt wrapper:
+  - `app.workflow_agent_task_prompt(row, step) -> str`
+- Prompt context heading:
+  - `Workflow upstream context (reference-only; artifact contents are not loaded):`
+
+### 3. Contracts
+
+- The workflow run row is the only source of upstream step context for this slice.
+- Context includes only completed upstream steps with at least one reference field: `task_id`, `agent_id`, or `artifact_refs`.
+- If the target step declares `depends_on`, context is scoped to completed dependency steps only, preserving workflow run step order.
+- If the target step has no explicit `depends_on`, context falls back to completed prior steps before the target step in workflow run order.
+- Duplicate artifact refs must be removed while preserving first-seen order.
+- Missing upstream refs must produce no context block and must preserve the base prompt string exactly.
+- `app.workflow_agent_task_prompt(...)` may append the formatted context block after the base prompt. It must not mutate the workflow row, dispatch a task, append ledgers, read artifacts, or evaluate a template language.
+- `workflows.py` remains pure and must not import app/runtime/UI/governance owners, append JSONL rows, read task ledgers, dispatch subagents, read artifact files, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- Target `agent_task` depends on a completed upstream `agent_task` with `task_id`, `agent_id`, and artifact refs -> downstream prompt includes the upstream step id, step type, task id, agent id, and deduped artifact refs.
+- Target `agent_task` has explicit `depends_on=["collect"]` and another prior completed step exists -> context includes `collect` only.
+- Target `agent_task` has no explicit dependencies -> context includes completed prior reference-bearing steps in run order.
+- Upstream completed step has duplicate artifact refs -> formatted context contains each ref once.
+- Upstream completed step has no `task_id`, no `agent_id`, and no artifact refs -> it contributes no context.
+- Upstream step is pending, blocked, waiting, failed, rejected, cancelled, skipped, or aborted -> it contributes no context.
+- Base prompt is empty -> the bridge still fails visibly through the existing missing-prompt path; context must not create a synthetic task prompt.
+
+### 5. Good/Base/Bad Cases
+
+- Good: First workflow `agent_task` completes and writes `artifact_refs`; a later explicit `/workflow continue <run_id>` dispatches the next `agent_task` with a reference-only context block.
+- Good: The downstream task sees `artifact://...` refs and the upstream `task_id`, but not raw artifact file content or raw subagent result text.
+- Good: Existing workflows with no upstream refs still dispatch the exact same prompt string as before.
+- Base: The downstream agent may later request artifact hydration through governed artifact/tool paths; this slice only passes references.
+- Base: Approval, condition, auto-continue, and workflow inspection behavior remain unchanged.
+- Bad: The prompt wrapper opens an artifact path and inlines its content.
+- Bad: The workflow runner writes a new task/progress/artifact ledger row only to represent context passing.
+- Bad: `workflows.py` imports `app.py`, `ledger_store`, `runtime_dispatch`, `secret_vault`, `curses`, or `subprocess`.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert pure context collection scopes explicit dependencies, falls back to prior completed steps when no dependencies are declared, dedupes artifact refs, and formats the reference-only block.
+- `tests/test_workflows.py` must assert `app.workflow_agent_task_prompt(...)` preserves the base prompt exactly when no upstream refs exist.
+- `tests/test_workflows.py` must assert a later workflow `agent_task` receives upstream `step_id`, `task_id`, `agent_id`, and artifact refs in the dispatched prompt after an earlier `agent_task` completes.
+- `scripts/check_policy_gates.py` must assert the real app bridge injects reference-only context through `workflow_agent_task_prompt(...)`, routes dispatch through the governed subagent task pipeline, appends no workflow row during direct prompt bridging, and keeps `workflows.py` side-effect-free.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow continue wfr_review -> reads artifact://policy/upstream-report.md and pastes the file body into the next agent prompt
+```
+
+#### Correct
+
+```text
+/workflow continue wfr_review -> app prompt wrapper lists upstream task/artifact refs only, then dispatches through start_subagent_task_structured(...)
+```
+
 ## Scenario: Workflow Auto-Continue Event Bridge
 
 ### 1. Scope / Trigger
