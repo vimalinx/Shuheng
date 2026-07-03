@@ -8779,8 +8779,8 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     ))
     assert a.process_ui_queue(state) is True
     assert a.latest_task_records()[workflow_task_id]["status"] == "completed", a.latest_task_records()[workflow_task_id]
-    assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
-    assert "Workflow run continued:" in state.messages[-1].content, state.messages[-1].content
+    assert "Workflow auto-continued after subagent task:" in state.messages[-1].content, state.messages[-1].content
+    assert run_id in state.messages[-1].content, state.messages[-1].content
     workflow_run_rows_after_task = a.workflow_run_records()
     assert len(workflow_run_rows_after_task) == 3, workflow_run_rows_after_task
     workflow_done_row = workflow_run_rows_after_task[-1]
@@ -8790,6 +8790,9 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert workflow_done_row["steps"][1]["task_id"] == workflow_task_id, workflow_done_row
     assert workflow_done_row["steps"][1]["task_status"] == "completed", workflow_done_row
     assert workflow_done_row["steps"][1]["artifact_refs"], workflow_done_row
+    assert a.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run already completed:" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == 3, a.workflow_run_records()
     task_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
     progress_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
     artifact_rows_after_agent_completion = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))

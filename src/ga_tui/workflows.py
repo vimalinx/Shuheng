@@ -22,6 +22,14 @@ WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES = frozenset({
     "pause",
     "notify",
 })
+WORKFLOW_RUN_TERMINAL_STATUSES = frozenset({
+    "completed",
+    "failed",
+    "rejected",
+    "cancelled",
+    "canceled",
+    "aborted",
+})
 WORKFLOW_STEP_TYPES = frozenset({
     "prompt",
     "agent_task",
@@ -111,6 +119,7 @@ class WorkflowRunContinueResult:
     approval_id: str = ""
     task_id: str = ""
     task_status: str = ""
+    run_status: str = ""
 
 
 def workflow_issue(workflow_ref: str, path: str, message: str) -> WorkflowIssue:
@@ -1045,6 +1054,16 @@ def format_workflow_continue_result(result: WorkflowRunContinueResult) -> str:
             f"history_rows: {result.history_rows}",
             "No workflow run row was appended.",
         ])
+    if result.status == "already_terminal":
+        lines = [
+            f"Workflow run already terminal: {run_id}",
+            f"status: {result.run_status or '-'}",
+            f"history_rows: {result.history_rows}",
+        ]
+        if result.reason:
+            lines.append(f"reason: {result.reason}")
+        lines.append("No workflow run row was appended.")
+        return "\n".join(lines)
     if result.status == "no_progress":
         lines = [
             f"Workflow run cannot continue with runner v0: {run_id}",

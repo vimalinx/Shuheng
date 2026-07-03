@@ -4853,6 +4853,55 @@ def bridge_workflow_agent_task(
     return waiting, dispatch.task_id, dispatch.message
 
 
+def workflow_run_ids_waiting_on_agent_task(task_id: str) -> list[str]:
+    target = str(task_id or "").strip()
+    if not target:
+        return []
+    run_ids: list[str] = []
+    for run_id, row in latest_workflow_run_records().items():
+        step = pending_workflow_agent_task_step(row)
+        if step is None:
+            continue
+        if str(step.get("task_id") or "").strip() != target:
+            continue
+        safe_run_id = str(row.get("run_id") or run_id or "").strip()
+        if safe_run_id and safe_run_id not in run_ids:
+            run_ids.append(safe_run_id)
+    return run_ids
+
+
+def auto_continue_workflows_for_agent_task(
+    state: State,
+    task_id: str,
+    *,
+    source: str = "subagent_task_completed",
+) -> list[tuple[str, str]]:
+    target = str(task_id or "").strip()
+    if not target:
+        return []
+    task_row = latest_task_records().get(target)
+    if not isinstance(task_row, dict):
+        return []
+    task_status = str(task_row.get("status") or "").strip().lower()
+    if not terminal_task_status(task_status):
+        return []
+    continued: list[tuple[str, str]] = []
+    for run_id in workflow_run_ids_waiting_on_agent_task(target):
+        row, message = continue_workflow_run_v0(run_id, state=state)
+        if row is None:
+            continue
+        continued.append((run_id, message))
+        add_system(
+            state,
+            f"Workflow auto-continued after subagent task: {run_id}\n"
+            f"task_id: {target}\n"
+            f"source: {source}\n\n"
+            f"{message}",
+            kind="workflow_auto_continue",
+        )
+    return continued
+
+
 def create_planned_workflow_run(result: workflow_helpers.WorkflowLoadResult) -> tuple[dict[str, Any] | None, str]:
     built = build_workflow_run_record(
         result,
@@ -4916,12 +4965,23 @@ def continue_workflow_run_v0(run_id: str, state: Optional[State] = None) -> tupl
         result = workflow_helpers.WorkflowRunContinueResult(run_id=target, status="not_found")
         return None, format_workflow_continue_result(result)
     latest = history[-1]
-    if str(latest.get("status") or "").strip() == "completed":
+    latest_status = str(latest.get("status") or "").strip().lower()
+    if latest_status == "completed":
         result = workflow_helpers.WorkflowRunContinueResult(
             run_id=target,
             status="already_completed",
             record=latest,
             history_rows=len(history),
+        )
+        return None, format_workflow_continue_result(result)
+    if latest_status in workflow_helpers.WORKFLOW_RUN_TERMINAL_STATUSES:
+        result = workflow_helpers.WorkflowRunContinueResult(
+            run_id=target,
+            status="already_terminal",
+            record=latest,
+            history_rows=len(history),
+            reason=str(latest.get("error") or ""),
+            run_status=latest_status,
         )
         return None, format_workflow_continue_result(result)
     if str(latest.get("status") or "").strip() == "waiting_approval" and pending_workflow_approval_step(latest):
@@ -24765,6 +24825,12 @@ def process_ui_queue(state: State) -> bool:
                 else:
                     if sub.security_context != "secret" and not runtime_error:
                         maybe_queue_orchestrator_plan_continuation(state, f"subagent_completed:{sub.name}")
+                if sub.security_context != "secret":
+                    auto_continue_workflows_for_agent_task(
+                        state,
+                        bus_task_id,
+                        source="process_ui_queue:sub_stream",
+                    )
                 mark_subagent_messages_changed(state, sub)
             changed = True
             state.dirty = True

@@ -673,9 +673,6 @@ def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Pat
 
     drain_app_ui_queue(state)
     assert app_module.latest_task_records()[task_id]["status"] == "completed"
-    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
-    assert "Workflow run continued:" in state.messages[-1].content
-    assert "status: completed" in state.messages[-1].content
     rows = app_module.workflow_run_records()
     assert len(rows) == rows_after_dispatch + 1
     completed = rows[-1]
@@ -685,6 +682,12 @@ def test_workflow_agent_task_bridge_dispatches_waits_and_continues(tmp_path: Pat
     assert completed["steps"][1]["task_status"] == "completed"
     assert completed["steps"][1]["artifact_refs"]
     assert completed["artifact_refs"] == completed["steps"][1]["artifact_refs"]
+    assert "Workflow auto-continued after subagent task:" in state.messages[-1].content
+    assert run_id in state.messages[-1].content
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run already completed:" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == rows_after_dispatch + 1
 
 
 def test_workflow_agent_task_bridge_stops_on_failed_task(tmp_path: Path, monkeypatch) -> None:
@@ -727,8 +730,6 @@ def test_workflow_agent_task_bridge_stops_on_failed_task(tmp_path: Path, monkeyp
 
     drain_app_ui_queue(state)
     assert app_module.latest_task_records()[task_id]["status"] == "failed"
-    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
-    assert "Workflow run stopped by subagent task:" in state.messages[-1].content
     rows = app_module.workflow_run_records()
     failed = rows[-1]
     assert failed["status"] == "failed"
@@ -736,6 +737,12 @@ def test_workflow_agent_task_bridge_stops_on_failed_task(tmp_path: Path, monkeyp
     assert failed["steps"][1]["task_status"] == "failed"
     assert failed["steps"][2]["status"] == "pending"
     assert "boom" in failed["error"]
+    assert "Workflow auto-continued after subagent task:" in state.messages[-1].content
+
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run already terminal:" in state.messages[-1].content
+    assert "status: failed" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == len(rows)
 
 
 def test_workflow_agent_task_bridge_creates_plugin_template_subagent(tmp_path: Path, monkeypatch) -> None:
@@ -795,8 +802,39 @@ def test_workflow_agent_task_bridge_creates_plugin_template_subagent(tmp_path: P
 
     drain_app_ui_queue(state)
     assert app_module.latest_task_records()[task_id]["status"] == "completed"
-    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
     assert app_module.workflow_run_records()[-1]["status"] == "completed"
+    assert "Workflow auto-continued after subagent task:" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow continue {run_id}") is True
+    assert "Workflow run already completed:" in state.messages[-1].content
+
+
+def test_workflow_auto_continue_ignores_unrelated_subagent_task(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.create_subagent(
+        state,
+        "Unrelated Agent",
+        "Runs outside any workflow.",
+        role="researcher",
+        persistent=True,
+    )
+    sub.agent = SequencedWorkflowAgent(["unrelated result"])
+
+    dispatch = app_module.start_subagent_task_structured(
+        state,
+        sub,
+        "Do unrelated work.",
+        source="test:unrelated",
+        task_title="Unrelated task",
+    )
+    assert dispatch.task_id
+    assert app_module.workflow_run_records() == []
+
+    drain_app_ui_queue(state)
+
+    assert app_module.latest_task_records()[dispatch.task_id]["status"] == "completed"
+    assert app_module.workflow_run_records() == []
+    assert not any("Workflow auto-continued after subagent task:" in message.content for message in state.messages)
 
 
 def test_workflow_continue_command_advances_planned_run_only(tmp_path: Path, monkeypatch) -> None:
