@@ -46,6 +46,40 @@ Cleaned the schedule control prompt and normal policy tests so ScheduleCreate is
 - None - task complete
 
 
+## Session 43: Add scheduled workflow run trigger
+
+**Date**: 2026-07-03
+**Task**: Add Workflow Scheduled Run Trigger V1
+**Branch**: `main`
+
+### Summary
+
+Added `execution.mode:"workflow_run"` to scheduled tasks so scheduler rows can trigger the existing app-owned workflow runner without introducing a hidden executor.
+
+### Main Changes
+
+- `scheduler.py` now parses workflow-run schedule execution, validates `workflow_ref`, records `dispatch_contract:"workflow_run.v1"`, appends normal schedule-run audit rows, and delegates execution only through an injected callback.
+- `app.py` now injects `_scheduler_dispatch_workflow_run(...)`, which resolves workflow refs through the plugin registry and calls `create_workflow_run_v0(...)`.
+- Control hints, schedule tool schemas, workflow/scheduler tests, policy gates, and backend spec now document and enforce the scheduled workflow contract.
+
+### Testing
+
+- [OK] Targeted compile, Ruff, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`
+- [OK] Full Ruff, release hygiene, compileall, `git diff --check`, full pytest, build, runtime smoke, integration doctor, `shuheng-check`, and wheel smoke
+
+### Architecture Baseline
+
+Moves the system closer to the baseline: the scheduler remains an auditable trigger/audit layer, while the strong Orchestrator retains workflow ref resolution, workflow ledger writes, approvals, subagent dispatch, retries, and artifact provenance.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
 ## Session 43: Add workflow auto run command
 
 **Date**: 2026-07-03
