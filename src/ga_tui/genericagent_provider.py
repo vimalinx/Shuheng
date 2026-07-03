@@ -72,9 +72,10 @@ TUI_AGENT_CONTROL_HINT = """
 - 创建定时任务时不要读取、修改或启动外部 scheduler 文件、外部定时任务 SOP 或其他程序的调度目录；当前有效调度状态只来自 TUI 调度工具和 `schedule.create` 控制动作。
 - `ScheduleCreate` 的触发器 schema 只由 `cron`、`interval`、`at`，或标准化 `trigger` 前缀定义（例如 `cron:0 8 * * *`、`interval:1m`、`at:YYYY-MM-DDT09:00:00+08:00`）。schema 外字段由通用边界处理，不在当前协议里枚举历史字段。
 - 用户说“每天 8 点”时输出 `cron:"0 8 * * *"`；说“工作日 8 点半”时输出 `cron:"30 8 * * 1-5"`；说“每 1 分钟”时输出 `interval:"1m"`；说“明天 9 点”时按当前日期和时区输出 ISO `at`。
-- `ScheduleCreate` 必须带 `execution` 判别式执行对象。`execution.mode:"tui_action"` 表示 TUI 本地动作；`execution.mode:"agent_task"` 表示通过 `agenttask.v2` 委派给子 agent。
+- `ScheduleCreate` 必须带 `execution` 判别式执行对象。`execution.mode:"tui_action"` 表示 TUI 本地动作；`execution.mode:"agent_task"` 表示通过 `agenttask.v2` 委派给子 agent；`execution.mode:"workflow_run"` 表示按时启动已登记的 workflow。
 - 用户要求“响一声蜂鸣/提醒我一下”这类 TUI 本地提醒时，不需要创建子 agent；设置 `execution:{"mode":"tui_action","action":"beep","message":"..."}`，由 TUI 调度器到点直接执行并写入 schedule-run 审计。
-- 除 TUI 本地提醒外，用户没有指定 `schedule_id` 时可以省略，让 TUI 自动生成；但必须在 `execution.mode:"agent_task"` 中提供明确目标 agent（优先先用 `agent_match` / `agent_list` 查询）和完整 `routing` / `work_order` / capability / context / output contracts，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
+- 用户要求“每天自动跑这个 workflow / 定时执行某个工作流”时，设置 `execution:{"mode":"workflow_run","workflow_ref":"<plugin-id>/<workflow-id>","inputs":{...}}`；scheduler 只触发 app-owned workflow runner，不直接执行 workflow 步骤。
+- 除 TUI 本地提醒和已登记 workflow run 外，用户没有指定 `schedule_id` 时可以省略，让 TUI 自动生成；但必须在 `execution.mode:"agent_task"` 中提供明确目标 agent（优先先用 `agent_match` / `agent_list` 查询）和完整 `routing` / `work_order` / capability / context / output contracts，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
 [/GenericAgent-TUI ga-control v2]
@@ -231,8 +232,8 @@ TUI_SCHEDULE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "properties": {
                             "mode": {
                                 "type": "string",
-                                "enum": ["tui_action", "agent_task"],
-                                "description": "tui_action runs a local TUI action; agent_task dispatches through agenttask.v2.",
+                                "enum": ["tui_action", "agent_task", "workflow_run"],
+                                "description": "tui_action runs a local TUI action; agent_task dispatches through agenttask.v2; workflow_run starts an existing workflow.",
                             },
                             "action": {
                                 "type": "string",
@@ -241,6 +242,8 @@ TUI_SCHEDULE_TOOL_SCHEMAS: list[dict[str, Any]] = [
                             },
                             "message": {"type": "string", "description": "Optional message for the TUI action audit row."},
                             "payload": {"type": "object", "description": "Optional bounded payload for the TUI action."},
+                            "workflow_ref": {"type": "string", "description": "Required when mode=workflow_run. Plugin workflow ref or shorthand such as research-pack/compare-sources."},
+                            "inputs": {"type": "object", "description": "Optional workflow inputs when mode=workflow_run."},
                             "routing": {"type": "object", "description": "Required when mode=agent_task. agenttask.v2 routing contract with selected_agent."},
                             "work_order": {"type": "object", "description": "Required when mode=agent_task. Must include objective."},
                             "capability_contract": {"type": "object", "description": "agenttask.v2 capability contract."},

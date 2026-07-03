@@ -30,6 +30,8 @@ class SchedulerDispatchResult:
     message: str
     task_id: str = ""
     approval_id: str = ""
+    workflow_run_id: str = ""
+    workflow_ref: str = ""
     error: str = ""
     provider_id: str = ""
 
@@ -49,6 +51,7 @@ class SchedulerRuntime:
     emit_tui_beep: Optional[Callable[[], str]] = None
     resolve_subagent: Optional[Callable[[Any, str], Any]] = None
     dispatch_subagent_task: Optional[Callable[[Any, Any, dict[str, Any], str, str, dict[str, Any]], SchedulerDispatchResult]] = None
+    dispatch_workflow_run: Optional[Callable[[Any, dict[str, Any], str, str, dict[str, Any]], SchedulerDispatchResult]] = None
 
 
 _runtime = SchedulerRuntime()
@@ -144,6 +147,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
         "jobs": jobs[-50:],
         "dispatch": {
             "contract": "agenttask.v2",
+            "supported_contracts": ["tui_action.v1", "agenttask.v2", "workflow_run.v1"],
             "runtime_provider_selection": "explicit provider_id or registry default",
             "task_ledger": _runtime.task_ledger_path,
             "agent_mail": _runtime.agent_mail_path,
@@ -153,6 +157,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
         "capabilities": {
             "register_recurring_jobs": True,
             "dispatch_to_runtime_provider": True,
+            "dispatch_workflow_runs": True,
             "audit_each_run": True,
             "approval_gates_before_risky_runs": True,
         },
@@ -478,6 +483,13 @@ def schedule_execution_from_control(control: dict[str, Any]) -> dict[str, Any]:
             "context_contract": raw.get("context_contract") if isinstance(raw.get("context_contract"), dict) else {},
             "output_contract": raw.get("output_contract") if isinstance(raw.get("output_contract"), dict) else {},
         }
+    if mode == "workflow_run":
+        execution = {
+            "mode": "workflow_run",
+            "workflow_ref": str(raw.get("workflow_ref") or "").strip(),
+            "inputs": raw.get("inputs") if isinstance(raw.get("inputs"), dict) else {},
+        }
+        return _runtime.json_safe(execution)
     return {}
 
 
@@ -507,15 +519,26 @@ def schedule_execution_error(execution: dict[str, Any]) -> str:
         if not schedule_execution_target(execution):
             return "schedule execution missing routing.selected_agent."
         return ""
+    if mode == "workflow_run":
+        if not str(execution.get("workflow_ref") or "").strip():
+            return "schedule execution missing workflow_ref."
+        return ""
     return "schedule execution mode is required."
+
+
+def schedule_dispatch_contract_for_execution(execution: dict[str, Any]) -> str:
+    mode = str(execution.get("mode") or "").strip().lower()
+    if mode == "tui_action":
+        return "tui_action.v1"
+    if mode == "workflow_run":
+        return "workflow_run.v1"
+    return "agenttask.v2"
 
 
 def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, status: str, source: str) -> dict[str, Any]:
     provider_id = str(control.get("provider_id") or control.get("runtime_provider_id") or "").strip()
     execution = schedule_execution_from_control(control)
     target = schedule_execution_target(execution)
-    mode = str(execution.get("mode") or "").strip().lower()
-    dispatch_contract = "tui_action.v1" if mode == "tui_action" else "agenttask.v2"
     record = {
         "schema_version": "scheduledtask.v1",
         "schedule_id": schedule_id,
@@ -524,7 +547,7 @@ def schedule_record_from_control(control: dict[str, Any], *, schedule_id: str, s
         "trigger": schedule_trigger_from_control(control),
         "timezone": str(control.get("timezone") or control.get("tz") or "").strip(),
         "provider_id": provider_id or _runtime.default_provider_id(),
-        "dispatch_contract": dispatch_contract,
+        "dispatch_contract": schedule_dispatch_contract_for_execution(execution),
         "execution": _runtime.json_safe(execution),
         "target": target,
         "created_at": str(control.get("created_at") or _now_iso()),
@@ -562,10 +585,9 @@ def schedule_record_updates_from_control(control: dict[str, Any], *, source: str
                 updates[key] = value
     if isinstance(control.get("execution"), dict):
         execution = schedule_execution_from_control(control)
-        mode = str(execution.get("mode") or "").strip().lower()
         updates["execution"] = _runtime.json_safe(execution)
         updates["target"] = schedule_execution_target(execution)
-        updates["dispatch_contract"] = "tui_action.v1" if mode == "tui_action" else "agenttask.v2"
+        updates["dispatch_contract"] = schedule_dispatch_contract_for_execution(execution)
     return updates
 
 
@@ -673,7 +695,9 @@ def append_schedule_skip_run(row: dict[str, Any], info: dict[str, Any], *, statu
         "due_at": info.get("due_at", ""),
         "idempotency_key": key,
         "provider_id": row.get("provider_id", ""),
-        "dispatch_contract": row.get("dispatch_contract") or "agenttask.v2",
+        "dispatch_contract": row.get("dispatch_contract") or schedule_dispatch_contract_for_execution(
+            row.get("execution") if isinstance(row.get("execution"), dict) else {}
+        ),
     })
     update_schedule_last_run(row, run)
     return run
@@ -711,6 +735,46 @@ def dispatch_schedule_tui_action(row: dict[str, Any], started: dict[str, Any]) -
     return finished
 
 
+def dispatch_schedule_workflow_run(row: dict[str, Any], started: dict[str, Any], state: Any, *, source: str) -> Optional[dict[str, Any]]:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    if str(execution.get("mode") or "").strip().lower() != "workflow_run":
+        return None
+    schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
+    workflow_ref = str(execution.get("workflow_ref") or "").strip()
+    if _runtime.dispatch_workflow_run is None:
+        dispatch = SchedulerDispatchResult(
+            status="failed",
+            message="scheduler dispatch_workflow_run callback is not configured",
+            workflow_ref=workflow_ref,
+            error="scheduler dispatch_workflow_run callback is not configured",
+        )
+    else:
+        try:
+            dispatch = _runtime.dispatch_workflow_run(state, row, source, schedule_id, execution)
+        except Exception as exc:
+            dispatch = SchedulerDispatchResult(
+                status="failed",
+                message=f"{type(exc).__name__}: {exc}",
+                workflow_ref=workflow_ref,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+    finished = dict(started)
+    finished.update({
+        "status": dispatch.status,
+        "finished_at": _now_iso(),
+        "execution": _runtime.json_safe(execution),
+        "workflow_ref": dispatch.workflow_ref or workflow_ref,
+        "workflow_run_id": dispatch.workflow_run_id,
+        "result": dispatch.message,
+        "runtime_provider_id": dispatch.provider_id or str(row.get("provider_id") or _runtime.default_provider_id() or "ohmypi"),
+    })
+    if dispatch.status in {"failed", "rejected"}:
+        finished["error"] = dispatch.error or dispatch.message
+    append_schedule_run(finished)
+    update_schedule_last_run(row, finished)
+    return finished
+
+
 def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any], *, source: str = "scheduler") -> dict[str, Any]:
     schedule_id = str(row.get("schedule_id") or row.get("id") or "").strip()
     idempotency_key = str(info.get("idempotency_key") or "").strip()
@@ -731,7 +795,9 @@ def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any],
         "due_at": info.get("due_at", ""),
         "idempotency_key": idempotency_key,
         "provider_id": provider_id,
-        "dispatch_contract": row.get("dispatch_contract") or "agenttask.v2",
+        "dispatch_contract": row.get("dispatch_contract") or schedule_dispatch_contract_for_execution(
+            row.get("execution") if isinstance(row.get("execution"), dict) else {}
+        ),
         "source": source,
     })
     tui_action_run = dispatch_schedule_tui_action(row, started)
@@ -745,6 +811,9 @@ def dispatch_schedule_run(state: Any, row: dict[str, Any], info: dict[str, Any],
         append_schedule_run(finished)
         update_schedule_last_run(row, finished)
         return finished
+    workflow_run = dispatch_schedule_workflow_run(row, started, state, source=source)
+    if workflow_run is not None:
+        return workflow_run
     control = schedule_agenttask_control(row)
     work_order = control.get("work_order") if isinstance(control.get("work_order"), dict) else {}
     if not str(work_order.get("objective") or "").strip():

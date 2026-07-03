@@ -328,6 +328,7 @@ cron_field_matches = scheduler_runtime.cron_field_matches
 cron_matches_now = scheduler_runtime.cron_matches_now
 dispatch_schedule_run = scheduler_runtime.dispatch_schedule_run
 dispatch_schedule_tui_action = scheduler_runtime.dispatch_schedule_tui_action
+dispatch_schedule_workflow_run = scheduler_runtime.dispatch_schedule_workflow_run
 format_scheduled_task_registry = scheduler_runtime.format_scheduled_task_registry
 format_scheduler_tick_result = scheduler_runtime.format_scheduler_tick_result
 latest_schedule_attempt_runs_by_schedule_id = scheduler_runtime.latest_schedule_attempt_runs_by_schedule_id
@@ -338,6 +339,7 @@ parse_schedule_interval_seconds = scheduler_runtime.parse_schedule_interval_seco
 parse_schedule_timestamp = scheduler_runtime.parse_schedule_timestamp
 schedule_active = scheduler_runtime.schedule_active
 schedule_agenttask_control = scheduler_runtime.schedule_agenttask_control
+schedule_dispatch_contract_for_execution = scheduler_runtime.schedule_dispatch_contract_for_execution
 schedule_due_info = scheduler_runtime.schedule_due_info
 schedule_execution_error = scheduler_runtime.schedule_execution_error
 schedule_execution_from_control = scheduler_runtime.schedule_execution_from_control
@@ -14038,7 +14040,15 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
                     "cron": {"type": "string"},
                     "interval": {"type": "string"},
                     "at": {"type": "string"},
-                    "execution": {"type": "object", "additionalProperties": True},
+                    "execution": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "properties": {
+                            "mode": {"type": "string", "enum": ["tui_action", "agent_task", "workflow_run"]},
+                            "workflow_ref": {"type": "string"},
+                            "inputs": {"type": "object", "additionalProperties": True},
+                        },
+                    },
                 },
                 "required": ["name"],
             },
@@ -24363,6 +24373,47 @@ def _scheduler_dispatch_subagent_task(
     )
 
 
+def _scheduler_dispatch_workflow_run(
+    state: State,
+    row: dict[str, Any],
+    source: str,
+    schedule_id: str,
+    execution: dict[str, Any],
+) -> SchedulerDispatchResult:
+    del source
+    workflow_ref = str(execution.get("workflow_ref") or "").strip()
+    inputs = execution.get("inputs") if isinstance(execution.get("inputs"), dict) else {}
+    if not workflow_ref:
+        return SchedulerDispatchResult(
+            status="failed",
+            message="schedule execution missing workflow_ref.",
+            error="schedule execution missing workflow_ref.",
+            provider_id=str(row.get("provider_id") or _scheduler_default_provider_id()),
+        )
+    result = workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))
+    workflow_row, message = create_workflow_run_v0(
+        result,
+        state=state,
+        inputs=inputs,
+        source_command=f"/scheduler run {schedule_id}",
+    )
+    if workflow_row is None:
+        return SchedulerDispatchResult(
+            status="failed",
+            message=message,
+            workflow_ref=workflow_ref,
+            error=message,
+            provider_id=str(row.get("provider_id") or _scheduler_default_provider_id()),
+        )
+    return SchedulerDispatchResult(
+        status="dispatched",
+        message=message,
+        workflow_run_id=str(workflow_row.get("run_id") or ""),
+        workflow_ref=str(workflow_row.get("workflow_ref") or workflow_ref),
+        provider_id=str(row.get("provider_id") or _scheduler_default_provider_id()),
+    )
+
+
 configure_scheduler_runtime(
     schedules_path=AGENT_SCHEDULES_PATH,
     runs_path=AGENT_SCHEDULE_RUNS_PATH,
@@ -24377,6 +24428,7 @@ configure_scheduler_runtime(
     emit_tui_beep=_scheduler_emit_tui_beep,
     resolve_subagent=resolve_subagent,
     dispatch_subagent_task=_scheduler_dispatch_subagent_task,
+    dispatch_workflow_run=_scheduler_dispatch_workflow_run,
 )
 
 

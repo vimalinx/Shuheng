@@ -93,11 +93,29 @@ def configure_app_workflow_harness(tmp_path: Path, monkeypatch, plugin_root: Pat
     monkeypatch.setattr(app_module, "AGENT_POLICY_DECISIONS_PATH", str(harness_dir / "policy_decisions.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_ORCHESTRATOR_PLANS_PATH", str(harness_dir / "orchestrator_plans.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_MEMORY_CANDIDATES_PATH", str(harness_dir / "memory_candidates.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_SCHEDULES_PATH", str(harness_dir / "schedules.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_SCHEDULE_RUNS_PATH", str(harness_dir / "schedule_runs.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_CHECKPOINTS_DIR", str(harness_dir / "checkpoints"))
     monkeypatch.setattr(app_module, "AGENT_CHECKPOINT_INDEX_PATH", str(harness_dir / "checkpoints.jsonl"))
     monkeypatch.setattr(app_module, "SUBAGENTS_DIR", str(memory_dir / "subagents"))
     monkeypatch.setattr(app_module, "TEMP_SUBAGENTS_DIR", str(temp_dir / "subagents"))
     app_module.clear_plugin_registry_cache()
+    app_module.configure_scheduler_runtime(
+        schedules_path=app_module.AGENT_SCHEDULES_PATH,
+        runs_path=app_module.AGENT_SCHEDULE_RUNS_PATH,
+        task_ledger_path=app_module.AGENT_TASK_LEDGER_PATH,
+        agent_mail_path=app_module.AGENT_MAIL_PATH,
+        read_jsonl=app_module.read_jsonl,
+        append_jsonl=app_module.append_jsonl,
+        now_iso=app_module.now_iso,
+        json_safe=app_module.tui_query_json_safe,
+        default_provider_id=app_module._scheduler_default_provider_id,
+        truncate_cells=app_module.truncate_cells,
+        emit_tui_beep=app_module._scheduler_emit_tui_beep,
+        resolve_subagent=app_module.resolve_subagent,
+        dispatch_subagent_task=app_module._scheduler_dispatch_subagent_task,
+        dispatch_workflow_run=app_module._scheduler_dispatch_workflow_run,
+    )
     return harness_dir
 
 
@@ -431,6 +449,124 @@ def test_workflow_run_last_uses_existing_approval_bridge(tmp_path: Path, monkeyp
     assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_scheduler_can_trigger_existing_workflow_runner(tmp_path: Path, monkeypatch) -> None:
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "scheduled-safe-flow",
+            "name": "Scheduled Safe Flow",
+            "inputs": {"ready": {"type": "boolean", "required": True}},
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan scheduled work."},
+                {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+                {"id": "notify", "type": "notify", "depends_on": ["check"]},
+            ],
+        },
+        workflow_name="scheduled-safe-flow",
+    )
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    message = app_module.apply_schedule_control(
+        state,
+        "schedule_create",
+        "",
+        "",
+        {
+            "schedule_id": "sched_workflow_safe",
+            "name": "Scheduled Workflow Safe",
+            "interval": "1h",
+            "execution": {
+                "mode": "workflow_run",
+                "workflow_ref": "research-pack/scheduled-safe-flow",
+                "inputs": {"ready": True},
+            },
+        },
+        source="test",
+    )
+
+    assert message and "已登记定时任务" in message
+    schedule = app_module.latest_schedule_records()["sched_workflow_safe"]
+    assert schedule["dispatch_contract"] == "workflow_run.v1"
+    assert schedule["target"] == ""
+    assert schedule["execution"]["workflow_ref"] == "research-pack/scheduled-safe-flow"
+    tick = app_module.scheduler_tick(
+        state,
+        now_epoch=1780000000.0,
+        source="test:scheduler_workflow",
+        target_schedule_id="sched_workflow_safe",
+        force=True,
+    )
+
+    assert tick["due"] == 1
+    assert tick["dispatched"] == 1
+    workflow_rows = app_module.workflow_run_records()
+    assert len(workflow_rows) == 2
+    assert workflow_rows[0]["status"] == "planned"
+    assert workflow_rows[0]["inputs"] == {"ready": True}
+    assert workflow_rows[1]["status"] == "completed"
+    assert [step["status"] for step in workflow_rows[1]["steps"]] == ["completed", "completed", "completed"]
+    runs = [
+        row for row in app_module.read_jsonl(app_module.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_workflow_safe"
+    ]
+    assert [row["status"] for row in runs] == ["starting", "dispatched"]
+    final = runs[-1]
+    assert final["dispatch_contract"] == "workflow_run.v1"
+    assert final["workflow_run_id"] == workflow_rows[0]["run_id"]
+    assert final["workflow_ref"] == "plugin://research-pack/workflows/scheduled-safe-flow"
+    assert "status: completed" in final["result"]
+    assert app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+
+
+def test_scheduler_workflow_run_missing_ref_fails_without_workflow_rows(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+
+    message = app_module.apply_schedule_control(
+        state,
+        "schedule_create",
+        "",
+        "",
+        {
+            "schedule_id": "sched_workflow_missing",
+            "name": "Scheduled Missing Workflow",
+            "at": "2026-01-01T00:00:00+0800",
+            "execution": {
+                "mode": "workflow_run",
+                "workflow_ref": "research-pack/missing-flow",
+            },
+        },
+        source="test",
+    )
+
+    assert message and "已登记定时任务" in message
+    tick = app_module.scheduler_tick(
+        state,
+        now_epoch=1780000000.0,
+        source="test:scheduler_workflow_missing",
+        target_schedule_id="sched_workflow_missing",
+        force=True,
+    )
+
+    assert tick["due"] == 1
+    assert tick["failed"] == 1
+    assert app_module.workflow_run_records() == []
+    runs = [
+        row for row in app_module.read_jsonl(app_module.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_workflow_missing"
+    ]
+    assert [row["status"] for row in runs] == ["starting", "failed"]
+    assert runs[-1]["dispatch_contract"] == "workflow_run.v1"
+    assert runs[-1]["workflow_ref"] == "research-pack/missing-flow"
+    assert not runs[-1]["workflow_run_id"]
+    assert "Workflow" in runs[-1]["error"]
 
 
 def test_workflow_auto_generates_saves_and_runs_safe_workflow(tmp_path: Path, monkeypatch) -> None:

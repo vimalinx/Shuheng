@@ -5205,6 +5205,86 @@ At 08:00, scheduler calls agent.put_task("Generate daily digest") directly and s
 At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule to agenttask.v2 delegate.create, calls start_subagent_task(), then appends the final run status and relies on task ledger/artifact refs for execution evidence.
 ```
 
+## Scenario: Scheduled Workflow Run Trigger V1
+
+### 1. Scope / Trigger
+
+- Trigger: A `scheduledtask.v1` row should start an existing workflow run on a timer without adding a second workflow executor.
+- Applies to: `execution.mode:"workflow_run"`, `dispatch_contract:"workflow_run.v1"`, `src/ga_tui/scheduler.py`, `src/ga_tui/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: This does not add parallel/fan-out/fan-in execution, workflow daemon ownership, workflow-specific backoff, workflow timeouts, graph editing, approval auto-resume, plugin code execution, direct tool/model calls, or A2A/MCP workflow service exposure.
+
+### 2. Signatures
+
+- Schedule execution shape:
+  - `{"mode":"workflow_run","workflow_ref":"<plugin-id>/<workflow-id>","inputs":{...}}`
+- Workflow refs may use the same manifest-backed refs and shorthands accepted by `/workflow run`.
+- Schedule record dispatch contract: `workflow_run.v1`.
+- Scheduler callback injection:
+  - `SchedulerRuntime.dispatch_workflow_run(state, schedule_row, source, schedule_id, execution) -> SchedulerDispatchResult`
+- App-owned callback:
+  - `_scheduler_dispatch_workflow_run(...)` loads through `workflow_load_result_for_ref(workflow_ref, user_plugin_registry(force=True))`.
+  - The callback starts the run only through `create_workflow_run_v0(result, state=state, inputs=inputs, source_command=f"/scheduler run {schedule_id}")`.
+- Schedule final run rows may include:
+  - `workflow_run_id`
+  - `workflow_ref`
+  - `result`
+  - `error`
+  - existing trigger, idempotency, provider, source, and dispatch contract metadata.
+
+### 3. Contracts
+
+- `scheduler.py` owns parsing, validation, due/idempotency handling, and schedule-run audit rows only.
+- `scheduler.py` must not import `app.py`, `workflows.py`, plugin helpers, curses, mutable TUI `State`, runtime provider classes, approval queues, task/progress/artifact ledgers, or governance owners.
+- `scheduler.py` must not resolve workflow refs, append workflow run rows, dispatch subagents, queue approvals, evaluate workflow steps, or duplicate workflow runner behavior.
+- `app.py` remains the strong Orchestrator owner for plugin registry refresh, workflow ref resolution, workflow run creation, approval bridging, agent-task bridging, retries, artifact refs, and workflow ledger writes.
+- A workflow-run schedule must be rejected at create/update validation when `execution.workflow_ref` is missing or blank.
+- `execution.inputs` is JSON-safe schedule data passed to the workflow runner unchanged; scheduler validation must not interpret workflow input schemas.
+- A due workflow-run schedule appends the normal `scheduledtask.run.v1` `starting` row before app callback dispatch and one final schedule-run row after the callback returns.
+- A successful app callback appends normal `shuheng.workflow_run.v1` rows through `create_workflow_run_v0(...)`, then the final schedule-run row links `workflow_run_id` and canonical `workflow_ref`.
+- A missing or invalid workflow produces a failed final schedule-run row and no workflow run rows.
+- Existing `execution.mode:"tui_action"` and `execution.mode:"agent_task"` behavior remains compatible.
+
+### 4. Validation & Error Matrix
+
+- Valid workflow-run schedule with `workflow_ref` and inputs -> schedule record `dispatch_contract:"workflow_run.v1"` and empty `target`.
+- Workflow-run schedule missing `workflow_ref` -> visible create/update validation error, no schedule record append.
+- Forced `/scheduler run <id>` for a safe workflow schedule -> `starting` and final `dispatched` schedule-run rows, plus planned and advanced workflow-run rows.
+- Workflow ref not found -> `starting` and final `failed` schedule-run rows, no workflow-run rows.
+- Workflow definition invalid -> final `failed` schedule-run row with the workflow rejection message, no workflow-run rows.
+- Scheduler runtime callback missing -> final `failed` schedule-run row, no workflow-run rows.
+- Workflow that reaches approval or agent-task bridge -> final schedule-run row links the workflow run id; approval/task side effects remain owned by the existing app workflow bridge.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `interval:"1h"` plus `execution.mode:"workflow_run"` starts `plugin://schedule-pack/workflows/daily-flow` through `create_workflow_run_v0(...)` and records the workflow run id in `schedule_runs.jsonl`.
+- Good: A scheduled workflow that reaches `agent_task` dispatches only through the existing Workflow Agent Task Bridge and stores task ids in the workflow row, not in scheduler-owned synthetic task rows.
+- Base: `schedule_list`, `/schedules`, and gateway registry may still show `agenttask.v2` as the historical default dispatch contract while individual workflow schedule rows use `workflow_run.v1`.
+- Bad: `scheduler.py` imports `workflows.py` and calls `advance_workflow_run_v0(...)` directly.
+- Bad: Scheduler appends `workflow_runs.jsonl` itself or starts subagents directly for workflow steps.
+- Bad: A failed workflow ref silently falls back to an `agent_task` schedule.
+
+### 6. Tests Required
+
+- `tests/test_scheduler_parsing.py` must assert workflow-run execution parsing, required `workflow_ref`, JSON-safe inputs, create/update `dispatch_contract:"workflow_run.v1"`, and empty scheduler target.
+- `tests/test_workflows.py` must assert a forced scheduler run for a valid workflow schedule appends schedule-run rows and normal workflow-run rows through the app runner.
+- `tests/test_workflows.py` must assert a missing workflow schedule appends a failed schedule-run final row and no workflow-run rows.
+- `scripts/check_policy_gates.py` must assert `workflow_run` is exposed in schedule control/tool schemas, scheduler runtime retargeting injects `dispatch_workflow_run`, scheduler module ownership remains pure, and safe scheduled workflow runs do not write task/progress/approval/artifact ledgers.
+- Keep targeted compile/Ruff, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+schedule workflow_run -> scheduler.py loads plugin workflow, advances steps, writes workflow_runs.jsonl, and dispatches subagents
+```
+
+#### Correct
+
+```text
+schedule workflow_run -> scheduler.py writes scheduledtask.run.v1 starting -> injected app callback -> create_workflow_run_v0(...) -> final schedule-run row links workflow_run_id
+```
+
 ## Scenario: Shuheng-Owned Storage And Archive-Backed Sidebar Rows
 
 ### 1. Scope / Trigger

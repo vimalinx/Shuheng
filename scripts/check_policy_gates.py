@@ -140,6 +140,7 @@ def retarget_harness(root: str) -> None:
                 task_title=str(mapped.get("task_title") or row.get("name") or schedule_id),
             ).__dict__
         ),
+        dispatch_workflow_run=a._scheduler_dispatch_workflow_run,
     )
 
 
@@ -221,8 +222,10 @@ def assert_scheduler_module_boundary() -> None:
         "update_schedule_last_run",
         "append_schedule_skip_run",
         "dispatch_schedule_tui_action",
+        "dispatch_schedule_workflow_run",
         "dispatch_schedule_run",
         "scheduler_tick",
+        "schedule_dispatch_contract_for_execution",
         "format_scheduler_tick_result",
         "format_scheduled_task_registry",
     )
@@ -9928,7 +9931,9 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
     schema = next(tool for tool in a.TUI_SCHEDULE_TOOL_SCHEMAS if tool["function"]["name"] == "schedule_create")
     execution_schema = schema["function"]["parameters"]["properties"]["execution"]
     assert execution_schema["required"] == ["mode"], execution_schema
-    assert set(execution_schema["properties"]["mode"]["enum"]) == {"tui_action", "agent_task"}, execution_schema
+    assert set(execution_schema["properties"]["mode"]["enum"]) == {"tui_action", "agent_task", "workflow_run"}, execution_schema
+    assert "workflow_ref" in execution_schema["properties"], execution_schema
+    assert "inputs" in execution_schema["properties"], execution_schema
     schedule_list = a.tui_tool_schedule_list(state, {})
     assert schedule_list["status"] == "ok", schedule_list
     assert any(job["schedule_id"] == "sched_tool_digest" for job in schedule_list["registry"]["jobs"]), schedule_list
@@ -12032,8 +12037,12 @@ def run_checks() -> None:
     assert a.split_schedule_trigger(updated_daily) == ("interval", "10m"), updated_daily
     a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
     assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
-    for prompt_token in ("ScheduleCreate", "schedule_create", "schedule_list", "execution", "tui_action", "agent_task"):
+    for prompt_token in ("ScheduleCreate", "schedule_create", "schedule_list", "execution", "tui_action", "agent_task", "workflow_run", "workflow_ref"):
         assert prompt_token in a.TUI_AGENT_CONTROL_HINT, prompt_token
+    schedule_tool = next(tool for tool in a.TUI_SCHEDULE_TOOL_SCHEMAS if tool.get("function", {}).get("name") == "schedule_create")
+    execution_schema = schedule_tool["function"]["parameters"]["properties"]["execution"]["properties"]
+    assert "workflow_run" in execution_schema["mode"]["enum"], schedule_tool
+    assert "workflow_ref" in execution_schema and "inputs" in execution_schema, schedule_tool
     assert a.split_schedule_trigger({"cron": "0 8 * * *"}) == ("cron", "0 8 * * *")
     assert a.split_schedule_trigger({"interval": "1m"}) == ("interval", "1m")
     assert a.split_schedule_trigger({"at": "2026-01-01T00:00:00+0800"}) == ("at", "2026-01-01T00:00:00+0800")
@@ -12041,6 +12050,93 @@ def run_checks() -> None:
     assert a.schedule_trigger_from_control({"unsupported_field": "x"}) == ""
     assert a.split_schedule_trigger({"trigger": "free form words"}) == ("unknown", "free form words")
     assert a.parse_schedule_interval_seconds("free form words") is None
+    workflow_plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "schedule-pack")
+    workflow_dir = workflow_plugin_root / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    workflow_dir.joinpath("daily-flow.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "daily-flow",
+                "name": "Daily Flow",
+                "inputs": {"ready": {"type": "boolean", "required": True}},
+                "steps": [
+                    {"id": "plan", "type": "prompt", "prompt": "Plan daily workflow."},
+                    {"id": "check", "type": "condition", "depends_on": ["plan"], "condition": {"ref": "inputs.ready", "equals": True}},
+                    {"id": "notify", "type": "notify", "depends_on": ["check"]},
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    workflow_plugin_root.joinpath("plugin.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.plugin.v1",
+                "id": "schedule-pack",
+                "name": "Schedule Pack",
+                "contributes": {
+                    "workflows": [
+                        {"id": "daily-flow", "name": "Daily Flow", "path": "workflows/daily-flow.json"}
+                    ]
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    a.clear_plugin_registry_cache()
+    workflow_schedule_control = ga_control({
+        "action": "schedule.create",
+        "schedule_id": "sched_workflow_daily",
+        "name": "Workflow Daily",
+        "interval": "1h",
+        "execution": {
+            "mode": "workflow_run",
+            "workflow_ref": "schedule-pack/daily-flow",
+            "inputs": {"ready": True},
+        },
+    })
+    task_rows_before_scheduled_workflow = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before_scheduled_workflow = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before_scheduled_workflow = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    artifact_rows_before_scheduled_workflow = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+    workflow_rows_before_scheduled_workflow = len(a.workflow_run_records())
+    a.apply_tui_controls_from_text(state, workflow_schedule_control, source="agent")
+    workflow_schedule = a.latest_schedule_records()["sched_workflow_daily"]
+    assert workflow_schedule["dispatch_contract"] == "workflow_run.v1", workflow_schedule
+    assert workflow_schedule["execution"]["workflow_ref"] == "schedule-pack/daily-flow", workflow_schedule
+    workflow_tick = a.scheduler_tick(
+        state,
+        now_epoch=1780000000.0,
+        source="test:scheduler_workflow",
+        target_schedule_id="sched_workflow_daily",
+        force=True,
+    )
+    assert workflow_tick["due"] == 1 and workflow_tick["dispatched"] == 1 and workflow_tick["failed"] == 0, workflow_tick
+    workflow_rows = a.workflow_run_records()
+    assert len(workflow_rows) == workflow_rows_before_scheduled_workflow + 2, workflow_rows
+    scheduled_workflow_planned = workflow_rows[-2]
+    scheduled_workflow_done = workflow_rows[-1]
+    assert scheduled_workflow_planned["inputs"] == {"ready": True}, scheduled_workflow_planned
+    assert scheduled_workflow_done["run_id"] == scheduled_workflow_planned["run_id"], workflow_rows[-2:]
+    assert scheduled_workflow_done["status"] == "completed", scheduled_workflow_done
+    workflow_schedule_runs = [
+        row for row in a.read_jsonl(a.AGENT_SCHEDULE_RUNS_PATH)
+        if row.get("schedule_id") == "sched_workflow_daily"
+    ]
+    assert [row.get("status") for row in workflow_schedule_runs] == ["starting", "dispatched"], workflow_schedule_runs
+    workflow_schedule_final = workflow_schedule_runs[-1]
+    assert workflow_schedule_final["dispatch_contract"] == "workflow_run.v1", workflow_schedule_final
+    assert workflow_schedule_final["workflow_run_id"] == scheduled_workflow_planned["run_id"], workflow_schedule_final
+    assert workflow_schedule_final["workflow_ref"] == "plugin://schedule-pack/workflows/daily-flow", workflow_schedule_final
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_scheduled_workflow
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_scheduled_workflow
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_scheduled_workflow
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before_scheduled_workflow
     interval_anchor_row = a.append_schedule_record({
         "schedule_id": "sched_interval_anchor",
         "name": "Interval Anchor",
@@ -12241,6 +12337,7 @@ def run_checks() -> None:
     assert "Agent Runtime Providers" in runtime_text and "genericagent" in runtime_text, runtime_text
     schedule_text = a.format_scheduled_task_registry(registry["scheduled_task_registry"])
     assert "Scheduled Tasks" in schedule_text and "agenttask.v2" in schedule_text and "schedule_runs.jsonl" in schedule_text, schedule_text
+    assert "workflow_run.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
     model_text = a.format_model_orchestration_registry(registry["model_orchestration"])
     assert "Model Orchestration" in model_text, model_text
     gateway_panel_keys = {item.key for item in a.gateway_panel_items(state)}

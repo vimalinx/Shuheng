@@ -15,7 +15,12 @@ from ga_tui.scheduler import (
     parse_schedule_interval_seconds,
     parse_schedule_timestamp,
     schedule_active,
+    schedule_dispatch_contract_for_execution,
     schedule_due_info,
+    schedule_execution_error,
+    schedule_execution_from_control,
+    schedule_record_from_control,
+    schedule_record_updates_from_control,
     split_schedule_trigger,
 )
 
@@ -275,3 +280,64 @@ class TestScheduleDueInfo:
         info = schedule_due_info({"schedule_id": "s1"}, now_epoch=1000)
         assert info["status"] == "invalid"
         assert "unsupported" in info["reason"]
+
+
+class TestWorkflowRunExecution:
+    def test_workflow_run_execution_parses_ref_and_inputs(self) -> None:
+        execution = schedule_execution_from_control({
+            "execution": {
+                "mode": "workflow-run",
+                "workflow_ref": "research-pack/compare-sources",
+                "inputs": {"topic": "workflow"},
+            }
+        })
+
+        assert execution == {
+            "mode": "workflow_run",
+            "workflow_ref": "research-pack/compare-sources",
+            "inputs": {"topic": "workflow"},
+        }
+        assert schedule_execution_error(execution) == ""
+        assert schedule_dispatch_contract_for_execution(execution) == "workflow_run.v1"
+
+    def test_workflow_run_execution_requires_ref(self) -> None:
+        execution = schedule_execution_from_control({"execution": {"mode": "workflow_run"}})
+
+        assert execution["mode"] == "workflow_run"
+        assert schedule_execution_error(execution) == "schedule execution missing workflow_ref."
+
+    def test_workflow_run_schedule_record_uses_workflow_dispatch_contract(self) -> None:
+        record = schedule_record_from_control(
+            {
+                "name": "Run Compare Sources",
+                "interval": "1h",
+                "execution": {
+                    "mode": "workflow_run",
+                    "workflow_ref": "research-pack/compare-sources",
+                    "inputs": {"topic": "daily"},
+                },
+            },
+            schedule_id="sched_workflow",
+            status="enabled",
+            source="test",
+        )
+
+        assert record["dispatch_contract"] == "workflow_run.v1"
+        assert record["target"] == ""
+        assert record["execution"]["workflow_ref"] == "research-pack/compare-sources"
+        assert record["execution"]["inputs"] == {"topic": "daily"}
+
+    def test_workflow_run_schedule_update_preserves_contract(self) -> None:
+        updates = schedule_record_updates_from_control(
+            {
+                "execution": {
+                    "mode": "workflow_run",
+                    "workflow_ref": "research-pack/compare-sources",
+                }
+            },
+            source="test",
+        )
+
+        assert updates["dispatch_contract"] == "workflow_run.v1"
+        assert updates["target"] == ""
+        assert updates["execution"]["inputs"] == {}
