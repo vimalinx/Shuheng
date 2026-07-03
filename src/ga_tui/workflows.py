@@ -662,6 +662,134 @@ def format_workflow_run_advanced(result: WorkflowRunAdvanceResult) -> str:
     return "\n".join(lines)
 
 
+def _workflow_run_id(row: dict[str, Any]) -> str:
+    return str(row.get("run_id") or "").strip()
+
+
+def _latest_workflow_run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    order: dict[str, int] = {}
+    for index, row in enumerate(rows):
+        run_id = _workflow_run_id(row)
+        if not run_id:
+            continue
+        latest[run_id] = row
+        order[run_id] = index
+    return [
+        latest[run_id]
+        for run_id in sorted(order, key=lambda item: order[item], reverse=True)
+    ]
+
+
+def _workflow_run_step_counts(row: dict[str, Any]) -> tuple[int, int]:
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    total = len([step for step in steps if isinstance(step, dict)])
+    completed = len([
+        step for step in steps
+        if isinstance(step, dict) and step.get("status") == "completed"
+    ])
+    return completed, total
+
+
+def _workflow_run_stop_reason(row: dict[str, Any]) -> str:
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    return str(execution.get("blocked_reason") or row.get("error") or "").strip()
+
+
+def format_workflow_runs(rows: list[dict[str, Any]], *, limit: int = 20) -> str:
+    latest_rows = _latest_workflow_run_rows(rows)
+    if not latest_rows:
+        return "\n".join([
+            "Workflow runs:",
+            "- (none)",
+            "Run /workflow run <plugin-id>/<workflow-id> to create a workflow run.",
+        ])
+    lines = ["Workflow runs:"]
+    for row in latest_rows[: max(1, limit)]:
+        run_id = _workflow_run_id(row) or "(missing)"
+        completed, total = _workflow_run_step_counts(row)
+        status = str(row.get("status") or "unknown")
+        workflow_ref = str(row.get("workflow_ref") or "-")
+        updated_at = str(row.get("updated_at") or row.get("timestamp") or "")
+        detail = f"- {run_id} - {status} - {workflow_ref} - steps:{completed}/{total}"
+        if updated_at:
+            detail += f" - updated:{updated_at}"
+        reason = _workflow_run_stop_reason(row)
+        if reason:
+            detail += f" - stop:{reason}"
+        lines.append(detail)
+    if len(latest_rows) > limit:
+        lines.append(f"... {len(latest_rows) - limit} older run(s) hidden")
+    lines.append("Use /workflow show <run_id> for details.")
+    return "\n".join(lines)
+
+
+def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
+    target = str(run_id or "").strip()
+    if not target:
+        return "Workflow run not found: (missing)"
+    history = [row for row in rows if _workflow_run_id(row) == target]
+    if not history:
+        return f"Workflow run not found: {target}"
+    row = history[-1]
+    completed, total = _workflow_run_step_counts(row)
+    execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+    approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
+    lines = [
+        f"Workflow run: {target}",
+        f"status: {row.get('status') or 'unknown'}",
+        f"workflow: {row.get('workflow_ref') or '-'}",
+        f"history_rows: {len(history)}",
+        f"timestamp: {row.get('timestamp') or ''}",
+        f"updated_at: {row.get('updated_at') or ''}",
+        f"completed_at: {row.get('completed_at') or ''}",
+        f"steps: {completed}/{total} completed",
+        "execution:",
+        f"- mode: {execution.get('mode') or ''}",
+        f"- steps_executed: {execution.get('steps_executed', 0)}",
+        f"- subagents_dispatched: {execution.get('subagents_dispatched', 0)}",
+        f"- approvals_created: {execution.get('approvals_created', 0)}",
+        f"- tools_called: {execution.get('tools_called', 0)}",
+        f"- artifacts_written: {execution.get('artifacts_written', 0)}",
+        f"- task_ledger_rows_written: {execution.get('task_ledger_rows_written', 0)}",
+        f"- progress_ledger_rows_written: {execution.get('progress_ledger_rows_written', 0)}",
+        "approval:",
+        f"- status: {approval.get('approval_status') or ''}",
+        f"- approval_id: {approval.get('approval_id') or ''}",
+    ]
+    approval_required_for = approval.get("approval_required_for")
+    if isinstance(approval_required_for, list):
+        lines.append("- required_for: " + (", ".join(str(item) for item in approval_required_for) or "[]"))
+    else:
+        lines.append(f"- required_for: {approval_required_for or '[]'}")
+    reason = _workflow_run_stop_reason(row)
+    if reason:
+        lines.append(f"stop_reason: {reason}")
+    lines.append("steps:")
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    if not steps:
+        lines.append("- (none)")
+    else:
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            pieces = [
+                f"- {step.get('order') or '?'}:{step.get('step_id') or '(missing)'}",
+                f"type={step.get('type') or ''}",
+                f"status={step.get('status') or 'unknown'}",
+            ]
+            if step.get("agent"):
+                pieces.append(f"agent={step.get('agent')}")
+            if step.get("task_id"):
+                pieces.append(f"task_id={step.get('task_id')}")
+            if step.get("approval_id"):
+                pieces.append(f"approval_id={step.get('approval_id')}")
+            if step.get("error"):
+                pieces.append(f"error={step.get('error')}")
+            lines.append(" | ".join(pieces))
+    return "\n".join(lines)
+
+
 def format_workflow_run_rejected(result: WorkflowLoadResult, issues: tuple[WorkflowIssue, ...]) -> str:
     lines = [
         f"Workflow run rejected: {result.workflow_ref}",

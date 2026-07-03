@@ -341,6 +341,54 @@ def test_workflow_runner_v0_blocks_agent_task_and_condition(tmp_path: Path) -> N
     assert "requires condition evaluation" in condition_advanced.blocked_reason
 
 
+def test_workflow_run_inspection_formatters_show_latest_rows(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+            ],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-inspect",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+    advanced = workflows.advance_workflow_run_v0(
+        built.record,
+        timestamp="2026-07-03T00:00:01+0800",
+    )
+
+    empty_listing = workflows.format_workflow_runs([])
+    listing = workflows.format_workflow_runs([built.record, advanced.record])
+    detail = workflows.format_workflow_run_detail("wfr-inspect", [built.record, advanced.record])
+    missing = workflows.format_workflow_run_detail("missing-run", [built.record, advanced.record])
+
+    assert "- (none)" in empty_listing
+    assert listing.count("wfr-inspect") == 1
+    assert "blocked" in listing
+    assert "steps:1/2" in listing
+    assert "requires subagent dispatch" in listing
+    assert "Workflow run: wfr-inspect" in detail
+    assert "history_rows: 2" in detail
+    assert "steps: 1/2 completed" in detail
+    assert "1:plan" in detail and "status=completed" in detail
+    assert "2:review" in detail and "status=blocked" in detail
+    assert "Workflow run not found: missing-run" in missing
+
+
 def test_workflow_run_record_rejects_invalid_workflow(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,
@@ -410,6 +458,9 @@ def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, m
     app_module.clear_plugin_registry_cache()
     state = app_module.State(agent=None)
 
+    assert app_module.handle_workflow_command(state, "/workflow runs") is True
+    assert "- (none)" in state.messages[-1].content
+
     assert app_module.handle_workflow_command(state, "/workflow run research-pack/compare-sources") is True
 
     assert "Workflow run advanced:" in state.messages[-1].content
@@ -429,4 +480,25 @@ def test_workflow_run_command_appends_only_workflow_run_ledger(tmp_path: Path, m
     assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
     assert app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH) == []
+    assert len(state.subagents) == 0
+    task_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    progress_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH))
+    artifact_rows_after_run = len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH))
+
+    assert app_module.handle_workflow_command(state, "/workflow runs") is True
+    assert rows[1]["run_id"] in state.messages[-1].content
+    assert "steps:1/2" in state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, f"/workflow show {rows[1]['run_id']}") is True
+    assert f"Workflow run: {rows[1]['run_id']}" in state.messages[-1].content
+    assert "history_rows: 2" in state.messages[-1].content
+    assert "2:review" in state.messages[-1].content
+    assert app_module.handle_workflow_command(state, "/workflow show missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content
+    assert len(app_module.workflow_run_records()) == 2
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == task_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH)) == approval_rows_after_run
+    assert len(app_module.read_jsonl(app_module.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_after_run
     assert len(state.subagents) == 0

@@ -971,6 +971,8 @@ format_workflow_list = workflow_helpers.format_workflow_list
 format_workflow_run_created = workflow_helpers.format_workflow_run_created
 format_workflow_run_advanced = workflow_helpers.format_workflow_run_advanced
 format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
+format_workflow_runs = workflow_helpers.format_workflow_runs
+format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 build_workflow_run_record = workflow_helpers.build_workflow_run_record
 workflow_load_result_for_ref = workflow_helpers.workflow_load_result_for_ref
@@ -22061,6 +22063,13 @@ def handle_workflow_command(state: State, text: str) -> bool:
     if raw in {"/workflows", "/workflow", "/workflow list"}:
         add_system(state, format_workflow_list(user_plugin_registry(force=True)))
         return True
+    if re.match(r"/workflows?\s+runs\s*$", raw, re.I):
+        add_system(state, format_workflow_runs(workflow_run_records()))
+        return True
+    m_show = re.match(r"/workflows?\s+(?:show|run-info|runinfo)\s+(\S+)\s*$", raw, re.I)
+    if m_show:
+        add_system(state, format_workflow_run_detail(m_show.group(1), workflow_run_records()))
+        return True
     m_info = re.match(r"/workflows?\s+info\s+(\S+)\s*$", raw, re.I)
     if m_info:
         result = workflow_load_result_for_ref(m_info.group(1), user_plugin_registry(force=True))
@@ -22082,7 +22091,8 @@ def handle_workflow_command(state: State, text: str) -> bool:
             state,
             "未知 /workflow 命令。\n"
             "用法：/workflows、/workflow info <plugin-id>/<workflow-id>、"
-            "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>",
+            "/workflow dry-run <plugin-id>/<workflow-id>、/workflow run <plugin-id>/<workflow-id>、"
+            "/workflow runs、/workflow show <run-id>",
         )
         return True
     return False

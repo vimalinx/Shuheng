@@ -2452,6 +2452,78 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow run research-pack/compare-sources -> appends planned + runner_v0 rows, completes safe steps, then blocks before agent dispatch
 ```
 
+## Scenario: Workflow Run Inspection Commands
+
+### 1. Scope / Trigger
+
+- Trigger: Users need to inspect append-only workflow run history before Shuheng adds workflow resume, real approval bridge, or agent dispatch.
+- Applies to: `/workflow runs`, `/workflow show <run_id>`, `workflow_runs.jsonl`, `shuheng.workflow_run.v1`, `workflows.format_workflow_runs(...)`, `workflows.format_workflow_run_detail(...)`, `app.workflow_run_records(...)`, `app.latest_workflow_run_records(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: Inspection commands do not continue runs, dispatch subagents, create approvals, call model providers, execute tools, run shell commands, execute plugin code, evaluate conditions, write artifacts, mutate task/progress ledgers, write memory, touch Secret Vault, schedule work, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Public commands:
+  - `/workflow runs`
+  - `/workflow show <run_id>`
+  - `/workflow run-info <run_id>` and `/workflow runinfo <run_id>` may alias the same detail view.
+- Ledger path: `AGENT_WORKFLOW_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_runs.jsonl")`.
+- Read helper ownership:
+  - `app.workflow_run_records(limit=0)` reads raw workflow run JSONL rows.
+  - `app.latest_workflow_run_records()` returns latest rows by `run_id`.
+- Pure formatting ownership:
+  - `workflows.format_workflow_runs(rows, limit=20)`
+  - `workflows.format_workflow_run_detail(run_id, rows)`
+
+### 3. Contracts
+
+- `/workflow runs` reads `workflow_runs.jsonl`, groups append-only rows by `run_id`, and renders the latest row per run id in recent-first order.
+- `/workflow runs` must show run id, status, workflow ref, completed/total step count, last timestamp, and stop reason when present.
+- `/workflow show <run_id>` reads `workflow_runs.jsonl`, filters rows for that run id, renders the latest row, and includes the number of append-only history rows for that run.
+- `/workflow show <run_id>` must show status, workflow ref, timestamps, execution counters, approval metadata, step statuses, task/approval ids when present, and stop reason when present.
+- Empty or missing `workflow_runs.jsonl` must render a no-runs message, not a traceback.
+- Unknown run id must render a not-found message and must not mutate state beyond adding a system message.
+- Inspection commands are read-only. They must not append workflow run rows or write task/progress/approval/artifact ledgers.
+- `workflows.py` remains pure and must not import `app.py`, curses, runtime dispatch, approval queues, task/progress ledgers, artifacts, provider adapters, governance owners, Secret Vault, or subprocess.
+
+### 4. Validation & Error Matrix
+
+- Missing workflow run ledger -> `/workflow runs` displays no runs.
+- Empty workflow run ledger -> `/workflow runs` displays no runs.
+- Multiple rows for the same `run_id` -> `/workflow runs` displays only the latest row for that run id.
+- Known run id -> `/workflow show <run_id>` displays latest state plus `history_rows`.
+- Unknown run id -> visible not-found message, no ledger writes.
+- Rows without `run_id` -> ignored by grouped run listing.
+- Run row with missing optional fields -> displays blanks/default counters, no crash.
+
+### 5. Good/Base/Bad Cases
+
+- Good: After `/workflow run research-pack/compare-sources`, `/workflow runs` shows one run id with latest `blocked` status and safe-step progress.
+- Good: `/workflow show wfr_...` shows `history_rows: 2`, execution counters, approval metadata, and each step status.
+- Base: Inspection output is text-first in the TUI command stream; a panel view can be added later using the same pure formatting or projection helpers.
+- Bad: `/workflow show <run_id>` calls `advance_workflow_run_v0(...)` or appends a new run row.
+- Bad: `/workflow runs` writes `tasks.jsonl`, `progress.jsonl`, `approvals.jsonl`, or `artifacts.jsonl`.
+- Bad: Inspection commands dispatch subagents, evaluate conditions, call tools, or run plugin code.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert empty listing, grouped latest-row listing, detail output with history count and step statuses, unknown run id output, and app command read-only behavior.
+- `scripts/check_policy_gates.py` must assert `/workflow runs` and `/workflow show <run_id>` can inspect rows created by `/workflow run`, do not append extra workflow run rows, and leave subagents plus task/progress/approval/artifact ledgers unchanged.
+- Keep `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, targeted pytest, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflow show wfr_123 -> resumes the workflow and starts the blocked agent_task
+```
+
+#### Correct
+
+```text
+/workflow show wfr_123 -> reads workflow_runs.jsonl and renders the latest row plus history count without side effects
+```
+
 ## Scenario: Running Indicator, Process Summary, Visible Reply Cleanup, Turn Marker Splitting, And Selection Geometry Rendering
 
 ### 1. Scope / Trigger

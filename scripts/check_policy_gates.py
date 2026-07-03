@@ -8676,6 +8676,18 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert workflow_run_rows[1]["execution"]["artifacts_written"] == 0, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["task_ledger_rows_written"] == 0, workflow_run_rows[1]
     assert workflow_run_rows[1]["execution"]["progress_ledger_rows_written"] == 0, workflow_run_rows[1]
+    run_id = workflow_run_rows[1]["run_id"]
+    assert a.handle_workflow_command(state, "/workflow runs") is True
+    assert run_id in state.messages[-1].content, state.messages[-1].content
+    assert "steps:1/3" in state.messages[-1].content, state.messages[-1].content
+    assert "requires subagent dispatch" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, f"/workflow show {run_id}") is True
+    assert f"Workflow run: {run_id}" in state.messages[-1].content, state.messages[-1].content
+    assert "history_rows: 2" in state.messages[-1].content, state.messages[-1].content
+    assert "2:review" in state.messages[-1].content, state.messages[-1].content
+    assert a.handle_workflow_command(state, "/workflow show missing-run") is True
+    assert "Workflow run not found: missing-run" in state.messages[-1].content, state.messages[-1].content
+    assert len(a.workflow_run_records()) == 2, a.workflow_run_records()
     assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before_workflow_run
     assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before_workflow_run
