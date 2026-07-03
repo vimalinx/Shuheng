@@ -978,6 +978,7 @@ format_workflow_run_rejected = workflow_helpers.format_workflow_run_rejected
 format_workflow_runs = workflow_helpers.format_workflow_runs
 format_workflow_run_detail = workflow_helpers.format_workflow_run_detail
 format_workflow_step_output_context = workflow_helpers.format_workflow_step_output_context
+latest_workflow_run_rows_for_panel = workflow_helpers.latest_workflow_run_rows
 advance_workflow_run_v0 = workflow_helpers.advance_workflow_run_v0
 apply_workflow_agent_task_result = workflow_helpers.apply_workflow_agent_task_result
 apply_workflow_step_approval_decision = workflow_helpers.apply_workflow_step_approval_decision
@@ -988,6 +989,8 @@ fail_workflow_agent_task_dispatch = workflow_helpers.fail_workflow_agent_task_di
 pending_workflow_agent_task_step = workflow_helpers.pending_workflow_agent_task_step
 pending_workflow_approval_step = workflow_helpers.pending_workflow_approval_step
 workflow_agent_task_id = workflow_helpers.workflow_agent_task_id
+workflow_run_step_counts = workflow_helpers.workflow_run_step_counts
+workflow_run_stop_reason = workflow_helpers.workflow_run_stop_reason
 workflow_run_has_meaningful_transition = workflow_helpers.workflow_run_has_meaningful_transition
 workflow_approval_id = workflow_helpers.workflow_approval_id
 workflow_draft_load_result_from_text = workflow_helpers.workflow_draft_load_result_from_text
@@ -21491,6 +21494,65 @@ def plugin_panel_items() -> list[PanelItem]:
     return items
 
 
+def workflow_run_panel_items(rows: Optional[list[dict[str, Any]]] = None) -> list[PanelItem]:
+    all_rows = workflow_run_records() if rows is None else list(rows)
+    latest_rows = latest_workflow_run_rows_for_panel(all_rows)
+    history_counts: dict[str, int] = {}
+    for row in all_rows:
+        run_id = str(row.get("run_id") or "").strip()
+        if run_id:
+            history_counts[run_id] = history_counts.get(run_id, 0) + 1
+    items: list[PanelItem] = []
+    for row in latest_rows:
+        run_id = str(row.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        workflow_ref = str(row.get("workflow_ref") or "-")
+        status = str(row.get("status") or "unknown")
+        completed, total = workflow_run_step_counts(row)
+        updated_at = str(row.get("updated_at") or row.get("timestamp") or "")
+        reason = workflow_run_stop_reason(row)
+        subtitle_parts = [
+            status,
+            f"steps:{completed}/{total}",
+            workflow_ref,
+        ]
+        if updated_at:
+            subtitle_parts.append(f"updated:{updated_at}")
+        detail_lines = [
+            format_workflow_run_detail(run_id, all_rows),
+            "",
+            "Commands:",
+            f"- /workflow show {run_id}",
+            f"- /workflow continue {run_id}",
+            f"- /workflow cancel {run_id}",
+            "",
+            "Panel actions:",
+            "- Enter/c: continue or resume this run",
+            "- x: cancel this run",
+        ]
+        if reason:
+            detail_lines.extend(["", f"Stop reason: {reason}"])
+        items.append(PanelItem(
+            key=f"workflow-run:{run_id}",
+            title=f"Run · {run_id}",
+            subtitle=" · ".join(subtitle_parts),
+            detail="\n".join(detail_lines),
+            status=status,
+            path=str(row.get("workflow_path") or ""),
+            payload={
+                "item_type": "workflow_run",
+                "run_id": run_id,
+                "workflow_ref": workflow_ref,
+                "status": status,
+                "history_rows": history_counts.get(run_id, 0),
+                "steps_completed": completed,
+                "steps_total": total,
+            },
+        ))
+    return items
+
+
 def workflow_panel_items() -> list[PanelItem]:
     registry = user_plugin_registry()
     results = workflow_helpers.all_workflow_load_results(registry)
@@ -21524,6 +21586,7 @@ def workflow_panel_items() -> list[PanelItem]:
                 "inputs": [item.input_id for item in definition.inputs],
                 "steps": [step.step_id for step in definition.steps],
                 "issue_count": len(result.issues),
+                "item_type": "workflow_definition",
             }
         items.append(PanelItem(
             key=key,
@@ -21557,6 +21620,7 @@ def workflow_panel_items() -> list[PanelItem]:
             path=issue.manifest_path,
             payload={"plugin_id": issue.plugin_id, "manifest_path": issue.manifest_path, "message": issue.message},
         ))
+    items.extend(workflow_run_panel_items())
     if not items:
         roots = user_plugin_roots()
         items.append(PanelItem(
@@ -21576,9 +21640,32 @@ def workflow_panel_items() -> list[PanelItem]:
                 "Use /workflow info <plugin-id>/<workflow-id> after adding a workflow package.",
             ]),
             status="empty",
-            payload={"roots": roots},
+            payload={"roots": roots, "item_type": "empty"},
         ))
     return items
+
+
+def workflow_panel_item_run_id(item: PanelItem) -> str:
+    payload = item.payload if isinstance(item.payload, dict) else {}
+    if payload.get("item_type") != "workflow_run":
+        return ""
+    return str(payload.get("run_id") or "").strip()
+
+
+def workflow_panel_run_action(state: State, item: PanelItem, action: str) -> str:
+    run_id = workflow_panel_item_run_id(item)
+    verb = str(action or "").strip().lower()
+    if not run_id:
+        if verb == "cancel":
+            return "请选择 workflow run 行再取消；workflow 定义行是只读预览。"
+        return "请选择 workflow run 行再继续；workflow 定义行是只读预览。"
+    if verb == "cancel":
+        _row, message = cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")
+        return message
+    if verb in {"continue", "resume"}:
+        _row, message = continue_workflow_run_v0(run_id, state=state)
+        return message
+    return f"未知 workflow run 操作: {action or '(missing)'}"
 
 
 def draw_panel_browser(
@@ -21664,7 +21751,7 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
         if panel == "plugins":
             return "Plugins", plugin_panel_items(), "r 刷新插件 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "workflows":
-            return "Workflows", workflow_panel_items(), "r 刷新 workflow registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+            return "Workflows", workflow_panel_items(), "Enter/c 继续 run  x 取消 run  r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         return "Harness", [], "Esc/q 关闭"
 
     try:
@@ -21726,6 +21813,14 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
             if not items:
                 continue
             current = items[selected]
+            if panel == "workflows" and key in ("\n", "\r", curses.KEY_ENTER, "c", "C"):
+                message = workflow_panel_run_action(state, current, "continue")
+                detail_scroll = 0
+                continue
+            if panel == "workflows" and key in ("x", "X"):
+                message = workflow_panel_run_action(state, current, "cancel")
+                detail_scroll = 0
+                continue
             if panel == "approvals" and key in ("\n", "\r", curses.KEY_ENTER):
                 if set_pending_approval_interaction(state, current.payload):
                     state.last_error = "已在底部打开审批单选：↑/↓ 选择，Enter 执行。"

@@ -9180,6 +9180,109 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.normalize_subagent_skill_refs(skilled.skill_refs) == [], skilled.skill_refs
 
 
+def assert_workflow_run_panel_contract() -> None:
+    root = tempfile.mkdtemp(prefix="ga_tui_workflow_panel_")
+    retarget_harness(root)
+    plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
+    workflow_dir = plugin_root / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    workflow_dir.joinpath("compare-sources.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.workflow.v1",
+                "id": "compare-sources",
+                "name": "Compare Sources",
+                "steps": [
+                    {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                    {
+                        "id": "review",
+                        "type": "agent_task",
+                        "agent": "plugin://research-pack/agents/evidence-researcher",
+                        "depends_on": ["plan"],
+                        "prompt": "Review.",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    plugin_root.joinpath("plugin.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "shuheng.plugin.v1",
+                "id": "research-pack",
+                "name": "Research Pack",
+                "contributes": {
+                    "workflows": [
+                        {
+                            "id": "compare-sources",
+                            "name": "Compare Sources",
+                            "path": "workflows/compare-sources.json",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = a.State(agent=SequencedFakeAgent([]))
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    workflow_source = Path(a.workflow_helpers.__file__).read_text(encoding="utf-8")
+    assert "workflow_run_panel_items" in app_source and "workflow_panel_run_action" in app_source, app_source
+    assert "continue_workflow_run_v0(run_id, state=state)" in app_source, app_source
+    assert 'cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")' in app_source, app_source
+    assert "latest_workflow_run_rows" in workflow_source and "workflow_run_step_counts" in workflow_source, workflow_source
+    assert "PanelItem" not in workflow_source and "curses" not in workflow_source, workflow_source
+
+    workflow_ref = "plugin://research-pack/workflows/compare-sources"
+    result = a.workflow_load_result_for_ref(workflow_ref, a.user_plugin_registry(force=True))
+    assert result.definition is not None, result
+    row, message = a.create_workflow_run_v0(
+        result,
+        state=None,
+        source_command="/workflow run research-pack/compare-sources",
+    )
+    assert row is not None, message
+    run_id = row["run_id"]
+    task_rows_before = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    progress_rows_before = len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH))
+    approval_rows_before = len(a.read_jsonl(a.AGENT_APPROVALS_PATH))
+    artifact_rows_before = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
+
+    panel_items = a.workflow_panel_items()
+    definition_item = next(item for item in panel_items if item.key == workflow_ref)
+    run_item = next(item for item in panel_items if item.key == f"workflow-run:{run_id}")
+    assert definition_item.payload["item_type"] == "workflow_definition", definition_item
+    assert run_item.payload["item_type"] == "workflow_run", run_item
+    assert run_item.payload["run_id"] == run_id, run_item
+    assert run_item.payload["workflow_ref"] == workflow_ref, run_item
+    assert run_item.payload["history_rows"] == 2, run_item
+    assert run_item.payload["steps_completed"] == 1, run_item
+    assert "Panel actions:" in run_item.detail and f"/workflow continue {run_id}" in run_item.detail, run_item.detail
+    assert f"Workflow run: {run_id}" in run_item.detail and "2:review" in run_item.detail, run_item.detail
+
+    workflow_rows_before_noop = len(a.workflow_run_records())
+    noop_message = a.workflow_panel_run_action(state, definition_item, "continue")
+    assert "只读预览" in noop_message, noop_message
+    assert len(a.workflow_run_records()) == workflow_rows_before_noop, a.workflow_run_records()
+
+    cancel_message = a.workflow_panel_run_action(state, run_item, "cancel")
+    assert "Workflow run cancelled:" in cancel_message, cancel_message
+    workflow_rows_after_cancel = a.workflow_run_records()
+    assert len(workflow_rows_after_cancel) == workflow_rows_before_noop + 1, workflow_rows_after_cancel
+    assert workflow_rows_after_cancel[-1]["run_id"] == run_id, workflow_rows_after_cancel[-1]
+    assert workflow_rows_after_cancel[-1]["status"] == "cancelled", workflow_rows_after_cancel[-1]
+    assert workflow_rows_after_cancel[-1]["error"] == "cancelled from workflow panel", workflow_rows_after_cancel[-1]
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_rows_before
+    assert len(a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)) == progress_rows_before
+    assert len(a.read_jsonl(a.AGENT_APPROVALS_PATH)) == approval_rows_before
+    assert len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)) == artifact_rows_before
+
+    continue_message = a.workflow_panel_run_action(state, run_item, "continue")
+    assert "Workflow run already terminal:" in continue_message, continue_message
+    assert len(a.workflow_run_records()) == workflow_rows_before_noop + 1, a.workflow_run_records()
+
+
 def assert_workflow_run_last_generated_draft_contract() -> None:
     root = tempfile.mkdtemp(prefix="ga_tui_workflow_run_last_")
     retarget_harness(root)
@@ -10677,6 +10780,7 @@ def run_checks() -> None:
     assert_agent_create_respects_explicit_lifecycle_and_reuse_policy()
     assert_subagent_dedicated_skills_are_agent_scoped()
     assert_declarative_plugins_are_agent_scoped()
+    assert_workflow_run_panel_contract()
     assert_workflow_run_last_generated_draft_contract()
     assert_persistent_agent_dashboard_home_pages()
     assert_temp_subagent_current_fallback_is_reloadable()

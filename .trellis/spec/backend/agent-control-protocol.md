@@ -2922,6 +2922,90 @@ build_workflow_run_record(...) -> returns a planned workflow run row with pendin
 /workflow show wfr_123 -> reads workflow_runs.jsonl and renders the latest row plus history count without side effects
 ```
 
+## Scenario: Workflow Run Panel V1
+
+### 1. Scope / Trigger
+
+- Trigger: Users enter `/workflows` and need to inspect both workflow definitions and active/completed workflow runs from the TUI panel instead of command output only.
+- Applies to: `/workflows`, `open_harness_panel(..., "workflows")`, `PanelItem`, `app.workflow_panel_items(...)`, `app.workflow_run_panel_items(...)`, `app.workflow_panel_run_action(...)`, `workflow_runs.jsonl`, `workflows.latest_workflow_run_rows(...)`, `workflows.workflow_run_step_counts(...)`, `workflows.workflow_run_stop_reason(...)`, `workflows.format_workflow_run_detail(...)`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Non-goal: The panel does not create a new workflow executor, edit workflow definitions, visualize a graph canvas, prompt for custom cancel reasons, retry/timeout/schedule runs, auto-approve approvals, dispatch Secret Vault work, execute plugin code, call tools/providers directly, or expose A2A/MCP workflow services.
+
+### 2. Signatures
+
+- Panel entry command:
+  - `/workflows`
+- Definition rows:
+  - `PanelItem.payload.item_type = "workflow_definition"` for valid workflow definition rows.
+- Run rows:
+  - `PanelItem.key = "workflow-run:<run_id>"`
+  - `PanelItem.payload.item_type = "workflow_run"`
+  - `PanelItem.payload.run_id`
+  - `PanelItem.payload.workflow_ref`
+  - `PanelItem.payload.status`
+  - `PanelItem.payload.history_rows`
+  - `PanelItem.payload.steps_completed`
+  - `PanelItem.payload.steps_total`
+- Panel action helper:
+  - `app.workflow_panel_run_action(state, item, "continue"|"resume"|"cancel") -> str`
+- Pure run projection helpers:
+  - `workflows.latest_workflow_run_rows(rows)`
+  - `workflows.workflow_run_step_counts(row)`
+  - `workflows.workflow_run_stop_reason(row)`
+
+### 3. Contracts
+
+- `/workflows` must keep using the existing harness panel browser route.
+- `workflow_panel_items()` must include manifest-backed workflow definition rows and latest workflow run rows from `workflow_runs.jsonl`.
+- Run rows must be latest-row projections grouped by `run_id` in recent-first ledger order.
+- Run row list text must show run id, latest status, workflow ref, completed/total step count, and update timestamp when present.
+- Run row detail must reuse `format_workflow_run_detail(...)` so it shows history rows, workflow ref, timestamps, execution counters, approval metadata, per-step status, task ids, approval ids, agent ids, artifact refs, and errors.
+- Pressing Enter or `c` on a run row may call only `continue_workflow_run_v0(run_id, state=state)`.
+- Pressing `x` on a run row may call only `cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")`.
+- Pressing run action keys on definition, issue, or empty rows must be a visible no-op and append no workflow run row.
+- Refreshing the workflow panel may clear the plugin registry cache and reread workflow ledgers, but must not advance, cancel, dispatch, approve, reject, or mutate task/progress/approval/artifact ledgers.
+- `workflows.py` remains pure. The new projection helpers may read dictionaries passed to them, but must not import app/runtime/UI/governance owners, append JSONL rows, queue approvals, dispatch subagents, or call tools/providers.
+
+### 4. Validation & Error Matrix
+
+- No workflow definitions and no workflow runs -> existing no-workflows empty row.
+- Valid definitions and no runs -> definition rows only, read-only action no-op.
+- Existing workflow run rows -> latest run rows are included after definition/issue rows.
+- Multiple rows for the same run id -> exactly one panel row for that run id, with `history_rows` equal to the append-only row count.
+- Run with artifact refs -> detail includes top-level and per-step artifact refs.
+- Enter/c on a definition row -> no workflow row append and no side-effect ledgers changed.
+- x on a non-terminal run row -> append at most one cancelled workflow row through the existing cancel helper.
+- Enter/c on a terminal run row -> existing continue helper reports already terminal/completed and appends no row.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `/workflows` shows `Run · wfr_...` with `waiting_task · steps:1/3 · plugin://...` and a detail pane containing the subagent `task_id`.
+- Good: Pressing `x` on a blocked run appends one `cancelled` workflow row and leaves task/progress/approval/artifact ledgers untouched.
+- Good: Pressing Enter on a run waiting for an already completed task delegates to `continue_workflow_run_v0(...)`, which owns artifact-copy and runner-v0 continuation semantics.
+- Base: The panel remains a text/list browser; richer graph visualization can reuse the same run projections later.
+- Bad: The panel directly mutates step statuses or appends workflow rows without `continue_workflow_run_v0(...)` / `cancel_workflow_run_v0(...)`.
+- Bad: The panel starts a subagent, creates an approval, or interprets a workflow condition itself.
+- Bad: `workflows.py` imports `PanelItem`, curses, `State`, `app.py`, or ledger/runtime owners.
+
+### 6. Tests Required
+
+- `tests/test_workflows.py` must assert workflow panel items include definition rows plus run rows, run payload shape, history row count, detail content, artifact refs, read-only no-op on definition rows, cancel delegation, and already-terminal continue no-op after cancellation.
+- `scripts/check_policy_gates.py` must assert `/workflows` panel route exposes run rows after `/workflow run`, panel run actions delegate to existing helpers, definition-row actions are no-op, cancel appends at most one row through the existing helper, and `workflows.py` remains side-effect-free.
+- Keep targeted compile/Ruff, `tests/test_workflows.py`, `python3 scripts/check_policy_gates.py`, full pytest, build/wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` green.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+/workflows panel x -> manually sets row["status"]="cancelled" and writes workflow_runs.jsonl
+```
+
+#### Correct
+
+```text
+/workflows panel x -> workflow_panel_run_action(...) -> cancel_workflow_run_v0(run_id, reason="cancelled from workflow panel")
+```
+
 ## Scenario: Workflow Continue Command
 
 ### 1. Scope / Trigger

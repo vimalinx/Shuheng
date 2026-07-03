@@ -943,6 +943,105 @@ def test_workflow_run_inspection_formatters_show_latest_rows(tmp_path: Path) -> 
     assert "Workflow run not found: missing-run" in missing
 
 
+def test_workflow_panel_items_include_run_rows_and_delegate_actions(tmp_path: Path, monkeypatch) -> None:
+    plugin_root = tmp_path / "plugins"
+    configure_app_workflow_harness(tmp_path, monkeypatch, plugin_root)
+    create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [
+                {"id": "plan", "type": "prompt", "prompt": "Plan."},
+                {
+                    "id": "review",
+                    "type": "agent_task",
+                    "agent": "plugin://research-pack/agents/evidence-researcher",
+                    "depends_on": ["plan"],
+                    "prompt": "Review.",
+                },
+            ],
+        },
+    )
+    state = app_module.State(agent=SequencedWorkflowAgent([]))
+    result = app_module.workflow_load_result_for_ref(
+        "research-pack/compare-sources",
+        app_module.user_plugin_registry(force=True),
+    )
+    row, message = app_module.create_workflow_run_v0(
+        result,
+        state=None,
+        source_command="/workflow run research-pack/compare-sources",
+    )
+    assert row is not None, message
+    run_id = row["run_id"]
+
+    items = app_module.workflow_panel_items()
+    definition_item = next(item for item in items if item.key == "plugin://research-pack/workflows/compare-sources")
+    run_item = next(item for item in items if item.key == f"workflow-run:{run_id}")
+
+    assert definition_item.payload["item_type"] == "workflow_definition"
+    assert run_item.payload["item_type"] == "workflow_run"
+    assert run_item.payload["run_id"] == run_id
+    assert run_item.payload["workflow_ref"] == "plugin://research-pack/workflows/compare-sources"
+    assert run_item.payload["status"] == "blocked"
+    assert run_item.payload["history_rows"] == 2
+    assert "Workflow run: " + run_id in run_item.detail
+    assert "history_rows: 2" in run_item.detail
+    assert "2:review" in run_item.detail
+    assert "Panel actions:" in run_item.detail
+    assert f"/workflow continue {run_id}" in run_item.detail
+
+    rows_before_definition_action = len(app_module.workflow_run_records())
+    definition_action = app_module.workflow_panel_run_action(state, definition_item, "continue")
+    assert "只读预览" in definition_action
+    assert len(app_module.workflow_run_records()) == rows_before_definition_action
+
+    cancel_message = app_module.workflow_panel_run_action(state, run_item, "cancel")
+    assert "Workflow run cancelled:" in cancel_message
+    rows_after_cancel = app_module.workflow_run_records()
+    assert len(rows_after_cancel) == rows_before_definition_action + 1
+    assert rows_after_cancel[-1]["run_id"] == run_id
+    assert rows_after_cancel[-1]["status"] == "cancelled"
+    assert rows_after_cancel[-1]["error"] == "cancelled from workflow panel"
+
+    continue_message = app_module.workflow_panel_run_action(state, run_item, "continue")
+    assert "Workflow run already terminal:" in continue_message
+    assert len(app_module.workflow_run_records()) == rows_before_definition_action + 1
+
+
+def test_workflow_run_detail_includes_artifact_refs(tmp_path: Path) -> None:
+    registry, _workflow_path = create_workflow_plugin(
+        tmp_path,
+        {
+            "schema_version": "shuheng.workflow.v1",
+            "id": "compare-sources",
+            "steps": [{"id": "plan", "type": "prompt", "prompt": "Plan."}],
+        },
+    )
+    result = workflows.workflow_load_result_for_ref("research-pack/compare-sources", registry)
+    built = workflows.build_workflow_run_record(
+        result,
+        run_id="wfr-artifacts",
+        timestamp="2026-07-03T00:00:00+0800",
+    )
+    assert built.record is not None
+    row = dict(built.record)
+    row["artifact_refs"] = ["artifact://run/report.md"]
+    row["steps"] = [
+        {
+            **row["steps"][0],
+            "status": "completed",
+            "artifact_refs": ["artifact://step/report.md"],
+        }
+    ]
+    detail = workflows.format_workflow_run_detail("wfr-artifacts", [built.record, row])
+
+    assert "artifact_refs:" in detail
+    assert "artifact://run/report.md" in detail
+    assert "artifact_refs=artifact://step/report.md" in detail
+
+
 def test_workflow_continue_formatters_detect_meaningful_transitions(tmp_path: Path) -> None:
     registry, _workflow_path = create_workflow_plugin(
         tmp_path,

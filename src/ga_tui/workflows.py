@@ -1674,7 +1674,7 @@ def _workflow_run_id(row: dict[str, Any]) -> str:
     return str(row.get("run_id") or "").strip()
 
 
-def _latest_workflow_run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def latest_workflow_run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     order: dict[str, int] = {}
     for index, row in enumerate(rows):
@@ -1689,7 +1689,11 @@ def _latest_workflow_run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     ]
 
 
-def _workflow_run_step_counts(row: dict[str, Any]) -> tuple[int, int]:
+def _latest_workflow_run_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return latest_workflow_run_rows(rows)
+
+
+def workflow_run_step_counts(row: dict[str, Any]) -> tuple[int, int]:
     steps = row.get("steps") if isinstance(row.get("steps"), list) else []
     total = len([step for step in steps if isinstance(step, dict)])
     completed = len([
@@ -1699,13 +1703,21 @@ def _workflow_run_step_counts(row: dict[str, Any]) -> tuple[int, int]:
     return completed, total
 
 
-def _workflow_run_stop_reason(row: dict[str, Any]) -> str:
+def _workflow_run_step_counts(row: dict[str, Any]) -> tuple[int, int]:
+    return workflow_run_step_counts(row)
+
+
+def workflow_run_stop_reason(row: dict[str, Any]) -> str:
     execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
     return str(execution.get("blocked_reason") or row.get("error") or "").strip()
 
 
+def _workflow_run_stop_reason(row: dict[str, Any]) -> str:
+    return workflow_run_stop_reason(row)
+
+
 def format_workflow_runs(rows: list[dict[str, Any]], *, limit: int = 20) -> str:
-    latest_rows = _latest_workflow_run_rows(rows)
+    latest_rows = latest_workflow_run_rows(rows)
     if not latest_rows:
         return "\n".join([
             "Workflow runs:",
@@ -1715,14 +1727,14 @@ def format_workflow_runs(rows: list[dict[str, Any]], *, limit: int = 20) -> str:
     lines = ["Workflow runs:"]
     for row in latest_rows[: max(1, limit)]:
         run_id = _workflow_run_id(row) or "(missing)"
-        completed, total = _workflow_run_step_counts(row)
+        completed, total = workflow_run_step_counts(row)
         status = str(row.get("status") or "unknown")
         workflow_ref = str(row.get("workflow_ref") or "-")
         updated_at = str(row.get("updated_at") or row.get("timestamp") or "")
         detail = f"- {run_id} - {status} - {workflow_ref} - steps:{completed}/{total}"
         if updated_at:
             detail += f" - updated:{updated_at}"
-        reason = _workflow_run_stop_reason(row)
+        reason = workflow_run_stop_reason(row)
         if reason:
             detail += f" - stop:{reason}"
         lines.append(detail)
@@ -1740,7 +1752,7 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
     if not history:
         return f"Workflow run not found: {target}"
     row = history[-1]
-    completed, total = _workflow_run_step_counts(row)
+    completed, total = workflow_run_step_counts(row)
     execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
     approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
     lines = [
@@ -1773,6 +1785,10 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
     reason = _workflow_run_stop_reason(row)
     if reason:
         lines.append(f"stop_reason: {reason}")
+    artifact_refs = _unique_strings(row.get("artifact_refs"))
+    if artifact_refs:
+        lines.append("artifact_refs:")
+        lines.extend(f"- {ref}" for ref in artifact_refs)
     lines.append("steps:")
     steps = row.get("steps") if isinstance(row.get("steps"), list) else []
     if not steps:
@@ -1796,6 +1812,9 @@ def format_workflow_run_detail(run_id: str, rows: list[dict[str, Any]]) -> str:
                 pieces.append(f"agent_id={step.get('agent_id')}")
             if step.get("approval_id"):
                 pieces.append(f"approval_id={step.get('approval_id')}")
+            step_artifact_refs = _unique_strings(step.get("artifact_refs"))
+            if step_artifact_refs:
+                pieces.append("artifact_refs=" + ",".join(step_artifact_refs))
             if step.get("error"):
                 pieces.append(f"error={step.get('error')}")
             lines.append(" | ".join(pieces))
