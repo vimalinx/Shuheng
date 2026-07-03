@@ -1167,3 +1167,36 @@ Added bounded /workflow continue and /workflow resume commands that resume from 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: Add workflow approval bridge
+
+**Date**: 2026-07-03
+**Task**: Add workflow approval bridge
+**Branch**: `main`
+
+### Summary
+
+Implemented workflow approval bridge: runner-v0 approval steps now create workflow_step_approval rows through the existing approval ledger, attach approval ids to workflow run metadata and step snapshots, wait while pending, continue only after /approve, reject terminally after /reject, and bridge legacy waiting_approval rows without approval ids. Added backend spec, workflow tests, and policy gate coverage; all quality gates passed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff2835c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
