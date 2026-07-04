@@ -19,7 +19,7 @@
 - Distribution name in `pyproject.toml`: `shuheng`.
 - Current control schema and hidden block: `shuheng-control.v2` and `<shuheng-control>...</shuheng-control>`.
 - Current OMP proposal type for governed controls: `proposal_type:"shuheng_control"`.
-- Canonical environment variables use `SHUHENG_*`; the optional legacy provider root override is `GENERICAGENT_ROOT`.
+- Canonical environment variables use `SHUHENG_*`; the optional legacy-provider checkout override is `GENERICAGENT_ROOT`.
 
 ### 3. Contracts
 
@@ -5465,7 +5465,7 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert `shuheng_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
 - Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
-- Tests must assert the OMP runtime adapter subprocess `cwd` is the Shuheng app root, not the legacy GenericAgent root.
+- Tests must assert the OMP runtime adapter subprocess `cwd` is the Shuheng app root, not a legacy-provider checkout.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert PAAS v4 OpenAI-compatible bases such as `https://open.bigmodel.cn/api/coding/paas/v4` do not inherit Anthropic `/v1/messages` routing from a historical `native_claude_config_*` variable name.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
@@ -5992,7 +5992,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 ### 3. Contracts
 
 - Physical archival must not remove a known sidebar row when TUI metadata still knows the session.
-- `GENERICAGENT_ROOT` remains only an optional legacy runtime/source discovery root, not a Shuheng state root or core startup requirement.
+- `GENERICAGENT_ROOT` remains only an optional legacy-provider checkout path, not a Shuheng state root or core startup requirement.
 - Missing-source rows may use metadata preview, description, rounds, last-user timestamp, and display name to remain visible.
 - Missing-source rows must not pretend to be normal raw sessions.
 - New main-agent sessions must bind their agent/client/backend log path to the Shuheng-owned `MODEL_RESPONSES_DIR` before runtime work starts.
@@ -6395,7 +6395,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 - The OMP plugin must not read or write Shuheng JSONL stores directly.
 - The OMP plugin must not call `queue_approval`, `queue_curated_memory_candidate`, scheduler helpers, or artifact writers itself; only Python Shuheng code owns those operations.
 - Bridge metadata must report owner `shuheng.control_plane`, supported actions, relevant paths, and policy fields showing provider direct writes are disabled.
-- Bridge metadata paths must distinguish `app_root_dir` from optional `legacy_genericagent_root`; it must not expose a generic `root_dir` that can be mistaken for the Shuheng core root.
+- Bridge metadata paths must distinguish `app_root_dir` from optional `genericagent_legacy_provider_checkout`; it must not expose a generic `root_dir` that can be mistaken for the Shuheng core root.
 
 ### 4. Validation & Error Matrix
 
@@ -6422,7 +6422,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"shuheng.agent_bridge.v1"`, owner `shuheng.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
-- Tests must assert bridge metadata includes `app_root_dir` and `legacy_genericagent_root` and does not expose ambiguous `root_dir`.
+- Tests must assert bridge metadata includes `app_root_dir` and `genericagent_legacy_provider_checkout` and does not expose ambiguous `root_dir`.
 - Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `shuheng.query.v1` response with `context_pack_ref`.
 - Tests must assert bridge `memory_candidate_submit` queues a `shuheng.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
 - Tests must assert unknown bridge actions return a structured bridge error.

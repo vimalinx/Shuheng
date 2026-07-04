@@ -71,7 +71,7 @@ def find_genericagent_root(start: str | os.PathLike[str] | None = None) -> Path:
     root = maybe_find_genericagent_root(start)
     if root is not None:
         return root
-    raise RuntimeError("GenericAgent legacy-provider root not found; set GENERICAGENT_ROOT=/path/to/GenericAgent")
+    raise RuntimeError("GenericAgent legacy-provider checkout not found; set GENERICAGENT_ROOT=/path/to/GenericAgent")
 
 
 def is_genericagent_legacy_provider_root(root: Path) -> bool:
@@ -94,7 +94,7 @@ def validate_legacy_provider_root(root: Path) -> list[str]:
 
     failures: list[str] = []
     if not is_genericagent_legacy_provider_root(root):
-        failures.append(f"{root} does not look like a GenericAgent legacy-provider root")
+        failures.append(f"{root} does not look like a GenericAgent legacy-provider checkout")
         return failures
     for name in REQUIRED_FRONTEND_FILES:
         if not (root / "frontends" / name).is_file():
@@ -208,7 +208,7 @@ def _print_report(root: Path | None, failures: Iterable[str]) -> int:
         print("GenericAgent legacy provider: unavailable (optional)")
         print("Status: OK")
         return 0
-    print(f"GenericAgent legacy provider root: {root}")
+    print(f"GenericAgent legacy provider checkout: {root}")
     if failures:
         print("Status: FAIL")
         for failure in failures:
@@ -221,7 +221,7 @@ def _print_report(root: Path | None, failures: Iterable[str]) -> int:
 
 def doctor_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate Shuheng core integration")
-    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider root")
+    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider checkout path")
     args = parser.parse_args(argv)
     if args.root:
         root = Path(args.root).expanduser().resolve()
@@ -232,7 +232,7 @@ def doctor_main(argv: list[str] | None = None) -> int:
 
 def install_core_shim_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install an external Shuheng launcher shim")
-    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider root; defaults to auto-discovery")
+    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider checkout path; defaults to auto-discovery")
     parser.add_argument(
         "--target",
         choices=("tuiapp-curses", "tuiapp"),

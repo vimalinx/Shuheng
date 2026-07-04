@@ -3348,7 +3348,7 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert "已退出枢衡" in app_source, app_source
     assert "确认退出枢衡" in app_source, app_source
     issue_template = Path(ROOT, ".github/ISSUE_TEMPLATE/bug_report.md").read_text(encoding="utf-8")
-    assert "Optional GenericAgent legacy-provider root configured" in issue_template, issue_template
+    assert "Optional GenericAgent legacy-provider checkout configured" in issue_template, issue_template
     assert ("GenericAgent " + "root available") not in issue_template, issue_template
     integration_source = Path(integ.__file__).read_text(encoding="utf-8")
     assert ("def validate" + "_core(") not in integration_source, integration_source
@@ -3356,6 +3356,9 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert ("def is_genericagent" + "_root(") not in integration_source, integration_source
     assert ("does not look like a GenericAgent " + "root") not in integration_source, integration_source
     assert ("GenericAgent " + "root not found") not in integration_source, integration_source
+    assert ("GenericAgent legacy provider " + "root:") not in integration_source, integration_source
+    assert ("legacy-provider " + "root") not in integration_source, integration_source
+    assert "GenericAgent legacy provider checkout:" in integration_source, integration_source
     assert "validate_legacy_provider_root(" in integration_source, integration_source
 
 
@@ -5815,8 +5818,9 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert "memory_context_get" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
     assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
-    assert metadata["paths"]["legacy_genericagent_root"] == a.GENERICAGENT_ROOT, metadata
+    assert metadata["paths"]["genericagent_legacy_provider_checkout"] == a.GENERICAGENT_ROOT, metadata
     assert "root_dir" not in metadata["paths"], metadata
+    assert ("legacy_genericagent_" + "root") not in metadata["paths"], metadata
     assert metadata["paths"]["shuheng_home"] == a.SHUHENG_HOME, metadata
     assert metadata["paths"]["shuheng_memory_dir"] == a.SHUHENG_MEMORY_DIR, metadata
     assert metadata["paths"]["harness_dir"] == a.AGENT_HARNESS_DIR, metadata

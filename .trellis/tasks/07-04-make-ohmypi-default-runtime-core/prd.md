@@ -7,30 +7,30 @@ Make Shuheng treat OhMyPi / OMP as the normal core runtime and GenericAgent as a
 ## What I Already Know
 
 * The user explicitly corrected the architecture: OhMyPi is the core runtime; GenericAgent is not the root of Shuheng.
-* `src/ga_tui/app.py` currently resolves `ROOT_DIR = find_genericagent_root()` at module import time, mutates `sys.path`, and imports `agentmain`, `GenericAgent`, `agent_loop`, and `continue_cmd` directly.
-* `src/ga_tui/integration.py` currently treats `agentmain.py`, `ga.py`, and `frontends/continue_cmd.py` as the integration core.
-* `RuntimeRegistry` already defaults to `ohmypi` in parts of the app, but the module-level GenericAgent bootstrap can still fail before provider selection matters.
-* Existing docs and release hygiene still describe Shuheng as an external GenericAgent TUI layer or require a GenericAgent root for checks.
+* `src/shuheng/app.py` must stay importable without an optional GenericAgent legacy-provider checkout.
+* `src/shuheng/integration.py` must treat OhMyPi / OMP and Shuheng package health as core checks, with GenericAgent checks isolated to optional legacy-provider diagnostics.
+* `RuntimeRegistry` defaults to `ohmypi`; provider selection must not depend on optional legacy-provider import success.
+* Active docs, release hygiene, doctor output, and task guidance must describe Shuheng as the owned control plane, not as an external layer over GenericAgent.
 
 ## Requirements
 
 * Shuheng imports and CLI help must work without a GenericAgent checkout.
 * The default runtime provider must be `ohmypi`.
 * The OMP provider must register independently of GenericAgent.
-* The GenericAgent provider must be optional: available only when a valid GenericAgent root and imports are present, or explicitly used for legacy compatibility.
-* `shuheng-check` and `ga_tui.integration doctor` must distinguish Shuheng core / OhMyPi provider checks from optional GenericAgent legacy provider checks.
+* The GenericAgent provider must be optional: available only when a valid GenericAgent legacy-provider checkout and imports are present, or explicitly used for legacy compatibility.
+* `shuheng-check` and `python3 -m shuheng.integration doctor` must distinguish Shuheng core / OhMyPi provider checks from optional GenericAgent legacy-provider checks.
 * Missing GenericAgent must not be a global failure for normal Shuheng operation.
-* GenericAgent launcher shim installation may still require a valid GenericAgent root.
+* GenericAgent launcher shim installation may still require a valid GenericAgent legacy-provider checkout.
 * Documentation, executable policy gates, and Trellis spec must state the new source of truth.
 
 ## Acceptance Criteria
 
-* [x] `python3 -c "import ga_tui.app"` succeeds when GenericAgent auto-discovery is disabled or absent.
-* [x] `python3 -m ga_tui --help` succeeds without requiring GenericAgent.
+* [x] `python3 -c "import shuheng.app"` succeeds when GenericAgent auto-discovery is disabled or absent.
+* [x] `python3 -m shuheng --help` succeeds without requiring GenericAgent.
 * [x] `shuheng --help` succeeds without requiring GenericAgent.
 * [x] Runtime registry reports `ohmypi` as the default provider.
 * [x] Missing GenericAgent is reported as an unavailable optional legacy provider, not as a failed Shuheng core.
-* [x] GenericAgent provider still works when a valid root is configured.
+* [x] GenericAgent provider still works when a valid legacy-provider checkout is configured.
 * [x] Policy gates prevent reintroducing module-import hard dependency on GenericAgent.
 * [x] README / docs / spec no longer describe GenericAgent as Shuheng's root runtime.
 
@@ -51,7 +51,7 @@ Context: GenericAgent was historical bootstrap infrastructure, but OhMyPi is the
 
 Decision: Shuheng owns the control plane and defaults to OMP. GenericAgent remains an optional legacy compatibility provider and shim target.
 
-Consequences: Some legacy helper names may remain internally for compatibility, but active docs, checks, and provider metadata must not imply that GenericAgent is required for normal Shuheng.
+Consequences: Legacy compatibility code may remain only inside isolated provider, shim, migration, or quarantine boundaries, but active docs, checks, and provider metadata must not imply that GenericAgent is required for normal Shuheng.
 
 ## Out of Scope
 
@@ -62,15 +62,15 @@ Consequences: Some legacy helper names may remain internally for compatibility, 
 
 ## Technical Notes
 
-* Key files: `src/ga_tui/app.py`, `src/ga_tui/integration.py`, `src/ga_tui/runtime.py`, `src/ga_tui/genericagent_provider.py`, `src/ga_tui/ohmypi_provider.py`.
+* Key files: `src/shuheng/app.py`, `src/shuheng/integration.py`, `src/shuheng/runtime.py`, `src/shuheng/genericagent_provider.py`, `src/shuheng/ohmypi_provider.py`.
 * Regression gates: `scripts/check_policy_gates.py`, release hygiene tests, CLI/import tests, runtime dispatch tests.
 * Docs/spec candidates: `README.md`, `README.en.md`, `docs/public-alpha-readiness.md`, `docs/runtime-provider-control-plane.md`, `.trellis/spec/backend/agent-control-protocol.md`.
 
 ## Completion Notes
 
 * Shuheng now registers OMP as the independent default runtime core and registers the GenericAgent provider only when the optional legacy checkout/imports are available.
-* Missing GenericAgent is a healthy OMP-core state: `shuheng-check` and `ga_tui.integration doctor` report the legacy provider as optional rather than failing Shuheng core checks.
+* Missing GenericAgent is a healthy OMP-core state: `shuheng-check` and `python3 -m shuheng.integration doctor` report the legacy provider as optional rather than failing Shuheng core checks.
 * `app.py` uses Shuheng-owned history/session-name fallback helpers when GenericAgent frontends are unavailable.
 * Active user-facing docs, prompts, doctor output, release readiness text, and policy gates now state that GenericAgent is an optional legacy provider/shim target, not Shuheng's root runtime.
 * Architecture baseline comparison: this moves closer to `docs/agent-harness-architecture.md` by strengthening a single Shuheng Orchestrator/control plane, making runtime providers bounded adapters, and preserving policy/ledger/memory ownership in Shuheng.
-* Remaining gaps: `app.py` is still a large composition module, internal `ga_tui`/GA-TUI compatibility schema names remain for migration stability, and A2A/MCP remain compatibility surfaces rather than certified external conformance.
+* Remaining gaps: `app.py` is still a large composition module, retired naming is limited to quarantined historical cleanup and executable absence gates, and A2A/MCP remain compatibility surfaces rather than certified external conformance.
