@@ -13,6 +13,12 @@ from typing import Any, Optional
 
 RETIRED_TUI_CONTROL_RE = re.compile(r"(?<!`)<ga[-_]tui>\s*([\s\S]*?)\s*</ga[-_]tui>", re.IGNORECASE)
 RETIRED_TUI_CONTROL_FENCE_RE = re.compile(r"```ga[-_]tui\s*([\s\S]*?)```", re.IGNORECASE)
+RETIRED_TUI_CONTROL_HINT_BLOCK_RE = re.compile(
+    r"\n?\[(?:GenericAgent[- ]TUI session control|GenericAgent[- ]TUI ga[-_]control v2)\]"
+    r"[\s\S]*?\[/(?:GenericAgent[- ]TUI session control|GenericAgent[- ]TUI ga[-_]control v2)\]\s*",
+    re.IGNORECASE,
+)
+RETIRED_SECRET_VAULT_SENTINELS = (b"GenericAgent" + b"-TUI Secret Vault v1",)
 HISTORICAL_SUBAGENT_BACKFILL_WINDOW_SECONDS = 2 * 60 * 60
 
 

@@ -7,14 +7,15 @@ in app-layer callbacks injected at configuration time.
 from __future__ import annotations
 
 import copy
-import re
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
 try:
+    from .compat_legacy import RETIRED_TUI_CONTROL_HINT_BLOCK_RE
     from .runtime import RuntimeAdapter
 except Exception:
+    from compat_legacy import RETIRED_TUI_CONTROL_HINT_BLOCK_RE  # type: ignore
     from runtime import RuntimeAdapter  # type: ignore
 
 
@@ -82,23 +83,6 @@ TUI_AGENT_CONTROL_HINT = """
 [/Shuheng shuheng-control v2]
 """
 TUI_CONTROL_HINT_MARKER = "[Shuheng shuheng-control v2]"
-LEGACY_TUI_IDENTITY = "GenericAgent" + "-TUI"
-LEGACY_TUI_SESSION_CONTROL_MARKER = f"{LEGACY_TUI_IDENTITY} session control"
-LEGACY_TUI_SHUHENG_CONTROL_MARKER = f"{LEGACY_TUI_IDENTITY} " + "ga" + "-control v2"
-LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN = "|".join(
-    re.escape(marker)
-    for marker in (
-        LEGACY_TUI_SESSION_CONTROL_MARKER,
-        LEGACY_TUI_SHUHENG_CONTROL_MARKER,
-    )
-)
-# Keep historical injected control-hint blocks removable without exposing their
-# old product identity in the active Shuheng prompt.
-LEGACY_TUI_CONTROL_HINT_BLOCK_RE = re.compile(
-    rf"\n?\[(?:{LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN})\]"
-    rf"[\s\S]*?\[/(?:{LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN})\]\s*",
-    re.IGNORECASE,
-)
 TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -449,7 +433,7 @@ def install_tui_control_hint(agent: Any) -> None:
             continue
         try:
             extra = str(getattr(backend, "extra_sys_prompt", "") or "")
-            extra = LEGACY_TUI_CONTROL_HINT_BLOCK_RE.sub("", extra)
+            extra = RETIRED_TUI_CONTROL_HINT_BLOCK_RE.sub("", extra)
             if TUI_CONTROL_HINT_MARKER not in extra:
                 extra = extra.rstrip() + TUI_AGENT_CONTROL_HINT
             setattr(backend, "extra_sys_prompt", extra)
@@ -484,7 +468,6 @@ class GenericAgentRuntimeAdapter(RuntimeAdapter):
 __all__ = [
     "GenericAgentProviderRuntimeConfig",
     "GenericAgentRuntimeAdapter",
-    "LEGACY_TUI_CONTROL_HINT_BLOCK_RE",
     "TUI_AGENT_CONTROL_HINT",
     "TUI_CONTROL_HINT_MARKER",
     "TUI_QUERY_TOOL_NAMES",

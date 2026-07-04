@@ -29,8 +29,6 @@ REQUIRED_CONTINUE_FUNCS = (
 )
 
 GENERICAGENT_DISABLE_ENV = ("SHUHENG_DISABLE_GENERICAGENT",)
-LEGACY_TUI_REPO_BASENAME = "GenericAgent" + "-TUI"
-LEGACY_EXTERNAL_LAUNCHER_MARKER = f"Generated {LEGACY_TUI_REPO_BASENAME} external launcher"
 
 
 def tui_repo_root() -> Path:
@@ -146,18 +144,13 @@ def generated_core_shim(tui_root: Path | None = None) -> str:
             return Path(__file__).resolve().parents[1]
 
 
-        _LEGACY_TUI_REPO_BASENAME = "GenericAgent" + "-TUI"
-
-
         def _candidate_roots():
             env_repo = os.environ.get("SHUHENG_REPO")
             if env_repo:
                 yield Path(env_repo).expanduser()
             yield Path({repo_s!r})
             yield _genericagent_root().parent / "Shuheng"
-            yield _genericagent_root().parent / _LEGACY_TUI_REPO_BASENAME
             yield Path.home() / "Programs" / "Shuheng"
-            yield Path.home() / "Programs" / _LEGACY_TUI_REPO_BASENAME
 
 
         def main() -> None:
@@ -196,10 +189,7 @@ def install_core_shim(
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and not overwrite:
         current = path.read_text(encoding="utf-8", errors="replace")
-        if (
-            "Generated Shuheng external launcher" not in current
-            and LEGACY_EXTERNAL_LAUNCHER_MARKER not in current
-        ):
+        if "Generated Shuheng external launcher" not in current:
             raise FileExistsError(f"{path} exists; pass --overwrite to replace it")
     if path.exists() and target == "frontends/tuiapp.py":
         backup = path.with_suffix(path.suffix + ".shuheng-launcher.bak")

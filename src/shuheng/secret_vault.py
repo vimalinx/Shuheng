@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 try:
+    from .compat_legacy import RETIRED_SECRET_VAULT_SENTINELS
     from .history_titles import suggested_session_title
     from .text_utils import compact_title
     from .ui_types import Message
 except Exception:  # pragma: no cover - direct module execution compatibility
+    from compat_legacy import RETIRED_SECRET_VAULT_SENTINELS  # type: ignore
     from history_titles import suggested_session_title  # type: ignore
     from text_utils import compact_title  # type: ignore
     from ui_types import Message  # type: ignore
@@ -48,9 +50,7 @@ except Exception as exc:  # pragma: no cover - exercised only without PyNaCl/lib
 
 
 SECRET_VAULT_SENTINEL = b"Shuheng Secret Vault v1"
-LEGACY_SECRET_VAULT_PRODUCT_ID = "GenericAgent" + "-TUI"
-LEGACY_SECRET_VAULT_SENTINELS = (f"{LEGACY_SECRET_VAULT_PRODUCT_ID} Secret Vault v1".encode("ascii"),)
-SECRET_VAULT_ACCEPTED_SENTINELS = (SECRET_VAULT_SENTINEL, *LEGACY_SECRET_VAULT_SENTINELS)
+SECRET_VAULT_ACCEPTED_SENTINELS = (SECRET_VAULT_SENTINEL, *RETIRED_SECRET_VAULT_SENTINELS)
 SECRET_IMPORT_KEY_AAD = b"secret-vault:sealed-import-key:v1"
 SECRET_IMPORT_SEALED_SCHEMA = "secret.sealed_import.v1"
 SECRET_IMPORT_DROPBOX_META_KEY = "sealed_import"

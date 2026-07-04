@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from shuheng import app as app_module
+from shuheng.compat_legacy import RETIRED_SECRET_VAULT_SENTINELS
 from shuheng.secret_vault import (
-    LEGACY_SECRET_VAULT_SENTINELS,
     NACL_XCHACHA_ABYTES,
     NACL_XCHACHA_KEYBYTES,
     NACL_XCHACHA_NPUBBYTES,
@@ -557,7 +557,7 @@ class TestSecretVaultStorage:
             b"secret-vault-verifier",
         )
         assert verifier_plain == SECRET_VAULT_SENTINEL
-        assert verifier_plain not in LEGACY_SECRET_VAULT_SENTINELS
+        assert verifier_plain not in RETIRED_SECRET_VAULT_SENTINELS
 
         unlocked, unlocked_key, unlocked_message = secret_unlock_vault(paths, "Aa1!aaaa")
 
@@ -571,7 +571,7 @@ class TestSecretVaultStorage:
         key = secret_derive_key(password, salt)
         legacy_verifier = secret_encrypt_bytes(
             key,
-            LEGACY_SECRET_VAULT_SENTINELS[0],
+            RETIRED_SECRET_VAULT_SENTINELS[0],
             b"secret-vault-verifier",
         )
         write_secret_vault_meta(

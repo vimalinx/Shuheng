@@ -7,7 +7,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: The active product, package, protocol, runtime prompt, tool, docs, and release naming surface is `Shuheng` / `枢衡`.
-- Applies to: `pyproject.toml` console scripts, package import paths, README command examples, integration doctor output, launcher-shim help text, runtime prompts, control protocol schemas, OMP/tool descriptions, release checks, wheel/sdist smoke checks, and source distribution metadata.
+- Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, HTTP gateway server/header identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, release checks, wheel/sdist smoke checks, and source distribution metadata.
 - Non-goal: This does not remove the optional GenericAgent legacy provider, launcher shim target, non-destructive legacy history import, or quarantined historical prompt cleanup. Those surfaces must identify GenericAgent only as optional legacy compatibility, never as Shuheng's core runtime.
 
 ### 2. Signatures
@@ -40,14 +40,17 @@
 - OMP host-tool proposal enum still exposes a retired control proposal type -> tool API naming regression.
 - Doctor output requires GenericAgent for ordinary Shuheng checks -> runtime ownership regression.
 - Runtime strings identify the main orchestrator as a retired TUI alias or as GenericAgent core -> product identity regression.
+- HTTP gateway `Server` headers or handler `server_version` identify the service with a retired TUI alias -> product identity regression.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `shuheng-check` reports `Shuheng root`, `Core runtime: OhMyPi / OMP`, and `Launch without legacy patches: shuheng`.
 - Good: `python -m shuheng --help`, `python -m shuheng.integration doctor`, and package smoke checks run without requiring GenericAgent.
+- Good: the local gateway response header contains `ShuhengGateway/1` and installed `shuheng*` wrappers import from `shuheng.*`.
 - Base: `GENERICAGENT_ROOT` is still accepted for explicit legacy-provider or launcher-shim operations.
 - Bad: Re-adding retired pre-Shuheng commands, module docs, env aliases, or proposal types as active behavior.
 - Bad: Describing GenericAgent as the Shuheng root/core runtime.
+- Bad: `shuheng-check` or gateway wrappers are exported with Shuheng command names but still import from retired module names.
 
 ### 6. Tests Required
 
@@ -57,6 +60,7 @@
 - Tests must assert release/wheel smoke metadata uses `src/shuheng`, `shuheng` top-level package, and `integrations/omp-shuheng-plugin`.
 - `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments, while leaving optional GenericAgent legacy-provider references valid.
 - Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
+- `scripts/check_policy_gates.py` must assert `GatewayRequestHandler.server_version` and a live gateway HTTP response header use `ShuhengGateway/1`, not a retired TUI alias.
 - `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct

@@ -124,7 +124,6 @@ try:
     from . import workflows as workflow_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
-        LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
         TUI_AGENT_CONTROL_HINT,
         TUI_CONTROL_HINT_MARKER,
         TUI_QUERY_TOOL_NAMES,
@@ -275,7 +274,6 @@ except Exception:
     import workflows as workflow_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
-        LEGACY_TUI_CONTROL_HINT_BLOCK_RE,
         TUI_AGENT_CONTROL_HINT,
         TUI_CONTROL_HINT_MARKER,
         TUI_QUERY_TOOL_NAMES,
@@ -8659,7 +8657,7 @@ def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class GatewayRequestHandler(BaseHTTPRequestHandler):
-    server_version = "GATUIGateway/1"
+    server_version = "ShuhengGateway/1"
 
     def log_message(self, format: str, *args: Any) -> None:
         return

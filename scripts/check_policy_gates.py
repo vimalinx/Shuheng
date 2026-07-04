@@ -29,6 +29,7 @@ from shuheng import app as a  # noqa: E402
 from shuheng import agent_bridge as bridge  # noqa: E402
 from shuheng import baseline as baseline_mod  # noqa: E402
 from shuheng import commands as commands_mod  # noqa: E402
+from shuheng import compat_legacy as compat_legacy_mod  # noqa: E402
 from shuheng import control_protocol as cp  # noqa: E402
 from shuheng import context_packs as context_pack_mod  # noqa: E402
 from shuheng import dashboard as dashboard_mod  # noqa: E402
@@ -2175,8 +2176,7 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
     assert a.SECRET_VAULT_SENTINEL == b"Shuheng Secret Vault v1", a.SECRET_VAULT_SENTINEL
     assert secret_vault_mod.SECRET_VAULT_SENTINEL == b"Shuheng Secret Vault v1"
-    legacy_secret_sentinel = ("GenericAgent" + "-TUI Secret Vault v1").encode("ascii")
-    assert legacy_secret_sentinel in secret_vault_mod.SECRET_VAULT_ACCEPTED_SENTINELS
+    assert compat_legacy_mod.RETIRED_SECRET_VAULT_SENTINELS[0] in secret_vault_mod.SECRET_VAULT_ACCEPTED_SENTINELS
     assert secret_vault_mod.secret_session_title_for_messages(
         "Secret Vault",
         [a.Message("user", "secret boundary title")],
@@ -2995,7 +2995,6 @@ def assert_genericagent_provider_module_boundary() -> None:
     provider_names = (
         "TUI_AGENT_CONTROL_HINT",
         "TUI_CONTROL_HINT_MARKER",
-        "LEGACY_TUI_CONTROL_HINT_BLOCK_RE",
         "TUI_QUERY_TOOL_SCHEMAS",
         "TUI_SCHEDULE_TOOL_SCHEMAS",
         "TUI_TOOL_SCHEMAS",
@@ -3027,19 +3026,12 @@ def assert_genericagent_provider_module_boundary() -> None:
         assert getattr(gap, name).__module__ == "shuheng.genericagent_provider", name
     assert gap.GenericAgentRuntimeAdapter.__module__ == "shuheng.genericagent_provider"
     assert gap.TUI_CONTROL_HINT_MARKER == "[Shuheng shuheng-control v2]", gap.TUI_CONTROL_HINT_MARKER
-    legacy_tui_identity = "GenericAgent" + "-TUI"
-    assert gap.LEGACY_TUI_IDENTITY == legacy_tui_identity
-    assert legacy_tui_identity not in gap.TUI_AGENT_CONTROL_HINT, gap.TUI_AGENT_CONTROL_HINT
-    assert gap.LEGACY_TUI_SESSION_CONTROL_MARKER == f"{legacy_tui_identity} session control"
-    assert gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER == f"{legacy_tui_identity} " + "ga" + "-control v2"
-    for legacy_marker in (gap.LEGACY_TUI_SESSION_CONTROL_MARKER, gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER):
-        legacy_block = f"[{legacy_marker}]\nold\n[/{legacy_marker}]"
-        assert gap.LEGACY_TUI_CONTROL_HINT_BLOCK_RE.sub("", legacy_block) == ""
+    assert gap.RETIRED_TUI_CONTROL_HINT_BLOCK_RE is compat_legacy_mod.RETIRED_TUI_CONTROL_HINT_BLOCK_RE
     active_schema_text = json.dumps(
         gap.TUI_QUERY_TOOL_SCHEMAS + gap.TUI_SCHEDULE_TOOL_SCHEMAS + gap.TUI_TOOL_SCHEMAS,
         ensure_ascii=False,
     )
-    for forbidden in (legacy_tui_identity, "GA" + " TUI", "ga" + "_tui", "ga" + "-tui"):
+    for forbidden in ("GA" + " TUI", "ga" + "_tui", "ga" + "-tui"):
         assert forbidden not in active_schema_text, forbidden
     provider_source = Path(gap.__file__).read_text(encoding="utf-8")
     for forbidden in (
@@ -3050,9 +3042,11 @@ def assert_genericagent_provider_module_boundary() -> None:
         "import app",
         "from app import State",
         "from .app import State",
+        "LEGACY_TUI_IDENTITY",
+        "LEGACY_TUI_SESSION_CONTROL_MARKER",
+        "LEGACY_TUI_SHUHENG_CONTROL_MARKER",
     ):
         assert forbidden not in provider_source, forbidden
-    assert legacy_tui_identity not in provider_source, provider_source
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "def install_tui_query_tool_schema",
@@ -3337,16 +3331,20 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert retired_script_prefix not in report, report
     legacy_shuheng_words = "ga" + " tui"
     legacy_shuheng_title = "GA" + " TUI"
+    legacy_shuheng_compact = "GA" + "TUI"
     legacy_genericagent_title = "GenericAgent stable"
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for forbidden in (
         legacy_shuheng_words,
         f"{legacy_shuheng_title} gateway",
+        f"{legacy_shuheng_title}Gateway",
+        f"{legacy_shuheng_compact}Gateway",
         "Launch without " + "core patches",
         f"{legacy_genericagent_title} TUI",
         f"{legacy_genericagent_title} curses TUI",
     ):
         assert forbidden not in app_source, forbidden
+    assert a.GatewayRequestHandler.server_version == "ShuhengGateway/1", a.GatewayRequestHandler.server_version
     assert "已退出枢衡" in app_source, app_source
     assert "确认退出枢衡" in app_source, app_source
 
@@ -6831,7 +6829,10 @@ def run_gateway_server_checks() -> None:
         artifact_sig_before = a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH)
         schedule_sig_before = a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH)
         with urllib.request.urlopen(f"{base}/gui", timeout=5) as response:
+            server_header = response.headers.get("Server", "")
             html = response.read().decode("utf-8")
+        assert "ShuhengGateway/1" in server_header, server_header
+        assert ("GA" + "TUI") not in server_header, server_header
         assert "Shuheng Console" in html and "枢衡工作区" in html, html[:500]
         assert "/gui/snapshot" in html, html[:1000]
         assert "/gui/action" in html, html[:1000]
@@ -8252,25 +8253,17 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "agent_list" in a.TUI_AGENT_CONTROL_HINT
     assert "task_get" in a.TUI_AGENT_CONTROL_HINT
     assert a.TUI_CONTROL_HINT_MARKER == "[Shuheng shuheng-control v2]", a.TUI_CONTROL_HINT_MARKER
-    legacy_tui_identity = "GenericAgent" + "-TUI"
-    assert legacy_tui_identity not in a.TUI_AGENT_CONTROL_HINT, a.TUI_AGENT_CONTROL_HINT
     assert_retired_control_vocabulary_is_quarantined(state)
-    legacy_hint_blocks = (
-        f"[{legacy_tui_identity} session control]\nold\n[/{legacy_tui_identity} session control]",
-        f"[{gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER}]\nold\n[/{gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER}]",
-    )
-    for legacy_hint_block in legacy_hint_blocks:
-        hint_agent = FakeLLMAgent()
-        for client in hint_agent.llmclients:
-            client.backend.extra_sys_prompt = f"prefix\n{legacy_hint_block}\n"
-        a.install_tui_control_hint(hint_agent)
-        a.install_tui_control_hint(hint_agent)
-        for client in hint_agent.llmclients:
-            prompt = client.backend.extra_sys_prompt
-            assert "prefix" in prompt, prompt
-            assert legacy_tui_identity not in prompt, prompt
-            assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
-            assert "不要在示例、教程或解释中包含可执行 `<shuheng-control>` 标签" in prompt, prompt
+    hint_agent = FakeLLMAgent()
+    for client in hint_agent.llmclients:
+        client.backend.extra_sys_prompt = "prefix\n"
+    a.install_tui_control_hint(hint_agent)
+    a.install_tui_control_hint(hint_agent)
+    for client in hint_agent.llmclients:
+        prompt = client.backend.extra_sys_prompt
+        assert "prefix" in prompt, prompt
+        assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
+        assert "不要在示例、教程或解释中包含可执行 `<shuheng-control>` 标签" in prompt, prompt
     fenced_control = (
         "现在重新发送：\n"
         "```json\n"
