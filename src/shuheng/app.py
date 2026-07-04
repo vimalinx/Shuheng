@@ -48,7 +48,7 @@ PROJECT_AGENTS_PATH = os.path.join(APP_ROOT_DIR, "AGENTS.md")
 
 try:
     from .integration import (
-        ensure_core_import_path as _ensure_genericagent_import_path,
+        ensure_legacy_provider_import_path as _ensure_legacy_provider_import_path,
         find_genericagent_root as _find_genericagent_root,
         maybe_find_genericagent_root as _maybe_find_genericagent_root,
     )
@@ -198,7 +198,7 @@ try:
     )
 except Exception:
     from integration import (  # type: ignore
-        ensure_core_import_path as _ensure_genericagent_import_path,
+        ensure_legacy_provider_import_path as _ensure_legacy_provider_import_path,
         find_genericagent_root as _find_genericagent_root,
         maybe_find_genericagent_root as _maybe_find_genericagent_root,
     )
@@ -548,10 +548,10 @@ def load_optional_genericagent_runtime_modules() -> bool:
     global _format_response_segment, _pairs, _parse_native_history, _preview_text
     global _tool_results_from_prompt, _user_text, reset_conversation, restore
     if not GENERICAGENT_ROOT:
-        GENERICAGENT_RUNTIME_IMPORT_ERROR = "GenericAgent legacy root not found."
+        GENERICAGENT_RUNTIME_IMPORT_ERROR = "GenericAgent legacy-provider root not found."
         return False
     try:
-        _ensure_genericagent_import_path(_maybe_find_genericagent_root() or Path(GENERICAGENT_ROOT).expanduser().resolve())
+        _ensure_legacy_provider_import_path(_maybe_find_genericagent_root() or Path(GENERICAGENT_ROOT).expanduser().resolve())
         loaded_agentmain = importlib.import_module("agentmain")
         loaded_loop = importlib.import_module("agent_loop")
         loaded_continue = importlib.import_module("continue_cmd")

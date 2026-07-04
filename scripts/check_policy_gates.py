@@ -3347,6 +3347,16 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert a.GatewayRequestHandler.server_version == "ShuhengGateway/1", a.GatewayRequestHandler.server_version
     assert "已退出枢衡" in app_source, app_source
     assert "确认退出枢衡" in app_source, app_source
+    issue_template = Path(ROOT, ".github/ISSUE_TEMPLATE/bug_report.md").read_text(encoding="utf-8")
+    assert "Optional GenericAgent legacy-provider root configured" in issue_template, issue_template
+    assert ("GenericAgent " + "root available") not in issue_template, issue_template
+    integration_source = Path(integ.__file__).read_text(encoding="utf-8")
+    assert ("def validate" + "_core(") not in integration_source, integration_source
+    assert ("def ensure" + "_core_import_path(") not in integration_source, integration_source
+    assert ("def is_genericagent" + "_root(") not in integration_source, integration_source
+    assert ("does not look like a GenericAgent " + "root") not in integration_source, integration_source
+    assert ("GenericAgent " + "root not found") not in integration_source, integration_source
+    assert "validate_legacy_provider_root(" in integration_source, integration_source
 
 
 def assert_shuheng_history_storage_owned() -> None:

@@ -60,7 +60,7 @@ def maybe_find_genericagent_root(start: str | os.PathLike[str] | None = None) ->
         if not candidate:
             continue
         root = Path(candidate).expanduser().resolve()
-        if is_genericagent_root(root):
+        if is_genericagent_legacy_provider_root(root):
             return root
     return None
 
@@ -71,10 +71,10 @@ def find_genericagent_root(start: str | os.PathLike[str] | None = None) -> Path:
     root = maybe_find_genericagent_root(start)
     if root is not None:
         return root
-    raise RuntimeError("GenericAgent root not found; set GENERICAGENT_ROOT=/path/to/GenericAgent")
+    raise RuntimeError("GenericAgent legacy-provider root not found; set GENERICAGENT_ROOT=/path/to/GenericAgent")
 
 
-def is_genericagent_root(root: Path) -> bool:
+def is_genericagent_legacy_provider_root(root: Path) -> bool:
     return all((root / name).is_file() for name in REQUIRED_ROOT_FILES) and (root / "frontends").is_dir()
 
 
@@ -84,22 +84,22 @@ def _prepend_once(path: Path) -> None:
         sys.path.insert(0, value)
 
 
-def ensure_core_import_path(root: Path) -> None:
+def ensure_legacy_provider_import_path(root: Path) -> None:
     _prepend_once(root)
     _prepend_once(root / "frontends")
 
 
-def validate_core(root: Path) -> list[str]:
+def validate_legacy_provider_root(root: Path) -> list[str]:
     """Return human-readable validation failures for a GenericAgent checkout."""
 
     failures: list[str] = []
-    if not is_genericagent_root(root):
-        failures.append(f"{root} does not look like a GenericAgent root")
+    if not is_genericagent_legacy_provider_root(root):
+        failures.append(f"{root} does not look like a GenericAgent legacy-provider root")
         return failures
     for name in REQUIRED_FRONTEND_FILES:
         if not (root / "frontends" / name).is_file():
             failures.append(f"missing frontends/{name}")
-    ensure_core_import_path(root)
+    ensure_legacy_provider_import_path(root)
     try:
         importlib.import_module("agentmain")
     except Exception as exc:
@@ -182,7 +182,7 @@ def install_core_shim(
 ) -> Path:
     if target not in {"frontends/tuiapp_curses.py", "frontends/tuiapp.py"}:
         raise ValueError("target must be frontends/tuiapp_curses.py or frontends/tuiapp.py")
-    failures = validate_core(root)
+    failures = validate_legacy_provider_root(root)
     if failures:
         raise RuntimeError("; ".join(failures))
     path = root / target
@@ -225,9 +225,9 @@ def doctor_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.root:
         root = Path(args.root).expanduser().resolve()
-        return _print_report(root, validate_core(root))
+        return _print_report(root, validate_legacy_provider_root(root))
     root = maybe_find_genericagent_root()
-    return _print_report(root, validate_core(root) if root is not None else [])
+    return _print_report(root, validate_legacy_provider_root(root) if root is not None else [])
 
 
 def install_core_shim_main(argv: list[str] | None = None) -> int:

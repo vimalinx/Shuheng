@@ -4655,7 +4655,7 @@ token panel -> OMP get_state.contextUsage
 - `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `shuheng.control_protocol` and that the protocol module does not import curses.
 - `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py scripts/check_policy_gates.py` must pass.
 - `python3 scripts/check_policy_gates.py` must pass.
-- `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass when the sibling GenericAgent checkout exists.
+- `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass when validating an optional legacy GenericAgent provider checkout.
 
 ### 7. Wrong vs Correct
 

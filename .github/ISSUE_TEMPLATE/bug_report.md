@@ -16,7 +16,7 @@ Describe the visible problem and what you expected instead.
 - Python version:
 - OS and terminal:
 - Install mode: source editable / wheel / sdist / other
-- GenericAgent root available: yes / no
+- Optional GenericAgent legacy-provider root configured: yes / no / not relevant
 
 ## Reproduction
 
