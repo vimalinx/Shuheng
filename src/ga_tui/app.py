@@ -158,7 +158,18 @@ try:
         protocol_compatibility_metadata,
         release_readiness_report,
     )
-    from .text_utils import ANSI_RE, cell_width, clean_text, compact_category, compact_title, pad_cells, truncate_cells, wrap_cells
+    from .text_utils import (
+        ANSI_RE,
+        cell_width,
+        clean_text,
+        compact_category,
+        compact_title,
+        human_tokens,
+        pad_cells,
+        rel_age,
+        truncate_cells,
+        wrap_cells,
+    )
     from . import input_controller as input_controller_helpers
     from .ui_types import (
         HOME_SESSION_PREFIX,
@@ -293,7 +304,7 @@ except Exception:
         protocol_compatibility_metadata,
         release_readiness_report,
     )
-    from text_utils import ANSI_RE, cell_width, clean_text, compact_category, compact_title, pad_cells, truncate_cells, wrap_cells  # type: ignore
+    from text_utils import ANSI_RE, cell_width, clean_text, compact_category, compact_title, human_tokens, pad_cells, rel_age, truncate_cells, wrap_cells  # type: ignore
     import input_controller as input_controller_helpers  # type: ignore
     from ui_types import (  # type: ignore
         HOME_SESSION_PREFIX,
@@ -14947,28 +14958,6 @@ def install_interaction_hook(state: State, agent: Any) -> None:
         hooks["_ga_curses_interaction"] = _hook
     except Exception:
         pass
-
-
-def rel_age(mtime: float) -> str:
-    delta = int(time.time() - mtime)
-    if delta < 60:
-        return f"{delta}s"
-    if delta < 3600:
-        return f"{delta // 60}m"
-    if delta < 86400:
-        return f"{delta // 3600}h"
-    return f"{delta // 86400}d"
-
-
-def human_tokens(n: int) -> str:
-    n = int(n or 0)
-    if n < 1000:
-        return str(n)
-    if n < 1_000_000:
-        v = n / 1000.0
-        return f"{v:.1f}k" if v < 100 else f"{int(v)}k"
-    v = n / 1_000_000.0
-    return f"{v:.2f}M" if v < 100 else f"{int(v)}M"
 
 
 def empty_token_stats_dict() -> dict[str, int]:

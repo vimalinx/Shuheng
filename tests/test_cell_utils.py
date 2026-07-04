@@ -13,7 +13,9 @@ from ga_tui.text_utils import (
     clean_text,
     compact_category,
     compact_title,
+    human_tokens,
     pad_cells,
+    rel_age,
     truncate_cells,
     wrap_cells,
 )
@@ -29,6 +31,8 @@ class TestAppCompatibilityAliases:
         assert app_module.wrap_cells is text_utils.wrap_cells
         assert app_module.compact_title is text_utils.compact_title
         assert app_module.compact_category is text_utils.compact_category
+        assert app_module.rel_age is text_utils.rel_age
+        assert app_module.human_tokens is text_utils.human_tokens
 
     def test_ui_types_reexported_from_app(self) -> None:
         assert app_module.Message is ui_types.Message
@@ -149,6 +153,24 @@ class TestCompactCategory:
 
     def test_compacts_regular_category(self) -> None:
         assert compact_category("  **Shuheng / Agent**  ") == "Shuheng / Agent"
+
+
+class TestDisplayNumberFormatting:
+    def test_rel_age_formats_recent_and_old_times(self, monkeypatch) -> None:
+        monkeypatch.setattr(text_utils.time, "time", lambda: 100_000.0)
+
+        assert rel_age(99_955.0) == "45s"
+        assert rel_age(99_000.0) == "16m"
+        assert rel_age(90_000.0) == "2h"
+        assert rel_age(10_000.0) == "1d"
+
+    def test_human_tokens_formats_small_thousand_and_million_values(self) -> None:
+        assert human_tokens(0) == "0"
+        assert human_tokens(999) == "999"
+        assert human_tokens(1500) == "1.5k"
+        assert human_tokens(125_000) == "125k"
+        assert human_tokens(1_250_000) == "1.25M"
+        assert human_tokens(125_000_000) == "125M"
 
 
 class TestWrapCells:

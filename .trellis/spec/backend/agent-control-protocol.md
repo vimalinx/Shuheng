@@ -723,12 +723,16 @@ def normalize_dashboard_sections(raw_sections):
   - `wrap_cells(text, width)`.
   - `compact_title(text, max_width=24)`.
   - `compact_category(text)`.
+  - `rel_age(mtime)`.
+  - `human_tokens(n)`.
 
 ### 3. Contracts
 
 - `text_utils.py` must remain a pure leaf module and must not import `ga_tui.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, Web Console, dashboard, or command handlers.
 - `compact_title(...)` strips ANSI/control display noise through `clean_text`, removes fenced code, HTML-like tags, lightweight markdown markers, leading user/request boilerplate, and leading completion/summary boilerplate before terminal-cell truncation.
 - `compact_category(...)` uses `compact_title(..., 18)` and returns an empty category for sentinel values `-`, `clear`, `none`, `null`, and `未分类`.
+- `rel_age(...)` formats elapsed time for sidebar, Web Console, artifact, subagent, and memory display without depending on TUI state.
+- `human_tokens(...)` formats token counts for Web Console and status rows without depending on token registries.
 - `app.py` remains the compatibility facade and exposes moved helpers as direct aliases or behavior-identical wrappers.
 
 ### 4. Validation & Error Matrix

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 
 
@@ -83,3 +84,25 @@ def compact_title(text: str, max_width: int = 24) -> str:
 def compact_category(text: str) -> str:
     text = compact_title(text, 18)
     return "" if text.lower() in {"-", "clear", "none", "null", "未分类"} else text
+
+
+def rel_age(mtime: float) -> str:
+    delta = int(time.time() - mtime)
+    if delta < 60:
+        return f"{delta}s"
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
+
+
+def human_tokens(n: int) -> str:
+    n = int(n or 0)
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        v = n / 1000.0
+        return f"{v:.1f}k" if v < 100 else f"{int(v)}k"
+    v = n / 1_000_000.0
+    return f"{v:.2f}M" if v < 100 else f"{int(v)}M"
