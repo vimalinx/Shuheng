@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "General verification guide index for release-readiness and cleanup review."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check helper extraction follows reuse and ownership rules."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for this single-repo Shuheng task."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Primary check contract for Shuheng control-plane, release, workflow, and protocol changes."}
