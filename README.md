@@ -185,6 +185,14 @@ PYTHONPATH=src python -m ga_tui
 
 `ga_tui` 是保留的 Python 模块名；正式命令入口使用 `shuheng`。
 
+先确认公开命令入口可用：
+
+```bash
+shuheng --help
+```
+
+`shuheng --help` 不需要提前配置 GenericAgent 主项目；真正启动 TUI、运行 gateway 或执行 `shuheng-check` 时才需要有效的 GenericAgent root。
+
 ### 2. 指定 GenericAgent 主项目
 
 TUI 会自动寻找 `GenericAgent` 主项目。如果自动发现失败，显式设置：
@@ -354,6 +362,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 │   └── ga_tui/
 │       ├── __main__.py
 │       ├── __init__.py
+│       ├── cli.py
 │       ├── app.py
 │       ├── integration.py
 │       ├── runtime.py
@@ -376,6 +385,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 
 | 文件 | 作用 |
 | --- | --- |
+| `src/ga_tui/cli.py` | 轻量公开 CLI 入口；`--help` 不导入重型 TUI/runtime |
 | `src/ga_tui/app.py` | curses TUI 主实现、会话/记忆/审批/Secret Vault 核心逻辑 |
 | `src/ga_tui/integration.py` | GenericAgent 核心发现、doctor 检查和 launcher shim |
 | `src/ga_tui/runtime.py` | runtime provider 抽象层与注册表 |
@@ -471,6 +481,7 @@ git diff --check
 - 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
 - 发布记录：见 `CHANGELOG.md`。
 - CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build、wheel smoke 和 `git diff --check`。
+- Public alpha readiness：见 `docs/public-alpha-readiness.md`，其中记录发布姿态、Trellis ledger 公开语义、已知缺口和 fresh clone 期望。
 
 ## Community
 

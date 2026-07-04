@@ -185,6 +185,14 @@ PYTHONPATH=src python -m ga_tui
 
 `ga_tui` remains the Python module name for compatibility. The official command is `shuheng`.
 
+First confirm the public command entrypoint is available:
+
+```bash
+shuheng --help
+```
+
+`shuheng --help` does not require a configured GenericAgent checkout. Launching the TUI, serving the gateway, or running `shuheng-check` still requires a valid GenericAgent root.
+
 ### 2. Point To GenericAgent Core
 
 The TUI tries to discover the `GenericAgent` checkout automatically. If discovery fails:
@@ -354,6 +362,7 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 │   └── ga_tui/
 │       ├── __main__.py
 │       ├── __init__.py
+│       ├── cli.py
 │       ├── app.py
 │       ├── integration.py
 │       ├── runtime.py
@@ -376,6 +385,7 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 
 | File | Purpose |
 | --- | --- |
+| `src/ga_tui/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
 | `src/ga_tui/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
 | `src/ga_tui/integration.py` | GenericAgent core discovery, doctor checks, launcher shim |
 | `src/ga_tui/runtime.py` | Runtime provider abstractions and registry |
@@ -471,6 +481,7 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
 - CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, wheel smoke, and `git diff --check`.
+- Public alpha readiness: see `docs/public-alpha-readiness.md` for the release posture, Trellis ledger semantics, known gaps, and fresh-clone expectations.
 
 ## Community
 
