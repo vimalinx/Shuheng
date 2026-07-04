@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~43 | Active |
+| `journal-2.md` | ~77 | Active |
 | `journal-1.md` | ~1982 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-07-04 | Run public alpha release rehearsal | `9dc3efe`, `1043714` | `main` |
 | 46 | 2026-07-04 | Complete public alpha release readiness | `2067230`, `66caa10`, `c75c8b4`, `e223063` | `main` |
 | 45 | 2026-07-03 | Scheduled workflow autopilot | `b969211` | `main` |
 | 44 | 2026-07-03 | Add workflow next action JSON diagnostics | `4752e0d` | `main` |
