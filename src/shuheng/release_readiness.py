@@ -149,7 +149,7 @@ def gateway_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, A
         "local_only": local_only,
         "auth": "none",
         "allowed": allowed,
-        "reason": "loopback_default" if local_only else ("remote_allowed_by_env" if allow_remote else "remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND"),
+        "reason": "loopback_default" if local_only else ("remote_allowed_by_env" if allow_remote else "remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND"),
         "operator_note": "Gateway/Web Console has no built-in authentication; bind to loopback unless protected by a trusted external boundary.",
     }
 
@@ -170,7 +170,7 @@ def protocol_compatibility_metadata(kind: str) -> dict[str, Any]:
 
 def scheduler_runtime_ownership() -> dict[str, Any]:
     return {
-        "owner": "ga-tui.control_plane",
+        "owner": "shuheng.control_plane",
         "tick_owner": "tui_loop_or_gateway_manual_action",
         "always_on": False,
         "daemon_note": "Recurring jobs are evaluated while the TUI loop runs or when a gateway/manual scheduler action invokes a tick; no external system service is installed by default.",
@@ -201,7 +201,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "public console scripts exist",
             "shuheng --help",
             "helper --help entrypoints",
-            "python -m ga_tui.integration doctor",
+            "python -m shuheng.integration doctor",
             "shuheng-check core plus optional GenericAgent legacy-provider stub",
         ],
         "debug_options_not_release_gates": ["--no-deps", "--wheel-only"],

@@ -170,7 +170,7 @@ def plugin_roots(*roots: str, include_builtin: bool = False) -> list[str]:
     raw_roots = list(roots)
     if not raw_roots:
         shuheng_home = os.path.abspath(
-            os.path.expanduser(os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME") or "~/.shuheng")
+            os.path.expanduser(os.environ.get("SHUHENG_HOME") or "~/.shuheng")
         )
         raw_roots = [os.path.join(shuheng_home, "plugins")]
     if include_builtin:

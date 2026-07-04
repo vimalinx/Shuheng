@@ -13,12 +13,12 @@ function envPath(name: string): string {
 }
 
 function findRepoRoot(): string {
-	const configured = envPath("SHUHENG_REPO") || envPath("GA_TUI_REPO") || envPath("GA_TUI_ROOT");
+	const configured = envPath("SHUHENG_REPO") || envPath("SHUHENG_REPO") || envPath("SHUHENG_ROOT");
 	if (configured) return path.resolve(configured);
 
 	let current = import.meta.dir;
 	for (let i = 0; i < 8; i += 1) {
-		if (fs.existsSync(path.join(current, "src", "ga_tui", "agent_bridge.py"))) {
+		if (fs.existsSync(path.join(current, "src", "shuheng", "agent_bridge.py"))) {
 			return current;
 		}
 		const parent = path.dirname(current);
@@ -36,14 +36,14 @@ function pythonPathWithRepo(repoRoot: string): string {
 
 function bridgeCommand(payload: BridgePayload): { command: string; args: string[]; cwd: string } {
 	const repoRoot = findRepoRoot();
-	const python = envPath("GA_TUI_BRIDGE_PYTHON") || "python3";
+	const python = envPath("SHUHENG_BRIDGE_PYTHON") || "python3";
 	return {
 		command: "env",
 		args: [
 			`PYTHONPATH=${pythonPathWithRepo(repoRoot)}`,
 			python,
 			"-m",
-			"ga_tui.agent_bridge",
+			"shuheng.agent_bridge",
 			"call",
 			JSON.stringify(payload),
 		],
@@ -90,7 +90,7 @@ const factory: CustomToolFactory = pi => {
 
 	return [
 		{
-			name: "ga_tui_context_get",
+			name: "shuheng_context_get",
 			label: "Shuheng Context",
 			description:
 				"Read a Shuheng-managed context pack for the current project or a target subagent. This is read-only and returns an artifact ref plus bounded context JSON.",
@@ -122,7 +122,7 @@ const factory: CustomToolFactory = pi => {
 			},
 		},
 		{
-			name: "ga_tui_memory_candidate_submit",
+			name: "shuheng_memory_candidate_submit",
 			label: "Shuheng Memory Candidate",
 			description:
 				"Submit a durable memory candidate to Shuheng. This never writes long-term memory directly; Shuheng validates it and queues human approval.",

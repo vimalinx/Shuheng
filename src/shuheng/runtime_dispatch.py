@@ -10,7 +10,7 @@ except Exception:
 
 
 def agent_runtime_provider_id(agent: Any) -> str:
-    provider_id = str(getattr(agent, "_ga_tui_runtime_provider_id", "") or "").strip()
+    provider_id = str(getattr(agent, "_shuheng_runtime_provider_id", "") or "").strip()
     return provider_id or "unknown"
 
 

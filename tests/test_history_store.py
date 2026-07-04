@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ga_tui import app as app_module
-from ga_tui import history_store
-from ga_tui import path_utils
-from ga_tui.ui_types import Message
+from shuheng import app as app_module
+from shuheng import history_store
+from shuheng import path_utils
+from shuheng.ui_types import Message
 
 
 class TestSessionMetaRegistry:

@@ -59,7 +59,7 @@ or release promises.
 
 ## Public Alpha Known Gaps
 
-- `src/ga_tui/app.py` remains a large composition module and should continue to
+- `src/shuheng/app.py` remains a large composition module and should continue to
   shrink through small helper extractions with compatibility aliases.
 - Gateway/Web Console has no built-in authentication and should bind to loopback
   unless protected by an external trusted boundary.
@@ -76,10 +76,10 @@ A new contributor should be able to:
 1. Create a virtual environment.
 2. Install `.[dev]`.
 3. Run `shuheng --help` before configuring any optional legacy provider.
-4. Run `shuheng-check` or `python -m ga_tui.integration doctor` without a
+4. Run `shuheng-check` or `python -m shuheng.integration doctor` without a
    GenericAgent checkout.
-5. Optionally set `GENERICAGENT_ROOT` or `GA_ROOT` to validate the legacy
-   GenericAgent provider / shim path.
+5. Optionally set `GENERICAGENT_ROOT` to validate the legacy GenericAgent
+   provider / shim path.
 6. Run the release hygiene and runtime smoke checks without maintainer-local
    state.
 

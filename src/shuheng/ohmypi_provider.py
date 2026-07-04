@@ -31,8 +31,8 @@ MemoryCandidateSink = Callable[[dict[str, Any]], None]
 HostToolHandler = Callable[[str, dict[str, Any]], dict[str, Any]]
 RuntimeEventSink = Callable[[RuntimeTaskEvent], None]
 
-GA_TUI_MEMORY_PROMPT_FILENAME = "ohmypi-ga-tui-memory.md"
-GA_TUI_MEMORY_PROMPT_HEADER = "Shuheng Layered Memory Guidance"
+SHUHENG_MEMORY_PROMPT_FILENAME = "ohmypi-shuheng-memory.md"
+SHUHENG_MEMORY_PROMPT_HEADER = "Shuheng Layered Memory Guidance"
 OHMYPI_RUNTIME_DIRNAME = "ohmypi"
 OHMYPI_AGENT_DIRNAME = "agent"
 MAX_HOST_TOOL_RESULT_CHARS = 12000
@@ -1142,7 +1142,7 @@ class OhMyPiRpcAgent:
 
     def _next_request_id(self, prefix: str) -> str:
         self._request_no += 1
-        return f"ga-tui-{prefix}-{self._request_no}"
+        return f"shuheng-{prefix}-{self._request_no}"
 
     def _ensure_process(self) -> None:
         self._queue_selected_model_if_unconfirmed()
@@ -2199,7 +2199,7 @@ class OhMyPiRpcAgent:
         allowed_names = {str(tool.get("name") or "") for tool in self.host_tool_definitions}
         if not tool_name or tool_name not in allowed_names:
             result = {
-                "schema_version": "ga-tui.host_tool.v1",
+                "schema_version": "shuheng.host_tool.v1",
                 "status": "error",
                 "error": f"Unknown or unregistered host tool: {tool_name or '<missing>'}",
             }
@@ -2209,7 +2209,7 @@ class OhMyPiRpcAgent:
             return
         if self.host_tool_handler is None:
             result = {
-                "schema_version": "ga-tui.host_tool.v1",
+                "schema_version": "shuheng.host_tool.v1",
                 "status": "error",
                 "tool_name": tool_name,
                 "error": "No host tool handler is configured.",
@@ -2235,7 +2235,7 @@ class OhMyPiRpcAgent:
                 payload={"request_id": request_id, "tool_name": tool_name},
             )
             result = {
-                "schema_version": "ga-tui.host_tool.v1",
+                "schema_version": "shuheng.host_tool.v1",
                 "status": "error",
                 "tool_name": tool_name,
                 "error": f"{type(exc).__name__}: {exc}",
@@ -2387,8 +2387,8 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
 
     def start_agent(self, agent: Any, *, thread_name: str = "") -> Any:
         if not thread_name:
-            thread_name = "ga-tui-ohmypi"
-        setattr(agent, "_ga_tui_thread_name", thread_name)
+            thread_name = "shuheng-ohmypi"
+        setattr(agent, "_shuheng_thread_name", thread_name)
         return None
 
 
@@ -2397,7 +2397,7 @@ def _has_cli_flag(args: list[str], flag: str) -> bool:
 
 
 def resolve_ohmypi_binary(binary: str | None = None) -> str:
-    explicit = str(binary or os.environ.get("GA_TUI_OHMYPI_BIN") or "").strip()
+    explicit = str(binary or os.environ.get("SHUHENG_OHMYPI_BIN") or "").strip()
     if explicit:
         return explicit
     discovered = shutil.which("omp")
@@ -2419,9 +2419,9 @@ def ohmypi_rpc_command(
     approval_mode: str | None = None,
 ) -> list[str]:
     binary = resolve_ohmypi_binary(binary)
-    env_args = shlex.split(os.environ.get("GA_TUI_OHMYPI_ARGS", ""))
+    env_args = shlex.split(os.environ.get("SHUHENG_OHMYPI_ARGS", ""))
     appended_args = list(extra_args or env_args)
-    approval_mode = normalized_ohmypi_approval_mode(approval_mode or os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "yolo")
+    approval_mode = normalized_ohmypi_approval_mode(approval_mode or os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "yolo")
     args = [
         binary,
         "--mode",
@@ -2439,7 +2439,7 @@ def ohmypi_rpc_command(
 
 
 def ohmypi_memory_prompt_path(harness_dir: str) -> str:
-    return os.path.join(harness_dir, "runtime", GA_TUI_MEMORY_PROMPT_FILENAME)
+    return os.path.join(harness_dir, "runtime", SHUHENG_MEMORY_PROMPT_FILENAME)
 
 
 def _read_text_if_exists(path: str, *, max_chars: int = 4000) -> str:
@@ -2495,11 +2495,11 @@ def build_ohmypi_memory_prompt(*, root_dir: str, harness_dir: str) -> str:
     if not insight:
         insight = "(not available)"
     sections = [
-        f"# {GA_TUI_MEMORY_PROMPT_HEADER}",
+        f"# {SHUHENG_MEMORY_PROMPT_HEADER}",
         "",
         "You are running as the Oh My Pi execution runtime inside Shuheng.",
         "Shuheng remains the Orchestrator: it owns task ledgers, approvals, artifact refs, and long-term memory governance.",
-        "Use this GenericAgent-style layered memory as routing context. Read referenced files only when needed and verify current repository state before acting when memory could be stale.",
+        "Use this Shuheng-owned L0-L4 layered memory as routing context. Read referenced files only when needed and verify current repository state before acting when memory could be stale.",
         "Do not write long-term memory directly. If execution reveals a durable, verified lesson, submit or report a memory candidate with evidence refs.",
         "Always finish each user turn with a concise normal user-facing final reply in the user's language. Tool results, \"Result:\" summaries, and memory-candidate submit/deferred notices are not a substitute for that reply.",
         "Treat Shuheng context packs and context refs as internal execution metadata, not user-visible conversation objects. User pronouns such as this, that, it, 这个, 这个东西, or 它 refer to the recent visible conversation/task topic unless the user explicitly names the context pack/ref.",
@@ -2606,7 +2606,7 @@ def ohmypi_provider_spec(
             "provider_owned_subagents": True,
         },
         model_routing={
-            "owner": "ga-tui.control_plane",
+            "owner": "shuheng.control_plane",
             "supports_runtime_switch": True,
             "supports_default_model": True,
             "supports_per_agent_default": False,
@@ -2620,14 +2620,14 @@ def ohmypi_provider_spec(
             "tool_approval_mode": runtime_config.approval_mode if runtime_config else "",
         },
         scheduler={
-            "owner": "ga-tui.control_plane",
+            "owner": "shuheng.control_plane",
             "status": "registry_ready",
             "schedules_path": schedules_path,
             "dispatch_contract": "agenttask.v2",
             "runtime_provider_id": "ohmypi",
         },
         policy={
-            "approval_gate_owner": "ga-tui.policy",
+            "approval_gate_owner": "shuheng.policy",
             "tool_permissions": "tui_readonly_and_governed_proposal_tools_only",
             "runtime_tool_approval_mode": runtime_config.approval_mode if runtime_config else "yolo",
             "memory_write": "candidate_only",
@@ -2643,7 +2643,7 @@ def ohmypi_provider_spec(
             "resource_gateway": "not_exposed",
         },
         notes=[
-            "Default Shuheng runtime provider; GenericAgent is optional legacy compatibility via GA_TUI_RUNTIME_PROVIDER=genericagent when available.",
+            "Default Shuheng runtime provider; GenericAgent is optional legacy compatibility via SHUHENG_RUNTIME_PROVIDER=genericagent when available.",
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
             "Embedded Oh My Pi uses a Shuheng-owned PI_CODING_AGENT_DIR instead of ~/.omp/agent.",
             "Shuheng memory guidance is injected through --append-system-prompt.",

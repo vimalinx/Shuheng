@@ -19,7 +19,7 @@ or contacting the maintainer before publishing exploit details. Include:
 
 - The Gateway and Web Console have no built-in authentication and should bind to
   loopback by default.
-- Non-loopback Gateway binding requires `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` and
+- Non-loopback Gateway binding requires `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` and
   a trusted external access boundary.
 - Secret Vault content, normal session logs, runtime model credentials, and local
   machine paths must not be committed.

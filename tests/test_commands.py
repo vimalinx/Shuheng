@@ -1,8 +1,8 @@
 """Tests for pure command completion helpers."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import commands
+from shuheng import app as app_module
+from shuheng import commands
 
 
 def test_app_command_completion_helpers_reexport_module_symbols() -> None:

@@ -16,7 +16,7 @@ def console_scripts_text(missing_script: str = "") -> str:
         for script in wheel_smoke.PUBLIC_CONSOLE_SCRIPTS
         if script != missing_script
     ]
-    return "\n".join(["[console_scripts]", *[f"{script} = ga_tui.__main__:main" for script in scripts], ""])
+    return "\n".join(["[console_scripts]", *[f"{script} = shuheng.__main__:main" for script in scripts], ""])
 
 
 def sdist_fixture_content(member: str, *, missing_script: str = "", sources_members: list[str] | None = None) -> bytes:
@@ -25,7 +25,7 @@ def sdist_fixture_content(member: str, *, missing_script: str = "", sources_memb
     if member == "src/shuheng.egg-info/entry_points.txt":
         return console_scripts_text(missing_script).encode()
     if member == "src/shuheng.egg-info/top_level.txt":
-        return b"ga_tui\n"
+        return b"shuheng\n"
     if member == wheel_smoke.SDIST_SOURCES_MEMBER:
         rows = sources_members or []
         return ("\n".join(rows) + "\n").encode()
@@ -293,11 +293,11 @@ def test_artifact_content_leak_scan_rejects_local_absolute_path() -> None:
     local_path = "/home/" + "tester/shuheng"
     try:
         wheel_smoke.check_archive_text_has_no_release_leaks(
-            [("ga_tui/generated.py", f'HOME = "{local_path}"\n'.encode())],
+            [("shuheng/generated.py", f'HOME = "{local_path}"\n'.encode())],
             artifact_kind="wheel",
         )
     except ValueError as exc:
-        assert "local absolute path found in artifact member: ga_tui/generated.py" in str(exc)
+        assert "local absolute path found in artifact member: shuheng/generated.py" in str(exc)
     else:
         raise AssertionError("local absolute artifact content should fail")
 
@@ -363,23 +363,23 @@ def test_wheel_record_integrity_accepts_hashes_and_sizes(tmp_path: Path) -> None
 
 def test_wheel_record_integrity_rejects_hash_mismatch(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
-    write_wheel_fixture(wheel, expected_wheel_members(), corrupt_record_member="ga_tui/app.py")
+    write_wheel_fixture(wheel, expected_wheel_members(), corrupt_record_member="shuheng/app.py")
 
     try:
         wheel_smoke.wheel_record_integrity_check(wheel)
     except ValueError as exc:
-        assert "RECORD hash mismatch: ga_tui/app.py" in str(exc)
+        assert "RECORD hash mismatch: shuheng/app.py" in str(exc)
     else:
         raise AssertionError("wheel RECORD hash mismatch should fail")
 
 
 def test_wheel_record_integrity_rejects_missing_member_row(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
-    write_wheel_fixture(wheel, expected_wheel_members(), missing_record_member="ga_tui/app.py")
+    write_wheel_fixture(wheel, expected_wheel_members(), missing_record_member="shuheng/app.py")
 
     try:
         wheel_smoke.wheel_record_integrity_check(wheel)
     except ValueError as exc:
-        assert "RECORD missing rows: ga_tui/app.py" in str(exc)
+        assert "RECORD missing rows: shuheng/app.py" in str(exc)
     else:
         raise AssertionError("wheel RECORD missing row should fail")

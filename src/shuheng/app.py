@@ -62,7 +62,7 @@ try:
         AGENT_TASK_SCHEMA,
         CONTROL_CONTINUATION_ACTIONS,
         CURRENT_TUI_CONTROL_ACTIONS,
-        GA_CONTROL_SCHEMA,
+        SHUHENG_CONTROL_SCHEMA,
         SESSION_V2_TO_EXECUTION_ACTION,
         STRUCTURED_CONTINUATION_STATES,
         TUI_CONTROL_FENCE_RE,
@@ -75,7 +75,7 @@ try:
         agenttask_routing,
         agenttask_target_selector,
         agenttask_work_order,
-        coerce_ga_control_action,
+        coerce_shuheng_control_action,
         control_continuation_metadata,
         control_explicitly_requests_continuation,
         control_falsey,
@@ -94,7 +94,7 @@ try:
         inferred_policy_action_for_subagent_task,
         known_tui_control,
         lifecycle_is_persistent,
-        load_ga_control_json_text,
+        load_shuheng_control_json_text,
         normalized_control_action,
         policy_relevant_subagent_prompt_text,
         repair_json_missing_tail,
@@ -213,7 +213,7 @@ except Exception:
         AGENT_TASK_SCHEMA,
         CONTROL_CONTINUATION_ACTIONS,
         CURRENT_TUI_CONTROL_ACTIONS,
-        GA_CONTROL_SCHEMA,
+        SHUHENG_CONTROL_SCHEMA,
         SESSION_V2_TO_EXECUTION_ACTION,
         STRUCTURED_CONTINUATION_STATES,
         TUI_CONTROL_FENCE_RE,
@@ -226,7 +226,7 @@ except Exception:
         agenttask_routing,
         agenttask_target_selector,
         agenttask_work_order,
-        coerce_ga_control_action,
+        coerce_shuheng_control_action,
         control_continuation_metadata,
         control_explicitly_requests_continuation,
         control_falsey,
@@ -245,7 +245,7 @@ except Exception:
         inferred_policy_action_for_subagent_task,
         known_tui_control,
         lifecycle_is_persistent,
-        load_ga_control_json_text,
+        load_shuheng_control_json_text,
         normalized_control_action,
         policy_relevant_subagent_prompt_text,
         repair_json_missing_tail,
@@ -394,7 +394,7 @@ FRONTENDS_DIR = os.path.join(GENERICAGENT_ROOT, "frontends") if GENERICAGENT_ROO
 
 
 def default_shuheng_home() -> str:
-    return os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME") or "~/.shuheng"))
+    return os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_HOME") or "~/.shuheng"))
 
 
 SHUHENG_HOME = default_shuheng_home()
@@ -448,7 +448,7 @@ SUBAGENT_CONTEXT_TOTAL_LIMIT = 12000
 SESSION_TRASH_DIR = os.path.join(MODEL_RESPONSES_DIR, ".trash")
 SUBAGENTS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "subagents")
 TEMP_SUBAGENTS_DIR = os.path.join(SHUHENG_TEMP_DIR, "subagents")
-AGENT_HARNESS_DIR = os.path.abspath(os.path.expanduser(os.environ.get("GA_TUI_HARNESS_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "agent_harness")))
+AGENT_HARNESS_DIR = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_HARNESS_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "agent_harness")))
 AGENT_TASK_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "tasks.jsonl")
 AGENT_PROGRESS_LEDGER_PATH = os.path.join(AGENT_HARNESS_DIR, "progress.jsonl")
 AGENT_WORKFLOW_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "workflow_runs.jsonl")
@@ -482,20 +482,20 @@ AGENT_GATEWAY_DAEMON_PID_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.
 AGENT_GATEWAY_DAEMON_STATUS_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.json")
 AGENT_GATEWAY_DAEMON_LOG_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.log")
 try:
-    GATEWAY_SSE_MAX_SECONDS = max(5.0, float(os.environ.get("GA_TUI_GATEWAY_SSE_MAX_SECONDS", "300") or "300"))
+    GATEWAY_SSE_MAX_SECONDS = max(5.0, float(os.environ.get("SHUHENG_GATEWAY_SSE_MAX_SECONDS", "300") or "300"))
 except ValueError:
     GATEWAY_SSE_MAX_SECONDS = 300.0
 try:
-    GATEWAY_SSE_WRITE_TIMEOUT_SECONDS = max(0.5, float(os.environ.get("GA_TUI_GATEWAY_SSE_WRITE_TIMEOUT_SECONDS", "5") or "5"))
+    GATEWAY_SSE_WRITE_TIMEOUT_SECONDS = max(0.5, float(os.environ.get("SHUHENG_GATEWAY_SSE_WRITE_TIMEOUT_SECONDS", "5") or "5"))
 except ValueError:
     GATEWAY_SSE_WRITE_TIMEOUT_SECONDS = 5.0
 try:
-    GATEWAY_SSE_SENT_ID_LIMIT = max(20, int(os.environ.get("GA_TUI_GATEWAY_SSE_SENT_ID_LIMIT", "2000") or "2000"))
+    GATEWAY_SSE_SENT_ID_LIMIT = max(20, int(os.environ.get("SHUHENG_GATEWAY_SSE_SENT_ID_LIMIT", "2000") or "2000"))
 except ValueError:
     GATEWAY_SSE_SENT_ID_LIMIT = 2000
 AGENT_BRIDGE_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "bridge_registry.json")
 LLM_RECENT_MODELS_PATH = os.path.join(AGENT_HARNESS_DIR, "recent_models.json")
-SECRET_VAULT_DIR = os.path.abspath(os.path.expanduser(os.environ.get("GA_TUI_SECRET_VAULT_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "secret_vault")))
+SECRET_VAULT_DIR = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_SECRET_VAULT_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "secret_vault")))
 SECRET_VAULT_META_PATH = os.path.join(SECRET_VAULT_DIR, "vault.json")
 SECRET_VAULT_DATA_DIR = os.path.join(SECRET_VAULT_DIR, "data")
 SECRET_VAULT_SESSIONS_DIR = os.path.join(SECRET_VAULT_DATA_DIR, "sessions")
@@ -647,7 +647,7 @@ FENCE_BOUNDARY_RE = rendering_helpers.FENCE_BOUNDARY_RE
 PROMPT_BLOCK_WITH_TIME_RE = re.compile(r"^=== Prompt ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
 RESPONSE_BLOCK_WITH_TIME_RE = re.compile(r"^=== Response ===\s*([^\n]*)\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)", re.DOTALL | re.MULTILINE)
 SUBAGENT_MEMORY_RE = re.compile(r"<ga[-_]subagent[-_]memory>\s*([\s\S]*?)\s*</ga[-_]subagent[-_]memory>", re.IGNORECASE)
-SUBAGENT_PROMPT_RE = re.compile(r"\n?\[GA TUI SubAgent Profile\][\s\S]*?\[/GA TUI SubAgent Profile\]\n?", re.IGNORECASE)
+SUBAGENT_PROMPT_RE = re.compile(r"\n?\[Shuheng SubAgent Profile\][\s\S]*?\[/Shuheng SubAgent Profile\]\n?", re.IGNORECASE)
 RESTORE_DISPLAY_ROUNDS = 3
 HISTORY_EXPAND_ROUNDS = 3
 RESTORE_CACHE_LIMIT = 8
@@ -1772,9 +1772,9 @@ def reset_agent_runtime_context_no_snapshot(agent: Any, history: Optional[list[d
             client.last_tools = ""
     if hasattr(agent, "handler"):
         agent.handler = None
-    if hasattr(agent, "_ga_tui_pending_key_info"):
-        setattr(agent, "_ga_tui_pending_key_info", "")
-    for attr in ("_ga_tui_runtime_context_full_sent", "_ga_tui_runtime_context_prompt_count"):
+    if hasattr(agent, "_shuheng_pending_key_info"):
+        setattr(agent, "_shuheng_pending_key_info", "")
+    for attr in ("_shuheng_runtime_context_full_sent", "_shuheng_runtime_context_prompt_count"):
         if hasattr(agent, attr):
             try:
                 setattr(agent, attr, 0)
@@ -1823,7 +1823,7 @@ def shuheng_legacy_import_allowed() -> bool:
         return True
     if not GENERICAGENT_ROOT:
         return False
-    if os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME"):
+    if os.environ.get("SHUHENG_HOME"):
         return False
     return normalized_path(SHUHENG_HOME) == normalized_path("~/.shuheng")
 
@@ -2319,7 +2319,7 @@ def append_text_file(path: str, text: str) -> None:
 def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
 
-_DIAGNOSTICS_ENABLED = (os.environ.get("GA_TUI_DIAGNOSTICS", "") or "").strip().lower() not in {"", "0", "false", "no", "off"}
+_DIAGNOSTICS_ENABLED = (os.environ.get("SHUHENG_DIAGNOSTICS", "") or "").strip().lower() not in {"", "0", "false", "no", "off"}
 _DIAGNOSTIC_LOCK = threading.Lock()
 
 
@@ -2329,7 +2329,7 @@ def log_diagnostic(scope: str, exc: BaseException, *, detail: str = "") -> None:
     This does NOT surface the error to the user; callers that need user-visible
     feedback must still set state.last_error or return a message tuple. It is a
     forensic aid so that best-effort paths (which correctly swallow exceptions
-    to keep the TUI responsive) still leave evidence when GA_TUI_DIAGNOSTICS=1.
+    to keep the TUI responsive) still leave evidence when SHUHENG_DIAGNOSTICS=1.
     Disabled by default to avoid writing to disk on every run.
     """
     if not _DIAGNOSTICS_ENABLED:
@@ -2749,8 +2749,8 @@ def shuheng_layered_memory_payload() -> dict[str, Any]:
     return {
         "schema_version": "shuheng.layered_memory.v1",
         "included": True,
-        "mode": "genericagent_l0_l4",
-        "reason": "GenericAgent-style Shuheng layered memory is the primary runtime memory context.",
+        "mode": "shuheng_l0_l4",
+        "reason": "Shuheng-owned L0-L4 layered memory is the primary runtime memory context.",
         "items": items,
         "refs": [paths["user_profile"], paths["user_profile_state"], paths["l0"], paths["l1"], paths["l2"], paths["l3_dir"], paths["l4_dir"], paths["l4_index"]],
         "paths": paths,
@@ -3794,15 +3794,15 @@ def normalized_permission_profile(profile: str = "", *, default: str = PERMISSIO
 
 def default_omp_permission_profile() -> str:
     raw = (
-        os.environ.get("GA_TUI_OMP_PERMISSION_PROFILE")
-        or os.environ.get("GA_TUI_DEFAULT_PERMISSION_PROFILE")
+        os.environ.get("SHUHENG_OMP_PERMISSION_PROFILE")
+        or os.environ.get("SHUHENG_DEFAULT_PERMISSION_PROFILE")
         or PERMISSION_PROFILE_FULL
     )
     return normalized_permission_profile(raw, default=PERMISSION_PROFILE_FULL)
 
 
 def default_ohmypi_approval_mode() -> str:
-    return normalized_ohmypi_approval_mode(os.environ.get("GA_TUI_OMP_APPROVAL_MODE") or "yolo")
+    return normalized_ohmypi_approval_mode(os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "yolo")
 
 
 POLICY_ACTIONS: dict[str, dict[str, Any]] = {
@@ -6322,7 +6322,7 @@ def append_recovery_plan(
         "schema_version": "agentrecovery.plan.v1",
         "recovery_plan_id": plan_id,
         "task_id": task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "created_at": now_iso(),
         "action": action,
         "status": status,
@@ -6415,7 +6415,7 @@ def append_task_checkpoint(
         "schema_version": "agentcheckpoint.v1",
         "checkpoint_id": checkpoint_id,
         "task_id": task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "timestamp": now_iso(),
         "status": status,
         "reason": reason,
@@ -6437,7 +6437,7 @@ def append_task_checkpoint(
         "schema_version": "agentcheckpoint.index.v1",
         "checkpoint_id": checkpoint_id,
         "task_id": task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "timestamp": checkpoint["timestamp"],
         "status": status,
         "reason": reason,
@@ -6480,7 +6480,7 @@ def append_recovery_record(
         "schema_version": "agentrecovery.v1",
         "recovery_id": short_uid("recovery"),
         "task_id": task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "timestamp": now_iso(),
         "action": action,
         "status": status,
@@ -6620,7 +6620,7 @@ def append_orchestrator_plan(
         "source": source,
         "task_id": task_id,
         "parent_task_id": parent_task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "orchestrator": {
             "agent_id": "orchestrator.main",
             "role": "meta_orchestrator",
@@ -6985,15 +6985,15 @@ def runtime_context_prompt_for_agent(agent: Any, pack: dict[str, Any], context_r
     provider_id = agent_runtime_provider_id(agent)
     if provider_id != "ohmypi":
         return format_context_pack_for_prompt(pack)
-    sent = int(getattr(agent, "_ga_tui_runtime_context_full_sent", 0) or 0)
-    count = int(getattr(agent, "_ga_tui_runtime_context_prompt_count", 0) or 0) + 1
+    sent = int(getattr(agent, "_shuheng_runtime_context_full_sent", 0) or 0)
+    count = int(getattr(agent, "_shuheng_runtime_context_prompt_count", 0) or 0) + 1
     try:
-        setattr(agent, "_ga_tui_runtime_context_prompt_count", count)
+        setattr(agent, "_shuheng_runtime_context_prompt_count", count)
     except Exception:
         pass
     if sent <= 0:
         try:
-            setattr(agent, "_ga_tui_runtime_context_full_sent", 1)
+            setattr(agent, "_shuheng_runtime_context_full_sent", 1)
         except Exception:
             pass
         return format_context_pack_for_prompt(pack)
@@ -7121,7 +7121,7 @@ def a2a_task_object(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "a2a.task.v1",
         "id": task_id,
-        "contextId": str(row.get("context_id") or "ga-tui"),
+        "contextId": str(row.get("context_id") or "shuheng"),
         "status": {
             "state": a2a_task_state(str(row.get("status") or "")),
             "timestamp": row.get("timestamp", ""),
@@ -7159,7 +7159,7 @@ def a2a_message_object(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "a2a.message.v1",
         "messageId": str(row.get("message_id") or ""),
-        "contextId": str(row.get("context_id") or "ga-tui"),
+        "contextId": str(row.get("context_id") or "shuheng"),
         "taskId": str(row.get("task_id") or ""),
         "role": a2a_message_role(str((row.get("from") or {}).get("agent_id") or "")),
         "from": row.get("from") or {},
@@ -7179,7 +7179,7 @@ def a2a_artifact_object(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "a2a.artifact.v1",
         "artifactId": str(row.get("artifact_id") or ""),
-        "contextId": "ga-tui",
+        "contextId": "shuheng",
         "taskId": str(row.get("source_task_id") or ""),
         "name": os.path.basename(str(row.get("path") or row.get("uri") or "")),
         "parts": [
@@ -7286,7 +7286,7 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
     ]
     return {
         "schema_version": "model_orchestration.v1",
-        "owner": "ga-tui.control_plane",
+        "owner": "shuheng.control_plane",
         "status": "active",
         "current": {
             "provider": current_provider,
@@ -7305,7 +7305,7 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
             "route_by_runtime_provider": True,
         },
         "policy": {
-            "owner": "ga-tui.orchestrator",
+            "owner": "shuheng.orchestrator",
             "selection_contract": "model config name or explicit provider/model metadata",
             "fallback": "inherit global default when an agent has no explicit model",
         },
@@ -7370,7 +7370,7 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "name": "CLI",
             "status": "active",
             "transport": "local_process",
-            "entrypoints": ["shuheng", "python -m ga_tui.app", "--gateway-daemon"],
+            "entrypoints": ["shuheng", "python -m shuheng.app", "--gateway-daemon"],
             "policy_action": "read_only",
             "approval_required": False,
         },
@@ -7655,7 +7655,7 @@ def gateway_daemon_alive() -> bool:
 
 
 def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
-    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
+    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
     return gateway_registry_helpers.gateway_service_descriptor(
         host=host,
         port=port,
@@ -8559,7 +8559,7 @@ def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], i
 
 
 def web_console_html() -> str:
-    from ga_tui.web_console_static import web_console_html as load_web_console_html
+    from shuheng.web_console_static import web_console_html as load_web_console_html
 
     return load_web_console_html()
 
@@ -8569,11 +8569,11 @@ def gateway_push_endpoint_allowed(endpoint: str) -> tuple[bool, str]:
     if parsed.scheme not in {"http", "https"}:
         return False, "unsupported_scheme"
     host = (parsed.hostname or "").lower()
-    if os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_PUSH") == "1":
+    if os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_PUSH") == "1":
         return True, "remote_allowed_by_env"
     if parsed.scheme == "http" and host in {"127.0.0.1", "localhost", "::1"}:
         return True, "loopback_allowed"
-    return False, "remote_push_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_PUSH"
+    return False, "remote_push_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_PUSH"
 
 
 def append_gateway_push_subscription(endpoint: str, event_types: Optional[list[str]] = None) -> dict[str, Any]:
@@ -8650,7 +8650,7 @@ def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
         tasks = [row for row in tasks if str(row.get("id") or "") == task_id]
     return {
         "schema_version": "a2a.query_response.v1",
-        "contextId": "ga-tui",
+        "contextId": "shuheng",
         "query": payload,
         "tasks": tasks,
         "messages": registry["a2a_gateway"].get("messages") or [],
@@ -8855,7 +8855,7 @@ def make_gateway_http_server(host: str = "127.0.0.1", port: int = 8765) -> Threa
 
 
 def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
-    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
+    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
     if not bind_safety.get("allowed"):
         write_gateway_daemon_status(
             "failed",
@@ -8900,7 +8900,7 @@ def gateway_daemon_env(extra_env: Optional[dict[str, str]] = None) -> dict[str, 
     env = os.environ.copy()
     src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env["PYTHONPATH"] = src_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    env["GA_TUI_HARNESS_DIR"] = AGENT_HARNESS_DIR
+    env["SHUHENG_HARNESS_DIR"] = AGENT_HARNESS_DIR
     if extra_env:
         env.update({str(key): str(value) for key, value in extra_env.items()})
     return env
@@ -8921,7 +8921,7 @@ def wait_for_gateway_daemon(pid: int, *, timeout: float = 5.0) -> dict[str, Any]
 
 
 def start_gateway_daemon(host: str = "127.0.0.1", port: int = 8765, *, extra_env: Optional[dict[str, str]] = None) -> dict[str, Any]:
-    allow_remote = os.environ.get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1" or bool((extra_env or {}).get("GA_TUI_GATEWAY_ALLOW_REMOTE_BIND") == "1")
+    allow_remote = os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1" or bool((extra_env or {}).get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
     bind_safety = gateway_bind_safety(host, allow_remote=allow_remote)
     if not bind_safety.get("allowed"):
         return write_gateway_daemon_status(
@@ -8941,7 +8941,7 @@ def start_gateway_daemon(host: str = "127.0.0.1", port: int = 8765, *, extra_env
     cmd = [
         sys.executable,
         "-m",
-        "ga_tui.app",
+        "shuheng.app",
         "--serve-gateway",
         "--gateway-host",
         str(host),
@@ -9623,7 +9623,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "purpose": "agent-to-agent compatibility surface",
             "compatibility": protocol_compatibility_metadata("A2A"),
             "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
-            "contextId": "ga-tui",
+            "contextId": "shuheng",
             "request_response": {
                 "registry": "/a2a",
                 "agent_cards": "/a2a/agent-cards",
@@ -9696,7 +9696,7 @@ def append_agent_mail(
         "schema_version": "agentmail.v1",
         "message_id": short_uid("msg"),
         "thread_id": task_id or short_uid("thr"),
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "task_id": task_id,
         "parent_task_id": parent_task_id,
         "timestamp": now_iso(),
@@ -9763,7 +9763,7 @@ def append_task_ledger(
         "schema_version": "agenttask.v1",
         "task_id": task_id,
         "parent_task_id": parent_task_id,
-        "context_id": "ga-tui",
+        "context_id": "shuheng",
         "timestamp": now_iso(),
         "status": status,
         "priority": priority,
@@ -9987,9 +9987,9 @@ def inject_orchestrator_notice(agent: Any, text: str) -> None:
     text = clean_text(text).strip()
     if not agent or not text:
         return
-    pending = str(getattr(agent, "_ga_tui_pending_key_info", "") or "").strip()
+    pending = str(getattr(agent, "_shuheng_pending_key_info", "") or "").strip()
     if text not in pending:
-        setattr(agent, "_ga_tui_pending_key_info", (pending + "\n" + text).strip())
+        setattr(agent, "_shuheng_pending_key_info", (pending + "\n" + text).strip())
     try:
         handler = getattr(agent, "handler", None)
         if handler is not None:
@@ -10002,9 +10002,9 @@ def inject_orchestrator_notice(agent: Any, text: str) -> None:
 
 
 def take_pending_agent_bus_text(agent: Any) -> str:
-    pending_key_info = clean_text(str(getattr(agent, "_ga_tui_pending_key_info", "") or "")).strip()
+    pending_key_info = clean_text(str(getattr(agent, "_shuheng_pending_key_info", "") or "")).strip()
     if pending_key_info:
-        setattr(agent, "_ga_tui_pending_key_info", "")
+        setattr(agent, "_shuheng_pending_key_info", "")
     return pending_key_info
 
 
@@ -10193,7 +10193,7 @@ def format_plan_continuation_prompt(
     plan = latest.get(plan_id, {})
     plan_title = str(plan.get("title") or plan.get("objective") or plan_id or "当前计划")
     lines = [
-        "[GA TUI Orchestrator Auto-Continue]",
+        "[Shuheng Orchestrator Auto-Continue]",
         f"Reason: {reason}",
         f"Active plan: {plan_title} ({plan_id})",
         "",
@@ -10212,7 +10212,7 @@ def format_plan_continuation_prompt(
         f"Next unblocked step: {next_task_id} - {next_title}",
         "",
         "This is a control-emission continuation, not a research, browsing, or user-chat turn.",
-        "Execute exactly the next ledger step by emitting hidden <ga-control> JSON control blocks before any prose.",
+        "Execute exactly the next ledger step by emitting hidden <shuheng-control> JSON control blocks before any prose.",
         "Do not call browser/search/file/code tools such as web_scan, webexecute_js, file_read, or code_run just to decide what to do; the task ledger above is authoritative.",
         f"When a control belongs to the next step, attach it with parent_task_id={next_task_id!r} or an equivalent step reference.",
         "Do not repeat completed steps. Reuse existing subagents before creating new ones.",
@@ -10220,9 +10220,9 @@ def format_plan_continuation_prompt(
         "If you need child agent output before summarizing, delegate with agenttask.v2 delegate.create and wait for results instead of inventing a summary.",
         "If the plan is blocked, emit task.update/task.fail for the blocked step with a concrete reason.",
         "Examples to adapt, not copy literally:",
-        f'<ga-control>{{"schema_version":"ga-control.v2","actions":[{{"action":"agent.create","name":"<name>","role":"researcher","lifecycle":"ephemeral","profile":"<role and boundaries>","parent_task_id":"{next_task_id}"}},{{"schema_version":"agenttask.v2","action":"delegate.create","parent_task_id":"{next_task_id}","routing":{{"mode":"agent_as_tool","selected_agent":"<agent name or id>","target_selector":{{"role":"researcher","capabilities_required":["read"],"reuse_policy":"prefer_existing","security_context":"standard"}}}},"work_order":{{"objective":"<bounded task>","success_criteria":["<done condition>"],"stop_condition":"return structured result then stop"}},"capability_contract":{{"tools_allowed":["read"],"tools_forbidden":["repo.write","deploy","email.send"],"write_policy":"none","max_subagents":0}},"context_contract":{{"history_mode":"summary","artifact_reference_only":true,"include_raw_logs":false}},"output_contract":{{"format":"structured_markdown","required_sections":["summary","findings","evidence_refs","risks","artifact_refs","confidence"],"schema_validation":"strict"}}}}]}}</ga-control>',
-        f'<ga-control>{{"schema_version":"ga-control.v2","actions":[{{"action":"task.update","target":"{next_task_id}","status":"working|completed|failed","summary":"<what changed>"}}]}}</ga-control>',
-        "[/GA TUI Orchestrator Auto-Continue]",
+        f'<shuheng-control>{{"schema_version":"shuheng-control.v2","actions":[{{"action":"agent.create","name":"<name>","role":"researcher","lifecycle":"ephemeral","profile":"<role and boundaries>","parent_task_id":"{next_task_id}"}},{{"schema_version":"agenttask.v2","action":"delegate.create","parent_task_id":"{next_task_id}","routing":{{"mode":"agent_as_tool","selected_agent":"<agent name or id>","target_selector":{{"role":"researcher","capabilities_required":["read"],"reuse_policy":"prefer_existing","security_context":"standard"}}}},"work_order":{{"objective":"<bounded task>","success_criteria":["<done condition>"],"stop_condition":"return structured result then stop"}},"capability_contract":{{"tools_allowed":["read"],"tools_forbidden":["repo.write","deploy","email.send"],"write_policy":"none","max_subagents":0}},"context_contract":{{"history_mode":"summary","artifact_reference_only":true,"include_raw_logs":false}},"output_contract":{{"format":"structured_markdown","required_sections":["summary","findings","evidence_refs","risks","artifact_refs","confidence"],"schema_validation":"strict"}}}}]}}</shuheng-control>',
+        f'<shuheng-control>{{"schema_version":"shuheng-control.v2","actions":[{{"action":"task.update","target":"{next_task_id}","status":"working|completed|failed","summary":"<what changed>"}}]}}</shuheng-control>',
+        "[/Shuheng Orchestrator Auto-Continue]",
     ]
     return "\n".join(lines)
 
@@ -10273,7 +10273,7 @@ def maybe_queue_orchestrator_plan_continuation(state: State, reason: str) -> boo
         kind="orchestrator_auto_continue",
     )
     prompt = format_plan_continuation_prompt(state, reason=reason, unfinished_rows=unfinished_rows)
-    return start_main_agent_task(state, prompt, source="ga-tui:auto_plan_continue", clear_history=False)
+    return start_main_agent_task(state, prompt, source="shuheng:auto_plan_continue", clear_history=False)
 
 
 def maybe_queue_orchestrator_control_continuation(
@@ -10322,7 +10322,7 @@ def maybe_queue_orchestrator_control_continuation(
         control_results=control_results,
         original_text=text,
     )
-    return start_main_agent_task(state, prompt, source="ga-tui:auto_control_continue", clear_history=False)
+    return start_main_agent_task(state, prompt, source="shuheng:auto_control_continue", clear_history=False)
 
 
 def queue_approval(
@@ -11563,7 +11563,7 @@ def subagent_prompt_block(sub: SubAgentRuntime) -> str:
     memory = subagent_memory_text(sub).strip() if sub.persistent else ""
     template = role_template(role)
     return f"""
-[GA TUI SubAgent Profile]
+[Shuheng SubAgent Profile]
 你是一个{'持久' if sub.persistent else '临时会话'}子 agent。
 Name: {sub.name}
 ID: {sub.agent_id}
@@ -11595,7 +11595,7 @@ Long-term memory:
 - 事实或偏好，尽量短
 </ga-subagent-memory>
 - 不要在该块里写临时状态、猜测、密码/API key。
-[/GA TUI SubAgent Profile]
+[/Shuheng SubAgent Profile]
 """.strip()
 
 
@@ -11629,7 +11629,7 @@ def subagent_direct_chat_prompt(
 ) -> str:
     prompt = (prompt or "").strip()
     return f"""
-[GA TUI Direct SubAgent Chat]
+[Shuheng Direct SubAgent Chat]
 You are answering inside the selected subagent chat, not as the main Shuheng Orchestrator.
 Selected subagent:
 - name: {sub.name}
@@ -11647,7 +11647,7 @@ Response rules:
 - If the user asks who you are, describe this subagent identity, role, and boundary.
 - If the user asks where your memory/session is stored, answer using the storage line above and this subagent's own profile/memory/chat session, not the main agent memory directory.
 - Keep the user's visible message semantics unchanged.
-[/GA TUI Direct SubAgent Chat]
+[/Shuheng Direct SubAgent Chat]
 
 User message:
 {prompt}
@@ -12455,7 +12455,7 @@ def tui_query_limit(value: Any, default: int, *, minimum: int = 1, maximum: int 
 
 def tui_query_error(message: str, **extra: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.query.v1",
+        "schema_version": "shuheng.query.v1",
         "status": "error",
         "error": message,
         **extra,
@@ -12464,7 +12464,7 @@ def tui_query_error(message: str, **extra: Any) -> dict[str, Any]:
 
 def tui_query_ok(kind: str, **payload: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.query.v1",
+        "schema_version": "shuheng.query.v1",
         "kind": kind,
         "status": "ok",
         "generated_at": now_iso(),
@@ -12474,7 +12474,7 @@ def tui_query_ok(kind: str, **payload: Any) -> dict[str, Any]:
 
 def tui_tool_error(message: str, **extra: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.tool.v1",
+        "schema_version": "shuheng.tool.v1",
         "status": "error",
         "error": message,
         **extra,
@@ -12483,7 +12483,7 @@ def tui_tool_error(message: str, **extra: Any) -> dict[str, Any]:
 
 def tui_tool_ok(kind: str, **payload: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.tool.v1",
+        "schema_version": "shuheng.tool.v1",
         "kind": kind,
         "status": "ok",
         "generated_at": now_iso(),
@@ -14286,8 +14286,8 @@ def append_ohmypi_runtime_event(event: RuntimeTaskEvent | dict[str, Any]) -> dic
     )
 
 
-OHMYPI_TUI_QUERY_TOOL_NAME = "ga_tui_query"
-OHMYPI_TUI_PROPOSE_TOOL_NAME = "ga_tui_propose"
+OHMYPI_TUI_QUERY_TOOL_NAME = "shuheng_query"
+OHMYPI_TUI_PROPOSE_TOOL_NAME = "shuheng_propose"
 OHMYPI_TUI_QUERY_ENDPOINTS = (
     "runtime_registry",
     "model_orchestration",
@@ -14302,7 +14302,7 @@ OHMYPI_TUI_QUERY_ENDPOINTS = (
     "schedule_list",
     "memory_context_get",
 )
-OHMYPI_TUI_PROPOSAL_TYPES = ("ga_control", "memory_candidate")
+OHMYPI_TUI_PROPOSAL_TYPES = ("shuheng_control", "memory_candidate")
 OHMYPI_TYPED_READONLY_TOOL_NAMES = (
     "agent_list",
     "agent_get",
@@ -14395,7 +14395,7 @@ def ohmypi_tui_proposal_host_tool_definition() -> RpcHostToolDefinition:
         label="Shuheng Proposal",
         description=(
             "Bounded Shuheng proposal bridge. Use it to submit current-schema "
-            "ga-control.v2 actions through existing TUI gates, or curated memory candidates "
+            "shuheng-control.v2 actions through existing TUI gates, or curated memory candidates "
             "through the existing human approval queue. It does not grant unrestricted host tools."
         ),
         parameters={
@@ -14405,11 +14405,11 @@ def ohmypi_tui_proposal_host_tool_definition() -> RpcHostToolDefinition:
                 "proposal_type": {
                     "type": "string",
                     "enum": list(OHMYPI_TUI_PROPOSAL_TYPES),
-                    "description": "Use ga_control for current-schema TUI controls or memory_candidate for curated memory.",
+                    "description": "Use shuheng_control for current-schema TUI controls or memory_candidate for curated memory.",
                 },
                 "control": {
                     "type": "object",
-                    "description": "Current-schema ga-control.v2 envelope or agenttask.v2 action. Required for proposal_type=ga_control.",
+                    "description": "Current-schema shuheng-control.v2 envelope or agenttask.v2 action. Required for proposal_type=shuheng_control.",
                     "additionalProperties": True,
                 },
                 "default_target": {
@@ -14443,7 +14443,7 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
         RpcHostToolDefinition(
             name="proposal_submit",
             label="proposal.submit",
-            description="Submit a governed Shuheng proposal through the same policy path as ga_tui_propose.",
+            description="Submit a governed Shuheng proposal through the same policy path as shuheng_propose.",
             parameters=ohmypi_tui_proposal_host_tool_definition().parameters,
         ),
         RpcHostToolDefinition(
@@ -14538,7 +14538,7 @@ def ohmypi_tui_memory_context_get(state: Optional[State], args: dict[str, Any]) 
 
 def ohmypi_proposal_error(message: str, **extra: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.proposal.v1",
+        "schema_version": "shuheng.proposal.v1",
         "status": "error",
         "error": message,
         **extra,
@@ -14547,7 +14547,7 @@ def ohmypi_proposal_error(message: str, **extra: Any) -> dict[str, Any]:
 
 def ohmypi_proposal_ok(kind: str, **payload: Any) -> dict[str, Any]:
     return {
-        "schema_version": "ga-tui.proposal.v1",
+        "schema_version": "shuheng.proposal.v1",
         "kind": kind,
         "status": "ok",
         "generated_at": now_iso(),
@@ -14611,26 +14611,26 @@ def ohmypi_tui_propose_memory_candidate(state: Optional[State], args: dict[str, 
     )
 
 
-def ohmypi_tui_propose_ga_control(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+def ohmypi_tui_propose_shuheng_control(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
     if state is None:
-        return ohmypi_proposal_error("TUI state is not bound; ga_control proposals require an active TUI state.")
+        return ohmypi_proposal_error("TUI state is not bound; shuheng_control proposals require an active TUI state.")
     control = args.get("control")
     if not isinstance(control, dict):
-        return ohmypi_proposal_error("Missing current-schema control object.", proposal_type="ga_control")
+        return ohmypi_proposal_error("Missing current-schema control object.", proposal_type="shuheng_control")
     schema = str(control.get("schema_version") or "").strip().lower()
-    if schema not in {GA_CONTROL_SCHEMA, AGENT_TASK_SCHEMA}:
+    if schema not in {SHUHENG_CONTROL_SCHEMA, AGENT_TASK_SCHEMA}:
         return ohmypi_proposal_error(
-            "Control proposals must use ga-control.v2 or agenttask.v2 schema_version.",
-            proposal_type="ga_control",
+            "Control proposals must use shuheng-control.v2 or agenttask.v2 schema_version.",
+            proposal_type="shuheng_control",
             schema_version=schema,
         )
     controls = controls_from_json_payload(control, require_known=True)
     if not controls:
         return ohmypi_proposal_error(
             "Control proposal parsed but contained no known current-schema action.",
-            proposal_type="ga_control",
+            proposal_type="shuheng_control",
         )
-    text = "<ga-control>" + json.dumps(control, ensure_ascii=False, separators=(",", ":")) + "</ga-control>"
+    text = "<shuheng-control>" + json.dumps(control, ensure_ascii=False, separators=(",", ":")) + "</shuheng-control>"
     result_lines = apply_tui_controls_from_text(
         state,
         text,
@@ -14638,8 +14638,8 @@ def ohmypi_tui_propose_ga_control(state: Optional[State], args: dict[str, Any]) 
         default_target=str(args.get("default_target") or "current"),
     )
     return ohmypi_proposal_ok(
-        "ga_control",
-        proposal_type="ga_control",
+        "shuheng_control",
+        proposal_type="shuheng_control",
         control_count=len(controls),
         result_lines=tui_query_json_safe(result_lines),
     )
@@ -14652,8 +14652,8 @@ def ohmypi_tui_propose_host_tool_handler(state: Optional[State], args: dict[str,
     try:
         if proposal_type == "memory_candidate":
             return ohmypi_tui_propose_memory_candidate(state, args)
-        if proposal_type == "ga_control":
-            return ohmypi_tui_propose_ga_control(state, args)
+        if proposal_type == "shuheng_control":
+            return ohmypi_tui_propose_shuheng_control(state, args)
         return ohmypi_proposal_error(
             "Unsupported proposal_type.",
             proposal_type=proposal_type,
@@ -14760,7 +14760,7 @@ def ohmypi_provider_id_for_entry(entry: LLMConfigEntry, index: int) -> str:
     ])
     digest = hashlib.sha256(seed.encode("utf-8", errors="replace")).hexdigest()[:8]
     base = compact_identifier(config_display_name(entry) or str(entry.cfg.get("apibase") or ""), 28)
-    return f"ga-tui-{base}-{digest}"
+    return f"shuheng-{base}-{digest}"
 
 
 def ohmypi_api_key_env_name(entry: LLMConfigEntry, index: int) -> str:
@@ -14772,7 +14772,7 @@ def ohmypi_api_key_env_name(entry: LLMConfigEntry, index: int) -> str:
         str(entry.cfg.get("apikey") or ""),
     ])
     digest = hashlib.sha256(seed.encode("utf-8", errors="replace")).hexdigest()[:16].upper()
-    return f"GA_TUI_OMP_API_KEY_{digest}"
+    return f"SHUHENG_OMP_API_KEY_{digest}"
 
 
 def ohmypi_runtime_settings_payload(default_model: str, *, approval_mode: str = "") -> dict[str, Any]:
@@ -14897,7 +14897,7 @@ def refresh_agent_runtime_model_config(agent: Any) -> str:
 
 
 def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeRegistry:
-    requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
+    requested = os.environ.get("SHUHENG_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
     registry = RuntimeRegistry(default_provider_id=requested)
     maybe_bootstrap_shuheng_legacy_state()
     ensure_shuheng_layered_memory_files()
@@ -14973,11 +14973,11 @@ def new_agent(log_path: Optional[str] = None) -> Any:
     adapter = agent_runtime_registry().default()
     agent = adapter.create_agent()
     try:
-        setattr(agent, "_ga_tui_runtime_provider_id", adapter.provider_id)
+        setattr(agent, "_shuheng_runtime_provider_id", adapter.provider_id)
     except Exception:
         pass
     agent_no = next(_AGENT_COUNTER)
-    thread_name = f"ga-tui-agent-{agent_no}"
+    thread_name = f"shuheng-agent-{agent_no}"
     adapter.prepare_agent(agent)
     target_log_path = log_path or new_session_log_path()
     set_agent_log_path(agent, target_log_path)
@@ -15130,7 +15130,7 @@ def agent_log_path_is_devnull(agent: Any) -> bool:
 
 
 def token_thread_name(agent: Any) -> str:
-    return str(getattr(agent, "_ga_tui_thread_name", "") or "")
+    return str(getattr(agent, "_shuheng_thread_name", "") or "")
 
 
 def token_stats_snapshot(stats: Any) -> dict[str, int]:
@@ -18028,7 +18028,7 @@ LOCAL_SESSION_CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "shuheng",
             "枢衡",
-            "ga-tui",
+            "shuheng",
             "genericagent-tui",
             "ohmypi",
             "oh my pi",
@@ -26519,7 +26519,7 @@ def process_ui_queue(state: State) -> bool:
                     state.dirty = True
                 if load_history(state, force=True):
                     state.dirty = True
-            if not finished_secret and (had_tui_controls or finished_source == "ga-tui:auto_plan_continue"):
+            if not finished_secret and (had_tui_controls or finished_source == "shuheng:auto_plan_continue"):
                 plan_queued = maybe_queue_orchestrator_plan_continuation(state, f"main_done:{finished_source or 'agent'}")
                 if not plan_queued and had_tui_controls:
                     maybe_queue_orchestrator_control_continuation(
@@ -27659,8 +27659,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Shuheng governed local-agent TUI")
     parser.add_argument("--serve-gateway", action="store_true", help="serve the A2A/MCP gateway over HTTP instead of starting curses")
     parser.add_argument("--gateway-daemon", choices=["start", "stop", "restart", "status"], help="manage the A2A/MCP gateway as a background service")
-    parser.add_argument("--gateway-host", default=os.environ.get("GA_TUI_GATEWAY_HOST", "127.0.0.1"), help="gateway bind host")
-    parser.add_argument("--gateway-port", type=int, default=int(os.environ.get("GA_TUI_GATEWAY_PORT", "8765")), help="gateway bind port")
+    parser.add_argument("--gateway-host", default=os.environ.get("SHUHENG_GATEWAY_HOST", "127.0.0.1"), help="gateway bind host")
+    parser.add_argument("--gateway-port", type=int, default=int(os.environ.get("SHUHENG_GATEWAY_PORT", "8765")), help="gateway bind port")
     args = parser.parse_args(argv)
     if args.gateway_daemon:
         return gateway_daemon_command(args.gateway_daemon, args.gateway_host, args.gateway_port)

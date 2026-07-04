@@ -1,9 +1,9 @@
 """Tests for process-summary-safe history title policy helpers."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import history_titles
-from ga_tui.ui_types import Message
+from shuheng import app as app_module
+from shuheng import history_titles
+from shuheng.ui_types import Message
 
 
 def _prompt(text: str) -> str:
@@ -100,7 +100,7 @@ def test_history_cache_detects_process_only_preview_markers() -> None:
 def test_message_text_for_metadata_context_strips_process_and_control_text() -> None:
     user = Message(
         "user",
-        "公开问题 <ga-control>{\"action\":\"x\"}</ga-control> "
+        "公开问题 <shuheng-control>{\"action\":\"x\"}</shuheng-control> "
         "<thinking>Hidden</thinking> <tool_use>{\"name\":\"x\"}</tool_use>",
     )
     assistant = Message("assistant", "<thinking>Hidden</thinking>\n最终回答")

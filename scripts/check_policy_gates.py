@@ -25,34 +25,34 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ga_tui import app as a  # noqa: E402
-from ga_tui import agent_bridge as bridge  # noqa: E402
-from ga_tui import baseline as baseline_mod  # noqa: E402
-from ga_tui import commands as commands_mod  # noqa: E402
-from ga_tui import control_protocol as cp  # noqa: E402
-from ga_tui import context_packs as context_pack_mod  # noqa: E402
-from ga_tui import dashboard as dashboard_mod  # noqa: E402
-from ga_tui import gateway_registry as gateway_registry_mod  # noqa: E402
-from ga_tui import genericagent_provider as gap  # noqa: E402
-from ga_tui import governance as governance_mod  # noqa: E402
-from ga_tui import history_store as history_store_mod  # noqa: E402
-from ga_tui import history_titles as history_titles_mod  # noqa: E402
-from ga_tui import input_controller as input_controller_mod  # noqa: E402
-from ga_tui import integration as integ  # noqa: E402
-from ga_tui import ledger_store as ledgers  # noqa: E402
-from ga_tui import ohmypi_provider as omp  # noqa: E402
-from ga_tui import path_utils as path_utils_mod  # noqa: E402
-from ga_tui import plugins as plugins_mod  # noqa: E402
-from ga_tui import release_readiness as rr  # noqa: E402
-from ga_tui import runtime_evidence as runtime_evidence_mod  # noqa: E402
-from ga_tui import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
-from ga_tui import rendering as rendering_mod  # noqa: E402
-from ga_tui import scheduler as sched  # noqa: E402
-from ga_tui import secret_vault as secret_vault_mod  # noqa: E402
-from ga_tui import subagent_store as subagent_store_mod  # noqa: E402
-from ga_tui import text_utils as text_utils_mod  # noqa: E402
-from ga_tui import ui_types as ui_types_mod  # noqa: E402
-from ga_tui import web_console as web_console_mod  # noqa: E402
+from shuheng import app as a  # noqa: E402
+from shuheng import agent_bridge as bridge  # noqa: E402
+from shuheng import baseline as baseline_mod  # noqa: E402
+from shuheng import commands as commands_mod  # noqa: E402
+from shuheng import control_protocol as cp  # noqa: E402
+from shuheng import context_packs as context_pack_mod  # noqa: E402
+from shuheng import dashboard as dashboard_mod  # noqa: E402
+from shuheng import gateway_registry as gateway_registry_mod  # noqa: E402
+from shuheng import genericagent_provider as gap  # noqa: E402
+from shuheng import governance as governance_mod  # noqa: E402
+from shuheng import history_store as history_store_mod  # noqa: E402
+from shuheng import history_titles as history_titles_mod  # noqa: E402
+from shuheng import input_controller as input_controller_mod  # noqa: E402
+from shuheng import integration as integ  # noqa: E402
+from shuheng import ledger_store as ledgers  # noqa: E402
+from shuheng import ohmypi_provider as omp  # noqa: E402
+from shuheng import path_utils as path_utils_mod  # noqa: E402
+from shuheng import plugins as plugins_mod  # noqa: E402
+from shuheng import release_readiness as rr  # noqa: E402
+from shuheng import runtime_evidence as runtime_evidence_mod  # noqa: E402
+from shuheng import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
+from shuheng import rendering as rendering_mod  # noqa: E402
+from shuheng import scheduler as sched  # noqa: E402
+from shuheng import secret_vault as secret_vault_mod  # noqa: E402
+from shuheng import subagent_store as subagent_store_mod  # noqa: E402
+from shuheng import text_utils as text_utils_mod  # noqa: E402
+from shuheng import ui_types as ui_types_mod  # noqa: E402
+from shuheng import web_console as web_console_mod  # noqa: E402
 
 
 def retarget_harness(root: str) -> None:
@@ -235,7 +235,7 @@ def assert_scheduler_module_boundary() -> None:
     )
     for name in scheduler_names:
         assert getattr(a, name) is getattr(sched, name), name
-        assert getattr(sched, name).__module__ == "ga_tui.scheduler", name
+        assert getattr(sched, name).__module__ == "shuheng.scheduler", name
     assert a.SCHEDULER_TICK_SECONDS == sched.SCHEDULER_TICK_SECONDS
     assert a.SCHEDULE_RUN_ATTEMPT_STATUSES is sched.SCHEDULE_RUN_ATTEMPT_STATUSES
     assert sched.scheduler_runtime_ownership is rr.scheduler_runtime_ownership
@@ -243,7 +243,7 @@ def assert_scheduler_module_boundary() -> None:
     for forbidden in (
         "import curses",
         "from curses",
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "from .workflows",
@@ -263,7 +263,7 @@ def assert_release_gateway_module_boundaries() -> None:
     assert a.gateway_base_url("0.0.0.0", 8765) == gateway_registry_mod.gateway_base_url("0.0.0.0", 8765)
     for module in (runtime_evidence_mod, baseline_mod, gateway_registry_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
-        assert "ga_tui.app" not in source, module.__file__
+        assert "shuheng.app" not in source, module.__file__
         assert "from .app" not in source, module.__file__
 
 
@@ -289,7 +289,7 @@ def assert_leaf_module_boundaries() -> None:
     assert a.SCHEDULED_REPORTS_SESSION_KEY == ui_types_mod.SCHEDULED_REPORTS_SESSION_KEY
     for module in (text_utils_mod, ui_types_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
-        for forbidden in ("ga_tui.app", "from .app", "import app"):
+        for forbidden in ("shuheng.app", "from .app", "import app"):
             assert forbidden not in source, f"{module.__file__}: {forbidden}"
     text_source = Path(text_utils_mod.__file__).read_text(encoding="utf-8")
     for forbidden in ("import curses", "from curses", "State", "SubAgentRuntime", "RenderLine"):
@@ -404,7 +404,7 @@ def assert_input_controller_module_boundary() -> None:
     )
     source = Path(input_controller_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -571,7 +571,7 @@ def assert_commands_module_boundary() -> None:
         assert moved_def not in app_source, f"{a.__file__}: {moved_def}"
     source = Path(commands_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -1674,7 +1674,7 @@ def assert_rendering_module_boundary() -> None:
     assert "search_markers =" not in app_source, a.__file__
     source = Path(rendering_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -1766,7 +1766,7 @@ def assert_history_store_module_boundary() -> None:
     assert a.is_model_response_basename("model_responses_a.txt") is history_store_mod.is_model_response_basename("model_responses_a.txt")
     assert a.session_meta_epoch("2026-06-30T12:34:56") == history_store_mod.session_meta_epoch("2026-06-30T12:34:56")
     assert a.clear_missing_source_session_meta({"source_missing": True}) == history_store_mod.clear_missing_source_session_meta({"source_missing": True})
-    assert a.is_subagent_session_log_sample("[GA TUI SubAgent Profile]") is history_store_mod.is_subagent_session_log_sample("[GA TUI SubAgent Profile]")
+    assert a.is_subagent_session_log_sample("[Shuheng SubAgent Profile]") is history_store_mod.is_subagent_session_log_sample("[Shuheng SubAgent Profile]")
     assert a.latest_user_message_text is history_store_mod.latest_user_message_text
     assert history_store_mod.latest_user_message_text([
         a.Message("assistant", "reply"),
@@ -1778,7 +1778,7 @@ def assert_history_store_module_boundary() -> None:
     assert history_store_mod.assistant_text_from_response_body(repr([{"type": "text", "text": "hello"}, "world"])) == "hello\nworld"
     source = Path(history_store_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -1790,7 +1790,7 @@ def assert_history_store_module_boundary() -> None:
         "dashboard",
     ):
         assert forbidden not in source, f"{history_store_mod.__file__}: {forbidden}"
-    root = tempfile.mkdtemp(prefix="ga_tui_history_store_")
+    root = tempfile.mkdtemp(prefix="shuheng_history_store_")
     meta_path = os.path.join(root, "session_meta.json")
     history_store_mod.save_session_meta_registry(meta_path, {"model_responses_a.txt": {"rounds": 1}})
     assert history_store_mod.load_session_meta_registry(meta_path)["model_responses_a.txt"]["rounds"] == 1
@@ -1846,7 +1846,7 @@ def assert_history_title_policy_module_boundary() -> None:
     assert a.suggested_session_title(messages) == history_titles_mod.suggested_session_title(messages) == "有效历史标题"
     source = Path(history_titles_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -1864,7 +1864,7 @@ def assert_history_title_policy_module_boundary() -> None:
 def assert_path_utils_module_boundary() -> None:
     assert a.normalized_path is path_utils_mod.normalized_path
     assert a.path_is_within is path_utils_mod.path_is_within
-    root = tempfile.mkdtemp(prefix="ga_tui_path_utils_")
+    root = tempfile.mkdtemp(prefix="shuheng_path_utils_")
     history_root = os.path.join(root, "model_responses")
     trash_root = os.path.join(history_root, ".trash")
     os.makedirs(trash_root, exist_ok=True)
@@ -1882,7 +1882,7 @@ def assert_path_utils_module_boundary() -> None:
     )
     source = Path(path_utils_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -1900,7 +1900,7 @@ def assert_path_utils_module_boundary() -> None:
 
 
 def assert_subagent_store_module_boundary() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_subagent_store_")
+    root = tempfile.mkdtemp(prefix="shuheng_subagent_store_")
     assert a.SUBAGENT_SESSION_PREFIX == subagent_store_mod.SUBAGENT_SESSION_PREFIX
     assert a.SUBAGENT_CHAT_HISTORY_SCOPE == subagent_store_mod.SUBAGENT_CHAT_HISTORY_SCOPE
     assert a.SUBAGENT_CHAT_MESSAGES_META_KEY == subagent_store_mod.SUBAGENT_CHAT_MESSAGES_META_KEY
@@ -1916,18 +1916,18 @@ def assert_subagent_store_module_boundary() -> None:
     assert a.subagent_control_alias_keys is subagent_store_mod.subagent_control_alias_keys
     assert a.resolve_subagent_control_alias is subagent_store_mod.resolve_subagent_control_alias
     assert a.normalize_subagent_skill_refs is subagent_store_mod.normalize_subagent_skill_refs
-    assert subagent_store_mod.parse_subagent_new_body.__module__ == "ga_tui.subagent_store"
-    assert subagent_store_mod.unique_subagent_id.__module__ == "ga_tui.subagent_store"
-    assert subagent_store_mod.unique_secret_subagent_id.__module__ == "ga_tui.subagent_store"
-    assert subagent_store_mod.unique_runtime_subagent_id.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.parse_subagent_new_body.__module__ == "shuheng.subagent_store"
+    assert subagent_store_mod.unique_subagent_id.__module__ == "shuheng.subagent_store"
+    assert subagent_store_mod.unique_secret_subagent_id.__module__ == "shuheng.subagent_store"
+    assert subagent_store_mod.unique_runtime_subagent_id.__module__ == "shuheng.subagent_store"
     assert a.subagent_new_chat_session_id is subagent_store_mod.subagent_new_chat_session_id
     assert a.subagent_session_sidebar_key is subagent_store_mod.subagent_session_sidebar_key
     assert a.subagent_session_from_sidebar_key is subagent_store_mod.subagent_session_from_sidebar_key
     assert a.normalize_loaded_subagent_chat_messages is subagent_store_mod.normalize_loaded_subagent_chat_messages
     assert a.subagent_chat_history_preview_messages is subagent_store_mod.subagent_chat_history_preview_messages
-    assert subagent_store_mod.subagent_chat_title_for_messages.__module__ == "ga_tui.subagent_store"
-    assert subagent_store_mod.subagent_chat_history_preview.__module__ == "ga_tui.subagent_store"
-    assert subagent_store_mod.subagent_chat_history_description.__module__ == "ga_tui.subagent_store"
+    assert subagent_store_mod.subagent_chat_title_for_messages.__module__ == "shuheng.subagent_store"
+    assert subagent_store_mod.subagent_chat_history_preview.__module__ == "shuheng.subagent_store"
+    assert subagent_store_mod.subagent_chat_history_description.__module__ == "shuheng.subagent_store"
     assert a.subagent_chat_history_rounds is subagent_store_mod.subagent_chat_history_rounds
     assert a.subagent_chat_history_last_user_at is subagent_store_mod.subagent_chat_history_last_user_at
     original_root = a.SUBAGENTS_DIR
@@ -2092,7 +2092,7 @@ def assert_subagent_store_module_boundary() -> None:
     assert "def subagent_control_alias_keys" not in app_source
     assert "def resolve_subagent_control_alias" not in app_source
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2131,7 +2131,7 @@ def assert_plugins_module_boundary() -> None:
     )
     source = Path(plugins_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2236,9 +2236,9 @@ def assert_secret_vault_module_boundary() -> None:
     assert [(message.role, message.content) for message in messages] == [("assistant", "raw assistant")]
     assert (loaded_rounds, total_rounds, message_count) == (1, 1, 1)
     source = Path(secret_vault_mod.__file__).read_text(encoding="utf-8")
-    for forbidden in ("ga_tui.app", "from .app", "import app", "import curses", "from curses"):
+    for forbidden in ("shuheng.app", "from .app", "import app", "import curses", "from curses"):
         assert forbidden not in source, f"{secret_vault_mod.__file__}: {forbidden}"
-    root = tempfile.mkdtemp(prefix="ga_tui_secret_vault_")
+    root = tempfile.mkdtemp(prefix="shuheng_secret_vault_")
     paths = secret_vault_mod.SecretVaultPaths(
         vault_dir=os.path.join(root, "secret_vault"),
         meta_path=os.path.join(root, "secret_vault", "vault.json"),
@@ -2344,7 +2344,7 @@ def assert_governance_module_boundary() -> None:
 
     source = Path(governance_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2357,7 +2357,7 @@ def assert_governance_module_boundary() -> None:
     ):
         assert forbidden not in source, f"{governance_mod.__file__}: {forbidden}"
 
-    root = tempfile.mkdtemp(prefix="ga_tui_governance_")
+    root = tempfile.mkdtemp(prefix="shuheng_governance_")
     harness = os.path.join(root, "agent_harness")
     old_harness = a.AGENT_HARNESS_DIR
     old_artifacts_dir = a.AGENT_ARTIFACTS_DIR
@@ -2560,7 +2560,7 @@ def assert_context_pack_module_boundary() -> None:
 
     source = Path(context_pack_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2577,7 +2577,7 @@ def assert_context_pack_module_boundary() -> None:
 
 def assert_runtime_dispatch_module_boundary() -> None:
     class RuntimeAgent:
-        _ga_tui_runtime_provider_id = "ohmypi"
+        _shuheng_runtime_provider_id = "ohmypi"
         native_session_file = " native/session.jsonl "
         native_context_usage = {"tokens": "25", "context_window": "100", "percent": 0}
 
@@ -2668,7 +2668,7 @@ def assert_runtime_dispatch_module_boundary() -> None:
 
     source = Path(runtime_dispatch_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2763,7 +2763,7 @@ def assert_web_console_module_boundary() -> None:
 
     source = Path(web_console_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2842,7 +2842,7 @@ def assert_dashboard_module_boundary() -> None:
 
     source = Path(dashboard_mod.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "import curses",
@@ -2870,7 +2870,7 @@ def assert_ledger_store_module_boundary() -> None:
     for forbidden in (
         "import curses",
         "from curses",
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "State",
@@ -2885,7 +2885,7 @@ def assert_ledger_store_module_boundary() -> None:
     assert "_LATEST_RECORDS_CACHE" not in app_source, "app.py must not own latest-record caches"
     assert "fcntl.flock" not in app_source, "app.py must delegate ledger locking to ledger_store"
 
-    root = tempfile.mkdtemp(prefix="ga_tui_ledger_store_")
+    root = tempfile.mkdtemp(prefix="shuheng_ledger_store_")
     path = os.path.join(root, "tasks.jsonl")
     ledgers.clear_jsonl_caches()
     a.append_jsonl(path, {"task_id": "task_core", "status": "queued"})
@@ -2898,7 +2898,7 @@ def assert_ledger_store_module_boundary() -> None:
 
 
 def assert_progress_ledger_is_persistent_and_hydrated() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_progress_ledger_")
+    root = tempfile.mkdtemp(prefix="shuheng_progress_ledger_")
     retarget_harness(root)
     state = a.State(agent=FakeAgent())
     state.running = True
@@ -2960,7 +2960,7 @@ def assert_progress_ledger_is_persistent_and_hydrated() -> None:
 
 
 def assert_runtime_evidence_store_upgrades_baseline() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_runtime_evidence_")
+    root = tempfile.mkdtemp(prefix="shuheng_runtime_evidence_")
     retarget_harness(root)
     state = a.State(agent=FakeAgent())
     state.running = True
@@ -3024,28 +3024,28 @@ def assert_genericagent_provider_module_boundary() -> None:
         "install_tui_query_runtime",
         "install_tui_control_hint",
     ):
-        assert getattr(gap, name).__module__ == "ga_tui.genericagent_provider", name
-    assert gap.GenericAgentRuntimeAdapter.__module__ == "ga_tui.genericagent_provider"
-    assert gap.TUI_CONTROL_HINT_MARKER == "[Shuheng ga-control v2]", gap.TUI_CONTROL_HINT_MARKER
+        assert getattr(gap, name).__module__ == "shuheng.genericagent_provider", name
+    assert gap.GenericAgentRuntimeAdapter.__module__ == "shuheng.genericagent_provider"
+    assert gap.TUI_CONTROL_HINT_MARKER == "[Shuheng shuheng-control v2]", gap.TUI_CONTROL_HINT_MARKER
     legacy_tui_identity = "GenericAgent" + "-TUI"
     assert gap.LEGACY_TUI_IDENTITY == legacy_tui_identity
     assert legacy_tui_identity not in gap.TUI_AGENT_CONTROL_HINT, gap.TUI_AGENT_CONTROL_HINT
     assert gap.LEGACY_TUI_SESSION_CONTROL_MARKER == f"{legacy_tui_identity} session control"
-    assert gap.LEGACY_TUI_GA_CONTROL_MARKER == f"{legacy_tui_identity} ga-control v2"
-    for legacy_marker in (gap.LEGACY_TUI_SESSION_CONTROL_MARKER, gap.LEGACY_TUI_GA_CONTROL_MARKER):
+    assert gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER == f"{legacy_tui_identity} " + "ga" + "-control v2"
+    for legacy_marker in (gap.LEGACY_TUI_SESSION_CONTROL_MARKER, gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER):
         legacy_block = f"[{legacy_marker}]\nold\n[/{legacy_marker}]"
         assert gap.LEGACY_TUI_CONTROL_HINT_BLOCK_RE.sub("", legacy_block) == ""
     active_schema_text = json.dumps(
         gap.TUI_QUERY_TOOL_SCHEMAS + gap.TUI_SCHEDULE_TOOL_SCHEMAS + gap.TUI_TOOL_SCHEMAS,
         ensure_ascii=False,
     )
-    for forbidden in (legacy_tui_identity, "GA TUI"):
+    for forbidden in (legacy_tui_identity, "GA" + " TUI", "ga" + "_tui", "ga" + "-tui"):
         assert forbidden not in active_schema_text, forbidden
     provider_source = Path(gap.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "import curses",
         "from curses",
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "from app import State",
@@ -3292,12 +3292,12 @@ def assert_queue_has_no_done(dq: queue.Queue, *, timeout: float = 0.2) -> None:
 
 
 def assert_ohmypi_provider_module_boundary() -> None:
-    assert omp.OhMyPiRuntimeAdapter.__module__ == "ga_tui.ohmypi_provider"
+    assert omp.OhMyPiRuntimeAdapter.__module__ == "shuheng.ohmypi_provider"
     provider_source = Path(omp.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "import curses",
         "from curses",
-        "ga_tui.app",
+        "shuheng.app",
         "from .app",
         "import app",
         "from app import State",
@@ -3317,12 +3317,13 @@ def assert_shuheng_brand_entrypoints() -> None:
         "shuheng-integration",
     ):
         assert f"{script} =" in pyproject, script
+    retired_script_prefix = "ga" + "-tui"
     for removed_script in (
-        "ga-tui",
-        "ga-tui-agent-bridge",
-        "ga-tui-check",
-        "ga-tui-install-core-shim",
-        "ga-tui-integration",
+        retired_script_prefix,
+        f"{retired_script_prefix}-agent-bridge",
+        f"{retired_script_prefix}-check",
+        f"{retired_script_prefix}-install-core-shim",
+        f"{retired_script_prefix}-integration",
     ):
         assert f"{removed_script} =" not in pyproject, removed_script
     buffer = io.StringIO()
@@ -3333,14 +3334,14 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert "Core runtime: OhMyPi / OMP" in report, report
     assert "GenericAgent legacy provider: unavailable (optional)" in report, report
     assert "Launch without legacy patches: shuheng" in report, report
-    assert "ga-tui" not in report, report
-    legacy_ga_tui_words = "ga" + " tui"
-    legacy_ga_tui_title = "GA" + " TUI"
+    assert retired_script_prefix not in report, report
+    legacy_shuheng_words = "ga" + " tui"
+    legacy_shuheng_title = "GA" + " TUI"
     legacy_genericagent_title = "GenericAgent stable"
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        legacy_ga_tui_words,
-        f"{legacy_ga_tui_title} gateway",
+        legacy_shuheng_words,
+        f"{legacy_shuheng_title} gateway",
         "Launch without " + "core patches",
         f"{legacy_genericagent_title} TUI",
         f"{legacy_genericagent_title} curses TUI",
@@ -3351,7 +3352,7 @@ def assert_shuheng_brand_entrypoints() -> None:
 
 
 def assert_shuheng_history_storage_owned() -> None:
-    expected_home = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME") or "~/.shuheng"))
+    expected_home = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_HOME") or "~/.shuheng"))
     assert a.SHUHENG_HOME == expected_home, a.SHUHENG_HOME
     assert a.SHUHENG_MEMORY_DIR == os.path.join(a.SHUHENG_HOME, "memory"), a.SHUHENG_MEMORY_DIR
     assert a.SHUHENG_TEMP_DIR == os.path.join(a.SHUHENG_HOME, "temp"), a.SHUHENG_TEMP_DIR
@@ -3386,7 +3387,7 @@ def assert_shuheng_history_storage_owned() -> None:
 
 
 def assert_token_usage_registry_prunes_removed_history() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_token_usage_")
+    root = tempfile.mkdtemp(prefix="shuheng_token_usage_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
 
@@ -3433,7 +3434,7 @@ def assert_token_usage_registry_prunes_removed_history() -> None:
     class TokenAgent:
         def __init__(self, path: str, thread_name: str) -> None:
             self.log_path = path
-            self._ga_tui_thread_name = thread_name
+            self._shuheng_thread_name = thread_name
 
         def abort(self) -> None:
             return None
@@ -3561,7 +3562,7 @@ def assert_token_usage_registry_prunes_removed_history() -> None:
 
 
 def assert_shuheng_workspace_memory_context() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_workspaces_")
+    root = tempfile.mkdtemp(prefix="shuheng_workspaces_")
     retarget_harness(root)
     old_cwd = os.getcwd()
     project_root = os.path.join(root, "Project Alpha")
@@ -3633,7 +3634,7 @@ def assert_shuheng_workspace_memory_context() -> None:
 
 
 def assert_shared_user_profile_context_is_global() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_shared_profile_")
+    root = tempfile.mkdtemp(prefix="shuheng_shared_profile_")
     retarget_harness(root)
     install_fake_agent_runtime()
     state = a.State(agent=FakeLLMAgent())
@@ -3687,7 +3688,7 @@ def assert_shared_user_profile_context_is_global() -> None:
 
 
 def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_legacy_bootstrap_")
+    root = tempfile.mkdtemp(prefix="shuheng_legacy_bootstrap_")
     legacy_root = os.path.join(root, "GenericAgent")
     shuheng_root = os.path.join(root, "ShuhengHome")
     legacy_history = os.path.join(legacy_root, "temp", "model_responses")
@@ -3764,7 +3765,7 @@ def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
 
 
 def assert_ohmypi_runtime_registry() -> None:
-    old = os.environ.pop("GA_TUI_RUNTIME_PROVIDER", None)
+    old = os.environ.pop("SHUHENG_RUNTIME_PROVIDER", None)
     try:
         registry = a.agent_runtime_registry()
         data = registry.to_record()
@@ -3786,11 +3787,11 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["capabilities"]["memory_candidates"] is True, ohmypi
         assert ohmypi["capabilities"]["memory_candidate_signals"] is True, ohmypi
         assert ohmypi["scheduler"]["status"] == "registry_ready", ohmypi
-        assert ohmypi["policy"]["approval_gate_owner"] == "ga-tui.policy", ohmypi
+        assert ohmypi["policy"]["approval_gate_owner"] == "shuheng.policy", ohmypi
         assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi
         assert ohmypi["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi
         assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
-        os.environ["GA_TUI_RUNTIME_PROVIDER"] = "genericagent"
+        os.environ["SHUHENG_RUNTIME_PROVIDER"] = "genericagent"
         selected = a.agent_runtime_registry().default().provider_id
         if a.GENERICAGENT_PROVIDER_CONFIGURED:
             assert selected == "genericagent", selected
@@ -3798,9 +3799,9 @@ def assert_ohmypi_runtime_registry() -> None:
             assert selected == "ohmypi", selected
     finally:
         if old is None:
-            os.environ.pop("GA_TUI_RUNTIME_PROVIDER", None)
+            os.environ.pop("SHUHENG_RUNTIME_PROVIDER", None)
         else:
-            os.environ["GA_TUI_RUNTIME_PROVIDER"] = old
+            os.environ["SHUHENG_RUNTIME_PROVIDER"] = old
 
 
 def assert_ohmypi_core_without_genericagent_discovery() -> None:
@@ -3809,7 +3810,7 @@ def assert_ohmypi_core_without_genericagent_discovery() -> None:
     env["SHUHENG_DISABLE_GENERICAGENT"] = "1"
     code = "\n".join([
         "import contextlib, io, json",
-        "from ga_tui import app, integration",
+        "from shuheng import app, integration",
         "registry = app.agent_runtime_registry(write_memory_prompt_file=False).to_record()",
         "buf = io.StringIO()",
         "with contextlib.redirect_stdout(buf):",
@@ -3841,8 +3842,8 @@ def assert_ohmypi_core_without_genericagent_discovery() -> None:
 
 
 def assert_ohmypi_memory_prompt_and_command() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_root_")
-    harness = tempfile.mkdtemp(prefix="ga_tui_omp_harness_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_root_")
+    harness = tempfile.mkdtemp(prefix="shuheng_omp_harness_")
     memory_dir = os.path.join(root, "memory")
     os.makedirs(memory_dir, exist_ok=True)
     Path(memory_dir, "global_mem_insight.txt").write_text("api_key: SHOULD_NOT_LEAK\nremember useful path\n", encoding="utf-8")
@@ -3867,16 +3868,16 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
     assert command[command.index("--approval-mode") + 1] == "yolo", command
     assert "--append-system-prompt" in command, command
     assert command[command.index("--append-system-prompt") + 1] == prompt_path, command
-    old_approval_mode = os.environ.get("GA_TUI_OMP_APPROVAL_MODE")
+    old_approval_mode = os.environ.get("SHUHENG_OMP_APPROVAL_MODE")
     try:
-        os.environ["GA_TUI_OMP_APPROVAL_MODE"] = "always-ask"
+        os.environ["SHUHENG_OMP_APPROVAL_MODE"] = "always-ask"
         command_with_approval_override = omp.ohmypi_rpc_command(binary="/fake/omp")
         assert command_with_approval_override[command_with_approval_override.index("--approval-mode") + 1] == "always-ask", command_with_approval_override
     finally:
         if old_approval_mode is None:
-            os.environ.pop("GA_TUI_OMP_APPROVAL_MODE", None)
+            os.environ.pop("SHUHENG_OMP_APPROVAL_MODE", None)
         else:
-            os.environ["GA_TUI_OMP_APPROVAL_MODE"] = old_approval_mode
+            os.environ["SHUHENG_OMP_APPROVAL_MODE"] = old_approval_mode
     command_with_user_append = omp.ohmypi_rpc_command(
         binary="/fake/omp",
         extra_args=["--append-system-prompt", "/user/append.md"],
@@ -3887,7 +3888,7 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
 
 
 def assert_ohmypi_rpc_command_discovers_user_bun_binary() -> None:
-    temp_home = tempfile.mkdtemp(prefix="ga_tui_omp_home_")
+    temp_home = tempfile.mkdtemp(prefix="shuheng_omp_home_")
     bun_bin = Path(temp_home, ".bun", "bin")
     bun_bin.mkdir(parents=True)
     omp_binary = bun_bin / "omp"
@@ -3895,14 +3896,14 @@ def assert_ohmypi_rpc_command_discovers_user_bun_binary() -> None:
     omp_binary.chmod(0o755)
     old_home = os.environ.get("HOME")
     old_path = os.environ.get("PATH")
-    old_bin = os.environ.pop("GA_TUI_OHMYPI_BIN", None)
+    old_bin = os.environ.pop("SHUHENG_OHMYPI_BIN", None)
     try:
         os.environ["HOME"] = temp_home
         os.environ["PATH"] = ""
         command = omp.ohmypi_rpc_command()
         assert command[0] == str(omp_binary), command
 
-        os.environ["GA_TUI_OHMYPI_BIN"] = "/custom/omp"
+        os.environ["SHUHENG_OHMYPI_BIN"] = "/custom/omp"
         explicit_command = omp.ohmypi_rpc_command()
         assert explicit_command[0] == "/custom/omp", explicit_command
     finally:
@@ -3915,13 +3916,13 @@ def assert_ohmypi_rpc_command_discovers_user_bun_binary() -> None:
         else:
             os.environ["PATH"] = old_path
         if old_bin is None:
-            os.environ.pop("GA_TUI_OHMYPI_BIN", None)
+            os.environ.pop("SHUHENG_OHMYPI_BIN", None)
         else:
-            os.environ["GA_TUI_OHMYPI_BIN"] = old_bin
+            os.environ["SHUHENG_OHMYPI_BIN"] = old_bin
 
 
 def assert_ohmypi_isolated_runtime_settings() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_isolated_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_isolated_")
     retarget_harness(root)
     mykey_file = os.path.join(root, "mykey.py")
     Path(mykey_file).write_text(
@@ -3934,7 +3935,7 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         encoding="utf-8",
     )
     old_mykey_path = a.mykey_path
-    old_approval_mode = os.environ.pop("GA_TUI_OMP_APPROVAL_MODE", None)
+    old_approval_mode = os.environ.pop("SHUHENG_OMP_APPROVAL_MODE", None)
     system_config = Path.home() / ".omp" / "agent" / "config.yml"
     before_hash = hashlib.sha256(system_config.read_bytes()).hexdigest() if system_config.exists() else ""
     try:
@@ -3960,7 +3961,7 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
             if provider["models"][0]["id"] == "model-beta"
         )
         assert beta_provider["api"] == "openai-responses", beta_provider
-        assert beta_provider["apiKey"].startswith("GA_TUI_OMP_API_KEY_"), beta_provider
+        assert beta_provider["apiKey"].startswith("SHUHENG_OMP_API_KEY_"), beta_provider
         assert beta_provider["models"][0]["contextWindow"] == 1050000, beta_provider
         assert beta_provider["models"][0]["maxTokens"] == 128000, beta_provider
         assert "key-beta" not in Path(runtime_config.models_path).read_text(encoding="utf-8")
@@ -3971,7 +3972,7 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert getattr(adapter, "cwd") == a.APP_ROOT_DIR, getattr(adapter, "cwd")
         assert getattr(adapter, "env")["PI_CODING_AGENT_DIR"] == runtime_config.agent_dir
         ohmypi_agent = adapter.create_agent()
-        setattr(ohmypi_agent, "_ga_tui_runtime_provider_id", "ohmypi")
+        setattr(ohmypi_agent, "_shuheng_runtime_provider_id", "ohmypi")
         assert ohmypi_agent.llm_no == 1, ohmypi_agent.llm_no
         assert ohmypi_agent.get_llm_name(model=True) == "model-beta", ohmypi_agent.get_llm_name(model=True)
         Path(mykey_file).write_text(
@@ -4052,16 +4053,16 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
     finally:
         a.mykey_path = old_mykey_path
         if old_approval_mode is None:
-            os.environ.pop("GA_TUI_OMP_APPROVAL_MODE", None)
+            os.environ.pop("SHUHENG_OMP_APPROVAL_MODE", None)
         else:
-            os.environ["GA_TUI_OMP_APPROVAL_MODE"] = old_approval_mode
+            os.environ["SHUHENG_OMP_APPROVAL_MODE"] = old_approval_mode
 
 
 def assert_ohmypi_permission_profiles() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_permissions_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_permissions_")
     retarget_harness(root)
-    old_profile = os.environ.pop("GA_TUI_OMP_PERMISSION_PROFILE", None)
-    old_default_profile = os.environ.pop("GA_TUI_DEFAULT_PERMISSION_PROFILE", None)
+    old_profile = os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
+    old_default_profile = os.environ.pop("SHUHENG_DEFAULT_PERMISSION_PROFILE", None)
     try:
         state = a.State(agent=FakeLLMAgent())
         pack, context_ref = a.build_main_runtime_context_pack(state, "Can you edit code?", "task_omp_full")
@@ -4112,20 +4113,20 @@ def assert_ohmypi_permission_profiles() -> None:
         assert sub_pack["permissions"]["write_policy"] == "none", sub_pack["permissions"]
         assert sub_pack["permissions"]["tools_allowed"] == ["web", "read"], sub_pack["permissions"]
 
-        os.environ["GA_TUI_OMP_PERMISSION_PROFILE"] = "read_only"
+        os.environ["SHUHENG_OMP_PERMISSION_PROFILE"] = "read_only"
         read_only_pack, _read_only_ref = a.build_main_runtime_context_pack(state, "Compatibility mode", "task_omp_read_only")
         assert read_only_pack["permission_profile"] == "read_only", read_only_pack
         assert read_only_pack["permissions"]["write_policy"] == "none", read_only_pack["permissions"]
         assert "bash" not in read_only_pack["permissions"]["tools_allowed"], read_only_pack["permissions"]
     finally:
         if old_profile is None:
-            os.environ.pop("GA_TUI_OMP_PERMISSION_PROFILE", None)
+            os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
         else:
-            os.environ["GA_TUI_OMP_PERMISSION_PROFILE"] = old_profile
+            os.environ["SHUHENG_OMP_PERMISSION_PROFILE"] = old_profile
         if old_default_profile is None:
-            os.environ.pop("GA_TUI_DEFAULT_PERMISSION_PROFILE", None)
+            os.environ.pop("SHUHENG_DEFAULT_PERMISSION_PROFILE", None)
         else:
-            os.environ["GA_TUI_DEFAULT_PERMISSION_PROFILE"] = old_default_profile
+            os.environ["SHUHENG_DEFAULT_PERMISSION_PROFILE"] = old_default_profile
 
 
 def assert_model_context_window_surface() -> None:
@@ -4133,7 +4134,7 @@ def assert_model_context_window_surface() -> None:
     assert "context_win" in fields, fields
     assert fields.index("context_win") > fields.index("model"), fields
 
-    root = tempfile.mkdtemp(prefix="ga_tui_model_context_")
+    root = tempfile.mkdtemp(prefix="shuheng_model_context_")
     mykey_file = os.path.join(root, "mykey.py")
     old_mykey_path = a.mykey_path
     try:
@@ -4160,7 +4161,7 @@ def assert_model_context_window_surface() -> None:
 
 
 def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_context_once_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_context_once_")
     retarget_harness(root)
     runtime_agent = RuntimeCaptureFakeAgent()
     runtime_state = a.State(agent=runtime_agent)
@@ -4171,8 +4172,8 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
         visible_user_text="first task",
     )
     first = runtime_agent.runtime_requests[-1]
-    assert "[GA TUI Context Pack]" in first.prompt, first.prompt
-    assert "[GA TUI Context Ref]" not in first.prompt, first.prompt
+    assert "[Shuheng Context Pack]" in first.prompt, first.prompt
+    assert "[Shuheng Context Ref]" not in first.prompt, first.prompt
     assert "subagent_identity_rule:" in first.prompt, first.prompt
     assert "copied profile, OMP native task spawn, or IRC demo participant is only a clone" in first.prompt, first.prompt
     assert "final_reply_rule:" in first.prompt, first.prompt
@@ -4194,8 +4195,8 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
         visible_user_text="second task",
     )
     second = runtime_agent.runtime_requests[-1]
-    assert "[GA TUI Context Pack]" not in second.prompt, second.prompt
-    assert "[GA TUI Context Ref]" in second.prompt, second.prompt
+    assert "[Shuheng Context Pack]" not in second.prompt, second.prompt
+    assert "[Shuheng Context Ref]" in second.prompt, second.prompt
     assert "final_reply_rule:" in second.prompt, second.prompt
     assert "memory-candidate notices" in second.prompt, second.prompt
     assert "deictic_reference_rule:" in second.prompt, second.prompt
@@ -4215,7 +4216,7 @@ def assert_ohmypi_runtime_context_pack_is_not_repeated() -> None:
         visible_user_text="third task",
     )
     third = runtime_agent.runtime_requests[-1]
-    assert "[GA TUI Context Pack]" in third.prompt, third.prompt
+    assert "[Shuheng Context Pack]" in third.prompt, third.prompt
 
 
 def assert_ohmypi_rpc_extension_approval_bridge() -> None:
@@ -4249,7 +4250,7 @@ def assert_ohmypi_rpc_extension_approval_bridge() -> None:
     agent._answer_extension_ui({  # type: ignore[attr-defined]
         "id": "ui-risky",
         "method": "select",
-        "title": "Allow tool: bash\nCommand: rm -rf /tmp/ga-tui-test",
+        "title": "Allow tool: bash\nCommand: rm -rf /tmp/shuheng-test",
         "options": ["Approve", "Deny"],
     })
     assert sent[-1] == {"type": "extension_ui_response", "id": "ui-risky", "value": "Approve"}, sent[-1]
@@ -4390,7 +4391,7 @@ def assert_ohmypi_rpc_usage_tracking() -> None:
     agent.close()
 
     fallback_processes: list[FakeRpcProcess] = []
-    agent_dir = tempfile.mkdtemp(prefix="ga_tui_omp_usage_agent_")
+    agent_dir = tempfile.mkdtemp(prefix="shuheng_omp_usage_agent_")
     sessions_dir = os.path.join(agent_dir, "sessions", "-Programs-Shuheng")
     os.makedirs(sessions_dir, exist_ok=True)
     session_path = os.path.join(sessions_dir, "session.jsonl")
@@ -4500,7 +4501,7 @@ def assert_ohmypi_native_session_state_and_restore() -> None:
 
     class NativeRestoreAgent:
         def __init__(self) -> None:
-            self._ga_tui_runtime_provider_id = "ohmypi"
+            self._shuheng_runtime_provider_id = "ohmypi"
             self.switches: list[str] = []
             self.reset_calls = 0
             self.log_path = ""
@@ -4533,7 +4534,7 @@ def assert_ohmypi_native_session_state_and_restore() -> None:
 
     class NativeTokenAgent:
         def __init__(self) -> None:
-            self._ga_tui_runtime_provider_id = "ohmypi"
+            self._shuheng_runtime_provider_id = "ohmypi"
             self.native_context_usage = {"tokens": 123456, "contextWindow": 1000000, "percent": 12.3456}
             self.native_message_count = 8
 
@@ -4719,7 +4720,7 @@ def assert_ohmypi_rpc_continues_incomplete_final_reply() -> None:
         process,
         lambda frame: frame.get("type") == "prompt" and frame.get("message") == omp.INCOMPLETE_FINAL_CONTINUATION_PROMPT,
     )
-    assert str(continuation_prompt.get("id") or "").startswith("ga-tui-continue-final-"), continuation_prompt
+    assert str(continuation_prompt.get("id") or "").startswith("shuheng-continue-final-"), continuation_prompt
     assert agent.is_running is True
     assert agent.task_queue.unfinished_tasks == 1
     assert_queue_has_no_done(dq, timeout=0.1)
@@ -4884,7 +4885,7 @@ def assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn() -> None
 
     def handler(tool_name: str, args: dict[str, object]) -> dict[str, object]:
         return {
-            "schema_version": "ga-tui.query.v1",
+            "schema_version": "shuheng.query.v1",
             "status": "ok",
             "kind": "test.host_tool",
             "tool_name": tool_name,
@@ -4892,8 +4893,8 @@ def assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn() -> None
         }
 
     tool = omp.RpcHostToolDefinition(
-        name="ga_tui_query",
-        label="GA/TUI Query",
+        name="shuheng_query",
+        label="Shuheng Query",
         description="Read-only test query",
         parameters={"type": "object", "properties": {"endpoint": {"type": "string"}}},
     )
@@ -4915,7 +4916,7 @@ def assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn() -> None
         "type": "host_tool_call",
         "id": "call-stalled",
         "toolCallId": "tc-stalled",
-        "toolName": "ga_tui_query",
+        "toolName": "shuheng_query",
         "arguments": {"endpoint": "runtime_registry"},
     })
     result_frame = wait_for_rpc_write(
@@ -4925,10 +4926,10 @@ def assert_ohmypi_rpc_host_tool_followup_timeout_finishes_stalled_turn() -> None
     assert result_frame["result"]["content"][0]["type"] == "text", result_frame
 
     done, streamed = wait_for_queue_done(dq)
-    assert "Shuheng host tool `ga_tui_query` 已完成" in done["done"], done
+    assert "Shuheng host tool `shuheng_query` 已完成" in done["done"], done
     assert "模型没有继续生成最终回复" in done["done"], done
     assert "runtime_registry" in done["done"], done
-    assert "ga_tui_query" in streamed, streamed
+    assert "shuheng_query" in streamed, streamed
     assert agent.is_running is False
     assert agent.task_queue.unfinished_tasks == 0
     signal = omp.ohmypi_memory_candidate_signal(done["done"], source="test", request_id="host-tool-stall")
@@ -4946,7 +4947,7 @@ def assert_ohmypi_rpc_host_tool_followup_activity_waits_for_final_answer() -> No
 
     def handler(tool_name: str, args: dict[str, object]) -> dict[str, object]:
         return {
-            "schema_version": "ga-tui.query.v1",
+            "schema_version": "shuheng.query.v1",
             "status": "ok",
             "kind": "test.large_agent_list",
             "tool_name": tool_name,
@@ -5027,7 +5028,7 @@ def assert_ohmypi_rpc_host_tool_followup_ignores_pre_tool_progress_for_fallback(
 
     def handler(tool_name: str, args: dict[str, object]) -> dict[str, object]:
         return {
-            "schema_version": "ga-tui.query.v1",
+            "schema_version": "shuheng.query.v1",
             "status": "ok",
             "kind": "test.agent_list",
             "tool_name": tool_name,
@@ -5221,8 +5222,8 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
         return process
 
     models = [
-        omp.OhMyPiRuntimeModel(provider="ga-tui-alpha", model_id="model-alpha", display_name="alpha", base_url="https://alpha.example.invalid/v1"),
-        omp.OhMyPiRuntimeModel(provider="ga-tui-beta", model_id="model-beta", display_name="beta", base_url="https://beta.example.invalid/v1"),
+        omp.OhMyPiRuntimeModel(provider="shuheng-alpha", model_id="model-alpha", display_name="alpha", base_url="https://alpha.example.invalid/v1"),
+        omp.OhMyPiRuntimeModel(provider="shuheng-beta", model_id="model-beta", display_name="beta", base_url="https://beta.example.invalid/v1"),
     ]
     startup_processes: list[FakeRpcProcess] = []
 
@@ -5243,7 +5244,7 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     startup_process = wait_for_process(startup_processes)
     startup_set_model = wait_for_rpc_write(startup_process, lambda frame: frame.get("type") == "set_model")
     startup_prompt = wait_for_rpc_write(startup_process, lambda frame: frame.get("type") == "prompt")
-    assert startup_set_model["provider"] == "ga-tui-beta", startup_set_model
+    assert startup_set_model["provider"] == "shuheng-beta", startup_set_model
     assert startup_set_model["modelId"] == "model-beta", startup_set_model
     assert startup_process.stdin.writes.index(startup_set_model) < startup_process.stdin.writes.index(startup_prompt), startup_process.stdin.writes
     wait_for_queue_done(startup_q)
@@ -5258,13 +5259,13 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     restart_process = startup_processes[1]
     restart_set_model = wait_for_rpc_write(restart_process, lambda frame: frame.get("type") == "set_model")
     restart_prompt = wait_for_rpc_write(restart_process, lambda frame: frame.get("type") == "prompt")
-    assert restart_set_model["provider"] == "ga-tui-beta", restart_set_model
+    assert restart_set_model["provider"] == "shuheng-beta", restart_set_model
     assert restart_set_model["modelId"] == "model-beta", restart_set_model
     assert restart_process.stdin.writes.index(restart_set_model) < restart_process.stdin.writes.index(restart_prompt), restart_process.stdin.writes
     wait_for_queue_done(restart_q)
     startup_agent.close()
 
-    env = {"PI_CODING_AGENT_DIR": "/tmp/ga-tui-omp-agent", "GA_TUI_OMP_API_KEY_TEST": "key"}
+    env = {"PI_CODING_AGENT_DIR": "/tmp/shuheng-omp-agent", "SHUHENG_OMP_API_KEY_TEST": "key"}
     agent = omp.OhMyPiRpcAgent(
         command=["/fake/omp", "--mode", "rpc"],
         cwd=str(ROOT),
@@ -5288,13 +5289,13 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert agent.llm_no == 1
     assert agent.get_llm_name(model=True) == "model-beta"
     pending_model = getattr(agent, "_pending_model", None)
-    assert pending_model is not None and pending_model.provider == "ga-tui-beta" and pending_model.model_id == "model-beta", pending_model
+    assert pending_model is not None and pending_model.provider == "shuheng-beta" and pending_model.model_id == "model-beta", pending_model
     agent._handle_response({
         "type": "response",
         "command": "get_state",
         "success": True,
         "data": {
-            "model": {"provider": "ga-tui-alpha", "id": "model-alpha"},
+            "model": {"provider": "shuheng-alpha", "id": "model-alpha"},
             "contextUsage": {"tokens": 10, "contextWindow": 100, "percent": 10},
         },
     })
@@ -5307,7 +5308,7 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
         "command": "set_model",
         "success": True,
         "data": {
-            "model": {"provider": "ga-tui-beta", "id": "model-beta", "contextWindow": 200},
+            "model": {"provider": "shuheng-beta", "id": "model-beta", "contextWindow": 200},
         },
     })
     assert agent.llm_no == 1
@@ -5316,10 +5317,10 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert getattr(agent.llmclient.backend, "apibase", "") == "https://beta.example.invalid/v1"
     assert getattr(agent.llmclient.backend, "contextWindow", 0) == 200
     refreshed_models = [
-        omp.OhMyPiRuntimeModel(provider="ga-tui-gamma", model_id="model-gamma", display_name="gamma", base_url="https://gamma.example.invalid/v1"),
-        omp.OhMyPiRuntimeModel(provider="ga-tui-beta-new", model_id="model-beta", display_name="beta-new", base_url="https://beta.example.invalid/v1"),
+        omp.OhMyPiRuntimeModel(provider="shuheng-gamma", model_id="model-gamma", display_name="gamma", base_url="https://gamma.example.invalid/v1"),
+        omp.OhMyPiRuntimeModel(provider="shuheng-beta-new", model_id="model-beta", display_name="beta-new", base_url="https://beta.example.invalid/v1"),
     ]
-    refreshed_env = {"PI_CODING_AGENT_DIR": "/tmp/ga-tui-omp-agent-refreshed", "GA_TUI_OMP_API_KEY_TEST_2": "key2"}
+    refreshed_env = {"PI_CODING_AGENT_DIR": "/tmp/shuheng-omp-agent-refreshed", "SHUHENG_OMP_API_KEY_TEST_2": "key2"}
     agent.refresh_configured_models(refreshed_models, env=refreshed_env, command=["/fake/omp-new", "--mode", "rpc"])
     assert agent.llm_no == 1
     assert agent.list_llms() == [(0, "OhMyPi/gamma", False), (1, "OhMyPi/beta-new", True)], agent.list_llms()
@@ -5329,7 +5330,7 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     assert popen_kwargs[0]["env"] == refreshed_env, popen_kwargs
     set_model = wait_for_rpc_write(process, lambda frame: frame.get("type") == "set_model")
     prompt = wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt")
-    assert set_model["provider"] == "ga-tui-beta-new", set_model
+    assert set_model["provider"] == "shuheng-beta-new", set_model
     assert set_model["modelId"] == "model-beta", set_model
     assert process.stdin.writes.index(set_model) < process.stdin.writes.index(prompt), process.stdin.writes
 
@@ -5373,7 +5374,7 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     warmup_q = mismatch_agent.put_task("warmup", source="test")
     wait_for_queue_done(warmup_q)
     mismatch_process = wait_for_process(mismatch_processes)
-    mismatch_process.stdin.set_model_model_override = {"provider": "ga-tui-alpha", "id": "model-alpha"}
+    mismatch_process.stdin.set_model_model_override = {"provider": "shuheng-alpha", "id": "model-alpha"}
     ok_mismatch, mismatch_msg = mismatch_agent.set_llm_index(1, wait=True, timeout=1)
     assert not ok_mismatch, mismatch_msg
     assert "expected" in mismatch_msg, mismatch_msg
@@ -5397,7 +5398,7 @@ def assert_ohmypi_rpc_env_model_switch_and_error_mapping() -> None:
     legacy_warmup = legacy_agent.put_task("legacy warmup", source="test")
     wait_for_queue_done(legacy_warmup)
     legacy_process = wait_for_process(legacy_processes)
-    legacy_process.stdin.set_model_model_override = {"provider": "ga-tui-alpha", "id": "model-alpha"}
+    legacy_process.stdin.set_model_model_override = {"provider": "shuheng-alpha", "id": "model-alpha"}
     legacy_agent.next_llm(1)
     assert legacy_agent.llm_no == 0, legacy_agent.llm_no
     assert legacy_agent.model_sync_snapshot()["status"] == "clean", legacy_agent.model_sync_snapshot()
@@ -5419,15 +5420,15 @@ def assert_ohmypi_host_tool_bridge() -> None:
         if args.get("endpoint") == "explode":
             raise RuntimeError("boom")
         return {
-            "schema_version": "ga-tui.query.v1",
+            "schema_version": "shuheng.query.v1",
             "status": "ok",
             "kind": "test.host_tool",
             "endpoint": str(args.get("endpoint") or ""),
         }
 
     tool = omp.RpcHostToolDefinition(
-        name="ga_tui_query",
-        label="GA/TUI Query",
+        name="shuheng_query",
+        label="Shuheng Query",
         description="Read-only test query",
         parameters={"type": "object", "properties": {"endpoint": {"type": "string"}}},
     )
@@ -5444,22 +5445,22 @@ def assert_ohmypi_host_tool_bridge() -> None:
     set_host_tools = wait_for_rpc_write(process, lambda frame: frame.get("type") == "set_host_tools")
     prompt = wait_for_rpc_write(process, lambda frame: frame.get("type") == "prompt")
     assert process.stdin.writes.index(set_host_tools) < process.stdin.writes.index(prompt), process.stdin.writes
-    assert set_host_tools["tools"][0]["name"] == "ga_tui_query", set_host_tools
+    assert set_host_tools["tools"][0]["name"] == "shuheng_query", set_host_tools
     assert set_host_tools["tools"][0]["parameters"]["type"] == "object", set_host_tools
 
     process.stdout.push({
         "type": "host_tool_call",
         "id": "call-1",
         "toolCallId": "tc-1",
-        "toolName": "ga_tui_query",
+        "toolName": "shuheng_query",
         "arguments": {"endpoint": "runtime_registry"},
     })
     success = wait_for_rpc_write(process, lambda frame: frame.get("type") == "host_tool_result" and frame.get("id") == "call-1")
     success_text = success["result"]["content"][0]["text"]
     success_payload = json.loads(success_text)
-    assert success_payload["schema_version"] == "ga-tui.query.v1", success_payload
+    assert success_payload["schema_version"] == "shuheng.query.v1", success_payload
     assert success_payload["status"] == "ok", success_payload
-    assert calls[-1] == ("ga_tui_query", {"endpoint": "runtime_registry"}), calls
+    assert calls[-1] == ("shuheng_query", {"endpoint": "runtime_registry"}), calls
 
     process.stdout.push({
         "type": "host_tool_call",
@@ -5479,7 +5480,7 @@ def assert_ohmypi_host_tool_bridge() -> None:
         "type": "host_tool_call",
         "id": "call-error",
         "toolCallId": "tc-error",
-        "toolName": "ga_tui_query",
+        "toolName": "shuheng_query",
         "arguments": {"endpoint": "explode"},
     })
     failed = wait_for_rpc_write(
@@ -5505,33 +5506,33 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     tools = a.ohmypi_tui_readonly_host_tool_definitions()
     assert len(tools) == 1, tools
     tool = tools[0].to_rpc()
-    assert tool["name"] == "ga_tui_query", tool
+    assert tool["name"] == "shuheng_query", tool
     assert "runtime_registry" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
     assert "artifact_list" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
 
     handler = a.ohmypi_tui_query_host_tool_handler(None)
-    runtime = handler("ga_tui_query", {"endpoint": "runtime_registry"})
-    assert runtime["schema_version"] == "ga-tui.query.v1", runtime
+    runtime = handler("shuheng_query", {"endpoint": "runtime_registry"})
+    assert runtime["schema_version"] == "shuheng.query.v1", runtime
     assert runtime["status"] == "ok", runtime
     assert runtime["runtime_registry"]["default_provider_id"] == "ohmypi", runtime
     assert runtime["runtime_registry"]["providers"], runtime
     provider = {item["provider_id"]: item for item in runtime["runtime_registry"]["providers"]}["ohmypi"]
     assert provider["capabilities"]["tui_typed_host_tools"] is True, provider
 
-    tasks = handler("ga_tui_query", {"endpoint": "task_list", "args": {"limit": 1}})
-    assert tasks["schema_version"] == "ga-tui.query.v1", tasks
+    tasks = handler("shuheng_query", {"endpoint": "task_list", "args": {"limit": 1}})
+    assert tasks["schema_version"] == "shuheng.query.v1", tasks
     assert tasks["kind"] == "task.list", tasks
 
-    agent_list = handler("ga_tui_query", {"endpoint": "agent_list"})
+    agent_list = handler("shuheng_query", {"endpoint": "agent_list"})
     assert agent_list["status"] == "error", agent_list
     assert "TUI state is not bound" in agent_list["error"], agent_list
 
-    unknown = handler("ga_tui_query", {"endpoint": "not-real"})
+    unknown = handler("shuheng_query", {"endpoint": "not-real"})
     assert unknown["status"] == "error", unknown
     assert "runtime_registry" in unknown["supported_endpoints"], unknown
     assert "memory_context_get" in unknown["supported_endpoints"], unknown
 
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_typed_tools_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_typed_tools_")
     retarget_harness(root)
     state = a.State(agent=FakeLLMAgent())
     steward = a.create_subagent(
@@ -5543,8 +5544,8 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     )
     all_tools = [item.to_rpc() for item in a.ohmypi_tui_host_tool_definitions()]
     tool_names = {str(item.get("name") or "") for item in all_tools}
-    assert {"ga_tui_query", "agent_list", "schedule_list", "memory_context_get", "memory_candidate_submit"} <= tool_names, all_tools
-    query_tool = next(item for item in all_tools if item["name"] == "ga_tui_query")
+    assert {"shuheng_query", "agent_list", "schedule_list", "memory_context_get", "memory_candidate_submit"} <= tool_names, all_tools
+    query_tool = next(item for item in all_tools if item["name"] == "shuheng_query")
     assert "or sends messages to agents" in query_tool["description"], query_tool
     typed_agent_get_tool = next(item for item in all_tools if item["name"] == "agent_get")
     assert "identity/interaction rules" in typed_agent_get_tool["description"], typed_agent_get_tool
@@ -5556,7 +5557,7 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert "Submitted/deferred status must never replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
     typed_handler = a.ohmypi_tui_host_tool_handler(state)
     typed_agents = typed_handler("agent_list", {"limit": 5})
-    assert typed_agents["schema_version"] == "ga-tui.query.v1", typed_agents
+    assert typed_agents["schema_version"] == "shuheng.query.v1", typed_agents
     assert typed_agents["kind"] == "agent.list", typed_agents
     typed_agent = next(row for row in typed_agents["agents"] if row["agent_id"] == steward.agent_id)
     assert typed_agent["runtime_loaded"] is False, typed_agent
@@ -5595,7 +5596,7 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
 
 
 def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_proposal_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_proposal_")
     retarget_harness(root)
     state = a.State(agent=FakeLLMAgent())
     target = a.create_subagent(
@@ -5608,13 +5609,13 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
 
     tools = [tool.to_rpc() for tool in a.ohmypi_tui_host_tool_definitions()]
     tool_names = {str(tool.get("name") or "") for tool in tools}
-    assert {"ga_tui_query", "ga_tui_propose"} <= tool_names, tools
-    propose_tool = next(tool for tool in tools if tool["name"] == "ga_tui_propose")
-    assert "ga_control" in propose_tool["parameters"]["properties"]["proposal_type"]["enum"], propose_tool
+    assert {"shuheng_query", "shuheng_propose"} <= tool_names, tools
+    propose_tool = next(tool for tool in tools if tool["name"] == "shuheng_propose")
+    assert "shuheng_control" in propose_tool["parameters"]["properties"]["proposal_type"]["enum"], propose_tool
     assert "memory_candidate" in propose_tool["parameters"]["properties"]["proposal_type"]["enum"], propose_tool
 
     handler = a.ohmypi_tui_host_tool_handler(state)
-    memory_result = handler("ga_tui_propose", {
+    memory_result = handler("shuheng_propose", {
         "proposal_type": "memory_candidate",
         "target": target.agent_id,
         "statement": (
@@ -5625,7 +5626,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "evidence_ref": "runtime://provider/ohmypi/test-proposal",
         "task_id": "task_omp_proposal_memory",
     })
-    assert memory_result["schema_version"] == "ga-tui.proposal.v1", memory_result
+    assert memory_result["schema_version"] == "shuheng.proposal.v1", memory_result
     assert memory_result["status"] == "ok", memory_result
     assert memory_result["kind"] == "memory_candidate", memory_result
     assert memory_result["result_status"] == "queued", memory_result
@@ -5662,7 +5663,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "evidence_ref": "runtime://provider/ohmypi/typed-memory",
         "task_id": "task_omp_typed_memory",
     })
-    assert typed_memory["schema_version"] == "ga-tui.proposal.v1", typed_memory
+    assert typed_memory["schema_version"] == "shuheng.proposal.v1", typed_memory
     assert typed_memory["status"] == "ok", typed_memory
     assert typed_memory["kind"] == "memory_candidate", typed_memory
     assert typed_memory["approval_ids"], typed_memory
@@ -5680,7 +5681,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "evidence_ref": "runtime://provider/ohmypi/target-mismatch",
         "task_id": "task_omp_target_mismatch_memory",
     })
-    assert mismatched_memory["schema_version"] == "ga-tui.proposal.v1", mismatched_memory
+    assert mismatched_memory["schema_version"] == "shuheng.proposal.v1", mismatched_memory
     assert mismatched_memory["status"] == "ok", mismatched_memory
     assert mismatched_memory["result_status"] == "rejected", mismatched_memory
     assert "target_mismatch_candidate_responsibility" in mismatched_memory["result_message"], mismatched_memory
@@ -5708,7 +5709,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "evidence_ref": "runtime://provider/ohmypi/target-match",
         "task_id": "task_omp_target_match_memory",
     })
-    assert matched_memory["schema_version"] == "ga-tui.proposal.v1", matched_memory
+    assert matched_memory["schema_version"] == "shuheng.proposal.v1", matched_memory
     assert matched_memory["status"] == "ok", matched_memory
     assert matched_memory["result_status"] == "queued", matched_memory
     assert matched_memory["target_subagent"] == ops_target.agent_id, matched_memory
@@ -5750,14 +5751,14 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
             "output_contract": {"format": "structured_markdown", "required_sections": ["summary"]},
         },
     })
-    assert typed_schedule["schema_version"] == "ga-tui.tool.v1", typed_schedule
+    assert typed_schedule["schema_version"] == "shuheng.tool.v1", typed_schedule
     assert typed_schedule["status"] == "ok", typed_schedule
     assert typed_schedule["schedule"]["provider_id"] == "ohmypi", typed_schedule
 
-    control_result = handler("ga_tui_propose", {
-        "proposal_type": "ga_control",
+    control_result = handler("shuheng_propose", {
+        "proposal_type": "shuheng_control",
         "control": {
-            "schema_version": "ga-control.v2",
+            "schema_version": "shuheng-control.v2",
             "actions": [
                 {
                     "action": "task.plan.create",
@@ -5767,19 +5768,19 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
             ],
         },
     })
-    assert control_result["schema_version"] == "ga-tui.proposal.v1", control_result
+    assert control_result["schema_version"] == "shuheng.proposal.v1", control_result
     assert control_result["status"] == "ok", control_result
-    assert control_result["kind"] == "ga_control", control_result
+    assert control_result["kind"] == "shuheng_control", control_result
     assert control_result["control_count"] == 1, control_result
     assert any("已创建任务计划：OMP Proposal Plan" in line for line in control_result["result_lines"]), control_result
     assert any("OMP Proposal Plan" in str(row.get("objective") or "") for row in a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
 
-    invalid_type = handler("ga_tui_propose", {"proposal_type": "not-real"})
+    invalid_type = handler("shuheng_propose", {"proposal_type": "not-real"})
     assert invalid_type["status"] == "error", invalid_type
     assert "memory_candidate" in invalid_type["supported_proposal_types"], invalid_type
-    invalid_control = handler("ga_tui_propose", {"proposal_type": "ga_control", "control": {"actions": []}})
+    invalid_control = handler("shuheng_propose", {"proposal_type": "shuheng_control", "control": {"actions": []}})
     assert invalid_control["status"] == "error", invalid_control
-    missing_state = a.ohmypi_tui_host_tool_handler(None)("ga_tui_propose", {
+    missing_state = a.ohmypi_tui_host_tool_handler(None)("shuheng_propose", {
         "proposal_type": "memory_candidate",
         "target": target.agent_id,
         "statement": "This should fail because no TUI state is bound.",
@@ -5789,7 +5790,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
 
 
 def assert_agent_bridge_contract_and_omp_plugin() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_agent_bridge_")
+    root = tempfile.mkdtemp(prefix="shuheng_agent_bridge_")
     retarget_harness(root)
     state = a.State(agent=FakeLLMAgent())
     target = a.create_subagent(
@@ -5801,8 +5802,8 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     )
     service = bridge.AgentBridgeService(app=a, state=state)
     metadata = service.handle({"action": "metadata"})
-    assert metadata["schema_version"] == "ga-tui.agent_bridge.v1", metadata
-    assert metadata["owner"] == "ga-tui.control_plane", metadata
+    assert metadata["schema_version"] == "shuheng.agent_bridge.v1", metadata
+    assert metadata["owner"] == "shuheng.control_plane", metadata
     assert "memory_context_get" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
     assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
@@ -5824,7 +5825,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
             "task_id": "task_agent_bridge_context",
         },
     })
-    assert context["schema_version"] == "ga-tui.query.v1", context
+    assert context["schema_version"] == "shuheng.query.v1", context
     assert context["status"] == "ok", context
     assert context["context_pack_ref"].startswith("artifact://"), context
     artifact_rows = a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH)
@@ -5843,7 +5844,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
             "task_id": "task_agent_bridge_memory",
         },
     })
-    assert memory["schema_version"] == "ga-tui.proposal.v1", memory
+    assert memory["schema_version"] == "shuheng.proposal.v1", memory
     assert memory["status"] == "ok", memory
     assert memory["kind"] == "memory_candidate", memory
     assert memory["result_status"] == "queued", memory
@@ -5854,19 +5855,19 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert candidate["target_subagent"] == target.agent_id, candidate
 
     missing = service.handle({"action": "does_not_exist"})
-    assert missing["schema_version"] == "ga-tui.agent_bridge.v1", missing
+    assert missing["schema_version"] == "shuheng.agent_bridge.v1", missing
     assert missing["status"] == "error", missing
     assert "memory_context_get" in missing["supported_actions"], missing
 
-    plugin_dir = ROOT / "integrations" / "omp-ga-tui-plugin"
+    plugin_dir = ROOT / "integrations" / "omp-shuheng-plugin"
     package_json = json.loads((plugin_dir / "package.json").read_text(encoding="utf-8"))
     manifest = package_json["omp"]
     assert manifest["tools"] == "tools/index.ts", manifest
-    assert manifest["settings"]["repoRoot"]["env"] == "GA_TUI_REPO", manifest
+    assert manifest["settings"]["repoRoot"]["env"] == "SHUHENG_REPO", manifest
     tool_source = (plugin_dir / "tools" / "index.ts").read_text(encoding="utf-8")
-    assert "ga_tui_context_get" in tool_source, tool_source
-    assert "ga_tui_memory_candidate_submit" in tool_source, tool_source
-    assert "ga_tui.agent_bridge" in tool_source, tool_source
+    assert "shuheng_context_get" in tool_source, tool_source
+    assert "shuheng_memory_candidate_submit" in tool_source, tool_source
+    assert "shuheng.agent_bridge" in tool_source, tool_source
     assert "PYTHONPATH=" in tool_source, tool_source
 
 
@@ -5894,7 +5895,7 @@ def assert_ohmypi_memory_candidate_signal_filters() -> None:
 
 
 def assert_ohmypi_missing_binary_and_abort() -> None:
-    missing_agent = omp.OhMyPiRpcAgent(command=["ga-tui-definitely-missing-omp"], startup_timeout=0.1)
+    missing_agent = omp.OhMyPiRpcAgent(command=["shuheng-definitely-missing-omp"], startup_timeout=0.1)
     missing_q = missing_agent.put_task("hello", source="test")
     missing = missing_q.get(timeout=2)
     assert "not found" in missing["done"], missing
@@ -5926,8 +5927,8 @@ def assert_ohmypi_missing_binary_and_abort() -> None:
     agent.close()
 
 
-def ga_control(*actions: dict) -> str:
-    return "<ga-control>" + json.dumps({"schema_version": "ga-control.v2", "actions": list(actions)}, ensure_ascii=False) + "</ga-control>"
+def shuheng_control(*actions: dict) -> str:
+    return "<shuheng-control>" + json.dumps({"schema_version": "shuheng-control.v2", "actions": list(actions)}, ensure_ascii=False) + "</shuheng-control>"
 
 
 def plan_action(title: str, steps: list[str]) -> dict:
@@ -6100,7 +6101,7 @@ class RuntimeCaptureFakeAgent(FakeLLMAgent):
     def __init__(self) -> None:
         super().__init__()
         self.runtime_requests: list[a.RuntimeTaskRequest] = []
-        self._ga_tui_runtime_provider_id = "ohmypi"
+        self._shuheng_runtime_provider_id = "ohmypi"
 
     def put_runtime_task(self, request: a.RuntimeTaskRequest) -> queue.Queue:
         self.runtime_requests.append(request)
@@ -6197,7 +6198,7 @@ def backend_history_text(agent: FakeLLMAgent) -> str:
 def seed_agent_context(agent: FakeLLMAgent, marker: str) -> None:
     agent.history = [marker]
     agent.handler = type("FakeHandler", (), {"working": {"key_info": marker}})()
-    setattr(agent, "_ga_tui_pending_key_info", marker)
+    setattr(agent, "_shuheng_pending_key_info", marker)
     for client in agent.llmclients:
         client.backend.history = [{"role": "user", "content": marker}]
         client.last_tools = marker
@@ -6521,7 +6522,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert a2a["schema_version"] == "a2a.gateway.v1", a2a
     assert a2a["status"] == "compatibility_surface", a2a
     assert a2a["compatibility"]["certification"] == "not_protocol_certified", a2a
-    assert a2a["contextId"] == "ga-tui", a2a
+    assert a2a["contextId"] == "shuheng", a2a
     for key in ("AgentCard", "Task", "Message", "Part", "Artifact", "contextId"):
         assert key in a2a["objects"], a2a
     for key in ("agent_cards", "tasks", "messages", "artifacts"):
@@ -6565,7 +6566,7 @@ def assert_gateway_schema(registry: dict) -> None:
         assert runtime_provider["schema_version"] == "agentruntime.provider.v1", runtime_provider
         assert runtime_provider["status"] == "legacy_available", runtime_provider
         assert runtime_provider["capabilities"]["streaming"] is True, runtime_provider
-        assert runtime_provider["model_routing"]["owner"] == "ga-tui.control_plane", runtime_provider
+        assert runtime_provider["model_routing"]["owner"] == "shuheng.control_plane", runtime_provider
         assert runtime_provider["scheduler"]["dispatch_contract"] == "agenttask.v2", runtime_provider
     ohmypi_provider = providers_by_id["ohmypi"]
     assert ohmypi_provider["transport"] == "jsonl_stdio_rpc", ohmypi_provider
@@ -6584,11 +6585,11 @@ def assert_gateway_schema(registry: dict) -> None:
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
     model_orchestration = registry["model_orchestration"]
     assert model_orchestration["schema_version"] == "model_orchestration.v1", model_orchestration
-    assert model_orchestration["owner"] == "ga-tui.control_plane", model_orchestration
+    assert model_orchestration["owner"] == "shuheng.control_plane", model_orchestration
     assert model_orchestration["capabilities"]["set_subagent_default_model"] is True, model_orchestration
     scheduled = registry["scheduled_task_registry"]
     assert scheduled["schema_version"] == "scheduledtask.registry.v1", scheduled
-    assert scheduled["owner"] == "ga-tui.control_plane", scheduled
+    assert scheduled["owner"] == "shuheng.control_plane", scheduled
     assert scheduled["dispatch"]["contract"] == "agenttask.v2", scheduled
     assert scheduled["runtime_ownership"]["always_on"] is False, scheduled
     assert scheduled["runtime_ownership"]["tick_owner"] == "tui_loop_or_gateway_manual_action", scheduled
@@ -6721,7 +6722,7 @@ def assert_agent_card_schema(card: dict) -> None:
 def assert_a2a_task_schema(task: dict) -> None:
     assert task["schema_version"] == "a2a.task.v1", task
     assert task["id"], task
-    assert task["contextId"] == "ga-tui", task
+    assert task["contextId"] == "shuheng", task
     assert task["status"]["state"], task
     assert isinstance(task["history"], list), task
     assert isinstance(task["artifacts"], list), task
@@ -6730,7 +6731,7 @@ def assert_a2a_task_schema(task: dict) -> None:
 def assert_a2a_message_schema(message: dict) -> None:
     assert message["schema_version"] == "a2a.message.v1", message
     assert message["messageId"], message
-    assert message["contextId"] == "ga-tui", message
+    assert message["contextId"] == "shuheng", message
     assert message["role"] in {"agent", "user"}, message
     assert message["parts"], message
 
@@ -6738,7 +6739,7 @@ def assert_a2a_message_schema(message: dict) -> None:
 def assert_a2a_artifact_schema(artifact: dict) -> None:
     assert artifact["schema_version"] == "a2a.artifact.v1", artifact
     assert artifact["artifactId"], artifact
-    assert artifact["contextId"] == "ga-tui", artifact
+    assert artifact["contextId"] == "shuheng", artifact
     assert artifact["parts"], artifact
     assert artifact["parts"][0]["file"]["uri"].startswith("artifact://"), artifact
 
@@ -7026,10 +7027,10 @@ def run_gateway_server_checks() -> None:
 
 
 def run_gateway_daemon_checks() -> None:
-    remote_default = a.start_gateway_daemon("0.0.0.0", 0, extra_env={"GA_TUI_HARNESS_DIR": a.AGENT_HARNESS_DIR})
+    remote_default = a.start_gateway_daemon("0.0.0.0", 0, extra_env={"SHUHENG_HARNESS_DIR": a.AGENT_HARNESS_DIR})
     assert remote_default["status"] == "failed", remote_default
-    assert remote_default["message"] == "remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND", remote_default
-    status = a.start_gateway_daemon("127.0.0.1", 0, extra_env={"GA_TUI_HARNESS_DIR": a.AGENT_HARNESS_DIR})
+    assert remote_default["message"] == "remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND", remote_default
+    status = a.start_gateway_daemon("127.0.0.1", 0, extra_env={"SHUHENG_HARNESS_DIR": a.AGENT_HARNESS_DIR})
     try:
         assert status["schema_version"] == "agentgateway.daemon.v1", status
         assert status["status"] == "running", status
@@ -7282,10 +7283,10 @@ def assert_process_detail_line_not_swallowed_by_code_fence() -> None:
 def assert_single_search_turn_keeps_final_reply_visible() -> None:
     restored = (
         "**LLM Running (Turn 1) ...**\n"
-        "<summary>查询 GenericAgent TUI 能力</summary>\n"
+        "<summary>查询 Shuheng 能力</summary>\n"
         "🛠️ Tool: `web_search` 📥 args:\n"
         "````text\n"
-        "{\"query\":\"GenericAgent TUI 能力\"}\n"
+        "{\"query\":\"Shuheng 能力\"}\n"
         "````\n"
         "`````\n"
         "search results noise\n"
@@ -7296,7 +7297,7 @@ def assert_single_search_turn_keeps_final_reply_visible() -> None:
     rendered = a.render_assistant_text(restored, done=True, fold_process=True, message_index=11)
     assert "在这个 TUI 里，我可以帮你管理会话、拆任务、调度子 Agent。" in rendered, rendered
     assert rendered.index("在这个 TUI 里") < rendered.index("▸ 过程 Turn 1"), rendered
-    assert "▸ 过程 Turn 1: 查询 GenericAgent TUI 能力" in rendered, rendered
+    assert "▸ 过程 Turn 1: 查询 Shuheng 能力" in rendered, rendered
     assert "搜索/浏览输出已折叠" not in rendered, rendered
     assert "<summary>" not in rendered, rendered
     assert "search results noise" not in rendered, rendered
@@ -7424,7 +7425,7 @@ def assert_subagent_result_context_update_from_notice() -> None:
 
 
 def assert_live_subagent_result_reaches_main_context() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_subagent_context_")
+    root = tempfile.mkdtemp(prefix="shuheng_subagent_context_")
     retarget_harness(root)
     install_fake_agent_runtime()
     state = a.State(agent=ContextFakeAgent())
@@ -7453,7 +7454,7 @@ def assert_live_subagent_result_reaches_main_context() -> None:
 
 
 def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_subagent_runtime_error_")
+    root = tempfile.mkdtemp(prefix="shuheng_subagent_runtime_error_")
     retarget_harness(root)
     install_fake_agent_runtime()
     state = a.State(agent=ContextFakeAgent())
@@ -7489,7 +7490,7 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     assert any(row.get("type") == "subagent-results" for row in artifacts), artifacts
     assert any(msg.role == "system" and "子 agent 失败" in msg.content and "429" in msg.content for msg in state.messages), state.messages
 
-    incomplete_root = tempfile.mkdtemp(prefix="ga_tui_subagent_incomplete_runtime_")
+    incomplete_root = tempfile.mkdtemp(prefix="shuheng_subagent_incomplete_runtime_")
     retarget_harness(incomplete_root)
     incomplete_state = a.State(agent=ContextFakeAgent())
     incomplete_state.running = True
@@ -7525,7 +7526,7 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     assert len(chat_agent.prompts) == 2, chat_agent.prompts
     assert "queued after rpc failure" in chat_agent.prompts[-1][0], chat_agent.prompts[-1]
 
-    model_root = tempfile.mkdtemp(prefix="ga_tui_subagent_model_block_")
+    model_root = tempfile.mkdtemp(prefix="shuheng_subagent_model_block_")
     retarget_harness(model_root)
     model_state = a.State(agent=ContextFakeAgent())
     model_state.running = True
@@ -7543,7 +7544,7 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     finally:
         a.apply_subagent_default_model = old_apply
 
-    chat_model_root = tempfile.mkdtemp(prefix="ga_tui_subagent_chat_model_block_")
+    chat_model_root = tempfile.mkdtemp(prefix="shuheng_subagent_chat_model_block_")
     retarget_harness(chat_model_root)
     chat_model_state = a.State(agent=ContextFakeAgent())
     chat_model_state.running = True
@@ -7566,7 +7567,7 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
     finally:
         a.apply_subagent_default_model = old_apply
 
-    empty_done_root = tempfile.mkdtemp(prefix="ga_tui_subagent_chat_empty_done_")
+    empty_done_root = tempfile.mkdtemp(prefix="shuheng_subagent_chat_empty_done_")
     retarget_harness(empty_done_root)
     empty_done_state = a.State(agent=ContextFakeAgent())
     empty_done_state.running = True
@@ -7582,7 +7583,7 @@ def assert_subagent_runtime_errors_fail_and_release_model_switch() -> None:
 
 
 def assert_selected_subagent_chat_is_direct_session() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_subagent_chat_")
+    root = tempfile.mkdtemp(prefix="shuheng_subagent_chat_")
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
     state.running = True
@@ -7594,9 +7595,9 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     a.submit(state, "persist before first token")
     assert blocking_agent.prompts, "direct chat prompt was not sent"
     assert blocking_agent.prompts[0][1] == f"subagent-chat:{blocking_sub.agent_id}", blocking_agent.prompts
-    assert "[GA TUI Context Pack]" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
+    assert "[Shuheng Context Pack]" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "Memory hydration pack:" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
-    assert "[GA TUI Direct SubAgent Chat]" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
+    assert "[Shuheng Direct SubAgent Chat]" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "name: Blocking Chat Agent" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "context_pack_ref:" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "do not introduce yourself as the main Shuheng Orchestrator" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
@@ -7630,10 +7631,10 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert chat_agent.prompts[0][1] == f"subagent-chat:{sub.agent_id}", chat_agent.prompts
     assert a.agent_log_path(sub.agent) == os.devnull, a.agent_log_path(sub.agent)
     assert not (Path(sub.home) / "model_responses.txt").exists(), "subagent runtime must not keep a private transcript log"
-    assert "[GA TUI Context Pack]" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
+    assert "[Shuheng Context Pack]" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "Memory hydration pack:" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "Chat Agent memory marker" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
-    assert "[GA TUI Direct SubAgent Chat]" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
+    assert "[Shuheng Direct SubAgent Chat]" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "name: Chat Agent" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "Prefer this subagent's own profile, memory, chat session, and context pack" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
     assert "hello direct" in chat_agent.prompts[0][0], chat_agent.prompts[0][0]
@@ -7891,7 +7892,7 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
 
 
 def assert_running_main_input_is_queued_and_interruptible() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_queued_input_")
+    root = tempfile.mkdtemp(prefix="shuheng_queued_input_")
     retarget_harness(root)
     state = a.State(agent=BlockingAbortFakeAgent())
     state.running = True
@@ -7947,7 +7948,7 @@ def assert_running_main_input_is_queued_and_interruptible() -> None:
 
 
 def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_agent_create_")
+    root = tempfile.mkdtemp(prefix="shuheng_agent_create_")
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
     state.running = True
@@ -7968,19 +7969,19 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert a.policy_relevant_subagent_prompt_text is cp.policy_relevant_subagent_prompt_text
     assert a.explicit_policy_action_for_subagent_task is cp.explicit_policy_action_for_subagent_task
     assert a.inferred_policy_action_for_subagent_task is cp.inferred_policy_action_for_subagent_task
-    assert cp.extract_tui_controls.__module__ == "ga_tui.control_protocol"
-    assert cp.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
-    assert cp.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
-    assert cp.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
-    assert cp.control_continuation_metadata.__module__ == "ga_tui.control_protocol"
-    assert cp.control_explicitly_requests_continuation.__module__ == "ga_tui.control_protocol"
-    assert cp.control_result_continuation_needed.__module__ == "ga_tui.control_protocol"
-    assert cp.format_control_result_continuation_prompt.__module__ == "ga_tui.control_protocol"
-    assert cp.format_agent_control_result.__module__ == "ga_tui.control_protocol"
-    assert cp.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
-    assert cp.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
-    assert cp.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
-    assert cp.inferred_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
+    assert cp.extract_tui_controls.__module__ == "shuheng.control_protocol"
+    assert cp.subagent_control_persistence_intent.__module__ == "shuheng.control_protocol"
+    assert cp.subagent_control_force_new_intent.__module__ == "shuheng.control_protocol"
+    assert cp.control_result_continuation_signature.__module__ == "shuheng.control_protocol"
+    assert cp.control_continuation_metadata.__module__ == "shuheng.control_protocol"
+    assert cp.control_explicitly_requests_continuation.__module__ == "shuheng.control_protocol"
+    assert cp.control_result_continuation_needed.__module__ == "shuheng.control_protocol"
+    assert cp.format_control_result_continuation_prompt.__module__ == "shuheng.control_protocol"
+    assert cp.format_agent_control_result.__module__ == "shuheng.control_protocol"
+    assert cp.agenttask_payload_from_prompt.__module__ == "shuheng.control_protocol"
+    assert cp.policy_relevant_subagent_prompt_text.__module__ == "shuheng.control_protocol"
+    assert cp.explicit_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"
+    assert cp.inferred_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"
     assert cp.subagent_control_persistence_intent({"persistent": True}, "", "", "", "") == (True, False)
     assert cp.subagent_control_persistence_intent({"temporary": True}, "", "", "", "") == (False, True)
     assert cp.subagent_control_persistence_intent({}, "persistent", "durable", "长期", "profile") == (False, True)
@@ -7990,7 +7991,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert not cp.subagent_control_force_new_intent({}, "new", "force_new", "separate", "never", "do not reuse")
     continuation_control = {
         "action": "agent_create",
-        "_ga_control_envelope": {"workflow": {"workflow_state": "in-progress"}},
+        "_shuheng_control_envelope": {"workflow": {"workflow_state": "in-progress"}},
     }
     assert cp.control_explicitly_requests_continuation(continuation_control)
     assert cp.control_result_continuation_needed("", [continuation_control])
@@ -7999,7 +8000,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     continuation_prompt = cp.format_control_result_continuation_prompt(
         reason="policy-gate",
         control_results=["- agent_create Worker: ok"],
-        original_text='visible <ga-control>{"schema_version":"ga-control.v2","actions":[]}</ga-control>',
+        original_text='visible <shuheng-control>{"schema_version":"shuheng-control.v2","actions":[]}</shuheng-control>',
     )
     assert "Control results:" in continuation_prompt
     assert "- agent_create Worker: ok" in continuation_prompt
@@ -8074,7 +8075,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     state.messages.append(a.Message("user", "你给我创建一个用来管理falsesocial的持久代理"))
     a.apply_tui_controls_from_text(
         state,
-        ga_control(create_agent_action("FalseSocial 管理代理", persistent=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
+        shuheng_control(create_agent_action("FalseSocial 管理代理", persistent=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
         source="agent",
     )
     falsesocial_agents = [sub for sub in state.subagents.values() if "falsesocial" in sub.agent_id]
@@ -8086,7 +8087,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     state.messages.append(a.Message("user", "不不，单独弄一个管理falsesocial的持久代理，不要复用"))
     a.apply_tui_controls_from_text(
         state,
-        "明白，单独新建，不引用已有代理。\n" + ga_control(create_agent_action("FalseSocial 管理代理", persistent=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
+        "明白，单独新建，不引用已有代理。\n" + shuheng_control(create_agent_action("FalseSocial 管理代理", persistent=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
         source="agent",
     )
     falsesocial_agents = [sub for sub in state.subagents.values() if "falsesocial" in sub.agent_id]
@@ -8094,7 +8095,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
 
     a.apply_tui_controls_from_text(
         state,
-        ga_control(create_agent_action("FalseSocial 管理代理", persistent=True, force_new=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
+        shuheng_control(create_agent_action("FalseSocial 管理代理", persistent=True, force_new=True, profile="专门管理 falsesocial 的账号、内容和运维事项。")),
         source="agent",
     )
     falsesocial_agents = [sub for sub in state.subagents.values() if "falsesocial" in sub.agent_id]
@@ -8126,13 +8127,13 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
 
     a.apply_tui_controls_from_text(
         state,
-        ga_control(create_agent_action("Lifecycle 默认检查", persistent=True, role="researcher")),
+        shuheng_control(create_agent_action("Lifecycle 默认检查", persistent=True, role="researcher")),
         source="agent",
     )
     assert len([sub for sub in state.subagents.values() if sub.name == "Lifecycle 默认检查" and sub.persistent]) == 1
     a.apply_tui_controls_from_text(
         state,
-        ga_control({"action": "agent.create", "name": "Lifecycle 默认检查", "role": "researcher"}),
+        shuheng_control({"action": "agent.create", "name": "Lifecycle 默认检查", "role": "researcher"}),
         source="agent",
     )
     lifecycle_matches = [sub for sub in state.subagents.values() if sub.name == "Lifecycle 默认检查"]
@@ -8154,7 +8155,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
         a.mykey_path = lambda: mykey_file
         a.apply_tui_controls_from_text(
             state,
-            ga_control(create_agent_action("Model Routed Agent", persistent=True, role="researcher", default_model="beta")),
+            shuheng_control(create_agent_action("Model Routed Agent", persistent=True, role="researcher", default_model="beta")),
             source="agent",
         )
         model_agent = a.resolve_subagent(state, "Model Routed Agent")
@@ -8177,7 +8178,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
 
     a.apply_tui_controls_from_text(
         state,
-        ga_control(create_agent_action("主控误用检查", persistent=True, role="main_orchestrator")),
+        shuheng_control(create_agent_action("主控误用检查", persistent=True, role="main_orchestrator")),
         source="agent",
     )
     bad_role_agent = a.resolve_subagent(state, "主控误用检查")
@@ -8232,14 +8233,14 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert dirty_card["role"] == "specialist", dirty_card
     assert dirty_card["permissions"]["role"] == "specialist", dirty_card
 
-    assert "schema_version:\"ga-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
+    assert "schema_version:\"shuheng-control.v2\"" in a.TUI_AGENT_CONTROL_HINT
     assert "agent.delete" in a.TUI_AGENT_CONTROL_HINT
     assert "当前主控 runtime 专属 role" in a.TUI_AGENT_CONTROL_HINT
     assert "TUI 不会从 name/profile 自然语言里猜生命周期" in a.TUI_AGENT_CONTROL_HINT
     assert "TUI 不会从可见正文里猜复用策略" in a.TUI_AGENT_CONTROL_HINT
     assert "delegate.create" in a.TUI_AGENT_CONTROL_HINT
     assert "能力说明" in a.TUI_AGENT_CONTROL_HINT
-    assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
+    assert "不要在示例、教程或解释中包含可执行 `<shuheng-control>` 标签" in a.TUI_AGENT_CONTROL_HINT
     assert "回复末尾隐藏块" in a.TUI_AGENT_CONTROL_HINT
     assert "会话标题维护" in a.TUI_AGENT_CONTROL_HINT
     assert "持久标题只由当前主控 runtime 自己通过 `session.rename` 写入" in a.TUI_AGENT_CONTROL_HINT
@@ -8248,13 +8249,13 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "Shuheng `SUBAGENTS_DIR`" in a.TUI_AGENT_CONTROL_HINT
     assert "agent_list" in a.TUI_AGENT_CONTROL_HINT
     assert "task_get" in a.TUI_AGENT_CONTROL_HINT
-    assert a.TUI_CONTROL_HINT_MARKER == "[Shuheng ga-control v2]", a.TUI_CONTROL_HINT_MARKER
+    assert a.TUI_CONTROL_HINT_MARKER == "[Shuheng shuheng-control v2]", a.TUI_CONTROL_HINT_MARKER
     legacy_tui_identity = "GenericAgent" + "-TUI"
     assert legacy_tui_identity not in a.TUI_AGENT_CONTROL_HINT, a.TUI_AGENT_CONTROL_HINT
     assert_retired_control_vocabulary_is_quarantined(state)
     legacy_hint_blocks = (
         f"[{legacy_tui_identity} session control]\nold\n[/{legacy_tui_identity} session control]",
-        f"[{legacy_tui_identity} ga-control v2]\nold\n[/{legacy_tui_identity} ga-control v2]",
+        f"[{gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER}]\nold\n[/{gap.LEGACY_TUI_SHUHENG_CONTROL_MARKER}]",
     )
     for legacy_hint_block in legacy_hint_blocks:
         hint_agent = FakeLLMAgent()
@@ -8267,7 +8268,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
             assert "prefix" in prompt, prompt
             assert legacy_tui_identity not in prompt, prompt
             assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
-            assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in prompt, prompt
+            assert "不要在示例、教程或解释中包含可执行 `<shuheng-control>` 标签" in prompt, prompt
     fenced_control = (
         "现在重新发送：\n"
         "```json\n"
@@ -8286,18 +8287,18 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     code_snippet_with_control_example = (
         "搜索结果里出现源码示例：\n"
         "```python\n"
-        "example = f'<ga-control>{{\"schema_version\":\"ga-control.v2\",\"actions\":[{{\"action\":\"agent.create\"}}]}}</ga-control>'\n"
+        "example = f'<shuheng-control>{{\"schema_version\":\"shuheng-control.v2\",\"actions\":[{{\"action\":\"agent.create\"}}]}}</shuheng-control>'\n"
         "```\n"
         "这只是展示，不是执行。"
     )
     assert a.extract_tui_controls(code_snippet_with_control_example) == []
     assert a.tui_control_parse_errors(code_snippet_with_control_example) == []
-    assert "<ga-control>" in a.strip_tui_controls(code_snippet_with_control_example), code_snippet_with_control_example
+    assert "<shuheng-control>" in a.strip_tui_controls(code_snippet_with_control_example), code_snippet_with_control_example
     code_snippet_message_count = len(state.messages)
     a.apply_tui_controls_from_text(state, code_snippet_with_control_example, source="agent")
     assert len(state.messages) == code_snippet_message_count, state.messages[-3:]
 
-    long_running_create = ga_control({
+    long_running_create = shuheng_control({
         "action": "agent.create",
         "name": "RSS日报编辑",
         "role": "researcher",
@@ -8312,9 +8313,9 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert os.path.commonpath([a.TEMP_SUBAGENTS_DIR, long_running_agent.home]) == a.TEMP_SUBAGENTS_DIR, long_running_agent.home
 
     truncated_create = (
-        '<ga-control>{"schema_version":"ga-control.v2","actions":['
+        '<shuheng-control>{"schema_version":"shuheng-control.v2","actions":['
         '{"action":"agent.create","name":"新闻主编","role":"researcher","lifecycle":"persistent","profile":"RSS新闻采集与日报排版"}]'
-        '</ga-control>'
+        '</shuheng-control>'
     )
     repaired_controls = a.extract_tui_controls(truncated_create)
     assert len(repaired_controls) == 1, repaired_controls
@@ -8322,7 +8323,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     news_agent = a.resolve_subagent(state, "新闻主编")
     assert news_agent is not None, state.subagents
     assert news_agent.persistent is True, news_agent
-    delete_control = ga_control({"action": "agent.delete", "target": news_agent.agent_id})
+    delete_control = shuheng_control({"action": "agent.delete", "target": news_agent.agent_id})
     delete_controls = a.extract_tui_controls(delete_control)
     assert len(delete_controls) == 1, delete_controls
     assert delete_controls[0]["action"] == "subagent_delete", delete_controls
@@ -8334,20 +8335,20 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "已从列表移除子 agent：新闻主编" in state.messages[-1].content, state.messages[-1].content
 
     bad_control_count = len(state.messages)
-    a.apply_tui_controls_from_text(state, '<ga-control>{"schema_version":</ga-control>', source="agent")
+    a.apply_tui_controls_from_text(state, '<shuheng-control>{"schema_version":</shuheng-control>', source="agent")
     assert len(state.messages) == bad_control_count + 1, [msg.content for msg in state.messages]
     assert "控制块解析失败" in state.messages[-1].content, state.messages[-1].content
 
     inline_control_label_then_real_control = (
-        "上次我发的 `<ga-control>` 标签没正确闭合，所以没执行。让我重新发一次。\n\n"
-        + ga_control({"action": "agent.create", "name": "Inline Label Safe", "role": "researcher"})
+        "上次我发的 `<shuheng-control>` 标签没正确闭合，所以没执行。让我重新发一次。\n\n"
+        + shuheng_control({"action": "agent.create", "name": "Inline Label Safe", "role": "researcher"})
     )
     inline_controls = a.extract_tui_controls(inline_control_label_then_real_control)
     assert len(inline_controls) == 1, inline_controls
     assert inline_controls[0]["name"] == "Inline Label Safe", inline_controls
     assert a.tui_control_parse_errors(inline_control_label_then_real_control) == []
     inline_visible = a.strip_tui_controls(inline_control_label_then_real_control)
-    assert "`<ga-control>` 标签没正确闭合" in inline_visible, inline_visible
+    assert "`<shuheng-control>` 标签没正确闭合" in inline_visible, inline_visible
     assert "Inline Label Safe" not in inline_visible, inline_visible
     a.apply_tui_controls_from_text(state, inline_control_label_then_real_control, source="agent")
     assert a.resolve_subagent(state, "Inline Label Safe") is not None
@@ -8355,7 +8356,7 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
 
 
 def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_subagent_skills_")
+    root = tempfile.mkdtemp(prefix="shuheng_subagent_skills_")
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
     state.running = True
@@ -8486,13 +8487,13 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert match["recommended_action"] == "reuse_existing", match
     assert match["recommended_agent"]["agent_id"] == loaded_skilled.agent_id, match
 
-    create_text = ga_control({
+    create_text = shuheng_control({
         "action": "agent.create",
         "name": "Skill Control Agent",
         "role": "researcher",
         "lifecycle": "persistent",
         "skills": ["custom-sop"],
-        "profile": "Created through ga-control with a dedicated skill.",
+        "profile": "Created through shuheng-control with a dedicated skill.",
     })
     create_controls = a.extract_tui_controls(create_text)
     assert len(create_controls) == 1 and create_controls[0]["skill_refs"] == ["custom-sop"], create_controls
@@ -8501,7 +8502,7 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert control_agent is not None, reloaded.subagents
     assert a.normalize_subagent_skill_refs(control_agent.skill_refs) == ["custom-sop"], control_agent.skill_refs
 
-    remove_text = ga_control({
+    remove_text = shuheng_control({
         "action": "agent.skill.update",
         "target": control_agent.agent_id,
         "op": "remove",
@@ -8516,7 +8517,7 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
 
 
 def assert_declarative_plugins_are_agent_scoped() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
+    root = tempfile.mkdtemp(prefix="shuheng_plugins_")
     retarget_harness(root)
     builtin_root = a.plugin_helpers.builtin_plugin_root()
     assert a.user_plugin_roots() == [a.SHUHENG_PLUGINS_DIR, builtin_root], a.user_plugin_roots()
@@ -8558,7 +8559,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
     assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
     assert not Path(a.SHUHENG_PLUGINS_DIR, "shuheng-examples").exists()
 
-    root = tempfile.mkdtemp(prefix="ga_tui_plugins_")
+    root = tempfile.mkdtemp(prefix="shuheng_plugins_")
     retarget_harness(root)
     empty_items = a.plugin_panel_items()
     assert not any(item.key == "no-plugins" for item in empty_items), empty_items
@@ -9453,7 +9454,7 @@ def assert_declarative_plugins_are_agent_scoped() -> None:
 
 
 def assert_workflow_run_panel_contract() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_workflow_panel_")
+    root = tempfile.mkdtemp(prefix="shuheng_workflow_panel_")
     retarget_harness(root)
     plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
     workflow_dir = plugin_root / "workflows"
@@ -9647,7 +9648,7 @@ def assert_workflow_run_panel_contract() -> None:
 
 
 def assert_workflow_retry_policy_contract() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_workflow_retry_")
+    root = tempfile.mkdtemp(prefix="shuheng_workflow_retry_")
     retarget_harness(root)
     plugin_root = Path(a.SHUHENG_PLUGINS_DIR, "research-pack")
     workflow_dir = plugin_root / "workflows"
@@ -9757,7 +9758,7 @@ def assert_workflow_retry_policy_contract() -> None:
 
 
 def assert_workflow_run_last_generated_draft_contract() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_workflow_run_last_")
+    root = tempfile.mkdtemp(prefix="shuheng_workflow_run_last_")
     retarget_harness(root)
     state = a.State(agent=SequencedFakeAgent([]))
     state.running = True
@@ -9801,7 +9802,7 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert a.handle_workflow_command(no_draft, "/workflow run-last generated-pack/no-draft") is True
     assert "Workflow draft was not run." in no_draft.messages[-1].content, no_draft.messages[-1].content
 
-    auto_root = tempfile.mkdtemp(prefix="ga_tui_workflow_auto_")
+    auto_root = tempfile.mkdtemp(prefix="shuheng_workflow_auto_")
     retarget_harness(auto_root)
     auto_payload = {
         "schema_version": "shuheng.workflow.v1",
@@ -9842,7 +9843,7 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
     assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
 
-    do_root = tempfile.mkdtemp(prefix="ga_tui_workflow_do_")
+    do_root = tempfile.mkdtemp(prefix="shuheng_workflow_do_")
     retarget_harness(do_root)
     do_payload = {
         "schema_version": "shuheng.workflow.v1",
@@ -9881,7 +9882,7 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
     assert a.read_jsonl(a.AGENT_APPROVALS_PATH) == []
     assert a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH) == []
 
-    invalid_auto_root = tempfile.mkdtemp(prefix="ga_tui_workflow_auto_invalid_")
+    invalid_auto_root = tempfile.mkdtemp(prefix="shuheng_workflow_auto_invalid_")
     retarget_harness(invalid_auto_root)
     invalid_auto = a.State(agent=SequencedFakeAgent(["not workflow json"]))
     invalid_auto.workflow_draft_payload = {
@@ -9899,7 +9900,7 @@ def assert_workflow_run_last_generated_draft_contract() -> None:
 
 
 def assert_persistent_agent_dashboard_home_pages() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_dashboard_home_")
+    root = tempfile.mkdtemp(prefix="shuheng_dashboard_home_")
     retarget_harness(root)
     state = a.State(agent=FakeAgent())
     state.running = True
@@ -10133,7 +10134,7 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     assert state.selected_session == sub.agent_id, state.selected_session
     assert a.selected_subagent(state) is sub, state.selected_session
 
-    dashboard_control = ga_control({
+    dashboard_control = shuheng_control({
         "action": "dashboard.update",
         "target": sub.agent_id,
         "dashboard": {
@@ -10190,12 +10191,12 @@ def assert_persistent_agent_dashboard_home_pages() -> None:
     sub_fields = set(a.SubAgentRuntime.__dataclass_fields__)
     assert "dashboard" in sub_fields, sub_fields
     registry = a.scheduled_task_registry(state)
-    assert registry["owner"] == "ga-tui.control_plane", registry
+    assert registry["owner"] == "shuheng.control_plane", registry
     assert any(row.get("schedule_id") == "sched_dashboard_agent" for row in registry.get("jobs", [])), registry
 
 
 def assert_temp_subagent_current_fallback_is_reloadable() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_temp_subagent_current_")
+    root = tempfile.mkdtemp(prefix="shuheng_temp_subagent_current_")
     retarget_harness(root)
     state = a.State(agent=ContextFakeAgent())
     state.running = True
@@ -10223,7 +10224,7 @@ def assert_temp_subagent_current_fallback_is_reloadable() -> None:
 def assert_tui_query_tools_expose_dashboard_state() -> None:
     if not a.GENERICAGENT_PROVIDER_CONFIGURED:
         return
-    root = tempfile.mkdtemp(prefix="ga_tui_query_tools_")
+    root = tempfile.mkdtemp(prefix="shuheng_query_tools_")
     retarget_harness(root)
     state = a.State(agent=FakeLLMAgent())
     state.running = True
@@ -10323,7 +10324,7 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
             },
         },
     )
-    assert schedule_tool["schema_version"] == "ga-tui.tool.v1", schedule_tool
+    assert schedule_tool["schema_version"] == "shuheng.tool.v1", schedule_tool
     assert schedule_tool["status"] == "ok", schedule_tool
     assert schedule_tool["schedule"]["schedule_id"] == "sched_tool_digest", schedule_tool
     assert schedule_tool["schedule"]["source"] == "tool:schedule_create", schedule_tool
@@ -10354,7 +10355,7 @@ def assert_tui_query_tools_expose_dashboard_state() -> None:
 
 
 def assert_retired_control_vocabulary_is_quarantined(state: a.State) -> None:
-    retired_tokens = ("<ga-tui>", "subagent_ask", "subagent_create", "task_update")
+    retired_tokens = ("subagent_ask", "subagent_create", "task_update")
     for token in retired_tokens:
         assert token not in a.TUI_AGENT_CONTROL_HINT, token
     for relative_path in (
@@ -10367,15 +10368,17 @@ def assert_retired_control_vocabulary_is_quarantined(state: a.State) -> None:
             assert token not in text, (relative_path, token)
 
     before_count = len(state.subagents)
-    old_external_action = ga_control({"action": "subagent_create", "name": "Retired External Action"})
+    old_external_action = shuheng_control({"action": "subagent_create", "name": "Retired External Action"})
     assert a.extract_tui_controls(old_external_action) == []
     a.apply_tui_controls_from_text(state, old_external_action, source="agent")
     assert len(state.subagents) == before_count, state.subagents
-    assert a.strip_tui_controls('visible\n<ga-tui>{"action":"subagent_create","name":"Hidden"}</ga-tui>') == "visible"
+    inert_tag_text = 'visible\n<shuheng>{"action":"agent.create","name":"Hidden"}</shuheng>'
+    assert a.extract_tui_controls(inert_tag_text) == []
+    assert a.strip_tui_controls(inert_tag_text) == inert_tag_text
 
 
 def assert_historical_subagent_result_quarantine_backfill() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_historical_subagent_restore_")
+    root = tempfile.mkdtemp(prefix="shuheng_historical_subagent_restore_")
     old_model_dir = a.MODEL_RESPONSES_DIR
     old_session_meta = a.SESSION_META_PATH
     try:
@@ -10387,7 +10390,7 @@ def assert_historical_subagent_result_quarantine_backfill() -> None:
         objective = "请小艾自我介绍并给一句总结。"
         response_text = (
             "我会派发给小艾。\n"
-            f'<ga-tui>{{"action":"subagent_ask","target":"小艾","prompt":"{objective}"}}</ga-tui>'
+            f'<shuheng>{{"action":"subagent_ask","target":"小艾","prompt":"{objective}"}}</shuheng>'
         )
         session_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_legacy.txt")
         prompt = {"role": "user", "content": [{"type": "text", "text": "叫小艾聊一句"}]}
@@ -10461,7 +10464,7 @@ def assert_historical_subagent_result_quarantine_backfill() -> None:
 
 
 def assert_recent_sessions_use_last_message_activity() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_recent_sessions_")
+    root = tempfile.mkdtemp(prefix="shuheng_recent_sessions_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
 
@@ -10511,7 +10514,7 @@ def assert_recent_sessions_use_last_message_activity() -> None:
 
 
 def assert_history_curator_skill_uses_progressive_disclosure() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_history_curator_")
+    root = tempfile.mkdtemp(prefix="shuheng_history_curator_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
 
@@ -10578,7 +10581,7 @@ def assert_history_curator_skill_uses_progressive_disclosure() -> None:
     assert runtime_request.metadata.get("runtime_context_mode") == "lean", runtime_request.metadata
     assert runtime_request.context_pack_ref == "", runtime_request
     assert runtime_request.artifact_refs == [], runtime_request
-    assert "[GA TUI Context Pack]" not in runtime_request.prompt, runtime_request.prompt
+    assert "[Shuheng Context Pack]" not in runtime_request.prompt, runtime_request.prompt
     assert runtime_request.prompt.startswith("[Shuheng History Curator Skill]"), runtime_request.prompt
     assert "Index artifact: artifact://artifacts/history-curation-index/" in runtime_request.prompt, runtime_request.prompt
 
@@ -10590,7 +10593,7 @@ def assert_history_curator_skill_uses_progressive_disclosure() -> None:
 
 
 def assert_model_owned_session_rename_is_title_path() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_model_title_")
+    root = tempfile.mkdtemp(prefix="shuheng_model_title_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     if a.session_names is None:
@@ -10623,7 +10626,7 @@ def assert_model_owned_session_rename_is_title_path() -> None:
 
     a.apply_tui_controls_from_text(
         state,
-        ga_control({"action": "session.rename", "target": "current", "value": "智能控制标题"}),
+        shuheng_control({"action": "session.rename", "target": "current", "value": "智能控制标题"}),
         source="agent",
     )
     assert a.session_names.name_for(path) == "智能控制标题", a.session_names._load()
@@ -10641,7 +10644,7 @@ def assert_model_owned_session_rename_is_title_path() -> None:
     drain_ui(state)
     a.apply_tui_controls_from_text(
         state,
-        ga_control({"action": "session.rename", "target": "current", "value": "不应覆盖手动"}),
+        shuheng_control({"action": "session.rename", "target": "current", "value": "不应覆盖手动"}),
         source="agent",
     )
     assert a.session_names.name_for(path) == "固定手动标题", a.session_names._load()
@@ -10650,7 +10653,7 @@ def assert_model_owned_session_rename_is_title_path() -> None:
 
 
 def assert_ohmypi_process_summary_does_not_title_history() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_title_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_title_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_omp_title.txt")
@@ -10712,11 +10715,11 @@ def assert_ohmypi_process_summary_does_not_title_history() -> None:
 
 
 def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_category_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_category_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     agent = FakeLLMAgent()
-    setattr(agent, "_ga_tui_runtime_provider_id", "ohmypi")
+    setattr(agent, "_shuheng_runtime_provider_id", "ohmypi")
     setattr(agent.llmclient.backend, "supports_raw_ask", False)
 
     def forbidden_raw_ask(_request):
@@ -10773,7 +10776,7 @@ def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
 
 
 def assert_missing_source_history_rows_restore_from_l4_archive() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_missing_source_history_")
+    root = tempfile.mkdtemp(prefix="shuheng_missing_source_history_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     os.makedirs(a.L4_RAW_SESSIONS_DIR, exist_ok=True)
@@ -10822,13 +10825,13 @@ def assert_missing_source_history_rows_restore_from_l4_archive() -> None:
 
 
 def assert_self_intro_does_not_consume_mutual_chat_step() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_policy_check_")
+    root = tempfile.mkdtemp(prefix="shuheng_policy_check_")
     retarget_harness(root)
     install_fake_agent_runtime()
     main_agent = SequencedFakeAgent(["我没有发出新的控制块。"])
     state = a.State(agent=main_agent)
     state.running = True
-    orchestration_text = ga_control(
+    orchestration_text = shuheng_control(
         plan_action("缺少自我介绍步骤的双代理对话", ["创建正式子代理", "创建临时子代理", "两个代理互相聊天对话", "汇总所有内容到我这里"]),
         create_agent_action("正式丙", persistent=True, profile="你是正式永久子代理，名叫正式丙。稍后和临时子代理临时丁交流。", plan_step_id="创建正式子代理"),
         create_agent_action("临时丁", temporary=True, profile="你是临时子代理，名叫临时丁。稍后和正式子代理正式丙交流。", plan_step_id="创建临时子代理"),
@@ -10860,19 +10863,19 @@ def assert_self_intro_does_not_consume_mutual_chat_step() -> None:
     assert latest[steps[3][0]]["status"] == "created", latest[steps[3][0]]
     assert main_agent.prompts, main_agent.prompts
     continuation_prompt, continuation_source = main_agent.prompts[0]
-    assert continuation_source == "ga-tui:auto_plan_continue", main_agent.prompts
+    assert continuation_source == "shuheng:auto_plan_continue", main_agent.prompts
     next_line = next(line for line in continuation_prompt.splitlines() if line.startswith("Next unblocked step:"))
     assert "两个代理互相聊天对话" in next_line, continuation_prompt
 
 
 def assert_control_result_continues_intermediate_workflow_step() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_control_continue_")
+    root = tempfile.mkdtemp(prefix="shuheng_control_continue_")
     retarget_harness(root)
     install_fake_agent_runtime()
     main_agent = SequencedFakeAgent([
         (
             "开始执行计划。第1步：创建新闻管家持久 agent。\n"
-            + ga_control(create_agent_action(
+            + shuheng_control(create_agent_action(
                 "新闻管家",
                 persistent=True,
                 profile="负责 RSS 信息源、每日新闻拉取、质量筛选和报纸排版。",
@@ -10894,7 +10897,7 @@ def assert_control_result_continues_intermediate_workflow_step() -> None:
         drain_ui(state)
     assert len(main_agent.prompts) == 2, main_agent.prompts
     continuation_prompt, continuation_source = main_agent.prompts[1]
-    assert continuation_source == "ga-tui:auto_control_continue", main_agent.prompts
+    assert continuation_source == "shuheng:auto_control_continue", main_agent.prompts
     assert "Control results:" in continuation_prompt, continuation_prompt
     assert "新闻管家" in continuation_prompt, continuation_prompt
     assert "Continue the user-approved workflow yourself" in continuation_prompt, continuation_prompt
@@ -11106,7 +11109,7 @@ def assert_secret_native_restore_hydrates_backend_context_blocks() -> None:
 
 
 def assert_temp_session_is_non_persistent() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_temp_session_")
+    root = tempfile.mkdtemp(prefix="shuheng_temp_session_")
     retarget_harness(root)
     install_fake_agent_runtime()
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
@@ -11152,7 +11155,7 @@ def assert_temp_session_is_non_persistent() -> None:
 
 
 def assert_new_agent_uses_shuheng_history_dir() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_new_agent_history_")
+    root = tempfile.mkdtemp(prefix="shuheng_new_agent_history_")
     retarget_harness(root)
     old_registry = a.agent_runtime_registry
 
@@ -11187,7 +11190,7 @@ def assert_new_agent_uses_shuheng_history_dir() -> None:
 
 
 def assert_ohmypi_main_turn_persists_model_response_history() -> None:
-    root = tempfile.mkdtemp(prefix="ga_tui_omp_history_")
+    root = tempfile.mkdtemp(prefix="shuheng_omp_history_")
     retarget_harness(root)
     os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
     agent = RuntimeCaptureFakeAgent()
@@ -11320,7 +11323,7 @@ def run_checks() -> None:
     assert_new_agent_uses_shuheng_history_dir()
     assert_ohmypi_main_turn_persists_model_response_history()
 
-    root = tempfile.mkdtemp(prefix="ga_tui_policy_check_")
+    root = tempfile.mkdtemp(prefix="shuheng_policy_check_")
     retarget_harness(root)
     install_fake_agent_runtime()
     state = a.State(agent=None)
@@ -11908,7 +11911,7 @@ def run_checks() -> None:
             assert any("secret direct reply marker" in msg.content for msg in reloaded_secret_subagent.messages), reloaded_secret_subagent.messages
             ledger_before_controls = list(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
             mail_before_controls = list(a.read_jsonl(a.AGENT_MAIL_PATH))
-            hidden_create = ga_control(create_agent_action("zzq xxy", profile="abc def marker", persistent=True, plan_step_id="normal-ledger-leak"))
+            hidden_create = shuheng_control(create_agent_action("zzq xxy", profile="abc def marker", persistent=True, plan_step_id="normal-ledger-leak"))
             assert a.apply_secret_subagent_controls_from_text(state, hidden_create) == 1
             hidden_secret_subagent = a.resolve_subagent(state, "zzq xxy")
             assert hidden_secret_subagent is not None
@@ -11917,7 +11920,7 @@ def run_checks() -> None:
             assert a.read_jsonl(a.AGENT_TASK_LEDGER_PATH) == ledger_before_controls
             assert a.read_jsonl(a.AGENT_MAIL_PATH) == mail_before_controls
             secret_agent.responses.append("hidden child result marker")
-            hidden_ask = ga_control(delegate_action(secret_subagent.agent_id, "hidden child task marker", parent_task_id="normal-ledger-leak"))
+            hidden_ask = shuheng_control(delegate_action(secret_subagent.agent_id, "hidden child task marker", parent_task_id="normal-ledger-leak"))
             assert a.apply_secret_subagent_controls_from_text(state, hidden_ask) == 1
             drain_ui(state)
             assert any("hidden child result marker" in msg.content for msg in state.messages), state.messages
@@ -12001,7 +12004,7 @@ def run_checks() -> None:
         a.cost_tracker = FakeCostTracker()
         token_agent = ContextFakeAgent()
         token_agent.log_path = os.devnull
-        token_agent._ga_tui_thread_name = "secret-token-thread"
+        token_agent._shuheng_thread_name = "secret-token-thread"
         token_state = a.State(agent=token_agent)
         assert a.persist_agent_token_usage(token_state, token_agent) is False
         assert token_state.token_live_offsets["secret-token-thread"]["input"] == 100
@@ -12019,7 +12022,7 @@ def run_checks() -> None:
     control_state.secret_vault.unlocked = False
     control_state.secret_vault.previous_log_path = os.path.join(root, "normal-after-lock.jsonl")
     a.set_agent_log_path(control_state.agent, os.devnull)
-    control_state.ui_queue.put(("stream", a.StreamTarget(), 42, ga_control(create_agent_action("secret-leak", profile="plaintext")), True))
+    control_state.ui_queue.put(("stream", a.StreamTarget(), 42, shuheng_control(create_agent_action("secret-leak", profile="plaintext")), True))
     a.process_ui_queue(control_state)
     assert "secret-leak" not in control_state.subagents
     assert "TUI 控制已忽略" in control_state.last_error, control_state.last_error
@@ -12206,7 +12209,7 @@ def run_checks() -> None:
         assert "normal-game-context-before-import-restore" not in imported_backend_text, imported_backend_text
         assert delete_state.agent.history == []
         assert delete_state.agent.handler is None
-        assert getattr(delete_state.agent, "_ga_tui_pending_key_info", "") == ""
+        assert getattr(delete_state.agent, "_shuheng_pending_key_info", "") == ""
         assert all(client.last_tools == "" for client in delete_state.agent.llmclients)
         assert all(client.log_path == os.devnull for client in delete_state.agent.llmclients)
         assert all(client.backend.log_path == os.devnull for client in delete_state.agent.llmclients)
@@ -12239,14 +12242,14 @@ def run_checks() -> None:
         native_backend_text = backend_history_text(delete_state.agent)
         assert "ordinary-secret-marker-delete" in native_backend_text, native_backend_text
         assert "normal-game-context-before-native-restore" not in native_backend_text, native_backend_text
-        assert getattr(delete_state.agent, "_ga_tui_pending_key_info", "") == ""
+        assert getattr(delete_state.agent, "_shuheng_pending_key_info", "") == ""
         lock_result = a.lock_secret_vault(delete_state, reason="backend-isolation-test")
         assert "已锁定" in lock_result, lock_result
         locked_backend_text = backend_history_text(delete_state.agent)
         assert "ordinary-secret-marker-delete" not in locked_backend_text, locked_backend_text
         assert delete_state.agent.history == []
         assert delete_state.agent.handler is None
-        assert getattr(delete_state.agent, "_ga_tui_pending_key_info", "") == ""
+        assert getattr(delete_state.agent, "_shuheng_pending_key_info", "") == ""
         delete_meta = a.load_session_meta_registry().get(a.session_key(str(delete_session_path)), {})
         assert delete_meta.get("secret_migrated") is True, delete_meta
         assert delete_meta.get("deleted") is True, delete_meta
@@ -12324,11 +12327,11 @@ def run_checks() -> None:
 
     partial_agent = SequencedFakeAgent(
         [
-            ga_control(
+            shuheng_control(
                 plan_action("自动续跑计划", ["创建正式子代理", "创建临时子代理"]),
                 create_agent_action("续跑正式", persistent=True, profile="正式测试子代理", plan_step_id="创建正式子代理"),
             ),
-            ga_control(create_agent_action("续跑临时", temporary=True, profile="临时测试子代理", plan_step_id="创建临时子代理")),
+            shuheng_control(create_agent_action("续跑临时", temporary=True, profile="临时测试子代理", plan_step_id="创建临时子代理")),
         ]
     )
     partial_state = a.State(agent=partial_agent)
@@ -12344,13 +12347,13 @@ def run_checks() -> None:
     for _ in range(4):
         drain_ui(partial_state)
     assert len(partial_agent.prompts) == 2, partial_agent.prompts
-    assert partial_agent.prompts[1][1] == "ga-tui:auto_plan_continue", partial_agent.prompts
+    assert partial_agent.prompts[1][1] == "shuheng:auto_plan_continue", partial_agent.prompts
     continuation_prompt = partial_agent.prompts[1][0]
     assert "创建临时子代理" in continuation_prompt, continuation_prompt
     assert "control-emission continuation" in continuation_prompt, continuation_prompt
     assert "Do not call browser/search/file/code tools" in continuation_prompt, continuation_prompt
     assert "web_scan" in continuation_prompt, continuation_prompt
-    assert '<ga-control>{"schema_version":"ga-control.v2"' in continuation_prompt, continuation_prompt
+    assert '<shuheng-control>{"schema_version":"shuheng-control.v2"' in continuation_prompt, continuation_prompt
     assert '"action":"agent.create"' in continuation_prompt, continuation_prompt
     assert '"action":"delegate.create"' in continuation_prompt, continuation_prompt
     assert '"action":"task.update"' in continuation_prompt, continuation_prompt
@@ -12363,7 +12366,7 @@ def run_checks() -> None:
 
     blocked_agent = SequencedFakeAgent(
         [
-            ga_control(
+            shuheng_control(
                 plan_action("自动续跑阻塞计划", ["创建正式子代理", "创建临时子代理"]),
                 create_agent_action("阻塞正式", persistent=True, profile="正式测试子代理", plan_step_id="创建正式子代理"),
             ),
@@ -12385,7 +12388,7 @@ def run_checks() -> None:
     assert len(blocked_agent.prompts) == 2, blocked_agent.prompts
     assert any("自动续跑已停止" in msg.content for msg in blocked_state.messages if msg.role == "system"), blocked_state.messages
 
-    root = tempfile.mkdtemp(prefix="ga_tui_policy_check_")
+    root = tempfile.mkdtemp(prefix="shuheng_policy_check_")
     retarget_harness(root)
     install_fake_agent_runtime()
     state = a.State(agent=None)
@@ -12415,7 +12418,7 @@ def run_checks() -> None:
     inventory = [item for item in a.artifact_inventory() if item.key == direct_ref]
     assert inventory and "Hash:" in inventory[-1].detail and "Provenance:" in inventory[-1].detail, inventory
     daily_worker = a.create_subagent(state, "Daily Digest Worker", role="researcher")
-    schedule_control = ga_control({
+    schedule_control = shuheng_control({
         "action": "schedule.create",
         "schedule_id": "sched_daily_digest",
         "name": "Daily Digest",
@@ -12435,14 +12438,14 @@ def run_checks() -> None:
     assert schedule_records["sched_daily_digest"]["dispatch_contract"] == "agenttask.v2", schedule_records
     assert schedule_records["sched_daily_digest"]["provider_id"] == "genericagent", schedule_records
     assert schedule_records["sched_daily_digest"]["cron"] == "0 8 * * *", schedule_records
-    a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.update", "target": "sched_daily_digest", "interval": "10m"}), source="agent")
+    a.apply_tui_controls_from_text(state, shuheng_control({"action": "schedule.update", "target": "sched_daily_digest", "interval": "10m"}), source="agent")
     updated_daily = a.latest_schedule_records()["sched_daily_digest"]
     assert updated_daily["dispatch_contract"] == "agenttask.v2", updated_daily
     assert updated_daily["execution"]["mode"] == "agent_task", updated_daily
     assert updated_daily["interval"] == "10m", updated_daily
     assert not str(updated_daily.get("cron") or "").strip(), updated_daily
     assert a.split_schedule_trigger(updated_daily) == ("interval", "10m"), updated_daily
-    a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
+    a.apply_tui_controls_from_text(state, shuheng_control({"action": "schedule.disable", "target": "sched_daily_digest"}), source="agent")
     assert a.latest_schedule_records()["sched_daily_digest"]["status"] == "disabled"
     for prompt_token in (
         "ScheduleCreate",
@@ -12508,7 +12511,7 @@ def run_checks() -> None:
         encoding="utf-8",
     )
     a.clear_plugin_registry_cache()
-    workflow_schedule_control = ga_control({
+    workflow_schedule_control = shuheng_control({
         "action": "schedule.create",
         "schedule_id": "sched_workflow_daily",
         "name": "Workflow Daily",
@@ -12601,7 +12604,7 @@ def run_checks() -> None:
     autopilot_artifact_rows_before = len(a.read_jsonl(a.AGENT_ARTIFACT_INDEX_PATH))
     a.apply_tui_controls_from_text(
         state,
-        ga_control({
+        shuheng_control({
             "action": "schedule.create",
             "schedule_id": "sched_workflow_autopilot_dry",
             "name": "Workflow Autopilot Dry",
@@ -12641,7 +12644,7 @@ def run_checks() -> None:
     assert autopilot_dry_final["workflow_event_count"] == 0, autopilot_dry_final
     a.apply_tui_controls_from_text(
         state,
-        ga_control({
+        shuheng_control({
             "action": "schedule.create",
             "schedule_id": "sched_workflow_autopilot_run",
             "name": "Workflow Autopilot Run",
@@ -12712,7 +12715,7 @@ def run_checks() -> None:
     old_emit_beep = a.emit_tui_beep
     try:
         a.emit_tui_beep = lambda: beep_calls.append("beep") or "beep emitted"
-        tui_beep_control = ga_control({
+        tui_beep_control = shuheng_control({
             "action": "schedule.create",
             "schedule_id": "sched_tui_beep",
             "name": "TUI Beep",
@@ -12724,7 +12727,7 @@ def run_checks() -> None:
         assert tui_record["dispatch_contract"] == "tui_action.v1", tui_record
         assert tui_record["execution"]["mode"] == "tui_action", tui_record
         assert tui_record["execution"]["action"] == "beep", tui_record
-        a.apply_tui_controls_from_text(state, ga_control({"action": "schedule.update", "target": "sched_tui_beep", "name": "Renamed TUI Beep"}), source="agent")
+        a.apply_tui_controls_from_text(state, shuheng_control({"action": "schedule.update", "target": "sched_tui_beep", "name": "Renamed TUI Beep"}), source="agent")
         tui_record = a.latest_schedule_records()["sched_tui_beep"]
         assert tui_record["name"] == "Renamed TUI Beep", tui_record
         assert tui_record["dispatch_contract"] == "tui_action.v1", tui_record
@@ -12739,7 +12742,7 @@ def run_checks() -> None:
     finally:
         a.emit_tui_beep = old_emit_beep
     scheduler_worker = a.create_subagent(state, "Scheduler Worker", role="researcher")
-    due_schedule_control = ga_control({
+    due_schedule_control = shuheng_control({
         "action": "schedule.create",
         "schedule_id": "sched_due_once",
         "name": "Due Once",
@@ -12781,13 +12784,13 @@ def run_checks() -> None:
     assert scheduled_task_rows, a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)
     visible_scheduler_prompts = [msg.content for msg in scheduler_worker.messages if msg.role == "user"]
     assert any("╭─ 子 Agent 工作单" in content for content in visible_scheduler_prompts), scheduler_worker.messages
-    assert all("[GA TUI AgentTask Envelope v2]" not in content for content in visible_scheduler_prompts), scheduler_worker.messages
+    assert all("[Shuheng AgentTask Envelope v2]" not in content for content in visible_scheduler_prompts), scheduler_worker.messages
     assert all('"tools_forbidden": [' not in content for content in visible_scheduler_prompts), scheduler_worker.messages
     assert scheduler_worker.agent.prompts, scheduler_worker.agent
-    assert "[GA TUI AgentTask Envelope v2]" in scheduler_worker.agent.prompts[-1][0], scheduler_worker.agent.prompts
+    assert "[Shuheng AgentTask Envelope v2]" in scheduler_worker.agent.prompts[-1][0], scheduler_worker.agent.prompts
     assert '"tools_forbidden": [' in scheduler_worker.agent.prompts[-1][0], scheduler_worker.agent.prompts[-1][0]
     scheduled_ops = a.create_subagent(state, "Scheduled Ops Agent", role="ops")
-    approval_schedule_control = ga_control({
+    approval_schedule_control = shuheng_control({
         "action": "schedule.create",
         "schedule_id": "sched_ops_approval",
         "name": "Scheduled Ops Approval",
@@ -12923,7 +12926,7 @@ def run_checks() -> None:
     contract_objective = "整理项目结构，输出证据引用。"
     a.apply_tui_controls_from_text(
         state,
-        ga_control(
+        shuheng_control(
             create_agent_action("Contract Researcher", role="researcher", profile="只读整理证据，不执行写操作。"),
             delegate_action("Contract Researcher", contract_objective, task_title="contract-safe-delegate"),
         ),
@@ -12939,10 +12942,10 @@ def run_checks() -> None:
         and "内部协议与工具权限已隐藏" in content
         for content in visible_contract_prompts
     ), contract_sub.messages
-    assert all("[GA TUI AgentTask Envelope v2]" not in content for content in visible_contract_prompts), contract_sub.messages
+    assert all("[Shuheng AgentTask Envelope v2]" not in content for content in visible_contract_prompts), contract_sub.messages
     assert all('"tools_forbidden": [' not in content for content in visible_contract_prompts), contract_sub.messages
     assert contract_sub.agent.prompts, contract_sub.agent
-    assert "[GA TUI AgentTask Envelope v2]" in contract_sub.agent.prompts[-1][0], contract_sub.agent.prompts
+    assert "[Shuheng AgentTask Envelope v2]" in contract_sub.agent.prompts[-1][0], contract_sub.agent.prompts
     assert '"tools_forbidden": [' in contract_sub.agent.prompts[-1][0], contract_sub.agent.prompts[-1][0]
     assert '"deploy"' in contract_sub.agent.prompts[-1][0], contract_sub.agent.prompts[-1][0]
     contract_task_rows = [
@@ -13085,7 +13088,7 @@ def run_checks() -> None:
     assert cache_child_row["summary"], cache_child_row
     assert any("/subagent-results/" in str(ref) for ref in cache_child_row["artifact_refs"]), cache_child_row
 
-    orchestration_text = ga_control(
+    orchestration_text = shuheng_control(
         plan_action("双代理对话演示", ["创建正式子代理(永久)", "创建临时子代理", "两个代理各自先向我说话", "两个代理互相聊天交流", "汇总所有对话内容"]),
         create_agent_action("正式甲", persistent=True, profile="你是正式永久子代理，名叫正式甲。稍后和临时子代理临时乙交流。", plan_step_id="创建正式子代理(永久)"),
         create_agent_action("临时乙", temporary=True, profile="你是临时子代理，名叫临时乙。稍后和正式子代理正式甲交流。", plan_step_id="创建临时子代理"),

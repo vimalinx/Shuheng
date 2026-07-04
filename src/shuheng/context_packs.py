@@ -52,7 +52,7 @@ def memory_hydration_pack(
         },
         {
             "scope": "shuheng.layered-memory",
-            "reason": "Primary GenericAgent-style L0-L4 memory context owned by Shuheng.",
+            "reason": "Primary Shuheng-owned L0-L4 layered memory context.",
             "items": [str(item) for item in (layered_memory.get("items") or [])[:8]],
             "refs": [str(ref) for ref in (layered_memory.get("refs") or []) if ref],
         },
@@ -153,7 +153,7 @@ def context_layers_for_task(
     project_items = [
         "Shuheng agent harness implementation follows docs/agent-harness-architecture.md.",
         "Program-level approval, task/mail schemas, artifact index, and single-writer are active implementation layers.",
-        "Primary memory mode is Shuheng-owned GenericAgent-style L0-L4 layered memory.",
+        "Primary memory mode is Shuheng-owned L0-L4 layered memory.",
     ]
     project_refs = ["docs/agent-harness-architecture.md", "goal-2/tasks.md"]
     project_refs.extend(str(ref) for ref in (layered_memory.get("refs") or []) if ref)
@@ -304,7 +304,7 @@ def format_context_pack_for_prompt(
             header += f"\n  instructions:\n{indent_text(body, '    ')}"
         skill_items.append(header)
     return f"""
-[GA TUI Context Pack]
+[Shuheng Context Pack]
 task_id: {pack.get("task_id", "")}
 agent: {(pack.get("for_agent") or {}).get("name", "")} ({(pack.get("for_agent") or {}).get("id", "")})
 role: {(pack.get("for_agent") or {}).get("role", "specialist")}
@@ -318,7 +318,7 @@ output_contract: {", ".join(pack.get("output_contract") or [])}
 stop_condition: {task.get("stop_condition", "")}
 subagent_identity_rule: To claim you talked to a persistent Shuheng subagent, route the message to that existing agent_id through Shuheng subagent task/direct-chat controls. A copied profile, OMP native task spawn, or IRC demo participant is only a clone/persona simulation and must be reported as such.
 final_reply_rule: After tool use, runtime task execution, or memory-candidate submission attempts, always finish with a normal user-facing final reply in the user's language. Tool results, "Result:" status lines, and memory-candidate submitted/deferred notices are not a substitute for that reply.
-deictic_reference_rule: Treat this GA TUI Context Pack as internal execution metadata, not as a user-visible conversation object. User phrases such as "这个", "这个东西", "它", "this", or "that" refer to the most recent visible user-facing topic or message unless the user explicitly says "context pack" or "上下文包".
+deictic_reference_rule: Treat this Shuheng Context Pack as internal execution metadata, not as a user-visible conversation object. User phrases such as "这个", "这个东西", "它", "this", or "that" refer to the most recent visible user-facing topic or message unless the user explicitly says "context pack" or "上下文包".
 persistent_agent_request_rule: If the user explicitly asks to create/build a persistent/long-term agent, first emit or execute agent.create with lifecycle:"persistent" or persistent:true for a dedicated matching agent, or reuse an existing matching persistent agent by id. Do not satisfy that request with only scripts, schedules, memory candidates, or a suggestion to create the agent later.
 
 Boundaries:
@@ -358,7 +358,7 @@ Profile excerpt:
 
 Memory excerpt:
 {pack.get("memory_excerpt") or "(empty)"}
-[/GA TUI Context Pack]
+[/Shuheng Context Pack]
 """.strip()
 
 
@@ -370,7 +370,7 @@ def format_context_ref_for_prompt(
 ) -> str:
     permissions = pack.get("permissions") or {}
     return f"""
-[GA TUI Context Ref]
+[Shuheng Context Ref]
 task_id: {pack.get("task_id", "")}
 context_pack_ref: {context_ref or "(none)"}
 role: {(pack.get("for_agent") or {}).get("role", "main_orchestrator")}
@@ -380,7 +380,7 @@ policy: This is a refreshed Shuheng context-pack artifact for the current turn.
 Do not treat older full context-pack blocks in OMP history as current if this ref is newer.
 Read the referenced artifact or call memory_context_get only when the task needs deeper context.
 final_reply_rule: Always finish with a normal user-facing final reply in the user's language; do not stop at tool results, "Result:" status lines, or memory-candidate notices.
-deictic_reference_rule: This GA TUI Context Ref is internal execution metadata. If the user says "这个", "它", "this", or "that", resolve it to the recent visible conversation/task topic, not to this context ref, unless the user explicitly names the context pack/ref.
+deictic_reference_rule: This Shuheng Context Ref is internal execution metadata. If the user says "这个", "它", "this", or "that", resolve it to the recent visible conversation/task topic, not to this context ref, unless the user explicitly names the context pack/ref.
 persistent_agent_request_rule: Explicit user requests to create a persistent/long-term agent require agent.create lifecycle:"persistent" or persistent:true before reporting success; scripts/schedules alone are not enough.
-[/GA TUI Context Ref]
+[/Shuheng Context Ref]
 """.strip()

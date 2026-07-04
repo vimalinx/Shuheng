@@ -1,8 +1,8 @@
 """Tests for pure dashboard schema helpers."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import dashboard
+from shuheng import app as app_module
+from shuheng import dashboard
 
 
 class Unserializable:

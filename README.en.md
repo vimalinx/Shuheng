@@ -39,7 +39,7 @@ Bring session management, multi-agent orchestration, task planning, memory gover
 
 ## Positioning
 
-`Shuheng` is a terminal control plane for local multi-agent work. It evolved from the earlier `GenericAgent TUI`: it does not reimplement agent runtimes, but separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
+`Shuheng` is a terminal control plane for local multi-agent work. It does not reimplement agent runtimes; it separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
 
 Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, and Secret Vault are the primary stable surfaces. The Web Console, HTTP gateway, A2A/MCP surfaces, baseline report, eval/trace quality scoring, and scheduler automation are still experimental compatibility surfaces. They are useful for local integration and verification, but should not be read as full protocol certification or production-grade remote services.
 
@@ -180,10 +180,10 @@ python -m pip install -e .
 Run directly from source without installation:
 
 ```bash
-PYTHONPATH=src python -m ga_tui
+PYTHONPATH=src python -m shuheng
 ```
 
-`ga_tui` remains the Python module name for compatibility. The official command is `shuheng`.
+`shuheng` remains the Python module name for compatibility. The official command is `shuheng`.
 
 First confirm the public command entrypoint is available:
 
@@ -199,12 +199,6 @@ Set this only when you want to use the old GenericAgent provider or install the 
 
 ```bash
 export GENERICAGENT_ROOT=/path/to/GenericAgent
-```
-
-Legacy variable is also supported:
-
-```bash
-export GA_ROOT=/path/to/GenericAgent
 ```
 
 ### 3. Validate Integration
@@ -361,7 +355,7 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 ├── scripts/
 │   └── check_policy_gates.py
 ├── src/
-│   └── ga_tui/
+│   └── shuheng/
 │       ├── __main__.py
 │       ├── __init__.py
 │       ├── cli.py
@@ -388,18 +382,18 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 
 | File | Purpose |
 | --- | --- |
-| `src/ga_tui/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
-| `src/ga_tui/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
-| `src/ga_tui/integration.py` | Shuheng doctor checks, optional GenericAgent legacy-provider discovery, and launcher shim |
-| `src/ga_tui/runtime.py` | Runtime provider abstractions and registry |
-| `src/ga_tui/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
-| `src/ga_tui/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
-| `src/ga_tui/control_protocol.py` | Agent task control protocol (v2) parsing |
-| `src/ga_tui/frontend_history_compat.py` | Shuheng-owned history/name fallback when GenericAgent frontends are unavailable |
-| `src/ga_tui/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
-| `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
-| `src/ga_tui/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
-| `src/ga_tui/compat_legacy.py` | Legacy session/memory compatibility parsing |
+| `src/shuheng/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
+| `src/shuheng/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
+| `src/shuheng/integration.py` | Shuheng doctor checks, optional GenericAgent legacy-provider discovery, and launcher shim |
+| `src/shuheng/runtime.py` | Runtime provider abstractions and registry |
+| `src/shuheng/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
+| `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
+| `src/shuheng/control_protocol.py` | Agent task control protocol (v2) parsing |
+| `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback when GenericAgent frontends are unavailable |
+| `src/shuheng/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
+| `src/shuheng/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
+| `src/shuheng/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
+| `src/shuheng/compat_legacy.py` | Legacy session/memory compatibility parsing |
 | `tests/` | pytest suite covering pure functions, crypto, and parsers |
 | `scripts/check_policy_gates.py` | Function-level smoke checks for harness policy gates |
 | `docs/agent-harness-architecture.md` | Long-term agent harness architecture baseline |
@@ -440,7 +434,7 @@ Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery
 
 ### Release Readiness
 
-Shuheng's release-readiness metadata lives in `src/ga_tui/release_readiness.py` and is exposed through the `/gateway` `release_readiness` field. Current default posture:
+Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py` and is exposed through the `/gateway` `release_readiness` field. Current default posture:
 
 - Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault.
 - Experimental surfaces: Web Console, HTTP gateway, A2A/MCP compatibility surfaces, baseline report, heuristic eval, scheduler runtime dispatch.
@@ -451,7 +445,7 @@ Shuheng's release-readiness metadata lives in `src/ga_tui/release_readiness.py` 
 Run from source:
 
 ```bash
-PYTHONPATH=src python -m ga_tui
+PYTHONPATH=src python -m shuheng
 ```
 
 Validate integration:

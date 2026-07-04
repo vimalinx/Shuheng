@@ -1,7 +1,7 @@
 """Tests for runtime/e2e evidence helper module."""
 from __future__ import annotations
 
-from ga_tui import runtime_evidence as re
+from shuheng import runtime_evidence as re
 
 
 def test_build_record_normalizes_targets_and_level() -> None:

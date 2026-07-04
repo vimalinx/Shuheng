@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ga_tui import plugins
+from shuheng import plugins
 
 
 def write_json(path: Path, payload: dict) -> None:

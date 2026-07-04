@@ -19,7 +19,7 @@ except Exception:
 
 SCHEDULE_RUN_ATTEMPT_STATUSES = {"starting", "dispatched", "queued", "approval_required", "failed", "rejected"}
 try:
-    SCHEDULER_TICK_SECONDS = max(5.0, float(os.environ.get("GA_TUI_SCHEDULER_TICK_SECONDS", "30") or "30"))
+    SCHEDULER_TICK_SECONDS = max(5.0, float(os.environ.get("SHUHENG_SCHEDULER_TICK_SECONDS", "30") or "30"))
 except ValueError:
     SCHEDULER_TICK_SECONDS = 30.0
 
@@ -144,7 +144,7 @@ def scheduled_task_registry(state: Optional[Any] = None) -> dict[str, Any]:
     ]
     return {
         "schema_version": "scheduledtask.registry.v1",
-        "owner": "ga-tui.control_plane",
+        "owner": "shuheng.control_plane",
         "status": "registry_ready",
         "schedules_path": _runtime.schedules_path,
         "runs_path": _runtime.runs_path,

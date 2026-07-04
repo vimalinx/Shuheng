@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from ga_tui import app as app_module
-from ga_tui import input_controller
+from shuheng import app as app_module
+from shuheng import input_controller
 
 
 class TestAppCompatibilityAliases:

@@ -5,8 +5,8 @@ import queue
 import time
 from pathlib import Path
 
-from ga_tui import app as app_module
-from ga_tui import plugins, workflows
+from shuheng import app as app_module
+from shuheng import plugins, workflows
 
 
 def write_json(path: Path, payload: dict) -> None:

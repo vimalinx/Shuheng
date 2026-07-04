@@ -1,7 +1,7 @@
 """Tests for release-readiness helper metadata."""
 from __future__ import annotations
 
-from ga_tui.release_readiness import release_readiness_report
+from shuheng.release_readiness import release_readiness_report
 
 
 def test_release_readiness_exposes_distribution_smoke_contract() -> None:

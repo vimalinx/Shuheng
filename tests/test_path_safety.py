@@ -1,4 +1,4 @@
-"""Tests for path-safety and ID-sanitization helpers (ga_tui.app).
+"""Tests for path-safety and ID-sanitization helpers (shuheng.app).
 
 These guard against directory traversal (secret vault, artifacts, workspaces)
 and enforce stable identifier shapes for subagents/workspaces.
@@ -9,10 +9,10 @@ import hashlib
 import os
 from pathlib import Path
 
-import ga_tui.app as app
+import shuheng.app as app
 
-from ga_tui import path_utils
-from ga_tui.app import (
+from shuheng import path_utils
+from shuheng.app import (
     clean_subagent_id,
     normalized_path,
     normalized_workspace_id,

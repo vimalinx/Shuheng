@@ -1,8 +1,8 @@
 """Tests for extracted baseline and gateway registry helpers."""
 from __future__ import annotations
 
-from ga_tui import baseline
-from ga_tui import gateway_registry
+from shuheng import baseline
+from shuheng import gateway_registry
 
 
 def test_baseline_item_keeps_evidence_semantics() -> None:

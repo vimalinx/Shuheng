@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-import ga_tui.app as app_module
-from ga_tui import subagent_store
+import shuheng.app as app_module
+from shuheng import subagent_store
 
 
 def test_home_session_keys_and_app_aliases() -> None:

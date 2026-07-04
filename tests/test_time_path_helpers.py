@@ -1,4 +1,4 @@
-"""Tests for time/format and small pure helpers (ga_tui.app).
+"""Tests for time/format and small pure helpers (shuheng.app).
 
 Covers now_iso, atomic file writes, and helper formatters that don't need
 curses or external state.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ga_tui.app import (
+from shuheng.app import (
     append_text_file,
     now_iso,
     write_bytes_atomic,

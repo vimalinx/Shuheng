@@ -92,8 +92,8 @@ REQUIRED_MANIFEST_LINES = (
     "include CODE_OF_CONDUCT.md",
     "include CHANGELOG.md",
     "recursive-include docs *.md",
-    "recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts",
-    "recursive-include src/ga_tui/builtin_plugins *.json",
+    "recursive-include integrations/omp-shuheng-plugin *.md *.json *.ts",
+    "recursive-include src/shuheng/builtin_plugins *.json",
     "recursive-include tests *.py",
     "include scripts/check_policy_gates.py",
     "include scripts/check_release_hygiene.py",
@@ -197,9 +197,10 @@ def check_pyproject_metadata(errors: list[str]) -> None:
     missing = sorted(required_scripts - set(scripts))
     if missing:
         errors.append(f"pyproject missing console scripts: {', '.join(missing)}")
-    public_legacy = sorted(script for script in scripts if script.startswith("ga-tui"))
+    retired_script_prefix = "ga" + "-tui"
+    public_legacy = sorted(script for script in scripts if script.startswith(retired_script_prefix))
     if public_legacy:
-        errors.append(f"legacy ga-tui console scripts are public: {', '.join(public_legacy)}")
+        errors.append(f"retired pre-Shuheng console scripts are public: {', '.join(public_legacy)}")
 
 
 def python_version_key(version: str) -> tuple[int, int]:
@@ -267,7 +268,7 @@ def check_public_positioning(errors: list[str]) -> None:
         if "wheel smoke" not in text.lower():
             errors.append(f"{path} CI summary must mention wheel smoke")
 
-    package_json = read_text("integrations/omp-ga-tui-plugin/package.json")
+    package_json = read_text("integrations/omp-shuheng-plugin/package.json")
     if '"name": "@shuheng/omp-bridge"' not in package_json:
         errors.append("OMP plugin package name should use Shuheng public branding")
 

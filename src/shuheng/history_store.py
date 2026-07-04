@@ -235,9 +235,9 @@ def sample_file_text(path: str, limit: int = 65536) -> str:
 def is_subagent_session_log_sample(text: str) -> bool:
     if not text:
         return False
-    if "[GA TUI SubAgent Profile]" in text:
+    if "[Shuheng SubAgent Profile]" in text:
         return True
-    if "[GA TUI Context Pack]" not in text or "[/GA TUI Context Pack]" not in text:
+    if "[Shuheng Context Pack]" not in text or "[/Shuheng Context Pack]" not in text:
         return False
     return "\nagent:" in text or "\\nagent:" in text
 

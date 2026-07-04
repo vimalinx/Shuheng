@@ -28,7 +28,7 @@ REQUIRED_CONTINUE_FUNCS = (
     "restore",
 )
 
-GENERICAGENT_DISABLE_ENV = ("SHUHENG_DISABLE_GENERICAGENT", "GA_TUI_DISABLE_GENERICAGENT")
+GENERICAGENT_DISABLE_ENV = ("SHUHENG_DISABLE_GENERICAGENT",)
 LEGACY_TUI_REPO_BASENAME = "GenericAgent" + "-TUI"
 LEGACY_EXTERNAL_LAUNCHER_MARKER = f"Generated {LEGACY_TUI_REPO_BASENAME} external launcher"
 
@@ -43,7 +43,7 @@ def genericagent_discovery_disabled() -> bool:
 
 def genericagent_root_candidates(start: str | os.PathLike[str] | None = None) -> list[Path | str | None]:
     here = Path(__file__).resolve()
-    env_root = os.environ.get("GENERICAGENT_ROOT") or os.environ.get("GA_ROOT")
+    env_root = os.environ.get("GENERICAGENT_ROOT")
     return [
         env_root,
         start or os.getcwd(),
@@ -150,7 +150,7 @@ def generated_core_shim(tui_root: Path | None = None) -> str:
 
 
         def _candidate_roots():
-            env_repo = os.environ.get("GA_TUI_REPO")
+            env_repo = os.environ.get("SHUHENG_REPO")
             if env_repo:
                 yield Path(env_repo).expanduser()
             yield Path({repo_s!r})
@@ -162,17 +162,17 @@ def generated_core_shim(tui_root: Path | None = None) -> str:
 
         def main() -> None:
             os.environ.setdefault("GENERICAGENT_ROOT", str(_genericagent_root()))
-            app_path = os.environ.get("GA_TUI_APP")
+            app_path = os.environ.get("SHUHENG_APP")
             if app_path and Path(app_path).expanduser().is_file():
                 runpy.run_path(str(Path(app_path).expanduser()), run_name="__main__")
                 return
             for root in _candidate_roots():
                 src = root / "src"
-                if (src / "ga_tui" / "app.py").is_file():
+                if (src / "shuheng" / "app.py").is_file():
                     sys.path.insert(0, str(src))
-                    runpy.run_module("ga_tui.app", run_name="__main__")
+                    runpy.run_module("shuheng.app", run_name="__main__")
                     return
-            runpy.run_module("ga_tui.app", run_name="__main__")
+            runpy.run_module("shuheng.app", run_name="__main__")
 
 
         if __name__ == "__main__":

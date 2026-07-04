@@ -199,7 +199,7 @@ class RuntimeRegistry:
             "providers": self.records(),
             "provider_ids": sorted(self._adapters),
             "selection_policy": {
-                "owner": "ga-tui.orchestrator",
+                "owner": "shuheng.orchestrator",
                 "default": "Use structured provider/capability metadata. Do not infer runtime choice from prose.",
                 "write_conflict_policy": "read tasks may fan out; writes stay single-writer or approval-gated",
             },
@@ -232,7 +232,7 @@ def genericagent_provider_spec(
             "subagents": True,
         },
         model_routing={
-            "owner": "ga-tui.control_plane",
+            "owner": "shuheng.control_plane",
             "supports_runtime_switch": True,
             "supports_default_model": True,
             "supports_per_agent_default": True,
@@ -240,14 +240,14 @@ def genericagent_provider_spec(
             "selection_contract": "model config name or explicit provider/model metadata",
         },
         scheduler={
-            "owner": "ga-tui.control_plane",
+            "owner": "shuheng.control_plane",
             "status": "registry_ready",
             "schedules_path": schedules_path,
             "dispatch_contract": "agenttask.v2",
             "runtime_provider_id": "genericagent",
         },
         policy={
-            "approval_gate_owner": "ga-tui.policy",
+            "approval_gate_owner": "shuheng.policy",
             "tool_permissions": "role_template",
             "memory_write": "candidate_only",
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],

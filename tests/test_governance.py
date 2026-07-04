@@ -5,10 +5,10 @@ import json
 import os
 from pathlib import Path
 
-from ga_tui import app as app_module
-from ga_tui import governance
-from ga_tui.ledger_store import append_jsonl, read_jsonl
-from ga_tui.ui_types import PolicyDecision, SubAgentRuntime
+from shuheng import app as app_module
+from shuheng import governance
+from shuheng.ledger_store import append_jsonl, read_jsonl
+from shuheng.ui_types import PolicyDecision, SubAgentRuntime
 
 
 def test_policy_decision_and_approval_metadata_shapes() -> None:

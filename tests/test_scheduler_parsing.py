@@ -1,4 +1,4 @@
-"""Tests for the scheduler cron/interval/timestamp parsers (ga_tui.scheduler).
+"""Tests for the scheduler cron/interval/timestamp parsers (shuheng.scheduler).
 
 These cover the pure timing functions: cron field matching, interval parsing,
 timestamp normalization, and the due-info decision function.
@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from ga_tui.scheduler import (
+from shuheng.scheduler import (
     cron_field_matches,
     cron_matches_now,
     parse_schedule_interval_seconds,

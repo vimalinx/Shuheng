@@ -15,12 +15,12 @@ except Exception:
     from text_utils import truncate_cells  # type: ignore
 
 
-TUI_CONTROL_RE = re.compile(r"(?<!`)<ga[-_]control>\s*([\s\S]*?)\s*</ga[-_]control>", re.IGNORECASE)
-TUI_CONTROL_FENCE_RE = re.compile(r"```ga[-_]control\s*([\s\S]*?)```", re.IGNORECASE)
+TUI_CONTROL_RE = re.compile(r"(?<!`)<shuheng[-_]control>\s*([\s\S]*?)\s*</shuheng[-_]control>", re.IGNORECASE)
+TUI_CONTROL_FENCE_RE = re.compile(r"```shuheng[-_]control\s*([\s\S]*?)```", re.IGNORECASE)
 TUI_CONTROL_JSON_FENCE_RE = re.compile(r"```(?:json|js|javascript|code)?[ \t]*\n([\s\S]*?)(?:^```|\Z)", re.IGNORECASE | re.MULTILINE)
 TUI_GENERIC_CODE_FENCE_RE = re.compile(r"```[^\n`]*\n[\s\S]*?(?:^```[ \t]*(?:\n|\Z)|\Z)", re.MULTILINE)
 
-GA_CONTROL_SCHEMA = "ga-control.v2"
+SHUHENG_CONTROL_SCHEMA = "shuheng-control.v2"
 AGENT_TASK_SCHEMA = "agenttask.v2"
 
 POLICY_ACTION_KEYWORD_CHECKS = (
@@ -121,7 +121,7 @@ def action_schema_valid(control: dict[str, Any]) -> bool:
     return schema in {"", AGENT_TASK_SCHEMA}
 
 
-def coerce_ga_control_action(action: dict[str, Any]) -> Optional[dict[str, Any]]:
+def coerce_shuheng_control_action(action: dict[str, Any]) -> Optional[dict[str, Any]]:
     if not isinstance(action, dict):
         return None
     item = dict(action)
@@ -247,7 +247,7 @@ def control_result_continuation_signature(text: str, control_results: list[str])
 
 def control_continuation_metadata(control: dict[str, Any]) -> list[dict[str, Any]]:
     candidates = [control]
-    envelope = control.get("_ga_control_envelope")
+    envelope = control.get("_shuheng_control_envelope")
     if isinstance(envelope, dict):
         candidates.append(envelope)
     for key in ("workflow", "orchestration", "continuation"):
@@ -295,12 +295,12 @@ def format_control_result_continuation_prompt(
 ) -> str:
     visible = truncate_cells(strip_tui_controls(original_text).strip(), 1200)
     lines = [
-        "[GA TUI Control Result Continuation]",
+        "[Shuheng Control Result Continuation]",
         f"Reason: {reason}",
         "",
         "The previous turn executed real TUI controls and explicitly requested continuation via structured control metadata.",
         "Continue the user-approved workflow yourself; do not ask the user to confirm the already-approved next step.",
-        "Use TUI query tools if needed, then emit the next hidden <ga-control> block for delegation, task updates, configuration, or blocker reporting.",
+        "Use TUI query tools if needed, then emit the next hidden <shuheng-control> block for delegation, task updates, configuration, or blocker reporting.",
         "If the prior visible plan was only natural language and no task ledger exists, first create or update the task ledger before continuing.",
         "Do not repeat controls that already succeeded.",
         "",
@@ -309,7 +309,7 @@ def format_control_result_continuation_prompt(
     ]
     if visible:
         lines += ["", "Previous visible text:", visible]
-    lines.append("[/GA TUI Control Result Continuation]")
+    lines.append("[/Shuheng Control Result Continuation]")
     return "\n".join(lines)
 
 
@@ -338,9 +338,9 @@ def format_agenttask_worker_prompt(control: dict[str, Any]) -> str:
     output_contract = agenttask_contract(control, "output_contract")
     payload = json.dumps(control, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     sections = [
-        "[GA TUI AgentTask Envelope v2]",
+        "[Shuheng AgentTask Envelope v2]",
         payload,
-        "[/GA TUI AgentTask Envelope v2]",
+        "[/Shuheng AgentTask Envelope v2]",
         "",
         "[Work Order]",
         f"objective: {objective}",
@@ -368,8 +368,8 @@ def format_agenttask_worker_prompt(control: dict[str, Any]) -> str:
 
 
 def agenttask_payload_from_prompt(prompt: str) -> dict[str, Any]:
-    marker_start = "[GA TUI AgentTask Envelope v2]"
-    marker_end = "[/GA TUI AgentTask Envelope v2]"
+    marker_start = "[Shuheng AgentTask Envelope v2]"
+    marker_end = "[/Shuheng AgentTask Envelope v2]"
     text = prompt or ""
     if marker_start not in text or marker_end not in text:
         return {}
@@ -432,9 +432,9 @@ def inferred_policy_action_for_subagent_task(prompt: str, *, role: str = "", wri
 def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any]]:
     action = normalized_control_action(control)
     common = {
-        "_ga_control_schema_version": str(control.get("schema_version") or AGENT_TASK_SCHEMA),
-        "_ga_control_external_action": str(control.get("action") or ""),
-        "_ga_control_envelope": dict(control),
+        "_shuheng_control_schema_version": str(control.get("schema_version") or AGENT_TASK_SCHEMA),
+        "_shuheng_control_external_action": str(control.get("action") or ""),
+        "_shuheng_control_envelope": dict(control),
     }
     if action in SESSION_V2_TO_EXECUTION_ACTION:
         mapped = dict(control)
@@ -542,7 +542,7 @@ def execution_control_from_v2(control: dict[str, Any]) -> Optional[dict[str, Any
 
 def controls_from_json_payload(payload: Any, *, require_known: bool = False) -> list[dict[str, Any]]:
     raw_items: list[Any] = []
-    if isinstance(payload, dict) and str(payload.get("schema_version") or "").strip().lower() == GA_CONTROL_SCHEMA:
+    if isinstance(payload, dict) and str(payload.get("schema_version") or "").strip().lower() == SHUHENG_CONTROL_SCHEMA:
         batch_metadata = {
             key: payload[key]
             for key in (
@@ -571,7 +571,7 @@ def controls_from_json_payload(payload: Any, *, require_known: bool = False) -> 
         raw_items = [payload]
     elif isinstance(payload, list):
         raw_items = [item for item in payload if isinstance(item, dict) and str(item.get("schema_version") or "").strip().lower() == AGENT_TASK_SCHEMA]
-    controls = [coerced for item in raw_items if isinstance(item, dict) for coerced in [coerce_ga_control_action(item)] if coerced is not None]
+    controls = [coerced for item in raw_items if isinstance(item, dict) for coerced in [coerce_shuheng_control_action(item)] if coerced is not None]
     if require_known:
         controls = [item for item in controls if known_tui_control(item)]
     execution_controls = []
@@ -613,7 +613,7 @@ def repair_json_missing_tail(raw: str) -> str:
     return text.rstrip() + "".join(reversed(stack))
 
 
-def load_ga_control_json_text(raw: str) -> tuple[Any, bool, str]:
+def load_shuheng_control_json_text(raw: str) -> tuple[Any, bool, str]:
     text = (raw or "").strip()
     if not text:
         return None, False, "empty control block"
@@ -632,7 +632,7 @@ def load_ga_control_json_text(raw: str) -> tuple[Any, bool, str]:
 
 
 def controls_from_json_text(raw: str, *, require_known: bool = False) -> list[dict[str, Any]]:
-    payload, _repaired, _error = load_ga_control_json_text(raw)
+    payload, _repaired, _error = load_shuheng_control_json_text(raw)
     if payload is None:
         return []
     return controls_from_json_payload(payload, require_known=require_known)
@@ -691,12 +691,12 @@ def tui_control_parse_errors(text: str, *, allow_json_fences: bool = False) -> l
     if allow_json_fences:
         blocks.extend(TUI_CONTROL_JSON_FENCE_RE.findall(text or ""))
     for raw in blocks:
-        payload, _repaired, error = load_ga_control_json_text(raw)
+        payload, _repaired, error = load_shuheng_control_json_text(raw)
         if error:
             errors.append(error)
             continue
         if payload is not None and not controls_from_json_payload(payload, require_known=allow_json_fences):
-            errors.append("control JSON parsed but no known ga-control.v2 or agenttask.v2 action was found")
+            errors.append("control JSON parsed but no known shuheng-control.v2 or agenttask.v2 action was found")
     return errors
 
 

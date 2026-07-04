@@ -6,11 +6,11 @@ import os
 import subprocess
 import sys
 
-from ga_tui import cli
+from shuheng import cli
 
 
 def test_cli_help_does_not_import_app(monkeypatch, capsys) -> None:
-    sys.modules.pop("ga_tui.app", None)
+    sys.modules.pop("shuheng.app", None)
 
     result = None
     try:
@@ -23,11 +23,11 @@ def test_cli_help_does_not_import_app(monkeypatch, capsys) -> None:
     assert result == 0
     assert "Shuheng governed local-agent TUI" in output
     assert "--serve-gateway" in output
-    assert "ga_tui.app" not in sys.modules
+    assert "shuheng.app" not in sys.modules
 
 
 def test_python_module_entrypoint_uses_lightweight_cli() -> None:
-    main_module = importlib.import_module("ga_tui.__main__")
+    main_module = importlib.import_module("shuheng.__main__")
 
     assert main_module.main is cli.main
 
@@ -38,7 +38,7 @@ def test_app_imports_without_genericagent_discovery() -> None:
     env["PYTHONPATH"] = "src"
     code = (
         "import json; "
-        "from ga_tui import app; "
+        "from shuheng import app; "
         "print(json.dumps(app.agent_runtime_registry(write_memory_prompt_file=False).to_record(), sort_keys=True))"
     )
     result = subprocess.run(

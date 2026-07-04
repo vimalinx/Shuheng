@@ -65,18 +65,18 @@ SDIST_REQUIRED_MEMBERS = (
     "SECURITY.md",
     "docs/agent-harness-architecture.md",
     "docs/runtime-provider-control-plane.md",
-    "integrations/omp-ga-tui-plugin/README.md",
-    "integrations/omp-ga-tui-plugin/package.json",
-    "integrations/omp-ga-tui-plugin/tools/index.ts",
+    "integrations/omp-shuheng-plugin/README.md",
+    "integrations/omp-shuheng-plugin/package.json",
+    "integrations/omp-shuheng-plugin/tools/index.ts",
     "pyproject.toml",
     "scripts/check_policy_gates.py",
     "scripts/check_release_hygiene.py",
     "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
-    "src/ga_tui/builtin_plugins/shuheng-examples/plugin.json",
-    "src/ga_tui/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
-    "src/ga_tui/app.py",
+    "src/shuheng/builtin_plugins/shuheng-examples/plugin.json",
+    "src/shuheng/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
+    "src/shuheng/app.py",
     "src/shuheng.egg-info/PKG-INFO",
     SDIST_SOURCES_MEMBER,
     "src/shuheng.egg-info/entry_points.txt",
@@ -109,13 +109,13 @@ SDIST_FORBIDDEN_PREFIXES = (
 )
 
 WHEEL_REQUIRED_PACKAGE_MEMBERS = (
-    "ga_tui/__init__.py",
-    "ga_tui/__main__.py",
-    "ga_tui/app.py",
-    "ga_tui/builtin_plugins/shuheng-examples/plugin.json",
-    "ga_tui/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
-    "ga_tui/integration.py",
-    "ga_tui/release_readiness.py",
+    "shuheng/__init__.py",
+    "shuheng/__main__.py",
+    "shuheng/app.py",
+    "shuheng/builtin_plugins/shuheng-examples/plugin.json",
+    "shuheng/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
+    "shuheng/integration.py",
+    "shuheng/release_readiness.py",
 )
 
 WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
@@ -340,8 +340,8 @@ def sdist_metadata_contract_check(sdist: Path) -> dict[str, object]:
     if "src/shuheng.egg-info/entry_points.txt" not in missing and missing_console_scripts:
         errors.append("entry_points.txt missing console scripts: " + ", ".join(missing_console_scripts))
     top_level_text = texts.get("src/shuheng.egg-info/top_level.txt", "")
-    if "src/shuheng.egg-info/top_level.txt" not in missing and "ga_tui" not in {line.strip() for line in top_level_text.splitlines()}:
-        errors.append("top_level.txt missing ga_tui")
+    if "src/shuheng.egg-info/top_level.txt" not in missing and "shuheng" not in {line.strip() for line in top_level_text.splitlines()}:
+        errors.append("top_level.txt missing shuheng")
     if missing or errors:
         details = []
         if missing:
@@ -570,7 +570,7 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
         install_cmd.append(str(artifact))
         run(install_cmd, cwd=tmp, env=env)
         scripts = {name: venv_script(venv_dir, name) for name in PUBLIC_CONSOLE_SCRIPTS}
-        module_result = run([str(py), "-m", "ga_tui.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
+        module_result = run([str(py), "-m", "shuheng.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
         main_help_result = run([str(scripts["shuheng"]), "--help"], cwd=tmp, env=env)
         for name in HELP_SAFE_CONSOLE_SCRIPTS:
             run([str(scripts[name]), "--help"], cwd=tmp, env=env)
@@ -586,7 +586,7 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
                 *[{"command": f"script exists: {name}", "returncode": 0} for name in PUBLIC_CONSOLE_SCRIPTS],
                 {"command": "shuheng --help", "returncode": main_help_result.returncode},
                 *[{"command": f"{name} --help", "returncode": 0} for name in HELP_SAFE_CONSOLE_SCRIPTS],
-                {"command": "python -m ga_tui.integration doctor", "returncode": module_result.returncode},
+                {"command": "python -m shuheng.integration doctor", "returncode": module_result.returncode},
                 {"command": "shuheng-check", "returncode": entrypoint_result.returncode},
             ],
         }

@@ -1,8 +1,8 @@
 """Tests for context-pack shaping helpers."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import context_packs
+from shuheng import app as app_module
+from shuheng import context_packs
 
 
 def _sample_pack() -> dict:
@@ -180,7 +180,7 @@ def test_prompt_and_ref_formatting_round_trip() -> None:
     ref = "artifact://context_packs/agent-test/task_context_test.json"
     ref_prompt = context_packs.format_context_ref_for_prompt(pack, ref, default_permission_profile="standard")
 
-    assert "[GA TUI Context Pack]" in prompt
+    assert "[Shuheng Context Pack]" in prompt
     assert "Memory hydration pack:" in prompt
     assert "Recent artifact refs:" in prompt
     assert "Dedicated skills for this agent only:" in prompt

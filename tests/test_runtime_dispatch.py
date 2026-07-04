@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import queue
 
-from ga_tui import app as app_module
-from ga_tui import runtime_dispatch
-from ga_tui.runtime import RuntimeTaskRequest
+from shuheng import app as app_module
+from shuheng import runtime_dispatch
+from shuheng.runtime import RuntimeTaskRequest
 
 
 class RuntimeTaskAgent:
-    _ga_tui_runtime_provider_id = "ohmypi"
+    _shuheng_runtime_provider_id = "ohmypi"
     native_session_file = " sessions/native.jsonl "
     native_context_usage = {"tokens": "50", "contextWindow": "200", "percent": 0}
 
@@ -27,7 +27,7 @@ class RuntimeTaskAgent:
 
 
 class LegacyTaskAgent:
-    _ga_tui_runtime_provider_id = ""
+    _shuheng_runtime_provider_id = ""
 
     def __init__(self) -> None:
         self.prompts: list[tuple[str, str]] = []
@@ -44,7 +44,7 @@ class LegacyTaskAgent:
 
 
 class ModuleDetectedOmpAgent:
-    __module__ = "ga_tui.ohmypi_provider"
+    __module__ = "shuheng.ohmypi_provider"
 
 
 def test_runtime_provider_identity_helpers() -> None:

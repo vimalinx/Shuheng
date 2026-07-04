@@ -1,6 +1,6 @@
 """Shared test fixtures for the Shuheng test suite.
 
-Tests import from the installed `ga_tui` package (pythonpath=src in
+Tests import from the installed `shuheng` package (pythonpath=src in
 pyproject.toml). Most target functions are pure; they only need isolated
 filesystem paths so they never touch the user's real ~/.shuheng state.
 """
@@ -22,7 +22,7 @@ if str(SRC) not in sys.path:
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect all Shuheng home/state dirs to a temp dir.
 
-    ga_tui.app reads several env vars at import time. Because the module is
+    shuheng.app reads several env vars at import time. Because the module is
     imported once per session, tests that need a *fresh* home should use the
     reset_app_state fixture. For pure-function tests this fixture is a no-op
     convenience that documents intent.
@@ -30,14 +30,14 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "fake_home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("GA_TUI_HARNESS_DIR", str(home / "harness"))
-    monkeypatch.setenv("GA_TUI_SECRET_VAULT_DIR", str(home / "secret"))
+    monkeypatch.setenv("SHUHENG_HARNESS_DIR", str(home / "harness"))
+    monkeypatch.setenv("SHUHENG_SECRET_VAULT_DIR", str(home / "secret"))
     return home
 
 
 @pytest.fixture()
 def fresh_app(isolated_home: Path, monkeypatch: pytest.MonkeyPatch):
-    """Import ga_tui.app with isolated paths via importlib.reload.
+    """Import shuheng.app with isolated paths via importlib.reload.
 
     This re-executes module-level path constants against the isolated_home env
     so SECRET_VAULT_DIR / AGENT_HARNESS_DIR point at temp dirs. Use sparingly;
@@ -46,7 +46,7 @@ def fresh_app(isolated_home: Path, monkeypatch: pytest.MonkeyPatch):
     """
     import importlib
 
-    import ga_tui.app as app_module
+    import shuheng.app as app_module
 
     reloaded = importlib.reload(app_module)
     yield reloaded

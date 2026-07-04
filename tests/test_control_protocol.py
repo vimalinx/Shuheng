@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import ga_tui.app as app_module
-from ga_tui import control_protocol
+import shuheng.app as app_module
+from shuheng import control_protocol
 
 
 def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> None:
@@ -19,15 +19,15 @@ def test_subagent_control_intent_helpers_are_protocol_owned_app_aliases() -> Non
     assert app_module.policy_relevant_subagent_prompt_text is control_protocol.policy_relevant_subagent_prompt_text
     assert app_module.explicit_policy_action_for_subagent_task is control_protocol.explicit_policy_action_for_subagent_task
     assert app_module.inferred_policy_action_for_subagent_task is control_protocol.inferred_policy_action_for_subagent_task
-    assert control_protocol.subagent_control_persistence_intent.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.subagent_control_force_new_intent.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.control_result_continuation_signature.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.format_control_result_continuation_prompt.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.format_agent_control_result.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.agenttask_payload_from_prompt.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.policy_relevant_subagent_prompt_text.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
-    assert control_protocol.inferred_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"
+    assert control_protocol.subagent_control_persistence_intent.__module__ == "shuheng.control_protocol"
+    assert control_protocol.subagent_control_force_new_intent.__module__ == "shuheng.control_protocol"
+    assert control_protocol.control_result_continuation_signature.__module__ == "shuheng.control_protocol"
+    assert control_protocol.format_control_result_continuation_prompt.__module__ == "shuheng.control_protocol"
+    assert control_protocol.format_agent_control_result.__module__ == "shuheng.control_protocol"
+    assert control_protocol.agenttask_payload_from_prompt.__module__ == "shuheng.control_protocol"
+    assert control_protocol.policy_relevant_subagent_prompt_text.__module__ == "shuheng.control_protocol"
+    assert control_protocol.explicit_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"
+    assert control_protocol.inferred_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"
 
 
 def test_subagent_control_persistence_intent_explicit_lifecycle_flags() -> None:
@@ -93,7 +93,7 @@ def test_control_continuation_metadata_checks_control_and_envelope() -> None:
     control = {
         "action": "agent_create",
         "workflow": {"continue_after": True},
-        "_ga_control_envelope": {
+        "_shuheng_control_envelope": {
             "orchestration": {"workflow_state": "in-progress"},
             "continuation": {"next_action": "delegate next"},
         },
@@ -115,7 +115,7 @@ def test_control_explicitly_requests_continuation_only_from_structured_fields() 
     assert helper({"action": "agent_create", "requires_continuation": 1})
     assert helper({"action": "agent_create", "workflow_state": "needs-followup"})
     assert helper({"action": "agent_create", "orchestration": {"state": "partial"}})
-    assert helper({"action": "agent_create", "_ga_control_envelope": {"continuation": {"next_action": {"op": "next"}}}})
+    assert helper({"action": "agent_create", "_shuheng_control_envelope": {"continuation": {"next_action": {"op": "next"}}}})
     assert not helper({"action": "agent_create", "message": "please continue with step 2"})
     assert not helper({"action": "agent_create", "continue_after": False, "next_action": ""})
 
@@ -132,7 +132,7 @@ def test_control_result_continuation_needed_filters_actions_and_metadata() -> No
 
 
 def test_control_result_signature_and_prompt_formatting_strip_controls() -> None:
-    raw_text = "visible before <ga-control>{\"schema_version\":\"ga-control.v2\",\"actions\":[]}</ga-control>"
+    raw_text = "visible before <shuheng-control>{\"schema_version\":\"shuheng-control.v2\",\"actions\":[]}</shuheng-control>"
     results = ["- agent_create Worker: 已创建临时子 agent：Worker"]
 
     signature = control_protocol.control_result_continuation_signature(raw_text, results)
@@ -146,7 +146,7 @@ def test_control_result_signature_and_prompt_formatting_strip_controls() -> None
         original_text=raw_text,
     )
 
-    assert prompt.startswith("[GA TUI Control Result Continuation]")
+    assert prompt.startswith("[Shuheng Control Result Continuation]")
     assert "Reason: control-results" in prompt
     assert results[0] in prompt
     assert "Continue the user-approved workflow yourself" in prompt
@@ -154,7 +154,7 @@ def test_control_result_signature_and_prompt_formatting_strip_controls() -> None
     assert "Previous visible text:" in prompt
     assert "visible before" in prompt
     assert "schema_version" not in prompt
-    assert prompt.endswith("[/GA TUI Control Result Continuation]")
+    assert prompt.endswith("[/Shuheng Control Result Continuation]")
 
 
 def test_format_agent_control_result_preserves_labels_and_truncation() -> None:
@@ -199,11 +199,11 @@ def test_agenttask_prompt_envelope_helpers_fallback_for_missing_invalid_or_empty
     assert control_protocol.agenttask_payload_from_prompt(plain) == {}
     assert control_protocol.policy_relevant_subagent_prompt_text(plain) == plain
 
-    invalid = "[GA TUI AgentTask Envelope v2]\nnot json\n[/GA TUI AgentTask Envelope v2]"
+    invalid = "[Shuheng AgentTask Envelope v2]\nnot json\n[/Shuheng AgentTask Envelope v2]"
     assert control_protocol.agenttask_payload_from_prompt(invalid) == {}
     assert control_protocol.policy_relevant_subagent_prompt_text(invalid) == invalid
 
-    non_object = "[GA TUI AgentTask Envelope v2]\n[]\n[/GA TUI AgentTask Envelope v2]"
+    non_object = "[Shuheng AgentTask Envelope v2]\n[]\n[/Shuheng AgentTask Envelope v2]"
     assert control_protocol.agenttask_payload_from_prompt(non_object) == {}
     assert control_protocol.policy_relevant_subagent_prompt_text(non_object) == non_object
 
@@ -232,7 +232,7 @@ def test_explicit_policy_action_for_subagent_task_reads_envelope_fields_in_order
     helper = control_protocol.explicit_policy_action_for_subagent_task
 
     assert helper("plain prompt") == ""
-    assert helper("[GA TUI AgentTask Envelope v2]\nnot json\n[/GA TUI AgentTask Envelope v2]") == ""
+    assert helper("[Shuheng AgentTask Envelope v2]\nnot json\n[/Shuheng AgentTask Envelope v2]") == ""
 
     top_level = control_protocol.format_agenttask_worker_prompt(
         {

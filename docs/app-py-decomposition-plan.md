@@ -1,10 +1,10 @@
-# `src/ga_tui/app.py` Decomposition Plan
+# `src/shuheng/app.py` Decomposition Plan
 
 Date: 2026-06-30
 
 ## Purpose
 
-`src/ga_tui/app.py` is still the central Shuheng TUI/control-plane module. It is
+`src/shuheng/app.py` is still the central Shuheng TUI/control-plane module. It is
 also the highest remaining maintainability risk: current size is about 28.7k
 lines and the module owns UI state, history, Secret Vault, subagents, governance
 stores, runtime dispatch, Web Console payloads, rendering, input handling, and
@@ -35,8 +35,8 @@ the existing executable contracts, release gates, and local-alpha compatibility.
 - No storage-root migration while decomposing modules.
 - No behavior rewrite bundled with file movement.
 - No breaking public imports, console scripts, policy gates, or test helpers that
-  still import functions from `ga_tui.app`.
-- No moving code into modules that import `ga_tui.app`; extracted modules must be
+  still import functions from `shuheng.app`.
+- No moving code into modules that import `shuheng.app`; extracted modules must be
   lower-level dependencies, not back-references.
 
 ## Target Dependency Direction
@@ -52,7 +52,7 @@ config/path constants
 
 Rules:
 
-- Lower-level modules must not import `ga_tui.app`.
+- Lower-level modules must not import `shuheng.app`.
 - `app.py` may temporarily re-export moved symbols for compatibility.
 - Mutable runtime globals should be centralized before broad extraction. Tests
   currently retarget many `app.py` globals directly, so path/state extraction
@@ -232,7 +232,7 @@ domain services exist, otherwise this becomes a second monolith.
 Deliverables:
 
 - Add a policy gate that forbids new extracted modules from importing
-  `ga_tui.app`.
+  `shuheng.app`.
 - Add a small import smoke that imports all planned modules.
 - Add an `app.py` line-count telemetry check to release-readiness metadata, but
   do not fail the build on line count yet.
@@ -253,7 +253,7 @@ Move:
 Compatibility:
 
 - `app.py` imports and re-exports moved names.
-- Existing tests that import from `ga_tui.app` keep passing.
+- Existing tests that import from `shuheng.app` keep passing.
 
 Success metric:
 
@@ -363,27 +363,27 @@ Keep in final `app.py`:
 Target final shape:
 
 ```text
-src/ga_tui/app.py                 thin executable facade
-src/ga_tui/ui_types.py            state/dataclasses
-src/ga_tui/text_utils.py          pure display/text helpers
-src/ga_tui/history_store.py       normal history and transcript storage
-src/ga_tui/secret_vault.py        encrypted storage
-src/ga_tui/subagent_store.py      subagent profile/memory/session refs
-src/ga_tui/governance.py          task/policy/approval/artifact semantics
-src/ga_tui/context_packs.py       context and memory hydration
-src/ga_tui/runtime_dispatch.py    provider-neutral dispatch
-src/ga_tui/web_console.py         Web Console adapters
-src/ga_tui/dashboard.py           home/dashboard lines
-src/ga_tui/rendering.py           render transforms and draw helpers
-src/ga_tui/input_controller.py    keyboard/mouse/input behavior
-src/ga_tui/commands.py            command grammar and handlers
+src/shuheng/app.py                 thin executable facade
+src/shuheng/ui_types.py            state/dataclasses
+src/shuheng/text_utils.py          pure display/text helpers
+src/shuheng/history_store.py       normal history and transcript storage
+src/shuheng/secret_vault.py        encrypted storage
+src/shuheng/subagent_store.py      subagent profile/memory/session refs
+src/shuheng/governance.py          task/policy/approval/artifact semantics
+src/shuheng/context_packs.py       context and memory hydration
+src/shuheng/runtime_dispatch.py    provider-neutral dispatch
+src/shuheng/web_console.py         Web Console adapters
+src/shuheng/dashboard.py           home/dashboard lines
+src/shuheng/rendering.py           render transforms and draw helpers
+src/shuheng/input_controller.py    keyboard/mouse/input behavior
+src/shuheng/commands.py            command grammar and handlers
 ```
 
 ## Phase Exit Criteria
 
 Every extraction phase must pass:
 
-- `python3 -m py_compile src/ga_tui/app.py <new modules>`
+- `python3 -m py_compile src/shuheng/app.py <new modules>`
 - `python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider`
@@ -402,7 +402,7 @@ For phases touching packaging, release, Web, runtime dispatch, or storage:
 
 Stop and re-evaluate if any phase causes:
 
-- an extracted module to import `ga_tui.app`
+- an extracted module to import `shuheng.app`
 - a second owner for history, Secret Vault, task ledgers, or memory candidates
 - a change to `~/.shuheng` storage semantics
 - a change to public console scripts or release posture
@@ -413,7 +413,7 @@ Stop and re-evaluate if any phase causes:
 
 Start with Phase 0 and Phase 1 only:
 
-1. Add a policy gate that extracted modules cannot import `ga_tui.app`.
+1. Add a policy gate that extracted modules cannot import `shuheng.app`.
 2. Create `ui_types.py` and move dataclasses with compatibility aliases in
    `app.py`.
 3. Create `text_utils.py` and move pure cell/text helpers with compatibility

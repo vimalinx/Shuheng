@@ -12,15 +12,15 @@
     "settings": {
       "python": {
         "type": "string",
-        "description": "Python executable used to run ga_tui.agent_bridge.",
+        "description": "Python executable used to run shuheng.agent_bridge.",
         "default": "python3",
-        "env": "GA_TUI_BRIDGE_PYTHON"
+        "env": "SHUHENG_BRIDGE_PYTHON"
       },
       "repoRoot": {
         "type": "string",
-        "description": "Shuheng repository root. Auto-detected when empty. Legacy GA_TUI_REPO is still accepted.",
+        "description": "Shuheng repository root. Auto-detected when empty. Legacy SHUHENG_REPO is still accepted.",
         "default": "",
-        "env": "GA_TUI_REPO"
+        "env": "SHUHENG_REPO"
       }
     }
   }

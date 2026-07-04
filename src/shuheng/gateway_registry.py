@@ -68,7 +68,7 @@ def gateway_service_descriptor(
             "test_endpoint": f"{base_url}/a2a/push-test",
             "subscriptions_path": gateway_push_subscriptions_path,
             "deliveries_path": gateway_push_deliveries_path,
-            "default_endpoint_policy": "loopback_only_unless_GA_TUI_GATEWAY_ALLOW_REMOTE_PUSH=1",
+            "default_endpoint_policy": "loopback_only_unless_SHUHENG_GATEWAY_ALLOW_REMOTE_PUSH=1",
             "auth": "none",
         },
         "daemon": {

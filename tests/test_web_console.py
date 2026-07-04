@@ -1,9 +1,9 @@
 """Tests for pure Web Console helper contracts."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import web_console
-from ga_tui.governance import parse_iso_timestamp
+from shuheng import app as app_module
+from shuheng import web_console
+from shuheng.governance import parse_iso_timestamp
 
 
 def test_web_console_ref_is_stable_opaque_and_kind_checked() -> None:

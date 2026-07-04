@@ -40,10 +40,10 @@ class SequencedFakeAgent:
 
 def import_isolated_app(shuheng_home: str):
     os.environ["SHUHENG_HOME"] = shuheng_home
-    os.environ["GA_TUI_HARNESS_DIR"] = os.path.join(shuheng_home, "memory", "agent_harness")
-    os.environ.setdefault("GA_TUI_RUNTIME_PROVIDER", "ohmypi")
+    os.environ["SHUHENG_HARNESS_DIR"] = os.path.join(shuheng_home, "memory", "agent_harness")
+    os.environ.setdefault("SHUHENG_RUNTIME_PROVIDER", "ohmypi")
     sys.path.insert(0, str(SRC))
-    from ga_tui import app as a  # noqa: PLC0415
+    from shuheng import app as a  # noqa: PLC0415
 
     return a
 

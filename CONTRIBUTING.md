@@ -16,7 +16,7 @@ python -m pip install -e ".[dev]"
 Run the local application from source:
 
 ```bash
-PYTHONPATH=src python -m ga_tui
+PYTHONPATH=src python -m shuheng
 ```
 
 ## Required Checks
@@ -38,14 +38,14 @@ git diff --check
 If you have a sibling GenericAgent checkout, also run:
 
 ```bash
-PYTHONPATH=src python -m ga_tui.integration doctor --root /path/to/GenericAgent
+PYTHONPATH=src python -m shuheng.integration doctor --root /path/to/GenericAgent
 ```
 
 ## Pull Request Guidelines
 
 - Keep user-facing product wording as Shuheng or 枢衡.
-- Preserve internal compatibility identifiers such as `src/ga_tui`, `GA_TUI_*`,
-  `ga_tui_query`, and `ga-tui.*` schemas unless a migration is explicitly scoped.
+- Preserve internal compatibility identifiers such as `src/shuheng`, `SHUHENG_*`,
+  `shuheng_query`, and `shuheng.*` schemas unless a migration is explicitly scoped.
 - Do not commit local runtime state, secrets, model credentials, normal session
   logs, Secret Vault content, or private research notes.
 - Changes touching TUI, subagents, approvals, memory, artifacts, recovery,

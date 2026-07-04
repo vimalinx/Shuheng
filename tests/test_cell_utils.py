@@ -5,9 +5,9 @@ text to a terminal cell budget. They are pure: no IO, no curses.
 """
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import text_utils, ui_types
-from ga_tui.text_utils import (
+from shuheng import app as app_module
+from shuheng import text_utils, ui_types
+from shuheng.text_utils import (
     ANSI_RE,
     cell_width,
     clean_text,

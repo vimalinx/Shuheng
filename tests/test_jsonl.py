@@ -11,8 +11,8 @@ import multiprocessing
 from pathlib import Path
 
 
-from ga_tui.app import append_jsonl, read_jsonl
-from ga_tui.ledger_store import (
+from shuheng.app import append_jsonl, read_jsonl
+from shuheng.ledger_store import (
     clear_jsonl_caches,
     jsonl_file_signature,
     latest_records_by_id,

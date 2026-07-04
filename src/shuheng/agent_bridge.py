@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-BRIDGE_SCHEMA_VERSION = "ga-tui.agent_bridge.v1"
+BRIDGE_SCHEMA_VERSION = "shuheng.agent_bridge.v1"
 SUPPORTED_ACTIONS = (
     "metadata",
     "query",
@@ -55,16 +55,16 @@ def _install_env(options: BridgeOptions) -> None:
     if options.genericagent_root:
         os.environ["GENERICAGENT_ROOT"] = os.path.abspath(os.path.expanduser(options.genericagent_root))
     if options.harness_dir:
-        os.environ["GA_TUI_HARNESS_DIR"] = os.path.abspath(os.path.expanduser(options.harness_dir))
+        os.environ["SHUHENG_HARNESS_DIR"] = os.path.abspath(os.path.expanduser(options.harness_dir))
     if options.secret_vault_dir:
-        os.environ["GA_TUI_SECRET_VAULT_DIR"] = os.path.abspath(os.path.expanduser(options.secret_vault_dir))
+        os.environ["SHUHENG_SECRET_VAULT_DIR"] = os.path.abspath(os.path.expanduser(options.secret_vault_dir))
 
 
 def load_app(options: BridgeOptions | None = None) -> Any:
     """Load the app module after applying path env overrides."""
 
     _install_env(options or BridgeOptions())
-    return importlib.import_module("ga_tui.app")
+    return importlib.import_module("shuheng.app")
 
 
 def create_bridge_state(app: Any | None = None) -> Any:
@@ -86,7 +86,7 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
     return {
         "schema_version": BRIDGE_SCHEMA_VERSION,
         "status": "ok",
-        "owner": "ga-tui.control_plane",
+        "owner": "shuheng.control_plane",
         "supported_actions": list(SUPPORTED_ACTIONS),
         "contracts": {
             "memory_context_get": "read_only_context_pack",
@@ -107,7 +107,7 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
         },
         "policy": {
             "long_term_memory_write": "candidate_only",
-            "approval_owner": "ga-tui.policy",
+            "approval_owner": "shuheng.policy",
             "provider_direct_writes": False,
         },
     }
@@ -150,7 +150,7 @@ class AgentBridgeService:
         return self.app.ohmypi_tui_propose_host_tool_handler(self.state, payload)
 
     def delegate(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Delegate work to a professional subagent via ga-control v2.
+        """Delegate work to a professional subagent via shuheng-control v2.
 
         Args:
             agent_role: Target agent role (e.g., "novelist")
@@ -160,14 +160,14 @@ class AgentBridgeService:
             stop_condition: Optional stop condition
 
         Returns:
-            ga-control delegate.create result or error.
+            shuheng-control delegate.create result or error.
         """
         payload = dict(args or {})
         agent_role = str(payload.get("agent_role") or "").strip()
         objective = str(payload.get("objective") or "").strip()
         if not agent_role or not objective:
             return bridge_error("delegate requires agent_role and objective.")
-        # Use the TUI's ga-control dispatch to create a delegation
+        # Use the TUI's shuheng-control dispatch to create a delegation
         return self.query("delegate_create", payload)
 
     def studio_state(self, args: dict[str, Any] | None = None) -> dict[str, Any]:

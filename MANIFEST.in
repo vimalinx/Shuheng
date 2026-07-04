@@ -9,8 +9,8 @@ include pyproject.toml
 recursive-include docs *.md
 exclude docs/foreign-student-acquisition-research.md
 exclude docs/homework-pricing-research.md
-recursive-include integrations/omp-ga-tui-plugin *.md *.json *.ts
-recursive-include src/ga_tui/builtin_plugins *.json
+recursive-include integrations/omp-shuheng-plugin *.md *.json *.ts
+recursive-include src/shuheng/builtin_plugins *.json
 recursive-include tests *.py
 include scripts/check_policy_gates.py
 include scripts/check_release_hygiene.py

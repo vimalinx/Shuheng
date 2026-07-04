@@ -2,60 +2,70 @@
 
 > Executable contract for Shuheng compatibility control blocks and governed subagent delegation.
 
-## Scenario: Shuheng Brand Entry Points
+## Scenario: Shuheng Naming Surface
 
 ### 1. Scope / Trigger
 
-- Trigger: The user-facing product name is `Shuheng` / `枢衡`; legacy `ga-tui` command aliases have been removed from public entry points while protocol and Python module compatibility identifiers remain internal surfaces.
-- Applies to: `pyproject.toml` console scripts, README command examples, integration doctor output, launcher-shim help text, runtime prompts, and OMP/tool descriptions.
-- Non-goal: This does not rename `src/ga_tui`, `GA_TUI_*` environment variables, `ga-tui.*` schema versions, `ga_tui_query`, `ga_tui_propose`, existing JSONL context ids, or historical compatibility markers.
+- Trigger: The active product, package, protocol, runtime prompt, tool, docs, and release naming surface is `Shuheng` / `枢衡`.
+- Applies to: `pyproject.toml` console scripts, package import paths, README command examples, integration doctor output, launcher-shim help text, runtime prompts, control protocol schemas, OMP/tool descriptions, release checks, wheel/sdist smoke checks, and source distribution metadata.
+- Non-goal: This does not remove the optional GenericAgent legacy provider, launcher shim target, non-destructive legacy history import, or quarantined historical prompt cleanup. Those surfaces must identify GenericAgent only as optional legacy compatibility, never as Shuheng's core runtime.
 
 ### 2. Signatures
 
 - Primary console scripts: `shuheng`, `shuheng-agent-bridge`, `shuheng-check`, `shuheng-install-core-shim`, and `shuheng-integration`.
-- Public `ga-tui*` console scripts are not exported.
-- Python module entry remains `python -m ga_tui` / `python -m ga_tui.app`.
+- Retired pre-Shuheng console-script aliases are not exported.
+- Python package root: `src/shuheng`.
+- Python module entry remains `python -m shuheng` / `python -m shuheng.app`.
 - Distribution name in `pyproject.toml`: `shuheng`.
+- Current control schema and hidden block: `shuheng-control.v2` and `<shuheng-control>...</shuheng-control>`.
+- Current OMP proposal type for governed controls: `proposal_type:"shuheng_control"`.
+- Canonical environment variables use `SHUHENG_*`; the optional legacy provider root override is `GENERICAGENT_ROOT`.
 
 ### 3. Contracts
 
 - User-facing docs and doctor output should prefer `Shuheng` and `shuheng*` commands.
-- User-facing docs and doctor output must not advertise `ga-tui*` aliases.
-- Protocol-level identifiers keep their current stable values until an explicit migration task exists.
-- Launcher-shim discovery may search both `Shuheng` and historical pre-Shuheng checkout directory names, but user-facing output must present Shuheng as the product identity.
+- User-facing docs and doctor output must not advertise retired pre-Shuheng aliases as current entry points.
+- Current protocol parsers must accept Shuheng control blocks/fences only.
+- `shuheng_query`, `shuheng_propose`, and typed OMP tools are Shuheng host tools. They may expose compatibility behavior only through bounded, governed Shuheng schemas.
+- OhMyPi / OMP is the default runtime core. GenericAgent remains selectable only as an optional legacy provider when a valid legacy checkout exists.
+- Historical Trellis task logs and quarantined compatibility cleanup may mention retired names as historical facts; active specs, docs, prompts, tests, release gates, and package metadata must describe the final Shuheng source of truth.
 
 ### 4. Validation & Error Matrix
 
 - Missing `shuheng*` console script in `pyproject.toml` -> packaging regression.
-- Public `ga-tui*` console script in `pyproject.toml` -> brand regression.
-- Doctor output says primary launch is `ga-tui` -> brand regression.
-- Doctor output mentions a `ga-tui` compatibility alias -> brand regression.
-- Runtime strings identify the main orchestrator only as `GA-TUI` -> product identity regression.
-- Exit prompts or terminal shutdown messages mention the legacy lowercase two-word alias -> brand regression.
+- Retired pre-Shuheng console script in `pyproject.toml` -> naming regression.
+- Built package metadata refers to the retired pre-Shuheng package or plugin directory -> package metadata regression.
+- Active parser regexes still target retired control blocks/fences -> protocol regression.
+- OMP host-tool proposal enum still exposes a retired control proposal type -> tool API naming regression.
+- Doctor output requires GenericAgent for ordinary Shuheng checks -> runtime ownership regression.
+- Runtime strings identify the main orchestrator as a retired TUI alias or as GenericAgent core -> product identity regression.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `shuheng-check --root <GenericAgent>` reports `Shuheng root` and `Launch without legacy patches: shuheng` without advertising a `ga-tui` alias.
-- Base: OMP host tools keep names such as `ga_tui_query` because they are protocol compatibility tool ids.
-- Bad: Re-adding public `ga-tui*` commands or exit messages while the product is Shuheng-only.
-- Bad: Renaming `ga_tui_query`, `GA_TUI_*`, or `ga-tui.query.v1` in a brand-only task, because that breaks external clients without a schema migration.
+- Good: `shuheng-check` reports `Shuheng root`, `Core runtime: OhMyPi / OMP`, and `Launch without legacy patches: shuheng`.
+- Good: `python -m shuheng --help`, `python -m shuheng.integration doctor`, and package smoke checks run without requiring GenericAgent.
+- Base: `GENERICAGENT_ROOT` is still accepted for explicit legacy-provider or launcher-shim operations.
+- Bad: Re-adding retired pre-Shuheng commands, module docs, env aliases, or proposal types as active behavior.
+- Bad: Describing GenericAgent as the Shuheng root/core runtime.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `pyproject.toml` contains all primary `shuheng*` scripts and no public `ga-tui*` scripts.
-- Tests must assert integration doctor report prefers `shuheng` and does not mention `ga-tui` as a compatibility command.
-- Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of the legacy lowercase two-word alias.
+- `scripts/check_policy_gates.py` must assert `pyproject.toml` contains all primary `shuheng*` scripts and no retired pre-Shuheng scripts.
+- Tests must assert integration doctor report identifies OhMyPi / OMP as the core runtime and GenericAgent as optional legacy provider only.
+- Tests must assert parser regexes, hidden control examples, and OMP proposal schemas use `shuheng-control.v2` / `shuheng_control`.
+- Tests must assert release/wheel smoke metadata uses `src/shuheng`, `shuheng` top-level package, and `integrations/omp-shuheng-plugin`.
+- Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
 - `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
-Keep advertising `ga-tui` as a user-facing compatibility command, or rename every `ga-tui`, `ga_tui`, and `GA_TUI` token in one sweep.
+Move the package to `src/shuheng` but leave built metadata, parser regexes, host-tool enums, or public docs pointing at retired pre-Shuheng identities or GenericAgent-as-core.
 
 #### Correct
 
-Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preserving legacy protocol/module/env names until a dedicated compatibility migration is designed.
+Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, docs, and release identity. Keep GenericAgent only inside explicit legacy-provider and migration/import boundaries.
 
 ## Scenario: Open-Source Release Hygiene
 
@@ -68,8 +78,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   plugin public wording.
 - Non-goal: This does not publish the repository, change the remote URL, certify
   A2A/MCP protocol compliance, add production remote gateway auth, or rename
-  internal compatibility identifiers such as `src/ga_tui`, `GA_TUI_*`,
-  `ga_tui_query`, and `ga-tui.*` schemas.
+  internal compatibility identifiers such as `src/shuheng`, `SHUHENG_*`,
+  `shuheng_query`, and `shuheng.*` schemas.
 
 ### 2. Signatures
 
@@ -88,7 +98,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 
 - Public release posture stays `experimental local alpha`.
 - `scripts/check_release_hygiene.py` must fail on missing governance files,
-  missing release scripts, missing package metadata, public legacy `ga-tui*`
+  missing release scripts, missing package metadata, public legacy `shuheng*`
   console scripts, unignored private/local paths, realistic secret literals,
   local absolute user paths in public files, missing MANIFEST public
   inclusions/private exclusions, or missing public alpha/security wording.
@@ -135,7 +145,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   checks must import that shared source instead of carrying duplicate regex
   tuples.
 - OMP plugin user-facing labels and docs should say Shuheng. Compatibility tool
-  ids may remain `ga_tui_*`.
+  ids may remain `shuheng_*`.
 
 ### 4. Validation & Error Matrix
 
@@ -152,12 +162,12 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Built sdist archive omits required public docs/scripts/tests or contains
   private/local paths such as `config/`, `.trellis/`, `memory/`, `temp/`,
   `tmp/`, `goal-*`, or private research docs -> wheel smoke fails.
-- Built sdist metadata omits `Name: shuheng`, `Version`, `ga_tui` top-level
+- Built sdist metadata omits `Name: shuheng`, `Version`, `shuheng` top-level
   package, or any public console-script entry point -> wheel smoke fails.
 - Built sdist `SOURCES.txt` is missing, has duplicate/unsafe rows, omits a real
   archive file member, or references a file that is not in the archive -> wheel
   smoke fails.
-- Built wheel archive omits required `ga_tui` package modules, dist-info
+- Built wheel archive omits required `shuheng` package modules, dist-info
   metadata, license, or public console-script entry point metadata, or contains
   private/local paths -> wheel smoke fails.
 - Built wheel `RECORD` omits an archive member, contains rows for missing
@@ -176,7 +186,7 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
 - Public file contains a local absolute user path -> release hygiene fails.
 - Packaged test file contains realistic API key/private-key material or local
   absolute user paths -> release hygiene fails.
-- `pyproject.toml` exports public `ga-tui*` scripts -> release hygiene fails.
+- `pyproject.toml` exports public `shuheng*` scripts -> release hygiene fails.
 - CI matrix omits the minimum supported Python version or highest advertised
   Python classifier -> release hygiene fails.
 - CI omits `git diff --check` -> release hygiene fails because whitespace and
@@ -196,8 +206,8 @@ Expose only `shuheng*` user commands and Shuheng/枢衡 UI strings, while preser
   `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
   research docs or local runtime state.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
-  `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
-- Base: Internal schemas and env names keep `ga_tui` / `GA_TUI` identifiers for
+  `shuheng_context_get` and `shuheng_memory_candidate_submit`.
+- Base: Internal schemas and env names keep `shuheng` / `SHUHENG` identifiers for
   compatibility.
 - Bad: Publishing `docs/homework-pricing-research.md` or a machine-specific MCP
   config in the public repository.
@@ -313,8 +323,8 @@ and app.py monolith risk.
 - `history_round_count(...)`, `extract_recent_ui_messages_from_pairs(...)`, and `history_messages_from_pairs(...)` belong to `history_store.py` because they shape already-parsed transcript pairs into recent restore message records. They accept app-provided prompt/tool/response-format callables and must not parse transcript files, switch providers, reset runtime backends, inspect UI state, write metadata, or own process-summary title policy.
 - `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
 - `short_session_title(...)`, `compact_description(...)`, `text_has_process_markers(...)`, `session_summary_titles_from_text(...)`, `session_response_preview_text(...)`, `session_preview_from_pairs(...)`, `is_process_only_session_title(...)`, `history_cache_has_process_only_preview(...)`, `message_text_for_metadata_context(...)`, `session_description_from_pairs(...)`, and `suggested_session_title(...)` belong to `history_titles.py` because they are process-summary-safe title/preview/description policy over already-parsed text, response bodies, message rows, or transcript pairs. App wrappers inject `_user_text(...)`, `latest_visible_reply_text(...)`, and current display limits where those dependencies remain app/rendering-owned.
-- `history_store.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
-- `history_titles.py` must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `history_store.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `history_titles.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
 ### 4. Validation & Error Matrix
 
@@ -396,14 +406,14 @@ S01 修复左栏历史会话标题
 
 ```python
 # history_store.py
-from ga_tui.app import RECENT_SESSION_LIMIT, normalized_path
+from shuheng.app import RECENT_SESSION_LIMIT, normalized_path
 ```
 
 #### Correct
 
 ```python
 # history_store.py
-from ga_tui import path_utils
+from shuheng import path_utils
 
 def recent_history_items(history_entries, used_paths, limit):
     ...
@@ -467,7 +477,7 @@ def recent_history_items(history_entries, used_paths, limit):
 - `scripts/check_policy_gates.py` must assert category-scoped `/curate-history` builds an index artifact with only matching session rows.
 - Tests must assert the generated prompt contains progressive disclosure rules, nested subskill names, candidate-only memory wording, and recommendation-only persistent-subagent wording.
 - Tests must assert the command starts the main agent with source `user:history_curator_skill` and preserves the literal command as the visible user message.
-- Tests must assert runtime-agent execution for this command does not prepend `[GA TUI Context Pack]` and records `runtime_context_mode:"lean"`.
+- Tests must assert runtime-agent execution for this command does not prepend `[Shuheng Context Pack]` and records `runtime_context_mode:"lean"`.
 - Tests must assert non-matching category scopes do not start a main-agent task.
 
 ### 7. Wrong vs Correct
@@ -581,7 +591,7 @@ def recent_history_items(history_entries, used_paths, limit):
 - Tests must assert default main and persistent-agent home rendering shows readable task and schedule rows while keeping raw artifact and approval rows behind detail-entry actions.
 - Tests must assert explicitly declared readable dashboard sections still render from persisted dashboard declarations.
 - Tests must assert temporary agents do not persist dashboard declarations.
-- Tests must assert `dashboard.update` is extracted from `ga-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
+- Tests must assert `dashboard.update` is extracted from `shuheng-control.v2`, normalized to `dashboard_update`, and persisted for persistent subagents.
 - Tests must assert unsupported section types and executable-looking fields are ignored.
 - Tests must assert old transcript-only behavior explicitly selects `"main"` when testing main chat rendering.
 - Tests must assert plain text on main home auto-switches to `selected_session == "main"` after starting a main task, while plain text on persistent-agent homes auto-switches to the corresponding subagent chat and sends the input without requiring `/chat`.
@@ -623,13 +633,13 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ### 1. Scope / Trigger
 
-- Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, dashboard cache-signature helpers, or pure status-card string layout helpers are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/dashboard.py`, compatibility aliases in `src/ga_tui/app.py`, `dashboard.update` normalization, main/persistent-agent home rendering inputs, policy gates, and dashboard helper unit tests.
+- Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, dashboard cache-signature helpers, or pure status-card string layout helpers are moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/dashboard.py`, compatibility aliases in `src/shuheng/app.py`, `dashboard.update` normalization, main/persistent-agent home rendering inputs, policy gates, and dashboard helper unit tests.
 - Non-goal: This does not move `State` or `SubAgentRuntime` projections, curses `RenderLine` home rendering, status-card drawing, session/history restore, ledger reads, scheduler reads, approval/action dispatch, or Web Console payloads.
 
 ### 2. Signatures
 
-- Lower-level helper module: `src/ga_tui/dashboard.py`.
+- Lower-level helper module: `src/shuheng/dashboard.py`.
 - Compatibility aliases in `app.py`:
   - `SUPPORTED_DASHBOARD_SECTIONS`.
   - `DEFAULT_DASHBOARD_SECTIONS`.
@@ -648,7 +658,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ### 3. Contracts
 
-- `dashboard.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw/home rendering functions.
+- `dashboard.py` must not import `shuheng.app`, `.app`, `app`, `curses`, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw/home rendering functions.
 - `app.py` remains the compatibility facade and exposes the moved names as direct aliases or behavior-identical wrappers.
 - Supported section types remain `function`, `status_narrative`, `todos`, `sessions`, `schedules`, `scheduled_reports`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - `normalize_dashboard_sections(...)` accepts string or dict section entries, drops unsupported/non-dict entries, bounds titles to 80 characters, bounds markdown/body to 3000 characters, and keeps at most 12 sections.
@@ -660,7 +670,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ### 4. Validation & Error Matrix
 
-- `dashboard.py` imports `ga_tui.app`, curses, TUI state, render types, or home-line functions -> policy gate fails.
+- `dashboard.py` imports `shuheng.app`, curses, TUI state, render types, or home-line functions -> policy gate fails.
 - App alias differs from module helper for the same input -> unit test or policy gate fails.
 - Unknown dashboard section type -> dropped from normalized sections.
 - Section title, markdown, status, todos, or payload markdown exceed bounds -> normalized output is truncated.
@@ -671,8 +681,8 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `apply_dashboard_control(...)` keeps calling `app.normalize_dashboard_spec_payload(...)`, while the implementation lives in `ga_tui.dashboard`.
-- Good: Home rendering keeps using `dashboard_sections_for_main(...)` and `dashboard_sections_for_subagent(...)` from `app.py`, with default sections imported from `ga_tui.dashboard`.
+- Good: `apply_dashboard_control(...)` keeps calling `app.normalize_dashboard_spec_payload(...)`, while the implementation lives in `shuheng.dashboard`.
+- Good: Home rendering keeps using `dashboard_sections_for_main(...)` and `dashboard_sections_for_subagent(...)` from `app.py`, with default sections imported from `shuheng.dashboard`.
 - Base: `dashboard_status_for_subagent(...)` stays in `app.py` because it reads `SubAgentRuntime` fields.
 - Base: `main_home_lines_uncached(...)` and `subagent_home_lines_uncached(...)` stay in `app.py` because they construct `RenderLine` values and read ledgers/live state.
 - Base: `append_status_card(...)` stays in `app.py` because it constructs `RenderLine` values and attaches curses attributes; it may call pure status-card line helpers from `dashboard.py`.
@@ -683,7 +693,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 - Unit tests must assert section normalization, payload normalization, cache signature behavior, status-card line/layout helpers, and `app.py` wrapper parity.
 - `scripts/check_policy_gates.py` must assert `dashboard.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway, runtime-dispatch, or home-rendering dependencies.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/dashboard.py scripts/check_policy_gates.py tests/test_dashboard.py` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/dashboard.py scripts/check_policy_gates.py tests/test_dashboard.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_dashboard.py -p no:cacheprovider` must pass.
 
 ### 7. Wrong vs Correct
@@ -692,7 +702,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ```python
 # dashboard.py
-from ga_tui.app import State, RenderLine, latest_task_records
+from shuheng.app import State, RenderLine, latest_task_records
 ```
 
 #### Correct
@@ -707,13 +717,13 @@ def normalize_dashboard_sections(raw_sections):
 
 ### 1. Scope / Trigger
 
-- Trigger: Pure terminal-cell or compact text helpers are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/text_utils.py`, compatibility aliases in `src/ga_tui/app.py`, title/category cleaning, sidebar/history title consumers, dashboard helpers, Web Console helpers, policy gates, and text utility unit tests.
+- Trigger: Pure terminal-cell or compact text helpers are moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/text_utils.py`, compatibility aliases in `src/shuheng/app.py`, title/category cleaning, sidebar/history title consumers, dashboard helpers, Web Console helpers, policy gates, and text utility unit tests.
 - Non-goal: This does not move history metadata, transcript parsing, Web Console history payloads, dashboard/home rendering, command handlers, runtime providers, ledgers, Secret Vault, or storage roots.
 
 ### 2. Signatures
 
-- Lower-level helper module: `src/ga_tui/text_utils.py`.
+- Lower-level helper module: `src/shuheng/text_utils.py`.
 - Compatibility aliases in `app.py`:
   - `ANSI_RE`.
   - `cell_width(text)`.
@@ -728,7 +738,7 @@ def normalize_dashboard_sections(raw_sections):
 
 ### 3. Contracts
 
-- `text_utils.py` must remain a pure leaf module and must not import `ga_tui.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, Web Console, dashboard, or command handlers.
+- `text_utils.py` must remain a pure leaf module and must not import `shuheng.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, Web Console, dashboard, or command handlers.
 - `compact_title(...)` strips ANSI/control display noise through `clean_text`, removes fenced code, HTML-like tags, lightweight markdown markers, leading user/request boilerplate, and leading completion/summary boilerplate before terminal-cell truncation.
 - `compact_category(...)` uses `compact_title(..., 18)` and returns an empty category for sentinel values `-`, `clear`, `none`, `null`, and `未分类`.
 - `rel_age(...)` formats elapsed time for sidebar, Web Console, artifact, subagent, and memory display without depending on TUI state.
@@ -737,14 +747,14 @@ def normalize_dashboard_sections(raw_sections):
 
 ### 4. Validation & Error Matrix
 
-- `text_utils.py` imports `ga_tui.app`, curses, TUI state, render types, runtime providers, stores, or command handlers -> policy gate fails.
+- `text_utils.py` imports `shuheng.app`, curses, TUI state, render types, runtime providers, stores, or command handlers -> policy gate fails.
 - App alias differs from module helper for the same input -> unit test or policy gate fails.
 - Title input includes code fences, HTML tags, or markdown markers -> helper removes layout/control noise before truncation.
 - Category input is a sentinel value -> helper returns `""` so callers can apply their own fallback label.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `session_title_for_path(...)` continues calling `app.compact_title(...)`, while the implementation lives in `ga_tui.text_utils`.
+- Good: `session_title_for_path(...)` continues calling `app.compact_title(...)`, while the implementation lives in `shuheng.text_utils`.
 - Good: `dashboard.py` and `web_console.py` import lower-level text helpers without depending on `app.py`.
 - Base: `app.compact_description(...)` remains the compatibility wrapper; the process-summary-safe implementation lives in `history_titles.py` alongside the process marker regexes it needs.
 - Bad: `text_utils.py` imports `TUI_CONTROL_RE` from `app.py`.
@@ -754,7 +764,7 @@ def normalize_dashboard_sections(raw_sections):
 
 - Unit tests must assert app wrapper parity, terminal-cell behavior, compact title cleanup, compact category sentinel handling, and no behavior drift for existing text helpers.
 - `scripts/check_policy_gates.py` must assert `text_utils.py` has no reverse import into `app.py` and no curses/TUI/runtime/store dependencies.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/text_utils.py scripts/check_policy_gates.py tests/test_cell_utils.py` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/text_utils.py scripts/check_policy_gates.py tests/test_cell_utils.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_cell_utils.py -p no:cacheprovider` must pass.
 
 ### 7. Wrong vs Correct
@@ -763,7 +773,7 @@ def normalize_dashboard_sections(raw_sections):
 
 ```python
 # text_utils.py
-from ga_tui.app import TUI_CONTROL_RE, State
+from shuheng.app import TUI_CONTROL_RE, State
 ```
 
 #### Correct
@@ -778,13 +788,13 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, input-history browse target calculation, text edit transition calculation, mouse-mask classification, and vertical cursor target helpers are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/input_controller.py`, compatibility aliases in `src/ga_tui/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, input-history browsing callers, input text edit callers, policy gates, and input-controller unit tests.
+- Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, input-history browse target calculation, text edit transition calculation, mouse-mask classification, and vertical cursor target helpers are moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/input_controller.py`, compatibility aliases in `src/shuheng/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, input-history browsing callers, input text edit callers, policy gates, and input-controller unit tests.
 - Non-goal: This does not move the app-owned `move_input_cursor_vertical(...)` state mutation wrapper, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
 
 ### 2. Signatures
 
-- Lower-level helper module: `src/ga_tui/input_controller.py`.
+- Lower-level helper module: `src/shuheng/input_controller.py`.
 - Compatibility aliases in `app.py`:
   - `raw_cursor_to_display(text, cursor)`.
   - `display_cursor_to_raw(text, display_cursor)`.
@@ -815,7 +825,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 3. Contracts
 
-- `input_controller.py` must not import `ga_tui.app`, `.app`, `app`, curses, mutable TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, Web Console, dashboard, runtime dispatch, command handlers, key/mouse handlers, or draw functions.
+- `input_controller.py` must not import `shuheng.app`, `.app`, `app`, curses, mutable TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, Web Console, dashboard, runtime dispatch, command handlers, key/mouse handlers, or draw functions.
 - `input_controller.py` may import lower-level terminal-cell helpers from `text_utils.py`.
 - Raw newlines display as the two-character sequence `\n`.
 - Raw cursor positions clamp into the valid source text range.
@@ -877,7 +887,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Unit tests must assert text insertion, backspace-style deletion, delete-style deletion, horizontal cursor movement, edit/no-edit flags, clamping behavior, app alias parity, and `insert_input_text(...)` wrapper state mutation/reset behavior.
 - Unit tests must assert direct mouse mask helper behavior over fake constants and `app.py` wrapper parity over curses constants.
 - `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider` must pass.
 
 ### 7. Wrong vs Correct
@@ -886,7 +896,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ```python
 # input_controller.py
-from ga_tui.app import State, mark_dirty
+from shuheng.app import State, mark_dirty
 ```
 
 #### Correct
@@ -902,8 +912,8 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 ### 1. Scope / Trigger
 
 - Trigger: Goal 7 decomposes deterministic command-completion constants and
-  helper functions out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/commands.py`, compatibility aliases in `app.py`,
+  helper functions out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/commands.py`, compatibility aliases in `app.py`,
   `/agent` subcommand option metadata, `/archived` completion, `/workspace` and
   `/workspaces` completion, `/filter` / `/collapse` / `/expand` category
   command row shaping over explicit category counts, `/approve` / `/reject`
@@ -919,7 +929,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 ### 2. Signatures
 
-- Lower-level helper module: `src/ga_tui/commands.py`.
+- Lower-level helper module: `src/shuheng/commands.py`.
 - Compatibility aliases in `app.py`:
   - `AGENT_SUBCOMMANDS`.
   - `AGENT_SUBCOMMANDS_REQUIRING_AGENT`.
@@ -937,7 +947,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 ### 3. Contracts
 
-- `commands.py` must not import `ga_tui.app`, `.app`, `app`, curses, mutable
+- `commands.py` must not import `shuheng.app`, `.app`, `app`, curses, mutable
   TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers,
   Web Console, dashboard, runtime dispatch, input controller, Secret Vault,
   governance stores, history stores, key/mouse handlers, or draw functions.
@@ -1095,7 +1105,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 - `scripts/check_policy_gates.py` must assert `commands.py` owns the moved
   helpers, `app.py` no longer defines the moved functions locally, and the new
   module has no reverse dependency into app/TUI/render/runtime/storage owners.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/commands.py
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/commands.py
   scripts/check_policy_gates.py tests/test_commands.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and
   `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_commands.py -p
@@ -1107,7 +1117,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 ```python
 # commands.py
-from ga_tui.app import State, pending_approvals
+from shuheng.app import State, pending_approvals
 ```
 
 #### Correct
@@ -1123,7 +1133,7 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 ### 1. Scope / Trigger
 
 - Trigger: `app.py` decomposition needs a shared lower-level home for filesystem path normalization and containment checks used by history, Secret Vault import validation, workspace checks, Web Console session refs, and policy gates.
-- Applies to: `src/ga_tui/path_utils.py`, compatibility aliases in `src/ga_tui/app.py`, normal session-log path checks, Shuheng-owned storage-root assertions, and path-safety unit tests.
+- Applies to: `src/shuheng/path_utils.py`, compatibility aliases in `src/shuheng/app.py`, normal session-log path checks, Shuheng-owned storage-root assertions, and path-safety unit tests.
 - Non-goal: This does not move Shuheng storage-root constants, frontend history storage configuration, legacy bootstrap, history metadata, Secret Vault storage behavior, Web Console payloads, commands, rendering, or input handling.
 
 ### 2. Signatures
@@ -1137,7 +1147,7 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 - `normalized_path(...)` expands `~` and returns an absolute path.
 - `path_is_within(...)` resolves real paths and returns `False` instead of raising on invalid input.
 - Normal session logs must be under `MODEL_RESPONSES_DIR`, outside `SESSION_TRASH_DIR`, and named `model_responses*.txt`.
-- `path_utils.py` must remain a pure leaf module and must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, history store, Secret Vault, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `path_utils.py` must remain a pure leaf module and must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, history store, Secret Vault, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 - Storage-root ownership remains app-configured and test-retargetable; extracted helpers accept roots as parameters rather than reading app globals.
 
 ### 4. Validation & Error Matrix
@@ -1151,7 +1161,7 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 
 - Good: Future lower-level history or Secret Vault extraction imports `path_utils.py` for path containment without importing `app.py`.
 - Base: `app.py` still owns actual Shuheng root constants and passes them into the path utility predicate.
-- Bad: A lower-level module imports `ga_tui.app` solely to call `path_is_within(...)`.
+- Bad: A lower-level module imports `shuheng.app` solely to call `path_is_within(...)`.
 
 ### 6. Tests Required
 
@@ -1164,14 +1174,14 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 
 ```python
 # history_store.py
-from ga_tui.app import path_is_within, MODEL_RESPONSES_DIR
+from shuheng.app import path_is_within, MODEL_RESPONSES_DIR
 ```
 
 #### Correct
 
 ```python
 # history_store.py or another lower-level store
-from ga_tui import path_utils
+from shuheng import path_utils
 
 path_utils.is_normal_session_log_path(
     path,
@@ -1185,12 +1195,12 @@ path_utils.is_normal_session_log_path(
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng reads or writes task ledgers, approvals, artifacts, traces, checkpoints, recovery rows, scheduler rows, gateway rows, or other JSONL governance records.
-- Applies to: `src/ga_tui/ledger_store.py`, compatibility wrappers in `src/ga_tui/app.py`, scheduler runtime callbacks, dashboard home-page registry signatures, task/approval/artifact panels, and policy-gate checks.
+- Applies to: `src/shuheng/ledger_store.py`, compatibility wrappers in `src/shuheng/app.py`, scheduler runtime callbacks, dashboard home-page registry signatures, task/approval/artifact panels, and policy-gate checks.
 - Non-goal: This does not move domain-specific task, approval, artifact, dashboard, or recovery projection logic out of `app.py` in one large rewrite.
 
 ### 2. Signatures
 
-- Shared module: `src/ga_tui/ledger_store.py`.
+- Shared module: `src/shuheng/ledger_store.py`.
 - Public helpers:
   - `append_jsonl(path, payload)`
   - `read_jsonl(path, limit=0, on_parse_error=None)`
@@ -1212,7 +1222,7 @@ path_utils.is_normal_session_log_path(
   protected by process-local and cross-process locks. Do not split lock acquire
   into independent `load -> mutate -> write_text_atomic` operations.
 - `read_jsonl(...)` skips corrupt and non-dict lines. App-level callers may pass a parse-error callback to preserve diagnostics without forcing `ledger_store` to import `app.py`.
-- `ledger_store.py` must not import curses, `ga_tui.app`, `State`, or `SubAgentRuntime`.
+- `ledger_store.py` must not import curses, `shuheng.app`, `State`, or `SubAgentRuntime`.
 
 ### 4. Validation & Error Matrix
 
@@ -1347,7 +1357,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 ### 3. Contracts
 
-- `governance.py` may interpret already-loaded task ledger rows and artifact text, but must not import `ga_tui.app`, curses, mutable TUI `State`, render types, Web Console, dashboard, command handlers, or draw functions.
+- `governance.py` may interpret already-loaded task ledger rows and artifact text, but must not import `shuheng.app`, curses, mutable TUI `State`, render types, Web Console, dashboard, command handlers, or draw functions.
 - `subagent_result_artifact_ref(...)` returns the first non-empty artifact ref containing `/subagent-results/` from a list; non-list inputs return `""`.
 - `subagent_result_body_from_text(...)` strips the generated leading Markdown heading and optional `Task:` prelude from an already-loaded artifact body, returning the remaining body or the original stripped text.
 - `subagent_name_from_task_row(...)` strips the existing `子 agent 执行:` / `子 agent 执行：` title prefixes, falls back to title, then uses an injected `agent_name_lookup(agent_id)` before returning the assigned agent id.
@@ -1370,7 +1380,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 - Good: `backfill_durable_subagent_result_messages_for_path(...)` stays in `app.py` but delegates row predicates and artifact body cleanup to `governance.py`.
 - Base: `app.py` wrappers still read the artifact file and subagent meta files because those paths are mutable app-owned runtime roots.
-- Bad: `governance.py` imports `ga_tui.app` to resolve artifact URIs or read `TEMP_SUBAGENTS_DIR`.
+- Bad: `governance.py` imports `shuheng.app` to resolve artifact URIs or read `TEMP_SUBAGENTS_DIR`.
 - Bad: Governance helpers inline artifact bodies into progress rows or change task ledger schemas.
 
 ### 6. Tests Required
@@ -1386,7 +1396,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 ```python
 # governance.py
-from ga_tui.app import TEMP_SUBAGENTS_DIR, artifact_path_from_uri
+from shuheng.app import TEMP_SUBAGENTS_DIR, artifact_path_from_uri
 ```
 
 #### Correct
@@ -1417,7 +1427,7 @@ governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
 
 ### 3. Contracts
 
-- `governance.py` may read already-selected JSONL store paths and checkpoint snapshot files, but must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, or draw functions.
+- `governance.py` may read already-selected JSONL store paths and checkpoint snapshot files, but must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, or draw functions.
 - Checkpoint/recovery history helpers filter rows by exact `task_id` and preserve row order from the source ledger.
 - `checkpoint_index_by_id(...)` returns the latest matching row by reverse ledger scan, or `{}` when no row exists.
 - `latest_checkpoint_for_task(...)` uses existing row timestamp ordering and returns `{}` when a task has no checkpoint.
@@ -1454,7 +1464,7 @@ governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
 
 ```python
 # governance.py
-from ga_tui.app import State, AGENT_CHECKPOINT_INDEX_PATH
+from shuheng.app import State, AGENT_CHECKPOINT_INDEX_PATH
 ```
 
 #### Correct
@@ -1483,7 +1493,7 @@ def latest_checkpoint_for_task(task_id):
 ### 3. Contracts
 
 - `governance.py` may interpret task ledger row values, status strings, approval status, and an already-resolved owner display name.
-- `governance.py` must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or subagent meta file IO.
+- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or subagent meta file IO.
 - `task_status_marker(...)` preserves the existing marker mapping: completed -> `✓`, failed/cancelled/rejected/aborted -> `✕`, pending approval/input -> `?`, running/working/accepted/pending -> `●`, and default -> `○`.
 - `row_looks_like_subagent_task(...)` preserves the existing predicate: explicit `subagent_task` / `subagent` kind or owner id starting with `agent-` / `tmp-`.
 - `task_display_title(...)` preserves existing title precedence: `title`, `display_title`, `task_title`, subagent owner-name fallback, objective/summary/error/task id, then `任务`.
@@ -1516,7 +1526,7 @@ def latest_checkpoint_for_task(task_id):
 
 ```python
 # governance.py
-from ga_tui.app import State, load_subagent_meta
+from shuheng.app import State, load_subagent_meta
 ```
 
 #### Correct
@@ -1543,7 +1553,7 @@ def task_display_title(row, state=None):
 ### 3. Contracts
 
 - `governance.py` may interpret already-loaded task ledger row values, row kind, status strings, and timestamps.
-- `governance.py` must not import `ga_tui.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or ledger write helpers for plan selection.
+- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or ledger write helpers for plan selection.
 - Only rows with `kind == "plan"` are plan candidates.
 - A non-empty preferred plan id wins when it exists among plan candidates, even before active filtering.
 - Active plans are plan rows whose status is not terminal according to the existing terminal task status predicate.
@@ -1579,7 +1589,7 @@ def task_display_title(row, state=None):
 
 ```python
 # governance.py
-from ga_tui.app import State, latest_task_records
+from shuheng.app import State, latest_task_records
 ```
 
 #### Correct
@@ -1614,7 +1624,7 @@ def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False)
 
 ### 3. Contracts
 
-- Secret value helpers may depend on `Message`, text helpers, and existing history-title fallback policy, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime providers, Web Console, dashboard, command handlers, or rendering owners.
+- Secret value helpers may depend on `Message`, text helpers, and existing history-title fallback policy, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime providers, Web Console, dashboard, command handlers, or rendering owners.
 - `secret_session_title_for_messages(...)` strips a `Secret: ` prefix, rejects placeholder titles such as `main` / `Secret Vault` / running or idle labels, and falls back to a message-derived title or `Secret 会话`.
 - `secret_session_state_payload(...)` must normalize the persisted payload title through `secret_session_title_for_messages(...)`.
 - `parse_secret_import_args(...)` maps delete/archive aliases while preserving unknown text as the target.
@@ -1654,7 +1664,7 @@ def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False)
 
 - Good: `secret_vault.py` owns Secret payload title normalization, import/proxy value parsing, resolver/link predicates, native-match lookup, and import raw-log message shaping without touching storage or UI state.
 - Base: `app.py` calls direct aliases for root-free helpers and keeps wrappers for native-entry loading and import-message shaping because it injects app-owned `State`, history parser, and display policy while still owning command handling and side effects.
-- Bad: `secret_vault.py` imports `ga_tui.app` to read `SECRET_DEFAULT_TOR_SOCKS` or call command/runtime helpers.
+- Bad: `secret_vault.py` imports `shuheng.app` to read `SECRET_DEFAULT_TOR_SOCKS` or call command/runtime helpers.
 - Bad: A pure parsing helper reads environment variables, checks network sockets, mutates proxy env vars, or queues policy approvals.
 
 ### 6. Tests Required
@@ -1669,7 +1679,7 @@ def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False)
 
 ```python
 # secret_vault.py
-from ga_tui.app import SECRET_DEFAULT_TOR_SOCKS, State
+from shuheng.app import SECRET_DEFAULT_TOR_SOCKS, State
 ```
 
 #### Correct
@@ -1793,8 +1803,8 @@ state.last_error carries the same short reason
   - `GET /gui/snapshot` returns JSON with `schema_version:"shuheng.web_console.snapshot.v1"`.
   - `POST /gui/action` accepts JSON with `schema_version:"shuheng.web_console.action_request.v1"` and returns `schema_version:"shuheng.web_console.action_response.v1"`.
 - External GUI loader:
-  - `src/ga_tui/web_console_static.py`.
-  - `web_console_html()` in `app.py` delegates to `ga_tui.web_console_static.web_console_html`.
+  - `src/shuheng/web_console_static.py`.
+  - `web_console_html()` in `app.py` delegates to `shuheng.web_console_static.web_console_html`.
   - `SHUHENG_WEB_GUI_INDEX` points directly at a standalone `index.html`.
   - `SHUHENG_WEB_GUI_DIR` points at a standalone GUI project directory and resolves `public/index.html` or `index.html`.
   - Default local project path: `<home-or-workspace>/Projects/Shuheng-Web-GUI/public/index.html`, with the old sibling `<repo-parent>/Shuheng-Web-GUI/public/index.html` kept only as a compatibility fallback.
@@ -1828,7 +1838,7 @@ state.last_error carries the same short reason
 
 ### 3. Contracts
 
-- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/ga_tui/app.py`, normally in `/home/vimalinx/Projects/Shuheng-Web-GUI`.
+- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/shuheng/app.py`, normally in `/home/vimalinx/Projects/Shuheng-Web-GUI`.
 - The standalone GUI page stays self-contained HTML/CSS/JS and must not require a frontend build step for the local gateway path.
 - `app.py` must not reintroduce a large embedded Web Console HTML/JS/CSS string. Backend code owns snapshot/action/state functions; the standalone GUI owns browser source.
 - If no standalone GUI file is found, `/gui` returns a clear fallback page explaining `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, and checked paths; it must not silently write files or mutate gateway state.
@@ -1885,7 +1895,7 @@ state.last_error carries the same short reason
 - Good: Clicking a subagent task button starts `start_subagent_task(...)` and later task completion/artifact rows appear because the Web-console runtime pump processed the normal queue.
 - Base: A user can still open `/gateway`, `/a2a`, or `/mcp/resources` for raw protocol inspection.
 - Bad: The GUI fetch path calls `ensure_gateway_registry(...)` and rewrites `gateway.json` just because a browser opened the console.
-- Bad: Re-embedding the full Web Console HTML/JS/CSS in `src/ga_tui/app.py`, because that makes the backend module the browser source of truth again.
+- Bad: Re-embedding the full Web Console HTML/JS/CSS in `src/shuheng/app.py`, because that makes the backend module the browser source of truth again.
 - Bad: The default GUI becomes a raw ledger viewer that prints `artifact://...`, `appr_...`, `task_...`, or schedule run ids as body text.
 - Bad: Browser buttons directly approve, dispatch, delete, switch models, or write memory without reusing existing policy gates and ledgers.
 
@@ -1938,7 +1948,7 @@ def web_console_html() -> str:
 
 ```python
 def web_console_html() -> str:
-    from ga_tui.web_console_static import web_console_html as load_web_console_html
+    from shuheng.web_console_static import web_console_html as load_web_console_html
 
     return load_web_console_html()
 ```
@@ -1947,13 +1957,13 @@ def web_console_html() -> str:
 
 ### 1. Scope / Trigger
 
-- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, metric row shaping, action payload shaping, or sanitized action-ref resolution are moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/web_console.py`, compatibility aliases in `src/ga_tui/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, action payload/ref helpers, policy gates, and Web Console helper unit tests.
+- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, metric row shaping, action payload shaping, or sanitized action-ref resolution are moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/web_console.py`, compatibility aliases in `src/shuheng/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, action payload/ref helpers, policy gates, and Web Console helper unit tests.
 - Non-goal: This does not move `GatewayRequestHandler`, `/gui/action` mutation routing, snapshot construction, runtime pumping, state construction, scheduler/model/subagent mutation, standalone GUI loading, or storage-root ownership.
 
 ### 2. Signatures
 
-- Lower-level helper module: `src/ga_tui/web_console.py`.
+- Lower-level helper module: `src/shuheng/web_console.py`.
 - Compatibility aliases in `app.py`:
   - `WEB_CONSOLE_ACTION_REQUEST_SCHEMA`.
   - `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA`.
@@ -1971,7 +1981,7 @@ def web_console_html() -> str:
 
 ### 3. Contracts
 
-- `web_console.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, `RenderLine`, `GatewayRequestHandler`, or runtime mutation helpers.
+- `web_console.py` must not import `shuheng.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, `RenderLine`, `GatewayRequestHandler`, or runtime mutation helpers.
 - `app.py` remains the compatibility facade and exposes the helper names as direct aliases or behavior-identical wrappers.
 - `WEB_CONSOLE_ACTION_REQUEST_SCHEMA` remains `shuheng.web_console.action_request.v1`.
 - `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA` remains `shuheng.web_console.action_response.v1`.
@@ -1989,7 +1999,7 @@ def web_console_html() -> str:
 
 ### 4. Validation & Error Matrix
 
-- `web_console.py` imports `ga_tui.app`, curses, TUI state, gateway handler, or runtime mutation helpers -> policy gate fails.
+- `web_console.py` imports `shuheng.app`, curses, TUI state, gateway handler, or runtime mutation helpers -> policy gate fails.
 - App alias differs from module helper for the same input -> unit test or policy gate fails.
 - Unknown `ui_ref` kind or blank raw id -> helper returns `""`.
 - Sanitized visible text still contains `artifact://`, `appr_`, `approval=appr_`, `task_`, `schedrun_`, `sched_`, `agent-N`, or `tmp-agent-*` -> unit test or policy gate fails.
@@ -2000,7 +2010,7 @@ def web_console_html() -> str:
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `/gui/snapshot` rows keep using `app.web_console_clean_visible(...)`, while the implementation is owned by `ga_tui.web_console`.
+- Good: `/gui/snapshot` rows keep using `app.web_console_clean_visible(...)`, while the implementation is owned by `shuheng.web_console`.
 - Good: `/gui/action` keeps schema validation in `app.py` but uses the schema constants from the helper module.
 - Base: `web_console_ref_map(...)` stays in `app.py` because it reads ledgers, model config, current history rows, and loaded subagents.
 - Base: `web_console_action_response(...)` stays in `app.py` because it may start the Web-console runtime pump and refresh snapshots.
@@ -2012,7 +2022,7 @@ def web_console_html() -> str:
 
 - Unit tests must assert helper behavior for stable opaque refs, invalid kinds, timestamp fallback, sanitization, status labels, metric shape, action payload/message shaping, model ref resolution, schedule target-agent ref mapping, and `app.py` wrapper parity.
 - `scripts/check_policy_gates.py` must assert `web_console.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway handler, or mutation-dispatch dependencies.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/web_console.py scripts/check_policy_gates.py tests/test_web_console.py` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/web_console.py scripts/check_policy_gates.py tests/test_web_console.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_web_console.py -p no:cacheprovider` must pass.
 
 ### 7. Wrong vs Correct
@@ -2021,7 +2031,7 @@ def web_console_html() -> str:
 
 ```python
 # web_console.py
-from ga_tui.app import State, decide_approval, process_ui_queue
+from shuheng.app import State, decide_approval, process_ui_queue
 
 def web_console_snapshot() -> dict:
     ...
@@ -2070,7 +2080,7 @@ def web_console_ref(kind: str, raw_id: object) -> str:
 - `subagent_store.normalize_subagent_skill_refs(...)` owns only pure skill-ref value normalization and de-duplication. Skill root discovery, file resolution, skill-pack assembly, UI formatting, metadata writes, Secret storage, and prompt installation remain outside `subagent_store.py`.
 - Only the target subagent's context pack includes its resolved `skill_pack` full body text. Other subagents and the main Orchestrator must show no body text from that skill unless they independently own the same ref.
 - `format_context_pack_for_prompt(...)` must label the section as `Dedicated skills for this agent only` so runtime agents know the skill is scoped, not global.
-- `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, gateway records, and `ga_tui_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
+- `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, gateway records, and `shuheng_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
 - `agent_match` may score a subagent by role tools plus dedicated skill refs/display names so a task requiring a target-only skill can reuse the correct existing agent.
 - Updating dedicated skills should reinstall the subagent system prompt when the subagent runtime is already loaded.
 - Skill support must not weaken existing role write policy, approval gates, Secret Vault isolation, or single-writer enforcement.
@@ -2305,18 +2315,18 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 ### 1. Scope / Trigger
 
 - Trigger: A fresh Shuheng install should expose at least one useful workflow without requiring the user to hand-create a plugin package.
-- Applies to: package-data plugin roots, `src/ga_tui/builtin_plugins/**`, `plugins.py`, `app.user_plugin_roots()`, `/plugins`, `/workflows`, `/workflow info <ref>`, `/workflow dry-run <ref>`, `/workflow run <ref>`, release hygiene, wheel smoke, `tests/test_plugins.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Applies to: package-data plugin roots, `src/shuheng/builtin_plugins/**`, `plugins.py`, `app.user_plugin_roots()`, `/plugins`, `/workflows`, `/workflow info <ref>`, `/workflow dry-run <ref>`, `/workflow run <ref>`, release hygiene, wheel smoke, `tests/test_plugins.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
 - Non-goal: This does not add executable plugin code, remote marketplace install, starter-file copying into user plugin roots, workflow daemon ownership, hidden model/tool/shell calls, subagent dispatch, or approval/task/artifact side effects from the built-in example.
 
 ### 2. Signatures
 
 - Built-in package root helper: `plugins.builtin_plugin_root()`.
 - App discovery wrapper: `app.user_plugin_roots()` returns the user plugin root plus the built-in package root.
-- Built-in plugin root: `src/ga_tui/builtin_plugins`.
+- Built-in plugin root: `src/shuheng/builtin_plugins`.
 - Built-in plugin id: `shuheng-examples`.
 - Built-in workflow ref: `plugin://shuheng-examples/workflows/daily-briefing`.
 - Distribution manifest entries:
-  - `MANIFEST.in` includes `recursive-include src/ga_tui/builtin_plugins *.json`.
+  - `MANIFEST.in` includes `recursive-include src/shuheng/builtin_plugins *.json`.
   - `pyproject.toml` package data includes the built-in plugin manifest and workflow JSON.
 
 ### 3. Contracts
@@ -2341,7 +2351,7 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 ### 5. Good/Base/Bad Cases
 
 - Good: A clean install can run `/workflow dry-run shuheng-examples/daily-briefing` and see a safe plan before creating any local plugin.
-- Good: A user later runs `/workflow save-last my-pack/my-flow`; the generated files are written under the user plugin root, not into `src/ga_tui/builtin_plugins`.
+- Good: A user later runs `/workflow save-last my-pack/my-flow`; the generated files are written under the user plugin root, not into `src/shuheng/builtin_plugins`.
 - Base: The built-in root is appended by the app-level discovery wrapper. Low-level `plugins.plugin_roots()` remains compatible unless `include_builtin=True` is requested.
 - Bad: Writing starter plugin files into `~/.shuheng/plugins/shuheng-examples` on first launch.
 - Bad: Hard-coding `daily-briefing.json` lookup in app command handlers instead of resolving the workflow through the plugin manifest.
@@ -2724,7 +2734,7 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 - Good: `/workflow do summarize sources -- ready=true` generates a stable `shuheng-auto-workflows/<slug>-<digest>` workflow, saves it as a user plugin, and starts a governed workflow run.
 - Good: `/workflow auto generated-pack/source-summary ...` still works for users who want explicit package ids.
 - Base: A non-ASCII goal may fall back to `workflow-<digest>` for the workflow id while preserving stable ref generation.
-- Bad: `/workflow do ...` writes to `src/ga_tui/builtin_plugins`.
+- Bad: `/workflow do ...` writes to `src/shuheng/builtin_plugins`.
 - Bad: `/workflow do ...` executes model output directly from `State.workflow_draft_payload`.
 - Bad: `/workflow do ...` appends workflow rows without first saving and reloading a manifest-backed workflow.
 
@@ -4154,8 +4164,8 @@ failed task -> continue_workflow_run_v0(...) -> prepare_workflow_agent_task_retr
 
 ### 2. Signatures
 
-- Frame source: `RUN_FRAMES` and `running_indicator(frame)`, implemented in `src/ga_tui/rendering.py` and re-exported from `src/ga_tui/app.py`.
-- Curses-free helper module: `src/ga_tui/rendering.py` owns `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)`.
+- Frame source: `RUN_FRAMES` and `running_indicator(frame)`, implemented in `src/shuheng/rendering.py` and re-exported from `src/shuheng/app.py`.
+- Curses-free helper module: `src/shuheng/rendering.py` owns `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)`.
 - Process text helper ownership: `rendering.strip_meta_blocks(text)`, `rendering.process_preview(text)`, `rendering.process_summary_text(text)`, and `rendering.process_title_text_from_parts(summary, has_search_noise, preview)`, re-exported by `app.py` for compatibility where applicable.
 - Process turn-marker splitter ownership: `rendering.next_nonblank_line(lines, start)`, `rendering.line_numbered_file_line(line)`, `rendering.stray_line_numbered_fence_close(line, previous_nonblank, next_nonblank)`, and `rendering.split_top_level_turn_markers(text)`, re-exported by `app.py` for compatibility.
 - Markdown fence balancing ownership: `rendering.close_unbalanced_markdown_fence(text)`, re-exported by `app.py` for compatibility.
@@ -4187,7 +4197,7 @@ failed task -> continue_workflow_run_v0(...) -> prepare_workflow_agent_task_retr
 - `message_render_cache_key(...)` accepts the existing `run_frame` argument for call-site compatibility, but the returned key must ignore it so animation ticks do not invalidate cached message blocks.
 - `scoped_subagent_meta_keys(...)` is pure over explicit scope strings and expanded metadata ids. It returns all expanded keys when no process scope is active, otherwise only keys under `"<scope>:submeta:"` with that prefix stripped.
 - `message_cache_signature(...)` is pure over explicit message-like objects and returns tuples of `(id(message), role, content_length, done)`. It must not inspect `State`, mutate caches, read message cache storage, allocate `RenderLine`, call curses, or include `run_frame`; app-owned `message_lines_cached(...)` remains responsible for combining this signature with `State.message_version` and mutable UI cache fields.
-- `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `ga_tui.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
+- `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
 - Process preview/summary helpers in `rendering.py` are deterministic text transforms. They may reuse process-safe history-title regex and description helpers, but must not parse JSON-ish tool payloads, inspect interaction state, read history stores, mutate message caches, allocate `RenderLine`, or call curses.
 - `process_preview(...)` prefers the last explicit `<summary>` title, otherwise strips fenced detail blocks, meta blocks, and simple tool markers before choosing the first compact visible line, falling back to `执行中`.
 - `process_summary_text(...)` returns the last compact summary, and when that summary is a legacy process-only label such as `OMP 思考`, it falls back to the latest `<thinking>` / `<think>` body excerpt.
@@ -4384,9 +4394,9 @@ last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
 ### 2. Signatures
 
 - Permission profiles: `standard`, `read_only`, `full`.
-- OMP profile env override: `GA_TUI_OMP_PERMISSION_PROFILE`.
-- Generic fallback env override: `GA_TUI_DEFAULT_PERMISSION_PROFILE`.
-- OMP tool approval env override: `GA_TUI_OMP_APPROVAL_MODE=always-ask|write|yolo`.
+- OMP profile env override: `SHUHENG_OMP_PERMISSION_PROFILE`.
+- Generic fallback env override: `SHUHENG_DEFAULT_PERMISSION_PROFILE`.
+- OMP tool approval env override: `SHUHENG_OMP_APPROVAL_MODE=always-ask|write|yolo`.
 - Default OMP main-runtime profile: `full`.
 - Default OMP main-runtime role: `main_orchestrator`.
 - Default subagent profile: `standard`.
@@ -4414,7 +4424,7 @@ last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
 
 - No env override + main OMP context -> `role:"main_orchestrator"`, `permission_profile:"full"`, `write_policy:"single_writer"`, full tool list, empty `tools_forbidden`, empty `approval_required_for`, and `memory_write:"candidate_only"`.
 - No env override + main OMP runtime task request -> `role:"main_orchestrator"`, prompt contains `role: main_orchestrator` plus `permission_profile: full`, and the request carries the same full permission set.
-- `GA_TUI_OMP_PERMISSION_PROFILE=read_only` + main OMP context -> `permission_profile:"read_only"`, `write_policy:"none"`, no bash in `tools_allowed`.
+- `SHUHENG_OMP_PERMISSION_PROFILE=read_only` + main OMP context -> `permission_profile:"read_only"`, `write_policy:"none"`, no bash in `tools_allowed`.
 - Subagent context without an explicit profile -> `permission_profile:"standard"` and role-bounded tools.
 - OMP isolated config generation -> `tools.approvalMode:"yolo"` and `PI_CODING_AGENT_DIR` under the Shuheng-owned harness.
 - OMP RPC approval select for safe `bash` under full profile -> respond `Approve`.
@@ -4428,8 +4438,8 @@ last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
 - Good: Main OMP runtime receives `role:"main_orchestrator"` and `permission_profile:"full"`, shows `write_policy:"single_writer"`, has an empty runtime deny/approval list, can use normal write/search/bash/browser capabilities, and still reports `memory_write:"candidate_only"`.
 - Good: A role-bounded researcher subagent receives `permission_profile:"standard"` with `tools_allowed:["web","read"]` and `write_policy:"none"`.
 - Good: An OMP-backed Shuheng sidebar-history bug session is categorized as `Shuheng` by the local fallback without calling `raw_ask`.
-- Base: Operator sets `GA_TUI_OMP_PERMISSION_PROFILE=read_only`; OMP main runtime starts in compatibility mode and does not advertise bash/write tools.
-- Base: Operator sets `GA_TUI_OMP_APPROVAL_MODE=always-ask`; command/config generation preserves the override.
+- Base: Operator sets `SHUHENG_OMP_PERMISSION_PROFILE=read_only`; OMP main runtime starts in compatibility mode and does not advertise bash/write tools.
+- Base: Operator sets `SHUHENG_OMP_APPROVAL_MODE=always-ask`; command/config generation preserves the override.
 - Bad: Main OMP runtime inherits `specialist` role permissions and tells users it only has `read, reason`.
 - Bad: OMP is launched without the default `--approval-mode yolo`, causing runtime tools to stop for OMP approval prompts in the normal main-runtime path.
 - Bad: `permission_profile:"full"` turns into direct long-term memory writes outside Shuheng-owned memory paths.
@@ -4530,25 +4540,25 @@ restore -> OMP switch_session(sessionPath=ohmypi_session_file) -> prompt
 token panel -> OMP get_state.contextUsage
 ```
 
-## Scenario: ga-control v2 Delegation
+## Scenario: shuheng-control v2 Delegation
 
 ### 1. Scope / Trigger
 
-- Trigger: Main-agent TUI controls, subagent creation, task planning, and subagent delegation must use the `ga-control.v2` / `agenttask.v2` contract.
+- Trigger: Main-agent TUI controls, subagent creation, task planning, and subagent delegation must use the `shuheng-control.v2` / `agenttask.v2` contract.
 - Applies to: hidden control blocks emitted by the main agent, JSON code-fence controls in recovery paths, auto-continuation prompts, and policy-gate regression tests.
 - Historical markup cleanup belongs in quarantine compatibility code only; it must not define executable external protocol behavior.
 
 ### 2. Signatures
 
-- Hidden block: `<ga-control>{...}</ga-control>`
-- Fenced block: ````ga-control`
-- Implementation module: `src/ga_tui/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, AgentTask prompt envelope parsing, AgentTask explicit and inferred policy-action extraction, control-result line formatting, control-result continuation helper parsing/formatting, and v2-to-internal-action coercion.
-- Execution module: `src/ga_tui/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
+- Hidden block: `<shuheng-control>{...}</shuheng-control>`
+- Fenced block: ````shuheng-control`
+- Implementation module: `src/shuheng/control_protocol.py` owns the current protocol regexes, schema constants, action sets, JSON repair/parsing, extraction, stripping, lifecycle/reuse field parsing, subagent lifecycle/reuse intent helpers, AgentTask prompt envelope parsing, AgentTask explicit and inferred policy-action extraction, control-result line formatting, control-result continuation helper parsing/formatting, and v2-to-internal-action coercion.
+- Execution module: `src/shuheng/app.py` may re-export protocol helpers for compatibility, but state-mutating execution functions stay in `app.py` unless they are extracted behind an explicit state boundary.
 - Batch envelope:
 
 ```json
 {
-  "schema_version": "ga-control.v2",
+  "schema_version": "shuheng-control.v2",
   "actions": []
 }
 ```
@@ -4564,7 +4574,7 @@ token panel -> OMP get_state.contextUsage
 
 ### 3. Contracts
 
-- `ga-control.v2.actions[]` accepts strong typed dotted action names only.
+- `shuheng-control.v2.actions[]` accepts strong typed dotted action names only.
 - Supported session actions: `session.pin`, `session.unpin`, `session.category`, `session.filter`, `session.clear_filter`, `session.collapse_category`, `session.expand_category`, `session.archive`, `session.unarchive`, `session.delete`, `session.rename`, `session.show_archived`, `session.hide_archived`.
 - Supported task actions: `task.plan.create`, `task.update`, `task.done`, `task.start`, `task.fail`, `task.cancel`.
 - Supported agent actions: `agent.create`, `agent.profile.update`, `agent.role.update`, `agent.model.update`, `agent.stop`, `agent.delete`.
@@ -4572,7 +4582,7 @@ token panel -> OMP get_state.contextUsage
 - Supported memory action: `memory.candidate`.
 - `delegate.create` must carry `routing`, `work_order`, `capability_contract`, `context_contract`, and `output_contract`.
 - `delegate.create.work_order.objective` is the policy-gate source of truth. Capability fields such as `tools_forbidden:["deploy","email.send"]` must not trigger deployment or external-send approval by themselves.
-- Generated `[GA TUI AgentTask Envelope v2]` prompt blocks must be parsed by `control_protocol.py`. `agenttask_payload_from_prompt()` extracts only a valid JSON object envelope; `policy_relevant_subagent_prompt_text()` must prefer `work_order.objective`, then top-level `objective`, then the original prompt. `explicit_policy_action_for_subagent_task()` owns only explicit structured fields in this order: top-level `policy_action`, top-level `approval_required_for`, nested `approval.policy_action`, nested `approval.approval_required_for`, and nested `capability_contract.policy_action`; string values are stripped/lowercased with hyphens normalized to underscores, and list values use the first non-empty item. `inferred_policy_action_for_subagent_task()` owns deterministic text/role/write-policy inference over explicit facts supplied by the app facade; `app.py` may keep `infer_policy_action_for_subagent_task(sub, prompt)` only as a wrapper that derives `normalized_subagent_role(sub.role)` and `role_write_policy(role)` before delegating.
+- Generated `[Shuheng AgentTask Envelope v2]` prompt blocks must be parsed by `control_protocol.py`. `agenttask_payload_from_prompt()` extracts only a valid JSON object envelope; `policy_relevant_subagent_prompt_text()` must prefer `work_order.objective`, then top-level `objective`, then the original prompt. `explicit_policy_action_for_subagent_task()` owns only explicit structured fields in this order: top-level `policy_action`, top-level `approval_required_for`, nested `approval.policy_action`, nested `approval.approval_required_for`, and nested `capability_contract.policy_action`; string values are stripped/lowercased with hyphens normalized to underscores, and list values use the first non-empty item. `inferred_policy_action_for_subagent_task()` owns deterministic text/role/write-policy inference over explicit facts supplied by the app facade; `app.py` may keep `infer_policy_action_for_subagent_task(sub, prompt)` only as a wrapper that derives `normalized_subagent_role(sub.role)` and `role_write_policy(role)` before delegating.
 - `agent.create` is ephemeral by default. Long-running, scheduled, recurring, or dedicated responsibilities must be expressed with explicit structured fields such as `lifecycle:"persistent"` or `persistent:true`; the runtime must not infer lifecycle from `name`, `profile`, visible prose, or other natural-language descriptions.
 - `agent.create` may carry `model`, `default_model`, or `model_name`; after create-or-reuse the runtime applies that value as the target subagent's default model through the same validation path as `agent.model.update`.
 - `agent.model.update` / `/agent model <agent> <model|inherit>` can target persistent or temporary subagents. Persistent subagents save the default model in persistent metadata; temporary subagents save it in their session-scoped temp metadata.
@@ -4580,18 +4590,18 @@ token panel -> OMP get_state.contextUsage
 - `main_orchestrator` is reserved for the main Shuheng runtime only. Any subagent creation, subagent role update, subagent command parsing, or loaded subagent metadata that requests `main_orchestrator` must normalize the subagent role to `specialist` and surface a bounded user-visible note instead of creating a main-orchestrator subagent.
 - Reuse intent must be explicit. `reuse_policy:"force_new"` / `force_new:true` forces a new agent; visible prose such as "do not reuse" is not a runtime signal unless the model also emits the structured field.
 - Plan binding must be explicit. Controls that belong to a plan step must carry `plan_step_id`, `parent_task_id`, or an equivalent explicit step reference; the runtime must not bind steps by matching words like "self-introduction", "chat", or "summary".
-- Executable `<ga-control>` blocks are only for real operations. Capability explanations, tutorials, and examples must not include literal executable tags; use escaped text such as `&lt;ga-control&gt;...&lt;/ga-control&gt;` or show only the JSON payload.
-- Literal `<ga-control>` snippets inside ordinary Markdown/code/tool-output fences are display text, not executable control blocks, and must not emit parse-error system messages. Only top-level hidden tags, explicit `ga-control` fences, and opt-in JSON recovery fences are executable.
+- Executable `<shuheng-control>` blocks are only for real operations. Capability explanations, tutorials, and examples must not include literal executable tags; use escaped text such as `&lt;shuheng-control&gt;...&lt;/shuheng-control&gt;` or show only the JSON payload.
+- Literal `<shuheng-control>` snippets inside ordinary Markdown/code/tool-output fences are display text, not executable control blocks, and must not emit parse-error system messages. Only top-level hidden tags, explicit `shuheng-control` fences, and opt-in JSON recovery fences are executable.
 - Automatic current-session title maintenance is an allowed `session.rename` control exception and the only automatic persisted-title path: the main runtime may emit it at the end of a normal reply when the title is stale or misleading, and must stay silent when the title is already accurate.
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
-- Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
-- `install_tui_control_hint()` must replace any previous historical TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
-- Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `control_result_continuation_*()` helpers, `control_explicitly_requests_continuation()`, `format_control_result_continuation_prompt()`, `format_agent_control_result()`, `explicit_policy_action_for_subagent_task()`, `inferred_policy_action_for_subagent_task()`, `policy_relevant_subagent_prompt_text()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
-- `src/ga_tui/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
+- Inline-code labels such as `` `<shuheng-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
+- `install_tui_control_hint()` must replace any previous historical TUI hint block before installing the current `shuheng-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
+- Protocol parser helpers must have one source of truth in `src/shuheng/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `control_result_continuation_*()` helpers, `control_explicitly_requests_continuation()`, `format_control_result_continuation_prompt()`, `format_agent_control_result()`, `explicit_policy_action_for_subagent_task()`, `inferred_policy_action_for_subagent_task()`, `policy_relevant_subagent_prompt_text()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
+- `src/shuheng/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
 
 ### 4. Validation & Error Matrix
 
-- Missing `schema_version:"ga-control.v2"` on a batch envelope -> no controls are extracted.
+- Missing `schema_version:"shuheng-control.v2"` on a batch envelope -> no controls are extracted.
 - Missing `schema_version:"agenttask.v2"` on a standalone action -> no controls are extracted.
 - Unknown action -> ignored during extraction.
 - Historical hidden markup -> stripped by quarantine compatibility cleanup only, not executed.
@@ -4607,9 +4617,9 @@ token panel -> OMP get_state.contextUsage
 - `agent.create` with `default_model:"beta"` -> creates or reuses the subagent and applies `beta` as that agent's default model if the model config exists.
 - `agent.model.update` on a temporary subagent -> updates session-scoped temp metadata and applies the model to its live agent when idle.
 - `agent.model.update` with `inherit` -> clears the subagent override and applies the current global default model when available.
-- `ga-control` JSON that only misses trailing `}` / `]` closers -> repair the missing tail and execute if it parses into known actions.
-- Visible prose containing inline-code `` `<ga-control>` `` followed by a real control block -> parse and execute only the real control block, keep the inline label visible, and do not report parse_error.
-- Unrepairable `ga-control` JSON -> add an `Agent 控制结果` parse-error message instead of silently swallowing the control block.
+- `shuheng-control` JSON that only misses trailing `}` / `]` closers -> repair the missing tail and execute if it parses into known actions.
+- Visible prose containing inline-code `` `<shuheng-control>` `` followed by a real control block -> parse and execute only the real control block, keep the inline label visible, and do not report parse_error.
+- Unrepairable `shuheng-control` JSON -> add an `Agent 控制结果` parse-error message instead of silently swallowing the control block.
 - `delegate.create` without a resolvable target -> runtime reports missing subagent target.
 - `agent.delete` on a running or aborting subagent -> runtime refuses deletion and asks for a stop first.
 - `agent.delete` on an idle subagent -> soft-delete from the TUI list, retain the original directory for audit, and persist `deleted:true`.
@@ -4618,26 +4628,26 @@ token panel -> OMP get_state.contextUsage
 ### 5. Good/Base/Bad Cases
 
 - Good: Batch envelope creates a plan, creates a researcher, then delegates with full routing/work/output contracts.
-- Good: A user asks "what can subagents do?" and the assistant answers in visible prose without emitting `<ga-control>`.
-- Good: A search result shows source code containing `f'<ga-control>{{...` inside a `python` fence; Shuheng keeps it as text and emits no parse-error control result.
+- Good: A user asks "what can subagents do?" and the assistant answers in visible prose without emitting `<shuheng-control>`.
+- Good: A search result shows source code containing `f'<shuheng-control>{{...` inside a `python` fence; Shuheng keeps it as text and emits no parse-error control result.
 - Good: A model mistakenly requests `role:"main_orchestrator"` for a persistent subagent; Shuheng creates a `specialist` subagent and reports that the main-orchestrator role is reserved.
 - Base: Single `agenttask.v2` action in a JSON fence is extracted only when the action is known.
-- Bad: A visible "example" section contains a literal `<ga-control>` block; the runtime will execute and strip it, leaving the section blank.
-- Base: A visible diagnosis says `` `<ga-control>` 标签没正确闭合 `` and then appends a real `<ga-control>{...}</ga-control>` block; the inline label is display text only.
+- Bad: A visible "example" section contains a literal `<shuheng-control>` block; the runtime will execute and strip it, leaving the section blank.
+- Base: A visible diagnosis says `` `<shuheng-control>` 标签没正确闭合 `` and then appends a real `<shuheng-control>{...}</shuheng-control>` block; the inline label is display text only.
 - Bad: Bare JSON without the required current schema envelope is ignored.
 - Bad: A current envelope with an unknown or non-dotted action name is ignored by the generic schema boundary.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `ga-control.v2` extraction, JSON-fence extraction, current hint install de-duplicates and replaces previous hints, auto-continuation prompt examples, subagent creation, explicit lifecycle handling, soft deletion, delegation, secret-control isolation, and policy-gate behavior.
+- `scripts/check_policy_gates.py` must assert `shuheng-control.v2` extraction, JSON-fence extraction, current hint install de-duplicates and replaces previous hints, auto-continuation prompt examples, subagent creation, explicit lifecycle handling, soft deletion, delegation, secret-control isolation, and policy-gate behavior.
 - Quarantine checks may assert that historical hidden markup is stripped but must not treat it as an executable protocol.
-- `scripts/check_policy_gates.py` must assert common missing-tail JSON repair for `<ga-control>` and visible parse-error reporting for unrepairable control JSON.
-- `scripts/check_policy_gates.py` must assert inline-code `<ga-control>` labels do not capture later real control blocks.
-- `scripts/check_policy_gates.py` must assert ordinary code/tool-output fences containing literal `<ga-control>` examples are not extracted, stripped, or reported as parse errors.
+- `scripts/check_policy_gates.py` must assert common missing-tail JSON repair for `<shuheng-control>` and visible parse-error reporting for unrepairable control JSON.
+- `scripts/check_policy_gates.py` must assert inline-code `<shuheng-control>` labels do not capture later real control blocks.
+- `scripts/check_policy_gates.py` must assert ordinary code/tool-output fences containing literal `<shuheng-control>` examples are not extracted, stripped, or reported as parse errors.
 - `scripts/check_policy_gates.py` must assert subagent creation, `/agent new` role parsing, role updates, saved metadata, and loaded metadata normalize `main_orchestrator` to `specialist` for subagents while preserving the main runtime's `main_orchestrator` role.
 - `scripts/check_policy_gates.py` must assert per-subagent default models can be set for persistent and temporary subagents, persist to the correct metadata scope, apply to the live runtime when idle, and clear back to the configured global default.
-- `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `ga_tui.control_protocol` and that the protocol module does not import curses.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py scripts/check_policy_gates.py` must pass.
+- `scripts/check_policy_gates.py` must assert `app.py` re-exports key protocol helpers from `shuheng.control_protocol` and that the protocol module does not import curses.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py scripts/check_policy_gates.py` must pass.
 - `python3 scripts/check_policy_gates.py` must pass.
 - `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass when the sibling GenericAgent checkout exists.
 
@@ -4694,7 +4704,7 @@ token panel -> OMP get_state.contextUsage
 ### 1. Scope / Trigger
 
 - Trigger: AgentTask prompt envelope parsing or subagent-task policy-action inference is changed, moved, or extended.
-- Applies to: `src/ga_tui/control_protocol.py`, the compatibility wrapper `infer_policy_action_for_subagent_task(sub, prompt)` in `src/ga_tui/app.py`, `policy_gate_for_subagent_task(...)`, Secret subagent dispatch, scheduled subagent dispatch, tests, and policy gates.
+- Applies to: `src/shuheng/control_protocol.py`, the compatibility wrapper `infer_policy_action_for_subagent_task(sub, prompt)` in `src/shuheng/app.py`, `policy_gate_for_subagent_task(...)`, Secret subagent dispatch, scheduled subagent dispatch, tests, and policy gates.
 - Non-goal: This does not move policy decisions, approval queueing, ledgers, runtime dispatch, `SubAgentRuntime`, role template lookup, Secret Vault behavior, mutable `State`, artifacts, storage roots, dashboard, rendering, or command execution out of `app.py`.
 
 ### 2. Signatures
@@ -4708,7 +4718,7 @@ token panel -> OMP get_state.contextUsage
 
 ### 3. Contracts
 
-- `agenttask_payload_from_prompt(...)` only parses the generated `[GA TUI AgentTask Envelope v2]` block and returns `{}` for missing, invalid, or non-object payloads.
+- `agenttask_payload_from_prompt(...)` only parses the generated `[Shuheng AgentTask Envelope v2]` block and returns `{}` for missing, invalid, or non-object payloads.
 - `policy_relevant_subagent_prompt_text(...)` must use only `work_order.objective`, then top-level `objective`, then the original prompt. Capability text, `tools_forbidden`, tool names, boundaries, non-goals, and examples are not policy-source text.
 - `explicit_policy_action_for_subagent_task(...)` has higher precedence than text inference. It checks fields in this order: top-level `policy_action`, top-level `approval_required_for`, `approval.policy_action`, `approval.approval_required_for`, and `capability_contract.policy_action`.
 - Explicit string values are stripped, lowercased, and hyphen-normalized to underscores. Explicit list values use the first non-empty item only.
@@ -4716,7 +4726,7 @@ token panel -> OMP get_state.contextUsage
 - Inference order is fixed: explicit action -> policy-relevant objective text keywords -> ops privileged-operation tokens -> `write_policy=="single_writer"` repo-write fallback -> `read_only`.
 - `app.infer_policy_action_for_subagent_task(...)` may only derive `role = normalized_subagent_role(sub.role)` and `write_policy = role_write_policy(role)` before delegating to `control_protocol.inferred_policy_action_for_subagent_task(...)`.
 - `policy_gate_for_subagent_task(...)` remains app-owned because it creates `PolicyDecision` payloads, queues approvals, references subagent identity, writes gate metadata, and owns Orchestrator side effects.
-- `src/ga_tui/control_protocol.py` must remain a restricted protocol module: no curses, no `State`, no `SubAgentRuntime`, no ledger stores, no approval queue writes, no runtime dispatch, no Secret Vault storage, no dashboard/rendering/command ownership.
+- `src/shuheng/control_protocol.py` must remain a restricted protocol module: no curses, no `State`, no `SubAgentRuntime`, no ledger stores, no approval queue writes, no runtime dispatch, no Secret Vault storage, no dashboard/rendering/command ownership.
 
 ### 4. Validation & Error Matrix
 
@@ -4750,10 +4760,10 @@ token panel -> OMP get_state.contextUsage
 - `tests/test_control_protocol.py` must cover inferred actions for access-secret, spend-money, deploy, external-send, publish, delete-file, modify-permission-policy, high-risk batch, ops privileged operations, single-writer repo-write fallback, and read-only fallback.
 - `tests/test_control_protocol.py` must include a case where `tools_forbidden:["deploy","email.send"]` does not trigger deployment or external-send approval when the objective is read-only.
 - `tests/test_control_protocol.py` must assert `app.infer_policy_action_for_subagent_task(...)` delegates through role/write-policy facts for representative coder, ops, researcher, and read-only prompts.
-- `scripts/check_policy_gates.py` must assert `inferred_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"` and `app.inferred_policy_action_for_subagent_task is control_protocol.inferred_policy_action_for_subagent_task`.
+- `scripts/check_policy_gates.py` must assert `inferred_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"` and `app.inferred_policy_action_for_subagent_task is control_protocol.inferred_policy_action_for_subagent_task`.
 - `scripts/check_policy_gates.py` must assert app-local duplicate keyword-table ownership is absent, including `POLICY_ACTION_KEYWORD_CHECKS` and `OPS_PRIVILEGED_OPERATION_TOKENS`.
 - `scripts/check_policy_gates.py` must keep the protocol module no-curses/no-runtime-class boundary green.
-- Targeted verification for this boundary is `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`, `python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`, and `python3 scripts/check_policy_gates.py`.
+- Targeted verification for this boundary is `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`, `python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`, and `python3 scripts/check_policy_gates.py`.
 
 ### 7. Wrong vs Correct
 
@@ -4784,7 +4794,7 @@ def infer_policy_action_for_subagent_task(sub: SubAgentRuntime, prompt: str) -> 
 
 ```python
 # control_protocol.py
-from ga_tui.app import SubAgentRuntime, role_write_policy
+from shuheng.app import SubAgentRuntime, role_write_policy
 ```
 
 #### Correct
@@ -4970,7 +4980,7 @@ if text.strip().lower() in {"/llm", "/models", "/model"}:
 
 - Trigger: The main agent needs current TUI dashboard facts before creating, reusing, stopping, or delegating to subagents.
 - Applies to: GenericAgent tool schema injection, GenericAgentHandler `do_*` dispatch methods, bound TUI `State`, shared task ledger queries, approval summaries, artifact metadata, and capability discovery.
-- Non-goal: These tools must never mutate sessions, tasks, agents, approvals, artifacts, memory, or files. Real state changes still require `ga-control.v2`.
+- Non-goal: These tools must never mutate sessions, tasks, agents, approvals, artifacts, memory, or files. Real state changes still require `shuheng-control.v2`.
 
 ### 2. Signatures
 
@@ -4982,10 +4992,10 @@ if text.strip().lower() in {"/llm", "/models", "/model"}:
 
 ### 3. Contracts
 
-- Every response is JSON-safe and starts with `schema_version:"ga-tui.query.v1"` plus `status:"ok"` or `status:"error"`.
+- Every response is JSON-safe and starts with `schema_version:"shuheng.query.v1"` plus `status:"ok"` or `status:"error"`.
 - Query tools are installed by wrapping `agentmain.load_tool_schema()` and appending TUI schemas idempotently after every GenericAgent schema reload.
 - Query handlers are installed by patching `agentmain.GenericAgentHandler` with `do_<tool_name>` methods.
-- Runtime state is provided through `agent._ga_tui_state`; if a handler has no bound state, the tool returns an error response instead of guessing.
+- Runtime state is provided through `agent._shuheng_state`; if a handler has no bound state, the tool returns an error response instead of guessing.
 - `agent_list` returns bounded agent records: id, name, role, lifecycle, status, busy reason, security context, capabilities, write policy, permissions, queues, active task refs, profile summary, interaction modes, and identity contract.
 - `agent_get` returns one detailed bounded record with profile summary/full bounded profile, memory summary, output contract, queue previews, recent assigned tasks, interaction modes, and identity contract.
 - `agent_match` scores current agents using structured selectors only: explicit target, role, capability, security context, lifecycle, and busy state. It must not score arbitrary natural-language objective/profile similarity.
@@ -5014,7 +5024,7 @@ if text.strip().lower() in {"/llm", "/models", "/model"}:
 - Good: To test whether a persistent steward can answer, target its existing `agent_id` with Shuheng subagent task/direct-chat controls and report the returned `assigned_agent`/`subagent-chat:<id>` lane.
 - Base: A capability explanation calls `capability_list` or `agent_list` and answers in prose without a control block.
 - Bad: A query tool creates an agent, starts a task, approves a gate, writes memory, or reads full artifact contents.
-- Bad: The model emits `<ga-control>` while only explaining available subagent capabilities.
+- Bad: The model emits `<shuheng-control>` while only explaining available subagent capabilities.
 - Bad: The model spawns a new OMP/IRC worker with a copied steward profile and reports "the persistent steward replied" instead of "a clone/persona simulation replied".
 
 ### 6. Tests Required
@@ -5025,7 +5035,7 @@ if text.strip().lower() in {"/llm", "/models", "/model"}:
 - Tests must assert `task_list` hides terminal tasks by default and includes them with `include_completed:true`.
 - Tests must assert `task_get` returns latest ledger details and approval references.
 - Tests must assert `approval_list` does not inline raw payload bodies.
-- `python3 -m py_compile src/ga_tui/app.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m py_compile src/shuheng/app.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
@@ -5048,21 +5058,21 @@ If the recommendation is create_new and the user asked for execution, create a b
 ### 1. Scope / Trigger
 
 - Trigger: GenericAgent-specific runtime integration code is needed for tool schema injection, `GenericAgentHandler` method patching, TUI state binding, control-hint installation, or agent lifecycle startup.
-- Applies to: `src/ga_tui/genericagent_provider.py`, compatibility re-exports from `src/ga_tui/app.py`, runtime provider registration, model switching, subagent runtime preparation, query tools, and schedule tools.
+- Applies to: `src/shuheng/genericagent_provider.py`, compatibility re-exports from `src/shuheng/app.py`, runtime provider registration, model switching, subagent runtime preparation, query tools, and schedule tools.
 - Non-goal: The provider module must not own TUI state mutation, curses rendering, ledgers, scheduler registries, Secret Vault storage, or subagent query implementation details.
 
 ### 2. Signatures
 
-- Provider module: `src/ga_tui/genericagent_provider.py`.
+- Provider module: `src/shuheng/genericagent_provider.py`.
 - Runtime configuration entrypoint: `configure_genericagent_provider_runtime(agentmain, generic_agent_cls, step_outcome_cls, is_state, tool_handlers, thread_factory=...)`.
 - Compatibility re-exports from `app.py`: `TUI_AGENT_CONTROL_HINT`, `TUI_QUERY_TOOL_SCHEMAS`, `TUI_SCHEDULE_TOOL_SCHEMAS`, `install_tui_query_runtime()`, `install_tui_control_hint()`, and `GenericAgentRuntimeAdapter`.
 - Handler methods installed on `agentmain.GenericAgentHandler`: `do_agent_list`, `do_agent_get`, `do_agent_match`, `do_task_list`, `do_task_get`, `do_approval_list`, `do_artifact_list`, `do_capability_list`, `do_schedule_create`, and `do_schedule_list`.
 
 ### 3. Contracts
 
-- `genericagent_provider.py` owns the active GenericAgent-facing control hint, query tool schemas, schedule tool schemas, tool schema injection, `agentmain.load_tool_schema()` wrapping, `GenericAgentHandler` patching, `_ga_tui_state` binding, `install_tui_control_hint()`, and `GenericAgentRuntimeAdapter`.
+- `genericagent_provider.py` owns the active GenericAgent-facing control hint, query tool schemas, schedule tool schemas, tool schema injection, `agentmain.load_tool_schema()` wrapping, `GenericAgentHandler` patching, `_shuheng_state` binding, `install_tui_control_hint()`, and `GenericAgentRuntimeAdapter`.
 - `app.py` may re-export provider names for compatibility, but must not locally redefine the moved installers, handler patch functions, control-hint installer, or `GenericAgentRuntimeAdapter`.
-- The provider module must not import `ga_tui.app`, curses, or mutable TUI `State`. App-layer behavior is injected through `configure_genericagent_provider_runtime()`.
+- The provider module must not import `shuheng.app`, curses, or mutable TUI `State`. App-layer behavior is injected through `configure_genericagent_provider_runtime()`.
 - Tool handlers remain app-layer callbacks because they read TUI state, subagent registries, ledgers, approvals, artifacts, Secret Vault state, gateway capabilities, and scheduler registries.
 - Repeated `install_tui_query_runtime()` calls must append each query/schedule schema at most once and must not add duplicate handler side effects.
 - A GenericAgent tool schema reload must re-append TUI tool schemas exactly once.
@@ -5073,9 +5083,9 @@ If the recommendation is create_new and the user asked for execution, create a b
 
 - Provider module imported before configuration -> runtime installation and adapter creation fail explicitly with a configuration error.
 - Missing bound TUI state on a handler call -> injected app-layer tool callback returns the standard TUI tool/query error response.
-- Unknown tool kind -> provider returns a JSON-safe `ga-tui.query.v1` error response instead of mutating state.
+- Unknown tool kind -> provider returns a JSON-safe `shuheng.query.v1` error response instead of mutating state.
 - Repeated provider configuration -> subsequent handler calls use the latest injected callback map because handler methods dispatch through provider runtime state.
-- Provider source imports `ga_tui.app`, curses, or TUI `State` -> boundary violation.
+- Provider source imports `shuheng.app`, curses, or TUI `State` -> boundary violation.
 - `app.py` locally defines moved GenericAgent glue after the extraction -> boundary violation.
 
 ### 5. Good/Base/Bad Cases
@@ -5084,16 +5094,16 @@ If the recommendation is create_new and the user asked for execution, create a b
 - Good: Model switching calls the provider's compatibility re-exported `install_tui_query_runtime()` and `install_tui_control_hint()` after selecting the backend model.
 - Base: A future runtime provider adds its own adapter without importing curses or TUI state classes.
 - Bad: `app.py` defines a second local `GenericAgentRuntimeAdapter` or local `do_agent_list` patch method.
-- Bad: `genericagent_provider.py` imports `ga_tui.app` to call `tui_tool_agent_list()` directly, creating a reverse dependency from provider to composition.
+- Bad: `genericagent_provider.py` imports `shuheng.app` to call `tui_tool_agent_list()` directly, creating a reverse dependency from provider to composition.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert app compatibility re-exports are identical to `ga_tui.genericagent_provider` names.
-- Tests must assert moved functions and `GenericAgentRuntimeAdapter` have `__module__ == "ga_tui.genericagent_provider"`.
+- `scripts/check_policy_gates.py` must assert app compatibility re-exports are identical to `shuheng.genericagent_provider` names.
+- Tests must assert moved functions and `GenericAgentRuntimeAdapter` have `__module__ == "shuheng.genericagent_provider"`.
 - Tests must assert `genericagent_provider.py` has no reverse import into `app.py` and no curses import.
 - Tests must assert `app.py` no longer locally defines the moved GenericAgent glue functions or adapter class.
 - Tests must preserve query/schedule schema idempotency, handler method presence, `StepOutcome(next_prompt:"\n")`, state-bound tool dispatch, and control-hint de-duplication checks.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/genericagent_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/genericagent_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
@@ -5122,14 +5132,14 @@ configure_genericagent_provider_runtime(
 
 ### 1. Scope / Trigger
 
-- Trigger: Provider-neutral runtime identity, metadata, request-construction, or task-submit helper logic is moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/runtime_dispatch.py`, compatibility wrappers in `src/ga_tui/app.py`, `RuntimeTaskRequest` construction, OMP native session/context usage readers, runtime task submission fallback, policy gates, and unit tests.
+- Trigger: Provider-neutral runtime identity, metadata, request-construction, or task-submit helper logic is moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/runtime_dispatch.py`, compatibility wrappers in `src/shuheng/app.py`, `RuntimeTaskRequest` construction, OMP native session/context usage readers, runtime task submission fallback, policy gates, and unit tests.
 - Non-goal: This does not move runtime stream queue consumption, TUI message mutation, subagent task/chat state transitions, scheduler dispatch, Web Console runtime pumping, or runtime context-pack full/ref prompt selection.
 
 ### 2. Signatures
 
-- Dataclass owner: `src/ga_tui/runtime.py` owns `RuntimeTaskRequest` and `RuntimeTaskEvent`.
-- Lower-level helper module: `src/ga_tui/runtime_dispatch.py`.
+- Dataclass owner: `src/shuheng/runtime.py` owns `RuntimeTaskRequest` and `RuntimeTaskEvent`.
+- Lower-level helper module: `src/shuheng/runtime_dispatch.py`.
 - Compatibility wrappers in `app.py`:
   - `agent_runtime_provider_id(agent)`.
   - `is_ohmypi_runtime_agent(agent)`.
@@ -5140,12 +5150,12 @@ configure_genericagent_provider_runtime(
 
 ### 3. Contracts
 
-- `runtime_dispatch.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
+- `runtime_dispatch.py` must not import `shuheng.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
 - `runtime_dispatch.py` may import `RuntimeTaskRequest` from `runtime.py`; `runtime.py` remains the schema/dataclass owner.
 - `app.py` remains the compatibility facade and delegates the wrapper names to `runtime_dispatch.py`.
 - `runtime_task_request_for_agent(...)` must preserve every `RuntimeTaskRequest` field: task ids, provider id, agent id, role, objective, prompt, source, context-pack ref, model, permissions, approval policy, output contract, artifact refs, and metadata.
 - Full prompts are allowed only inside the in-memory request object. Durable request records remain governed by `RuntimeTaskRequest.to_record()` and must store bounded `prompt_preview`, `prompt_chars`, context-pack refs, and artifact refs instead of raw prompt bodies.
-- Provider id fallback is `"unknown"` when `_ga_tui_runtime_provider_id` is missing or blank.
+- Provider id fallback is `"unknown"` when `_shuheng_runtime_provider_id` is missing or blank.
 - Model fallback is an empty string when `agent.get_llm_name(model=True)` is missing or raises.
 - If explicit `artifact_refs` is absent and `context_pack_ref` exists, the request artifact refs default to `[context_pack_ref]`.
 - `put_agent_runtime_task(...)` must call `agent.put_runtime_task(request)` when available; otherwise it must fall back to `agent.put_task(request.prompt, source=request.source)`.
@@ -5182,7 +5192,7 @@ configure_genericagent_provider_runtime(
 #### Wrong
 
 ```python
-from ga_tui.app import State
+from shuheng.app import State
 
 def put_agent_runtime_task(state: State, request):
     append_trace(request.task_id, "runtime_task_requested", payload={"prompt": request.prompt})
@@ -5203,24 +5213,24 @@ def put_agent_runtime_task(agent, request):
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng treats Oh My Pi / OMP as the default local runtime core.
-- Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, Shuheng memory prompt injection, app-injected TUI host tool registration, typed host-tool routing, governed proposal routing, memory candidate signaling, runtime task request/event records, RPC queue/event mapping, and OMP usage-to-token-registry bridging.
+- Applies to: `src/shuheng/ohmypi_provider.py`, runtime provider registration in `src/shuheng/app.py`, runtime registry records, provider selection, Shuheng memory prompt injection, app-injected TUI host tool registration, typed host-tool routing, governed proposal routing, memory candidate signaling, runtime task request/event records, RPC queue/event mapping, and OMP usage-to-token-registry bridging.
 - Non-goal: This provider must not own curses rendering, mutable TUI `State`, GenericAgent tool schema injection, TUI approval storage, scheduler registries, or first-class TUI subagent ledger mutation.
 
 ### 2. Signatures
 
-- Provider module: `src/ga_tui/ohmypi_provider.py`.
+- Provider module: `src/shuheng/ohmypi_provider.py`.
 - Provider id: `ohmypi`.
 - Runtime adapter: `OhMyPiRuntimeAdapter(RuntimeAdapter)`.
 - Queue-compatible wrapper: `OhMyPiRpcAgent`.
 - Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
 - App-layer refresh helper: `refresh_agent_runtime_model_config(agent)`.
 - Provider-local refresh method: `OhMyPiRpcAgent.refresh_configured_models(models, env=None, command=None)`.
-- Provider-neutral runtime envelopes: `RuntimeTaskRequest` and `RuntimeTaskEvent` in `src/ga_tui/runtime.py`.
+- Provider-neutral runtime envelopes: `RuntimeTaskRequest` and `RuntimeTaskEvent` in `src/shuheng/runtime.py`.
 - RPC command helpers: `resolve_ohmypi_binary(binary=None)` and `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
 - Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
 - Isolated runtime helpers: `ohmypi_runtime_root(harness_dir)`, `ohmypi_isolated_agent_dir(harness_dir)`, `ohmypi_config_path(agent_dir)`, `ohmypi_models_path(agent_dir)`, `write_ohmypi_runtime_files(...)`, and `ohmypi_subprocess_env(...)`.
 - Isolated runtime records: `OhMyPiRuntimeConfig` and `OhMyPiRuntimeModel`.
-- Compatibility TUI host tools exposed to OMP: `ga_tui_query` and `ga_tui_propose`.
+- Compatibility TUI host tools exposed to OMP: `shuheng_query` and `shuheng_propose`.
 - Typed TUI host tools exposed to OMP include `agent_list`, `agent_get`, `agent_match`, `task_list`, `task_get`, `approval_list`, `artifact_list`, `capability_list`, `schedule_list`, `memory_context_get`, `proposal_submit`, `memory_candidate_submit`, and `schedule_create`.
 - Read-only host tool definition helper: `ohmypi_tui_readonly_host_tool_definitions()`.
 - Typed read-only host tool definition helper: `ohmypi_typed_readonly_host_tool_definitions()`.
@@ -5230,14 +5240,14 @@ def put_agent_runtime_task(agent, request):
 - Combined host tool callback helper: `ohmypi_tui_host_tool_handler(state=None)`.
 - Backward-compatible query callback helper: `ohmypi_tui_query_host_tool_handler(state=None)`.
 - Environment keys:
-  - `SHUHENG_HOME` overrides the Shuheng-owned storage root; legacy internal `GA_TUI_HOME` remains an accepted compatibility override.
-  - unset `GA_TUI_RUNTIME_PROVIDER` selects `ohmypi`.
-  - `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the optional legacy GenericAgent adapter only when a valid legacy checkout is available.
-  - `GA_TUI_OHMYPI_BIN` overrides the executable.
-  - `GA_TUI_OHMYPI_ARGS` appends shell-split extra CLI arguments.
+  - `SHUHENG_HOME` overrides the Shuheng-owned storage root; legacy internal `SHUHENG_HOME` remains an accepted compatibility override.
+  - unset `SHUHENG_RUNTIME_PROVIDER` selects `ohmypi`.
+  - `SHUHENG_RUNTIME_PROVIDER=genericagent` selects the optional legacy GenericAgent adapter only when a valid legacy checkout is available.
+  - `SHUHENG_OHMYPI_BIN` overrides the executable.
+  - `SHUHENG_OHMYPI_ARGS` appends shell-split extra CLI arguments.
 - OMP subprocess environment:
   - `PI_CODING_AGENT_DIR` must point to the Shuheng-owned isolated OMP agent directory under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`.
-  - Generated per-process API key env vars use `GA_TUI_OMP_API_KEY_<digest>` and must be passed only through the OMP child process env.
+  - Generated per-process API key env vars use `SHUHENG_OMP_API_KEY_<digest>` and must be passed only through the OMP child process env.
 - Default RPC command shape: `<resolved-omp> --mode rpc --no-title --approval-mode yolo --append-system-prompt <generated-memory-file>`.
 
 ### 3. Contracts
@@ -5277,7 +5287,7 @@ def put_agent_runtime_task(agent, request):
 - Startup, prompt, or missing-binary failures must map to a queue `done` item instead of raising into the TUI caller after `put_task()` returns.
 - The wrapper must expose the current GenericAgent-shaped compatibility surface used by existing TUI hot paths: `put_task()`, `abort()`, `get_llm_name()`, `list_llms()`, `load_llm_sessions()`, `next_llm()`, `is_running`, `task_queue.unfinished_tasks`, `log_path`, `llmclient.backend`, and `llmclients`.
 - `OhMyPiRuntimeAdapter.start_agent()` must not block on model or network startup. RPC process startup is lazy and happens on first prompt.
-- The provider module must not import `ga_tui.app`, curses, or mutable TUI `State`.
+- The provider module must not import `shuheng.app`, curses, or mutable TUI `State`.
 - Oh My Pi unrestricted host tools remain disabled in provider metadata: `capabilities.host_tools:false`.
 - The only allowed host tool bridge is app-injected TUI governance querying, typed read-only control-plane tools, and governed proposal routing: `capabilities.tui_readonly_host_tools:true`, `capabilities.tui_governed_proposal_tools:true`, and `capabilities.tui_typed_host_tools:true`.
 - Provider metadata must advertise `capabilities.runtime_task_requests:true` and `capabilities.runtime_task_events:true` once OMP execution is wrapped by `runtime.task_request.v1` and `runtime.task_event.v1`.
@@ -5291,7 +5301,7 @@ def put_agent_runtime_task(agent, request):
 - When Shuheng has supplied `configured_models`, OMP `get_state` responses may update native session/context usage but must not overwrite the current local model selection. Otherwise a stale state response can mix an old provider/model id with the newly selected entry's base URL.
 - When Shuheng has supplied `configured_models`, OMP `set_model` / `cycle_model` confirmations may move the active index to a matching configured model and refresh context-window metadata, but must preserve Shuheng-projected display fields such as provider label, model id, and base URL.
 - Refreshing `OhMyPiRpcAgent.configured_models` must preserve the current model by selector, display name, provider/model id, or model/base URL where possible, and update any pending model switch so the next lazy RPC startup sends the refreshed provider/model pair.
-- OMP binary discovery order is explicit `binary` argument, `GA_TUI_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
+- OMP binary discovery order is explicit `binary` argument, `SHUHENG_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
 - Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
 - Generated OMP `config.yml` must set `todo.eager:"default"` and must not write boolean `true` or `"always"` by default. Eager todo forces first-turn `tool_choice:"todo"`, which thinking-mode OpenAI-compatible providers such as DeepSeek can reject before the model answers.
 - Generated OMP `models.yml` must represent complete GA-TUI OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
@@ -5300,16 +5310,16 @@ def put_agent_runtime_task(agent, request):
 - Incomplete GA-TUI model entries without API key, base URL, or model id are skipped when generating OMP model providers.
 - OMP runtime model rows exposed to the TUI must preserve enough provider/model/base URL metadata for `/model` current-session switching to call OMP `set_model` with structured `provider` and `modelId`.
 - Embedded OMP must not auto-resume stale internal OMP sessions; Shuheng owns visible session history and resets the OMP RPC session when Shuheng opens a fresh main/temporary/restored runtime context.
-- A long-running OMP process must receive at most one full `[GA TUI Context Pack]` prompt per Shuheng runtime session. Later context refreshes should pass a bounded `[GA TUI Context Ref]` with the artifact ref, so OMP history does not accumulate repeated full context packs.
-- `ga_tui_query` is read-only and must never mutate sessions, tasks, agents, approvals, artifacts, memory, or files.
-- `ga_tui_propose` accepts only bounded proposal payloads with `proposal_type:"ga_control"` or `proposal_type:"memory_candidate"`.
-- `ga_tui_propose` with `proposal_type:"ga_control"` must require a current-schema `ga-control.v2` envelope or `agenttask.v2` action object, validate that it maps to known current controls, and route execution through `apply_tui_controls_from_text(..., source="agent:ohmypi_host_tool")` so existing policy gates and ledgers remain the source of truth.
-- `ga_tui_propose` with `proposal_type:"memory_candidate"` must resolve the target subagent from the bound TUI `State` and call `queue_curated_memory_candidate(...)`; direct long-term memory writes remain forbidden.
-- `ga_tui_propose` results use `schema_version:"ga-tui.proposal.v1"` and return JSON-safe `status`, `kind`, result lines/messages, ids, and artifact refs where available.
+- A long-running OMP process must receive at most one full `[Shuheng Context Pack]` prompt per Shuheng runtime session. Later context refreshes should pass a bounded `[Shuheng Context Ref]` with the artifact ref, so OMP history does not accumulate repeated full context packs.
+- `shuheng_query` is read-only and must never mutate sessions, tasks, agents, approvals, artifacts, memory, or files.
+- `shuheng_propose` accepts only bounded proposal payloads with `proposal_type:"shuheng_control"` or `proposal_type:"memory_candidate"`.
+- `shuheng_propose` with `proposal_type:"shuheng_control"` must require a current-schema `shuheng-control.v2` envelope or `agenttask.v2` action object, validate that it maps to known current controls, and route execution through `apply_tui_controls_from_text(..., source="agent:ohmypi_host_tool")` so existing policy gates and ledgers remain the source of truth.
+- `shuheng_propose` with `proposal_type:"memory_candidate"` must resolve the target subagent from the bound TUI `State` and call `queue_curated_memory_candidate(...)`; direct long-term memory writes remain forbidden.
+- `shuheng_propose` results use `schema_version:"shuheng.proposal.v1"` and return JSON-safe `status`, `kind`, result lines/messages, ids, and artifact refs where available.
 - Typed read-only tools must call the same app-layer query functions as the compatibility query endpoint. They must not mutate sessions, tasks, approvals, long-term memory, or ledgers.
 - `memory_context_get` may generate a Shuheng-owned context-pack artifact and return `context_pack_ref` plus a JSON-safe pack. This is the allowed way for OMP to hydrate memory/context; it is not a long-term memory write.
-- `memory_candidate_submit` must call the same governed memory-candidate path as `ga_tui_propose` with `proposal_type:"memory_candidate"`.
-- `proposal_submit` must call the same governed proposal path as `ga_tui_propose`.
+- `memory_candidate_submit` must call the same governed memory-candidate path as `shuheng_propose` with `proposal_type:"memory_candidate"`.
+- `proposal_submit` must call the same governed proposal path as `shuheng_propose`.
 - `schedule_create` may create a TUI-owned schedule through the scheduler service; it must use the existing schedule registry and must not call OMP or any runtime directly.
 - Host tool registration must happen after OMP emits `{"type":"ready"}` and before the first prompt command is sent for that process.
 - OMP `host_tool_call` frames must be answered with `host_tool_result` using the same frame `id`.
@@ -5318,12 +5328,12 @@ def put_agent_runtime_task(agent, request):
 - OMP `host_tool_cancel` frames must be accepted safely and must not mutate TUI state.
 - OMP terminal error details from `message_end`, `turn_end`, or `agent_end` must map to a visible queue `done` item when frames carry `stopReason:"error"`, `errorMessage`, or `errorStatus`; error turns must not become empty assistant replies.
 - Host URI schemes and TUI approval mapping remain disabled until a separate explicit task designs those governance contracts.
-- Oh My Pi is the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
-- GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent` when a valid legacy checkout is available.
-- Missing GenericAgent must not break `import ga_tui.app`, `python -m ga_tui.app --help`, `python -m ga_tui --help`, `shuheng-check`, or OMP provider registration.
+- Oh My Pi is the default runtime provider when `SHUHENG_RUNTIME_PROVIDER` is unset.
+- GenericAgent must remain selectable with `SHUHENG_RUNTIME_PROVIDER=genericagent` when a valid legacy checkout is available.
+- Missing GenericAgent must not break `import shuheng.app`, `python -m shuheng.app --help`, `python -m shuheng --help`, `shuheng-check`, or OMP provider registration.
 - When GenericAgent discovery is disabled or absent, the runtime registry may contain only `ohmypi`; this is a healthy Shuheng core state, not a degraded core.
-- The TUI should generate a bounded `GA/TUI Memory Guidance` append prompt from Shuheng-owned memory sources under `${SHUHENG_HOME}/memory` and pass it through `--append-system-prompt`.
-- Oh My Pi completion output may emit memory candidate signals, and `ga_tui_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
+- The TUI should generate a bounded `Shuheng Layered Memory Guidance` append prompt from Shuheng-owned memory sources under `${SHUHENG_HOME}/memory` and pass it through `--append-system-prompt`.
+- Oh My Pi completion output may emit memory candidate signals, and `shuheng_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
 - Main OMP tasks and worker/subagent OMP tasks should include generated GA-TUI context pack artifacts when using the structured runtime request path.
 - OMP runtime events for requested tasks, host tool calls/results, completion, failure, and abort must be normalized into `runtime.task_event.v1` records and appended to GA-TUI traces when a concrete task id exists.
 - OMP runtime events for Secret-context tasks must not be appended to the normal trace store, and OMP memory candidate extraction must ignore `secret-*` sources.
@@ -5339,17 +5349,17 @@ def put_agent_runtime_task(agent, request):
 - RPC extension UI request `select`, `input`, or `editor` -> provider replies `cancelled:true`.
 - `abort()` called during a prompt -> provider sends RPC `abort`, emits a queue `done` item, clears `is_running`, and decrements `task_queue.unfinished_tasks`.
 - OMP `ready` with configured app-injected TUI tools -> provider sends `set_host_tools` before the prompt frame.
-- OMP `host_tool_call` for `ga_tui_query` -> provider runs the app-injected read-only callback and sends a JSON-safe `host_tool_result`.
+- OMP `host_tool_call` for `shuheng_query` -> provider runs the app-injected read-only callback and sends a JSON-safe `host_tool_result`.
 - OMP `host_tool_call` for a typed read-only tool such as `agent_list`, `schedule_list`, or `memory_context_get` -> app callback routes through the same control-plane query/context helpers and sends a JSON-safe `host_tool_result`.
 - OMP `host_tool_call` for `memory_candidate_submit` -> app callback routes through `queue_curated_memory_candidate(...)` and returns candidate/approval/artifact refs when queued.
 - OMP `host_tool_call` for `schedule_create` -> app callback writes a TUI-owned `scheduledtask.v1` row with default provider `ohmypi` when no explicit provider is supplied.
-- OMP `host_tool_call` for `ga_tui_propose` memory candidate -> app callback routes through `queue_curated_memory_candidate(...)` and returns a JSON-safe proposal result with candidate/approval/artifact refs when queued.
-- OMP `host_tool_call` for `ga_tui_propose` current-schema control -> app callback routes through `apply_tui_controls_from_text(...)` and returns control result lines.
-- OMP `host_tool_call` for `ga_tui_propose` with unknown proposal type, missing required fields, missing TUI state, unresolved target, invalid schema, or no known action -> callback returns `schema_version:"ga-tui.proposal.v1"` with `status:"error"`.
+- OMP `host_tool_call` for `shuheng_propose` memory candidate -> app callback routes through `queue_curated_memory_candidate(...)` and returns a JSON-safe proposal result with candidate/approval/artifact refs when queued.
+- OMP `host_tool_call` for `shuheng_propose` current-schema control -> app callback routes through `apply_tui_controls_from_text(...)` and returns control result lines.
+- OMP `host_tool_call` for `shuheng_propose` with unknown proposal type, missing required fields, missing TUI state, unresolved target, invalid schema, or no known action -> callback returns `schema_version:"shuheng.proposal.v1"` with `status:"error"`.
 - OMP `host_tool_call` for an unregistered tool -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_call` whose callback raises -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_cancel` -> provider records the cancellation safely and continues normal prompt handling.
-- Complete GA-TUI model entry -> isolated OMP `models.yml` gets one provider/model mapping and the child env gets a matching `GA_TUI_OMP_API_KEY_<digest>` value.
+- Complete GA-TUI model entry -> isolated OMP `models.yml` gets one provider/model mapping and the child env gets a matching `SHUHENG_OMP_API_KEY_<digest>` value.
 - Complete GA-TUI model entry with historical `native_claude_config_*` name but PAAS v4 base such as `https://open.bigmodel.cn/api/coding/paas/v4` -> isolated OMP `models.yml` uses `api:"openai-completions"`, validation/probe use Bearer auth and `/chat/completions` / `/models`, and no `/v1/messages` suffix is appended.
 - Complete GA-TUI model entry with Anthropic base such as `https://open.bigmodel.cn/api/anthropic` -> isolated OMP `models.yml` uses `api:"anthropic-messages"` and validation/probe use `x-api-key` plus Anthropic Messages endpoints.
 - Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
@@ -5385,26 +5395,26 @@ def put_agent_runtime_task(agent, request):
 - OMP `agent_end` arrives before the isolated session JSONL flushes usage -> the provider waits for the short stable-flush window, attaches the recovered usage, and only then emits the terminal queue item.
 - OMP terminal queue item carries usage -> the TUI main thread writes the active session row in `session_token_usage.json`, and the left status panel reads that row through `session_token_stats()`.
 - OMP terminal queue item carries usage for a devnull temporary session -> no token usage registry row is written.
-- Two consecutive OMP main turns in one Shuheng runtime session -> first prompt contains `[GA TUI Context Pack]`; second prompt contains `[GA TUI Context Ref]` and does not repeat the full pack.
+- Two consecutive OMP main turns in one Shuheng runtime session -> first prompt contains `[Shuheng Context Pack]`; second prompt contains `[Shuheng Context Ref]` and does not repeat the full pack.
 - OMP thinking delta + tool execution frames + final text delta -> active TUI queue receives GA-style process markers plus the final reply; `render_assistant_text(..., fold_process:true)` folds thinking/tool noise and keeps the final reply visible.
 - OMP host tool calls/results -> active TUI queue receives folded GA-style tool process turns while RPC still receives matching `host_tool_result` frames.
 - OMP memory-candidate signal extraction over normalized process output -> candidate statement contains only the final durable reply, not thinking text, tool args, or tool results.
-- OMP follow-up `这个是啥啊？` after a visible BSpace Agent Arcade URL/task -> answer about the Agent Arcade/game/API task, not about the GA TUI Context Pack/Ref.
+- OMP follow-up `这个是啥啊？` after a visible BSpace Agent Arcade URL/task -> answer about the Agent Arcade/game/API task, not about the Shuheng Context Pack/Ref.
 - OMP memory candidate declaring `target_role:"ops"` or `scope:"ops.*"` while targeting a generic `researcher` -> rejected with `target_mismatch_candidate_responsibility` and no subagent memory append occurs, even if a stale approval row is later approved.
 - `put_runtime_task(RuntimeTaskRequest)` -> provider emits at least `runtime_task_requested` and a terminal `runtime_task_completed`, `runtime_task_failed`, or `runtime_task_aborted` event carrying the original request and context-pack artifact refs.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: unset `GA_TUI_RUNTIME_PROVIDER` selects `OhMyPiRuntimeAdapter`, starts `omp --mode rpc` lazily with the generated memory append prompt, streams text deltas into the existing TUI message renderer, and keeps GenericAgent available as an explicit fallback.
+- Good: unset `SHUHENG_RUNTIME_PROVIDER` selects `OhMyPiRuntimeAdapter`, starts `omp --mode rpc` lazily with the generated memory append prompt, streams text deltas into the existing TUI message renderer, and keeps GenericAgent available as an explicit fallback.
 - Good: `/model` entries are projected into `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent/models.yml`, OMP is launched with `PI_CODING_AGENT_DIR` pointing at that directory, and system `~/.omp/agent/config.yml` is untouched.
-- Good: generated `models.yml` stores `apiKey: GA_TUI_OMP_API_KEY_<digest>` while the secret value is supplied only in the child process env.
+- Good: generated `models.yml` stores `apiKey: SHUHENG_OMP_API_KEY_<digest>` while the secret value is supplied only in the child process env.
 - Good: After adding a provider in `/model`, the running Shuheng wrapper's model list immediately includes it and a later selection uses the refreshed OMP provider id instead of a stale pending model.
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
 - Base: `/runtimes` shows `ohmypi` as default and shows `genericagent` only when the optional legacy provider is available.
-- Base: Oh My Pi can query bounded TUI governance facts through `ga_tui_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
+- Base: Oh My Pi can query bounded TUI governance facts through `shuheng_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
 - Base: Oh My Pi can use typed tools such as `agent_list`, `schedule_list`, and `memory_context_get`; compatibility aliases remain available during migration.
-- Base: Oh My Pi can propose current-schema actions through `ga_tui_propose`, while Shuheng remains the Orchestrator and policy/ledger owner.
-- Base: Oh My Pi can submit a durable memory candidate through `ga_tui_propose` or `memory_candidate_submit`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
+- Base: Oh My Pi can propose current-schema actions through `shuheng_propose`, while Shuheng remains the Orchestrator and policy/ledger owner.
+- Base: Oh My Pi can submit a durable memory candidate through `shuheng_propose` or `memory_candidate_submit`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
 - Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
 - Base: Oh My Pi task request/completion/host-tool events are normalized into trace rows when they have a GA-TUI task id.
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
@@ -5418,14 +5428,14 @@ def put_agent_runtime_task(agent, request):
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `ohmypi` appears in the runtime registry and is the default provider.
-- Tests must assert `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the GenericAgent legacy adapter when it is configured, and falls back to healthy OMP core behavior when GenericAgent is unavailable.
-- Tests must assert disabling GenericAgent discovery still allows `ga_tui.app` import, `shuheng-check`, and an OMP-only runtime registry.
+- Tests must assert `SHUHENG_RUNTIME_PROVIDER=genericagent` selects the GenericAgent legacy adapter when it is configured, and falls back to healthy OMP core behavior when GenericAgent is unavailable.
+- Tests must assert disabling GenericAgent discovery still allows `shuheng.app` import, `shuheng-check`, and an OMP-only runtime registry.
 - Tests must assert `ohmypi_provider.py` has no reverse import into `app.py` and no curses import.
 - Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
 - Tests must assert generated OMP context packs/context refs, memory append prompts, and memory-candidate tool descriptions contain the final-reply rule so memory-candidate status cannot become the only visible completion.
 - Tests must assert generated OMP context packs/context refs and memory append prompts contain the deictic-reference rule that prevents `这个`/`this` from resolving to internal context metadata by default.
 - Tests must assert generated OMP context packs/context refs and memory append prompts contain the persistent-agent request rule, and that memory candidates with declared target role/scope/responsibility mismatches are rejected both at queue time and approval time.
-- Tests must assert OMP command construction discovers `$HOME/.bun/bin/omp` when `omp` is absent from `PATH`, while explicit `GA_TUI_OHMYPI_BIN` remains authoritative.
+- Tests must assert OMP command construction discovers `$HOME/.bun/bin/omp` when `omp` is absent from `PATH`, while explicit `SHUHENG_OHMYPI_BIN` remains authoritative.
 - Tests must assert completed Oh My Pi output can produce a governed memory candidate signal and that empty, too-short, secret-looking, and Secret-context outputs are skipped.
 - Tests must assert a fake RPC process maps `ready`, `prompt` ack, `message_update` deltas, and `agent_end` into queue `next`/`done` items.
 - Tests must assert standalone dot deltas preserve real punctuation in normal streamed final text, still hide tool-turn placeholder dots, and do not cause terminal final-message fallback duplication.
@@ -5443,10 +5453,10 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert fake `host_tool_call` frames receive `host_tool_result` success frames.
 - Tests must assert unknown or failing host tool calls receive `host_tool_result` with `isError:true`.
 - Tests must assert `host_tool_cancel` frames are handled safely.
-- Tests must assert `ga_tui_query` remains read-only and `ga_tui_propose` supports governed `ga_control` and `memory_candidate` proposals.
+- Tests must assert `shuheng_query` remains read-only and `shuheng_propose` supports governed `shuheng_control` and `memory_candidate` proposals.
 - Tests must assert typed OMP tools include read-only state queries, `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
-- Tests must assert `memory_context_get` writes a GA-TUI context-pack artifact under the harness and returns its artifact ref.
-- Tests must assert `ga_tui_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
+- Tests must assert `memory_context_get` writes a Shuheng context-pack artifact under the harness and returns its artifact ref.
+- Tests must assert `shuheng_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
 - Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
 - Tests must assert the OMP runtime adapter subprocess `cwd` is the Shuheng app root, not the legacy GenericAgent root.
@@ -5467,7 +5477,7 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert OMP terminal errors on subagent task/chat streams fail and release the subagent without generating eval/memory/orchestrator-continuation side effects, and that subagent default-model application failure blocks startup before sending a prompt.
 - Tests must assert system `~/.omp/agent/config.yml` hash remains unchanged when present.
 - Tests must assert missing binary failure and `abort()` cleanup decrement unfinished task state.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
@@ -5513,7 +5523,7 @@ class OhMyPiRuntimeAdapter(RuntimeAdapter):
 ```python
 # ohmypi_provider.py
 def handle_memory_candidate(statement):
-    from ga_tui.app import queue_curated_memory_candidate
+    from shuheng.app import queue_curated_memory_candidate
     queue_curated_memory_candidate(...)
 ```
 
@@ -5558,13 +5568,13 @@ append_trace(task_id, "runtime_task_requested", payload=event_payload)
 - `schedule_create` must include a discriminated `execution` object.
 - `execution.mode:"tui_action"` runs a bounded local TUI action. The current supported action is `action:"beep"` for audible reminders that do not require a subagent.
 - `execution.mode:"agent_task"` dispatches governed work through `agenttask.v2` and carries `routing`, `work_order`, `capability_contract`, `context_contract`, and `output_contract`.
-- `schedule_create` response uses `schema_version:"ga-tui.tool.v1"` and returns the appended `scheduledtask.v1` row plus the current schedule registry snapshot.
-- `schedule_list` response uses `schema_version:"ga-tui.tool.v1"` and returns the TUI `scheduledtask.registry.v1` snapshot.
+- `schedule_create` response uses `schema_version:"shuheng.tool.v1"` and returns the appended `scheduledtask.v1` row plus the current schedule registry snapshot.
+- `schedule_list` response uses `schema_version:"shuheng.tool.v1"` and returns the TUI `scheduledtask.registry.v1` snapshot.
 
 ### 3. Contracts
 
 - `schedule_create` is a governed state-changing TUI tool, not a read-only query tool.
-- `schedule_create` must call the same schedule registration path used by `ga-control.v2` `schedule.create`.
+- `schedule_create` must call the same schedule registration path used by `shuheng-control.v2` `schedule.create`.
 - Created schedule rows must carry `schema_version:"scheduledtask.v1"`, an explicit `execution` object, a matching `dispatch_contract`, and `source:"tool:schedule_create"`.
 - Agent-task schedule rows use `dispatch_contract:"agenttask.v2"` and keep agent routing plus work/capability/context/output contracts under `execution`.
 - TUI-action reminder rows use `dispatch_contract:"tui_action.v1"` plus the bounded TUI action data under `execution`. They are audited through `scheduledtask.run.v1` rows but do not create task-ledger rows.
@@ -5599,14 +5609,14 @@ append_trace(task_id, "runtime_task_requested", payload=event_payload)
 
 ### 1. Scope / Trigger
 
-- Trigger: The main agent emits real `ga-control.v2` controls for an intermediate workflow step and explicitly requests continuation with structured metadata such as `continue_after:true` or `workflow_state:"in_progress"`, but does not create an executable task ledger and does not emit the next delegation/configuration controls.
+- Trigger: The main agent emits real `shuheng-control.v2` controls for an intermediate workflow step and explicitly requests continuation with structured metadata such as `continue_after:true` or `workflow_state:"in_progress"`, but does not create an executable task ledger and does not emit the next delegation/configuration controls.
 - Applies to: normal non-Secret main-agent turns after `apply_tui_controls_from_text()` has executed controls.
 - Non-goal: This must not manually execute the business workflow in the TUI. It only feeds control results back to the main agent so the orchestrator can continue emitting governed controls.
 
 ### 2. Signatures
 
-- Auto continuation source: `ga-tui:auto_control_continue`.
-- Continuation prompt block: `[GA TUI Control Result Continuation] ... [/GA TUI Control Result Continuation]`.
+- Auto continuation source: `shuheng:auto_control_continue`.
+- Continuation prompt block: `[Shuheng Control Result Continuation] ... [/Shuheng Control Result Continuation]`.
 - State counters: per-signature `auto_control_continue_attempts`, session cap `auto_control_continue_count`.
 - Structured continuation fields: `continue_after`, `next_action_required`, `requires_continuation`, `workflow_state`, `orchestrator_state`, and `next_action`.
 - Pure helper ownership: `control_protocol.py` owns continuation action/state constants, result signatures, metadata discovery, explicit-continuation predicates, continuation-needed predicates, and prompt text formatting over explicit inputs.
@@ -5632,14 +5642,14 @@ append_trace(task_id, "runtime_task_requested", payload=event_payload)
 
 ### 5. Good/Base/Bad Cases
 
-- Good: The assistant emits `agent.create` with `continue_after:true`; TUI creates the agent, then starts `ga-tui:auto_control_continue` with the control result so the assistant can continue with ledger/delegation/configuration.
+- Good: The assistant emits `agent.create` with `continue_after:true`; TUI creates the agent, then starts `shuheng:auto_control_continue` with the control result so the assistant can continue with ledger/delegation/configuration.
 - Base: The assistant creates an agent as a complete one-step user request without structured continuation metadata; no auto continuation fires.
 - Base: The assistant creates an agent and writes "Step 1" in visible prose but omits structured continuation metadata; no auto continuation fires.
 - Bad: The assistant emits `delegate.create` and TUI immediately starts another main turn before the subagent result arrives.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert structured continuation metadata plus `agent.create` starts a second main-agent prompt with source `ga-tui:auto_control_continue`.
+- `scripts/check_policy_gates.py` must assert structured continuation metadata plus `agent.create` starts a second main-agent prompt with source `shuheng:auto_control_continue`.
 - The continuation prompt must include the control result, the created agent name, and instruction to continue the approved workflow without repeating controls.
 - Existing auto-plan continuation tests must continue to pass and remain primary when a task ledger exists.
 
@@ -5654,7 +5664,7 @@ Visible text says "Step 1.1 create agent" but the control has no continuation me
 #### Correct
 
 ```text
-agent.create includes continue_after:true -> Agent 控制结果 shows success -> ga-tui:auto_control_continue feeds the result back to the orchestrator -> orchestrator emits the next governed controls.
+agent.create includes continue_after:true -> Agent 控制结果 shows success -> shuheng:auto_control_continue feeds the result back to the orchestrator -> orchestrator emits the next governed controls.
 ```
 
 ## Scenario: Scheduled Task Scheduler
@@ -5669,16 +5679,16 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 
 - Schedule registry path: `AGENT_SCHEDULES_PATH`, JSONL rows with `schema_version:"scheduledtask.v1"`.
 - Schedule run audit path: `AGENT_SCHEDULE_RUNS_PATH`, JSONL rows with `schema_version:"scheduledtask.run.v1"`.
-- Implementation module: `src/ga_tui/scheduler.py` owns schedule registry helpers, trigger parsing, due calculation, run audit shaping, tick aggregation, and scheduler text formatting.
-- Composition module: `src/ga_tui/app.py` may re-export scheduler helpers for compatibility, but it supplies mutable TUI dependencies through `configure_scheduler_runtime()` instead of being imported by `scheduler.py`.
+- Implementation module: `src/shuheng/scheduler.py` owns schedule registry helpers, trigger parsing, due calculation, run audit shaping, tick aggregation, and scheduler text formatting.
+- Composition module: `src/shuheng/app.py` may re-export scheduler helpers for compatibility, but it supplies mutable TUI dependencies through `configure_scheduler_runtime()` instead of being imported by `scheduler.py`.
 - TUI commands:
   - `/schedules` shows registry, due state, run count, and last-run state.
   - `/scheduler status` shows scheduler state.
   - `/scheduler tick` evaluates due jobs and records manual skip/invalid outcomes.
   - `/scheduler run <schedule_id>` force-runs one enabled schedule.
 - Supported trigger fields: `at`, `interval`, `cron`, and standardized `trigger` strings prefixed as `at:...`, `interval:...`, or `cron:...`.
-- Users express scheduling intent in natural language. The main model translates that intent into the current `ScheduleCreate` trigger schema before emitting `ga-control.v2`. Schema-outside fields are handled by the generic boundary; active runtime, prompts, docs, user-facing errors, and normal tests should not enumerate retired field names.
-- Daemon tick interval env: `GA_TUI_SCHEDULER_TICK_SECONDS`, minimum 5 seconds, default 30 seconds.
+- Users express scheduling intent in natural language. The main model translates that intent into the current `ScheduleCreate` trigger schema before emitting `shuheng-control.v2`. Schema-outside fields are handled by the generic boundary; active runtime, prompts, docs, user-facing errors, and normal tests should not enumerate retired field names.
+- Daemon tick interval env: `SHUHENG_SCHEDULER_TICK_SECONDS`, minimum 5 seconds, default 30 seconds.
 - MCP resources include `resource://agent-mail/schedules` and `resource://agent-mail/schedule-runs`.
 
 ### 3. Contracts
@@ -5697,7 +5707,7 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Due calculation for interval schedules must use the latest real dispatch attempt (`starting`, `dispatched`, `queued`, `approval_required`, `failed`, or `rejected`) as its anchor. Observation-only rows such as `duplicate`, `skipped`, and `invalid` may be displayed as the latest run, but must not move the next interval due time.
 - Disabled, deleted, cancelled, and canceled schedules are not dispatched.
 - Schedule execution must enter `start_subagent_task()` so policy gates, single-writer locks, task ledger, agent mail, checkpoints, traces, and artifacts remain active.
-- `src/ga_tui/scheduler.py` must not import curses, GenericAgent runtime classes, `StepOutcome`, mutable TUI `State`, or `ga_tui.app`.
+- `src/shuheng/scheduler.py` must not import curses, GenericAgent runtime classes, `StepOutcome`, mutable TUI `State`, or `shuheng.app`.
 - App-layer dependencies required by scheduler execution must be injected through scheduler runtime configuration: JSONL readers/writers, paths, `now_iso`, JSON-safe conversion, default provider lookup, text truncation, TUI beep callback, subagent resolver, and structured subagent dispatch callback.
 - TUI beep emission stays in `app.py` or another UI composition layer; scheduler dispatch calls it through an injected callback so the scheduler module remains UI-free.
 
@@ -5745,9 +5755,9 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Tests must assert the control hint tells the main model to translate natural user intent into new `cron` / `interval` / `at` fields.
 - Tests must assert disabled schedules skip and invalid schedules write audit records without dispatching.
 - Tests must assert MCP/gateway registries include both schedule registry and schedule-run audit paths.
-- Tests must assert `app.py` re-exports key scheduler helpers from `ga_tui.scheduler` and that `src/ga_tui/scheduler.py` does not import curses, GenericAgent runtime classes, `StepOutcome`, mutable TUI `State`, or `ga_tui.app`.
+- Tests must assert `app.py` re-exports key scheduler helpers from `shuheng.scheduler` and that `src/shuheng/scheduler.py` does not import curses, GenericAgent runtime classes, `StepOutcome`, mutable TUI `State`, or `shuheng.app`.
 - Tests that retarget harness paths must reconfigure scheduler runtime paths in the same step, otherwise scheduler JSONL helpers can silently write to the previous harness directory.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/runtime.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/runtime.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
@@ -5768,7 +5778,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 ### 1. Scope / Trigger
 
 - Trigger: A `scheduledtask.v1` row should start an existing workflow run on a timer without adding a second workflow executor.
-- Applies to: `execution.mode:"workflow_run"`, `dispatch_contract:"workflow_run.v1"`, `src/ga_tui/scheduler.py`, `src/ga_tui/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Applies to: `execution.mode:"workflow_run"`, `dispatch_contract:"workflow_run.v1"`, `src/shuheng/scheduler.py`, `src/shuheng/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
 - Non-goal: This does not add parallel/fan-out/fan-in execution, workflow daemon ownership, workflow-specific backoff, workflow timeouts, graph editing, approval auto-resume, plugin code execution, direct tool/model calls, or A2A/MCP workflow service exposure.
 
 ### 2. Signatures
@@ -5848,7 +5858,7 @@ schedule workflow_run -> scheduler.py writes scheduledtask.run.v1 starting -> in
 ### 1. Scope / Trigger
 
 - Trigger: A `scheduledtask.v1` row should periodically run the existing workflow autopilot tick so ready workflow runs can advance without adding a workflow daemon or weakening Orchestrator ownership.
-- Applies to: `execution.mode:"workflow_autopilot"`, `dispatch_contract:"workflow_autopilot.v1"`, `src/ga_tui/scheduler.py`, `src/ga_tui/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `workflow_events.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
+- Applies to: `execution.mode:"workflow_autopilot"`, `dispatch_contract:"workflow_autopilot.v1"`, `src/shuheng/scheduler.py`, `src/shuheng/app.py`, `/scheduler run <schedule_id>`, scheduler ticks, `schedule_runs.jsonl`, `workflow_runs.jsonl`, `workflow_events.jsonl`, `tests/test_scheduler_parsing.py`, `tests/test_workflows.py`, and `scripts/check_policy_gates.py`.
 - Non-goal: This does not add a new daemon, background thread, timer owner, workflow-specific executor, approval auto-resume, approval auto-decision, duplicate subagent dispatch, workflow retry engine, direct model/tool/plugin-code execution, or A2A/MCP workflow service exposure.
 
 ### 2. Signatures
@@ -5945,7 +5955,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 
 ### 2. Signatures
 
-- Shuheng history home defaults to `~/.shuheng`; `SHUHENG_HOME` overrides it, and legacy internal `GA_TUI_HOME` remains an accepted override.
+- Shuheng history home defaults to `~/.shuheng`; `SHUHENG_HOME` overrides it, and legacy internal `SHUHENG_HOME` remains an accepted override.
 - `SHUHENG_MEMORY_DIR` defaults to `~/.shuheng/memory`.
 - `SHUHENG_TEMP_DIR` defaults to `~/.shuheng/temp`.
 - Raw session rows are read from `MODEL_RESPONSES_DIR/model_responses*.txt`, where `MODEL_RESPONSES_DIR` defaults to `~/.shuheng/model_responses`.
@@ -6001,7 +6011,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 - Default import with no env override -> `AGENT_HARNESS_DIR`, `SUBAGENTS_DIR`, `TEMP_SUBAGENTS_DIR`, `SECRET_VAULT_DIR`, and isolated OMP runtime paths are all under `~/.shuheng`.
 - Default import with no GenericAgent checkout -> Shuheng still imports and `shuheng-check` reports OMP core healthy.
 - `SHUHENG_HOME=/tmp/shuheng-home` before import -> Shuheng history paths derive from `/tmp/shuheng-home`.
-- `GA_TUI_HOME=/tmp/compat-home` before import and no `SHUHENG_HOME` -> Shuheng history paths derive from `/tmp/compat-home`.
+- `SHUHENG_HOME=/tmp/compat-home` before import and no `SHUHENG_HOME` -> Shuheng history paths derive from `/tmp/compat-home`.
 - Normal default launch with old GenericAgent session files and empty Shuheng history -> copied Shuheng-owned session files appear in `load_history()` and the sidebar.
 - `SHUHENG_IMPORT_LEGACY=1` with a test/custom Shuheng home -> same non-destructive bootstrap runs against the custom target.
 - Existing Shuheng memory file conflicts with legacy GenericAgent memory file -> Shuheng file remains unchanged.
@@ -6185,12 +6195,12 @@ pack["workspace_context"] = workspace_context
 - Base: A fresh install has an empty/default shared profile that agents can read without inventing personal facts.
 - Bad: A subagent writes its own divergent user-profile file and other agents do not see it.
 - Bad: Secret Vault task text or temporary scratch prompts appear in `user_profile.md`.
-- Bad: The OMP provider imports `ga_tui.app` just to obtain the profile path.
+- Bad: The OMP provider imports `shuheng.app` just to obtain the profile path.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions and Web Console user actions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
 
@@ -6210,13 +6220,13 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 
 ### 1. Scope / Trigger
 
-- Trigger: Shuheng context-pack, memory-hydration, context-layer, prompt-formatting, or context-ref-formatting helper logic is moved out of `src/ga_tui/app.py`.
-- Applies to: `src/ga_tui/context_packs.py`, compatibility wrappers in `src/ga_tui/app.py`, `build_context_pack()`, `memory_context_get`, OMP runtime context/ref prompts, policy gates, and unit tests.
+- Trigger: Shuheng context-pack, memory-hydration, context-layer, prompt-formatting, or context-ref-formatting helper logic is moved out of `src/shuheng/app.py`.
+- Applies to: `src/shuheng/context_packs.py`, compatibility wrappers in `src/shuheng/app.py`, `build_context_pack()`, `memory_context_get`, OMP runtime context/ref prompts, policy gates, and unit tests.
 - Non-goal: This does not move runtime dispatch, Web Console action routing, dashboard rendering, command handlers, storage-root selection, or context-pack artifact writing out of `app.py` unless a later task defines those boundaries explicitly.
 
 ### 2. Signatures
 
-- Lower-level module: `src/ga_tui/context_packs.py`.
+- Lower-level module: `src/shuheng/context_packs.py`.
 - Compatibility wrappers in `app.py`:
   - `compact_nonempty_lines(text, limit=12, width=220)`.
   - `memory_hydration_pack(...)`.
@@ -6228,7 +6238,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 
 ### 3. Contracts
 
-- `context_packs.py` must not import `ga_tui.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
+- `context_packs.py` must not import `shuheng.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, or `RenderLine`.
 - `context_packs.py` owns pure shaping of memory hydration rows, L0-L8 context layers, context-pack prompt text, context-ref prompt text, and small text formatting helpers that can operate from explicit inputs.
 - `app.py` remains the compatibility facade and passes mutable runtime facts explicitly: shared user profile, Shuheng layered memory, workspace context, agent profile/memory refs, progress/task/artifact/trace rows, permission defaults, and security context.
 - `build_context_pack()` still owns runtime orchestration, Secret Vault context-pack writes, normal context-pack artifact writes, and artifact index updates until a separate artifact-writer boundary exists.
@@ -6238,7 +6248,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 
 ### 4. Validation & Error Matrix
 
-- `context_packs.py` imports `ga_tui.app` or `curses` -> policy gate fails.
+- `context_packs.py` imports `shuheng.app` or `curses` -> policy gate fails.
 - `app.py` formatter wrapper produces different prompt text from `context_packs.py` for the same pack and default permission profile -> policy gate fails.
 - `memory_hydration_pack(...)` omits `user.shared-profile`, `shuheng.layered-memory`, or `project.agent-harness` -> unit test or policy gate fails.
 - Workspace context is included -> hydration uses `workspace.project-provenance` as secondary provenance, not primary memory ownership.
@@ -6253,7 +6263,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 - Base: `build_context_pack()` still writes the context-pack artifact through app-owned artifact paths because mutable path retargeting remains in the app facade.
 - Bad: `context_packs.py` imports `State` so it can read `state.current_title` directly.
 - Bad: `context_packs.py` opens `AGENT_TRACES_PATH` directly and inlines raw trace payloads.
-- Bad: A test imports only `ga_tui.app` and never verifies the extracted module boundary.
+- Bad: A test imports only `shuheng.app` and never verifies the extracted module boundary.
 
 ### 6. Tests Required
 
@@ -6268,7 +6278,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 #### Wrong
 
 ```python
-from ga_tui.app import State
+from shuheng.app import State
 
 def context_layers_for_task(state: State, sub):
     traces = read_jsonl(AGENT_TRACES_PATH)
@@ -6332,15 +6342,15 @@ def context_layers_for_task(*, recent_traces, active_session):
 ### 1. Scope / Trigger
 
 - Trigger: Agent clients that are not directly launched by the TUI need Shuheng-owned project context and governed proposal submission.
-- Applies to: `src/ga_tui/agent_bridge.py`, `shuheng-agent-bridge`, `python -m ga_tui.agent_bridge`, repo-managed OMP plugin files under `integrations/omp-ga-tui-plugin`, OMP `--tool` loading, and future Codex/Claude Code adapters that consume the same bridge contract.
+- Applies to: `src/shuheng/agent_bridge.py`, `shuheng-agent-bridge`, `python -m shuheng.agent_bridge`, repo-managed OMP plugin files under `integrations/omp-shuheng-plugin`, OMP `--tool` loading, and future Codex/Claude Code adapters that consume the same bridge contract.
 - Non-goal: This bridge does not make OMP, Codex, Claude Code, or any plugin the owner of long-term memory, approval queues, schedule registries, task ledgers, artifacts, or traces.
 
 ### 2. Signatures
 
-- Python module: `src/ga_tui/agent_bridge.py`.
+- Python module: `src/shuheng/agent_bridge.py`.
 - Console script: `shuheng-agent-bridge`.
-- Module command: `python -m ga_tui.agent_bridge`.
-- Bridge schema: `ga-tui.agent_bridge.v1`.
+- Module command: `python -m shuheng.agent_bridge`.
+- Bridge schema: `shuheng.agent_bridge.v1`.
 - Bridge actions: `metadata`, `query`, `memory_context_get`, `memory_candidate_submit`, and `proposal_submit`.
 - JSON call shape:
 
@@ -6356,38 +6366,38 @@ def context_layers_for_task(*, recent_traces, active_session):
 }
 ```
 
-- OMP plugin package: `integrations/omp-ga-tui-plugin/package.json`.
-- OMP custom tool entry: `integrations/omp-ga-tui-plugin/tools/index.ts`.
-- OMP plugin tools: `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
+- OMP plugin package: `integrations/omp-shuheng-plugin/package.json`.
+- OMP custom tool entry: `integrations/omp-shuheng-plugin/tools/index.ts`.
+- OMP plugin tools: `shuheng_context_get` and `shuheng_memory_candidate_submit`.
 - Environment keys:
-  - `GA_TUI_REPO` or `GA_TUI_ROOT`: Shuheng checkout used by the plugin when locating `src/ga_tui/agent_bridge.py`.
-  - `GA_TUI_BRIDGE_PYTHON`: Python executable used by the OMP plugin, default `python3`.
-  - `GENERICAGENT_ROOT`: optional GenericAgent legacy-provider override consumed by `ga_tui.app` discovery.
-  - `GA_TUI_HARNESS_DIR`: harness directory override for bridge tests or isolated runs.
-  - `GA_TUI_SECRET_VAULT_DIR`: secret vault directory override for bridge tests or isolated runs.
+  - `SHUHENG_REPO` or `SHUHENG_ROOT`: Shuheng checkout used by the plugin when locating `src/shuheng/agent_bridge.py`.
+  - `SHUHENG_BRIDGE_PYTHON`: Python executable used by the OMP plugin, default `python3`.
+  - `GENERICAGENT_ROOT`: optional GenericAgent legacy-provider override consumed by `shuheng.app` discovery.
+  - `SHUHENG_HARNESS_DIR`: harness directory override for bridge tests or isolated runs.
+  - `SHUHENG_SECRET_VAULT_DIR`: secret vault directory override for bridge tests or isolated runs.
 
 ### 3. Contracts
 
 - `AgentBridgeService` must be a thin facade over existing app-owned services; it must not reimplement memory, approval, context-pack, or scheduler governance.
-- `memory_context_get` must call the same app-layer `memory_context_get` query path used by OMP host tools and must return `ga-tui.query.v1` with `context_pack_ref` plus a JSON-safe context pack.
-- `memory_candidate_submit` must call the same governed memory-candidate proposal path as OMP host tools and must return `ga-tui.proposal.v1`.
+- `memory_context_get` must call the same app-layer `memory_context_get` query path used by OMP host tools and must return `shuheng.query.v1` with `context_pack_ref` plus a JSON-safe context pack.
+- `memory_candidate_submit` must call the same governed memory-candidate proposal path as OMP host tools and must return `shuheng.proposal.v1`.
 - Bridge-submitted memory candidates must use source provenance such as `agent:omp_plugin`, not pretend to be direct human or internal TUI writes.
 - Long-term memory writes remain `candidate_only`; the bridge may queue memory candidates and approval rows but must not append to subagent memory files directly.
-- The default OMP usage path should be process-local `omp --tool <repo>/integrations/omp-ga-tui-plugin/tools/index.ts` so a user can test the plugin without linking it into the system OMP plugin store.
-- Persistent `omp plugin link <repo>/integrations/omp-ga-tui-plugin` is optional and must be documented as an explicit user choice.
+- The default OMP usage path should be process-local `omp --tool <repo>/integrations/omp-shuheng-plugin/tools/index.ts` so a user can test the plugin without linking it into the system OMP plugin store.
+- Persistent `omp plugin link <repo>/integrations/omp-shuheng-plugin` is optional and must be documented as an explicit user choice.
 - The OMP plugin must call the bridge CLI with `PYTHONPATH=<repo>/src` so it can run from a checkout without requiring package installation.
 - The OMP plugin must not read or write GA-TUI JSONL stores directly.
 - The OMP plugin must not call `queue_approval`, `queue_curated_memory_candidate`, scheduler helpers, or artifact writers itself; only Python GA-TUI code owns those operations.
-- Bridge metadata must report owner `ga-tui.control_plane`, supported actions, relevant paths, and policy fields showing provider direct writes are disabled.
+- Bridge metadata must report owner `shuheng.control_plane`, supported actions, relevant paths, and policy fields showing provider direct writes are disabled.
 - Bridge metadata paths must distinguish `app_root_dir` from optional `legacy_genericagent_root`; it must not expose a generic `root_dir` that can be mistaken for the Shuheng core root.
 
 ### 4. Validation & Error Matrix
 
-- Bridge payload is not a JSON object -> `ga-tui.agent_bridge.v1` error.
-- Unknown bridge action -> `ga-tui.agent_bridge.v1` error with `supported_actions`.
-- `query` without endpoint -> `ga-tui.agent_bridge.v1` error.
-- `memory_context_get` target not found or ambiguous -> `ga-tui.query.v1` error from the existing app query path.
-- `memory_candidate_submit` without target or statement -> `ga-tui.proposal.v1` error.
+- Bridge payload is not a JSON object -> `shuheng.agent_bridge.v1` error.
+- Unknown bridge action -> `shuheng.agent_bridge.v1` error with `supported_actions`.
+- `query` without endpoint -> `shuheng.agent_bridge.v1` error.
+- `memory_context_get` target not found or ambiguous -> `shuheng.query.v1` error from the existing app query path.
+- `memory_candidate_submit` without target or statement -> `shuheng.proposal.v1` error.
 - `memory_candidate_submit` target is temporary/non-persistent -> no direct memory write; return the existing governed no-op result.
 - Candidate text contains secrets or weak/empty content -> existing Memory Curator rejection path writes a rejected candidate record and no approval row.
 - OMP plugin cannot parse bridge stdout as JSON -> plugin tool execution throws a user-visible tool error instead of fabricating success.
@@ -6395,8 +6405,8 @@ def context_layers_for_task(*, recent_traces, active_session):
 
 ### 5. Good/Base/Bad Cases
 
-- Good: OMP loads `ga_tui_context_get` through `--tool`, requests project context, and receives a context-pack artifact ref without mutating any ledger except the context-pack artifact index.
-- Good: OMP calls `ga_tui_memory_candidate_submit`; GA-TUI validates the target, builds a memory-candidate artifact, appends a pending candidate row, queues a human approval, and records provenance.
+- Good: OMP loads `shuheng_context_get` through `--tool`, requests project context, and receives a context-pack artifact ref without mutating any ledger except the context-pack artifact index.
+- Good: OMP calls `shuheng_memory_candidate_submit`; GA-TUI validates the target, builds a memory-candidate artifact, appends a pending candidate row, queues a human approval, and records provenance.
 - Base: A user links the plugin persistently with `omp plugin link` only after explicitly choosing to let OMP remember the repo-managed plugin.
 - Base: Codex or Claude Code later calls the same bridge action names and gets the same schemas without OMP-specific contract names.
 - Bad: A plugin writes directly to `${SUBAGENTS_DIR}/*/memory.md` or `memory_candidates.jsonl`.
@@ -6405,14 +6415,14 @@ def context_layers_for_task(*, recent_traces, active_session):
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"ga-tui.agent_bridge.v1"`, owner `ga-tui.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
+- `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"shuheng.agent_bridge.v1"`, owner `shuheng.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
 - Tests must assert bridge metadata includes `app_root_dir` and `legacy_genericagent_root` and does not expose ambiguous `root_dir`.
-- Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `ga-tui.query.v1` response with `context_pack_ref`.
-- Tests must assert bridge `memory_candidate_submit` queues a `ga-tui.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
+- Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `shuheng.query.v1` response with `context_pack_ref`.
+- Tests must assert bridge `memory_candidate_submit` queues a `shuheng.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
 - Tests must assert unknown bridge actions return a structured bridge error.
 - Tests must assert the repo-managed OMP plugin manifest points to `tools/index.ts`.
-- Tests must assert the OMP plugin tool source contains `ga_tui_context_get`, `ga_tui_memory_candidate_submit`, `ga_tui.agent_bridge`, and `PYTHONPATH=<repo>/src` wiring.
-- Smoke checks should include `PYTHONPATH=src python3 -m ga_tui.agent_bridge ...`, Bun-loading the plugin tool factory, and a temporary-HOME OMP plugin dry-run or process-local `--tool` smoke so the user's real system OMP config is not mutated.
+- Tests must assert the OMP plugin tool source contains `shuheng_context_get`, `shuheng_memory_candidate_submit`, `shuheng.agent_bridge`, and `PYTHONPATH=<repo>/src` wiring.
+- Smoke checks should include `PYTHONPATH=src python3 -m shuheng.agent_bridge ...`, Bun-loading the plugin tool factory, and a temporary-HOME OMP plugin dry-run or process-local `--tool` smoke so the user's real system OMP config is not mutated.
 
 ### 7. Wrong vs Correct
 
@@ -6433,7 +6443,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng exposes public release, gateway, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
-- Applies to: `src/ga_tui/release_readiness.py`, `src/ga_tui/runtime_evidence.py`, `src/ga_tui/baseline.py`, `src/ga_tui/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and gateway/policy/runtime smoke tests.
+- Applies to: `src/shuheng/release_readiness.py`, `src/shuheng/runtime_evidence.py`, `src/shuheng/baseline.py`, `src/shuheng/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and gateway/policy/runtime smoke tests.
 - Non-goal: This does not certify full A2A/MCP compliance, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
 
 ### 2. Signatures
@@ -6493,7 +6503,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 
 - Public release posture must be explicit: stable local surfaces, experimental surfaces, and known gaps are separate lists.
 - A2A and MCP gateway metadata must use compatibility-surface wording until real third-party client end-to-end tests exist.
-- Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1`.
+- Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1`.
 - Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
 - Runtime/e2e checks must be persisted in `runtime_evidence.jsonl` under the Shuheng-owned `AGENT_HARNESS_DIR`; baseline reports may upgrade an item's strongest evidence level only from passed runtime evidence whose `target_items` match that baseline item.
 - Runtime evidence from local smoke tests is behavioral evidence for Shuheng's local harness path. It must not be described as A2A/MCP protocol certification or third-party client conformance.
@@ -6507,18 +6517,18 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
 - Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or gateway/manual ticks, not by an installed always-on service by default.
 - Release-readiness helpers should remain pure and must not import `app.py`.
-- Runtime evidence, baseline item formatting, and gateway descriptor/resource payload helpers live outside `app.py`. These helper modules must not import `ga_tui.app`; `app.py` owns runtime state, paths, daemon state, HTTP handlers, and compatibility wrapper names.
+- Runtime evidence, baseline item formatting, and gateway descriptor/resource payload helpers live outside `app.py`. These helper modules must not import `shuheng.app`; `app.py` owns runtime state, paths, daemon state, HTTP handlers, and compatibility wrapper names.
 
 ### 4. Validation & Error Matrix
 
 - `/gateway` registry missing `release_readiness` -> release posture regression.
 - Gateway service status is `network_capable` without no-auth/local wording -> overclaiming regression.
-- Non-loopback gateway daemon start without `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` -> failed daemon status with `remote_bind_requires_GA_TUI_GATEWAY_ALLOW_REMOTE_BIND`.
+- Non-loopback gateway daemon start without `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` -> failed daemon status with `remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND`.
 - A2A/MCP status says certified/network-capable without compatibility metadata -> protocol overclaiming regression.
 - Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
 - Direct baseline report rewrites `gateway.json`, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
 - Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
-- `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `ga_tui.app` -> monolith backslide regression.
+- `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `shuheng.app` -> monolith backslide regression.
 - Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
 - Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
 - Release readiness omits `distribution_smoke`, lists only wheel, or marks
@@ -6532,7 +6542,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and loopback HTTP only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
 - Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
 - Base: Local `127.0.0.1` gateway works without auth because it is loopback-only by default.
-- Base: Operator deliberately sets `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
+- Base: Operator deliberately sets `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
 - Bad: README or gateway metadata implies production-ready remote gateway or certified A2A/MCP support without client E2E evidence.
 - Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
 - Bad: A runtime smoke result is printed to stdout but not stored in `runtime_evidence.jsonl`, so later baseline reports cannot audit it.
@@ -6545,12 +6555,12 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
   distribution-smoke metadata for wheel+sdist, dependency-resolving install
   mode, public console scripts, and debug-only non-gate options.
 - Tests must assert gateway service descriptors use `local_no_auth_compatibility_surface`, `security.auth:"none"`, and loopback safety by default.
-- Tests must assert non-loopback gateway daemon start fails unless `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
+- Tests must assert non-loopback gateway daemon start fails unless `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
 - Tests must assert A2A/MCP metadata carries `certification:"not_protocol_certified"`.
 - Tests must assert baseline reports contain evidence model, per-item evidence checks, strongest evidence level, and claim limits.
 - Tests must assert `runtime_evidence.jsonl` is registered in governance paths, MCP resources, and gateway internal-mail metadata.
 - Tests must assert a passed runtime/e2e evidence row upgrades a matching baseline item's `strongest_evidence_level` without changing the protocol-certification wording.
-- Tests must assert extracted release/baseline/gateway helper modules stay independent from `ga_tui.app` and preserve the app compatibility wrapper behavior.
+- Tests must assert extracted release/baseline/gateway helper modules stay independent from `shuheng.app` and preserve the app compatibility wrapper behavior.
 - CI must run `scripts/runtime_smoke.py` as an isolated local smoke path in addition to function-level policy gates.
 - Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating gateway/governance/bridge registry file signatures.
 - Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.

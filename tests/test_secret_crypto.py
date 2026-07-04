@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from ga_tui import app as app_module
-from ga_tui.secret_vault import (
+from shuheng import app as app_module
+from shuheng.secret_vault import (
     LEGACY_SECRET_VAULT_SENTINELS,
     NACL_XCHACHA_ABYTES,
     NACL_XCHACHA_KEYBYTES,

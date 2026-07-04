@@ -1,9 +1,9 @@
 """Tests for curses-free rendering helper transforms."""
 from __future__ import annotations
 
-from ga_tui import app as app_module
-from ga_tui import rendering
-from ga_tui.ui_types import Message, RenderLine
+from shuheng import app as app_module
+from shuheng import rendering
+from shuheng.ui_types import Message, RenderLine
 
 
 def test_running_indicator_frames_wrap_by_modulo() -> None:
@@ -1341,7 +1341,7 @@ def test_app_process_line_wrappers_inject_app_owned_dependencies() -> None:
 def test_app_process_child_detail_wrapper_keeps_control_stripping_app_owned() -> None:
     body = (
         "Visible detail\n"
-        "<ga-control>{\"action\":\"agent.create\",\"params\":{\"name\":\"Hidden\"}}</ga-control>\n"
+        "<shuheng-control>{\"action\":\"agent.create\",\"params\":{\"name\":\"Hidden\"}}</shuheng-control>\n"
         "<summary>hidden summary</summary>"
     )
 
@@ -1351,7 +1351,7 @@ def test_app_process_child_detail_wrapper_keeps_control_stripping_app_owned() ->
         app_module.strip_tui_controls(body),
         app_module.process_preview(body),
     )
-    assert "ga-control" not in detail
+    assert "shuheng-control" not in detail
     assert "Hidden" not in detail
 
 

@@ -54,17 +54,17 @@ dev = [
 ]
 
 [project.scripts]
-shuheng = "ga_tui.cli:main"
-shuheng-agent-bridge = "ga_tui.agent_bridge:main"
-shuheng-check = "ga_tui.integration:doctor_main"
-shuheng-install-core-shim = "ga_tui.integration:install_core_shim_main"
-shuheng-integration = "ga_tui.integration:main"
+shuheng = "shuheng.cli:main"
+shuheng-agent-bridge = "shuheng.agent_bridge:main"
+shuheng-check = "shuheng.integration:doctor_main"
+shuheng-install-core-shim = "shuheng.integration:install_core_shim_main"
+shuheng-integration = "shuheng.integration:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ga_tui" = [
+"shuheng" = [
     "builtin_plugins/shuheng-examples/plugin.json",
     "builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
 ]
@@ -81,7 +81,7 @@ target-version = "py310"
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/ga_tui/app.py" = [
+"src/shuheng/app.py" = [
     "E402",  # Optional legacy runtime import paths are prepared dynamically before imports.
     "F401",  # Imported protocol/provider symbols are intentionally re-exported for compatibility.
     "F402",  # Legacy local names overlap with imports in the large compatibility module.

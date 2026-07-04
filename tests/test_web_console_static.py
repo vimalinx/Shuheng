@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import ga_tui.app as app
-from ga_tui import web_console_static
+import shuheng.app as app
+from shuheng import web_console_static
 
 
 def test_web_console_loader_prefers_explicit_index(tmp_path: Path, monkeypatch) -> None:
