@@ -54,7 +54,7 @@ dev = [
 ]
 
 [project.scripts]
-shuheng = "ga_tui.app:main"
+shuheng = "ga_tui.cli:main"
 shuheng-agent-bridge = "ga_tui.agent_bridge:main"
 shuheng-check = "ga_tui.integration:doctor_main"
 shuheng-install-core-shim = "ga_tui.integration:install_core_shim_main"
