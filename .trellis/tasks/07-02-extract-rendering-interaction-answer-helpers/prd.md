@@ -2,8 +2,8 @@
 
 ## Goal
 
-Continue reducing `src/ga_tui/app.py` by moving deterministic interaction answer
-and prompt text helpers into `src/ga_tui/rendering.py`, while preserving the
+Continue reducing `src/shuheng/app.py` by moving deterministic interaction answer
+and prompt text helpers into `src/shuheng/rendering.py`, while preserving the
 current `app.py` compatibility surface and Orchestrator-owned interaction
 state/approval behavior.
 
@@ -11,7 +11,7 @@ state/approval behavior.
 
 - Move only pure interaction answer/prompt text helpers that do not mutate
   runtime state, write ledgers, call approvals, or depend on curses.
-- Preserve public compatibility names from `ga_tui.app` for existing tests and
+- Preserve public compatibility names from `shuheng.app` for existing tests and
   downstream imports.
 - Keep interaction request extraction, payload normalization, current question
   traversal, selection mutation, `State.pending_interaction`, approval decisions,
@@ -27,9 +27,9 @@ state/approval behavior.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns deterministic helpers for interaction
+- [ ] `src/shuheng/rendering.py` owns deterministic helpers for interaction
       answer resolution, multi-question answer formatting, and prompt text.
-- [ ] `src/ga_tui/app.py` exposes compatibility aliases or thin wrappers and
+- [ ] `src/shuheng/app.py` exposes compatibility aliases or thin wrappers and
       keeps all state mutation and approval handling.
 - [ ] `tests/test_rendering.py` covers the direct helpers and app parity.
 - [ ] `scripts/check_policy_gates.py` verifies helper ownership, representative

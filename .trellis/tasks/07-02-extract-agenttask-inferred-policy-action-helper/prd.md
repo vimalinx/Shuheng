@@ -2,7 +2,7 @@
 
 ## Requirement
 
-Continue Goal 7 by moving the deterministic policy-action inference rules for subagent tasks out of `src/ga_tui/app.py` and into `src/ga_tui/control_protocol.py`, while keeping app-owned runtime state, role objects, approval decisions, queueing, and ledger side effects in `app.py`.
+Continue Goal 7 by moving the deterministic policy-action inference rules for subagent tasks out of `src/shuheng/app.py` and into `src/shuheng/control_protocol.py`, while keeping app-owned runtime state, role objects, approval decisions, queueing, and ledger side effects in `app.py`.
 
 The lower-level protocol helper should preserve the current inference order:
 

@@ -2,14 +2,14 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving the pure recent-history row selection helper into `src/ga_tui/history_store.py`, using the existing `path_utils` boundary for path normalization and preserving sidebar/home history behavior.
+Continue decomposing `src/shuheng/app.py` by moving the pure recent-history row selection helper into `src/shuheng/history_store.py`, using the existing `path_utils` boundary for path normalization and preserving sidebar/home history behavior.
 
 ## Requirements
 
-- Extend `src/ga_tui/history_store.py`.
+- Extend `src/shuheng/history_store.py`.
 - Move pure helper:
   - `recent_history_items(history_entries, used_paths, limit)`
-- Keep `src/ga_tui/app.py` compatibility wrapper with the existing default `RECENT_SESSION_LIMIT`.
+- Keep `src/shuheng/app.py` compatibility wrapper with the existing default `RECENT_SESSION_LIMIT`.
 - Preserve current semantics:
   - Only rows with positive activity timestamps are eligible.
   - Rows whose normalized path is already in `used_paths` are excluded.
@@ -20,9 +20,9 @@ Continue decomposing `src/ga_tui/app.py` by moving the pure recent-history row s
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.history_store` owns `recent_history_items`.
-- [ ] `ga_tui.app.recent_history_items` remains behavior-compatible and preserves the old default limit.
-- [ ] `history_store.py` may depend on `path_utils.py` but still does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- [ ] `shuheng.history_store` owns `recent_history_items`.
+- [ ] `shuheng.app.recent_history_items` remains behavior-compatible and preserves the old default limit.
+- [ ] `history_store.py` may depend on `path_utils.py` but still does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 - [ ] Unit tests cover sorting, zero-timestamp exclusion, used-path de-duplication, limit behavior, and app wrapper parity.
 - [ ] Existing policy gates around recent history and history-store boundaries continue to pass.
 - [ ] Phase exit verification passes.

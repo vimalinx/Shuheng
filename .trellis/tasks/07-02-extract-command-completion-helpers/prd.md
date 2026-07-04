@@ -3,8 +3,8 @@
 ## Goal
 
 Continue Goal 7 by moving deterministic command-completion helpers out of
-`src/ga_tui/app.py` into a lower-level `src/ga_tui/commands.py` module, while
-preserving executable behavior and the existing `ga_tui.app` compatibility
+`src/shuheng/app.py` into a lower-level `src/shuheng/commands.py` module, while
+preserving executable behavior and the existing `shuheng.app` compatibility
 surface.
 
 ## What I Already Know
@@ -18,11 +18,11 @@ surface.
   option constants, completion insertion text, archived-view completion, and
   workspace completion.
 - `app.py` must keep public aliases/wrappers because tests and policy gates
-  still import many helpers from `ga_tui.app`.
+  still import many helpers from `shuheng.app`.
 
 ## Requirements
 
-- Add `src/ga_tui/commands.py` as a lower-level module for pure command
+- Add `src/shuheng/commands.py` as a lower-level module for pure command
   completion constants/helpers.
 - Move these pure symbols into `commands.py`:
   - `AGENT_SUBCOMMANDS`
@@ -40,7 +40,7 @@ surface.
 - Keep `app.py` compatibility aliases for moved constants/functions.
 - Add unit tests for direct `commands.py` behavior and app compatibility parity.
 - Add a policy gate proving `commands.py` owns the moved helpers and does not
-  import `ga_tui.app`, curses, mutable `State`, rendering, runtime dispatch, Web
+  import `shuheng.app`, curses, mutable `State`, rendering, runtime dispatch, Web
   Console, dashboard, Secret Vault, governance stores, or history stores.
 - Update `.trellis/spec/backend/agent-control-protocol.md` with the durable
   command-completion boundary.
@@ -58,8 +58,8 @@ surface.
 
 ## Acceptance Criteria
 
-- `src/ga_tui/commands.py` exists and contains the scoped helpers.
-- `src/ga_tui/app.py` imports/re-exports the moved helpers and still delegates
+- `src/shuheng/commands.py` exists and contains the scoped helpers.
+- `src/shuheng/app.py` imports/re-exports the moved helpers and still delegates
   existing completion call sites correctly.
 - Targeted tests for `commands.py` pass.
 - `scripts/check_policy_gates.py` covers the new command module boundary.

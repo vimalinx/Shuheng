@@ -2,15 +2,15 @@
 
 ## Requirement
 
-Continue Goal 7 app decomposition by moving deterministic `/agent` command completion decision logic from `src/ga_tui/app.py` into the lower-level `src/ga_tui/commands.py` module.
+Continue Goal 7 app decomposition by moving deterministic `/agent` command completion decision logic from `src/shuheng/app.py` into the lower-level `src/shuheng/commands.py` module.
 
 This slice must preserve existing command-completion behavior while making `commands.py` responsible for deciding what kind of `/agent` completion is requested from raw input text. `app.py` remains the Orchestrator facade that expands those decisions using mutable UI/runtime state.
 
 ## Scope
 
-- Add a pure `/agent` completion decision helper in `src/ga_tui/commands.py`.
+- Add a pure `/agent` completion decision helper in `src/shuheng/commands.py`.
 - Keep command metadata already extracted in `commands.py`.
-- Keep dynamic stateful expansion in `src/ga_tui/app.py`:
+- Keep dynamic stateful expansion in `src/shuheng/app.py`:
   - current subagent rows
   - role template rows
   - category rows
@@ -45,8 +45,8 @@ This slice must preserve existing command-completion behavior while making `comm
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/commands.py tests/test_commands.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/commands.py tests/test_commands.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/commands.py tests/test_commands.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/commands.py tests/test_commands.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_commands.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit:

@@ -2,8 +2,8 @@
 
 ## Goal
 
-Continue reducing `src/ga_tui/app.py` by moving the deterministic process-title
-choice policy into `src/ga_tui/rendering.py`, while preserving `app.py` as the
+Continue reducing `src/shuheng/app.py` by moving the deterministic process-title
+choice policy into `src/shuheng/rendering.py`, while preserving `app.py` as the
 owner of process body parsing, tool-name extraction, search-noise detection,
 process grouping, and runtime/curses behavior.
 
@@ -27,8 +27,8 @@ process grouping, and runtime/curses behavior.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns `process_title_text_from_parts(...)`.
-- [ ] `src/ga_tui/app.py` exposes `process_title_text_from_parts` as a
+- [ ] `src/shuheng/rendering.py` owns `process_title_text_from_parts(...)`.
+- [ ] `src/shuheng/app.py` exposes `process_title_text_from_parts` as a
       compatibility alias and keeps `process_title_text(...)` as an app-owned
       parser wrapper.
 - [ ] Summary-first, search-noise fallback, and preview fallback behavior are

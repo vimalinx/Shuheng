@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move deterministic control-result continuation helpers out of `src/ga_tui/app.py` and into `src/ga_tui/control_protocol.py`, preserving current behavior and keeping `app.py` as the Orchestrator owner for mutable state and runtime side effects.
+Move deterministic control-result continuation helpers out of `src/shuheng/app.py` and into `src/shuheng/control_protocol.py`, preserving current behavior and keeping `app.py` as the Orchestrator owner for mutable state and runtime side effects.
 
 ## Scope
 
@@ -20,7 +20,7 @@ Move deterministic control-result continuation helpers out of `src/ga_tui/app.py
 - Do not move `maybe_queue_orchestrator_plan_continuation(...)`.
 - Do not move `apply_tui_controls_from_text(...)` or `apply_subagent_control(...)`.
 - Do not move `State`, `add_system(...)`, `start_main_agent_task(...)`, auto-continuation counters, task ledgers, approvals, artifacts, history, Secret Vault behavior, Web Console, dashboard, rendering, commands, or storage roots.
-- Do not change `ga-control.v2` parsing semantics, action mapping, or subagent lifecycle/reuse behavior.
+- Do not change `shuheng-control.v2` parsing semantics, action mapping, or subagent lifecycle/reuse behavior.
 
 ## Behavior To Preserve
 
@@ -29,7 +29,7 @@ Move deterministic control-result continuation helpers out of `src/ga_tui/app.py
 - Visible prose must never trigger continuation.
 - `subagent_ask`, `subagent_run`, `subagent_input`, `agent_ask`, and `agent_run` controls must not trigger the fallback continuation path.
 - Continuation only applies to the current continuation action set.
-- The prompt block text must keep the current `[GA TUI Control Result Continuation]` wrapper, control results, optional visible text, and instruction not to repeat successful controls.
+- The prompt block text must keep the current `[Shuheng Control Result Continuation]` wrapper, control results, optional visible text, and instruction not to repeat successful controls.
 
 ## Verification
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move the pure latest-visible-reply selection logic out of `src/ga_tui/app.py` and into `src/ga_tui/rendering.py`, while preserving existing behavior through an `app.py` compatibility wrapper.
+Move the pure latest-visible-reply selection logic out of `src/shuheng/app.py` and into `src/shuheng/rendering.py`, while preserving existing behavior through an `app.py` compatibility wrapper.
 
 ## Scope
 
@@ -25,9 +25,9 @@ Move the pure latest-visible-reply selection logic out of `src/ga_tui/app.py` an
 
 ## Acceptance Criteria
 
-- `src/ga_tui/rendering.py` owns the lower-level latest visible reply helper.
-- `src/ga_tui/app.py` keeps a same-name compatibility wrapper.
-- `rendering.py` remains free of `ga_tui.app`, curses, mutable `State`, runtime dispatch, Web Console/dashboard handlers, storage roots, and ledger writes.
+- `src/shuheng/rendering.py` owns the lower-level latest visible reply helper.
+- `src/shuheng/app.py` keeps a same-name compatibility wrapper.
+- `rendering.py` remains free of `shuheng.app`, curses, mutable `State`, runtime dispatch, Web Console/dashboard handlers, storage roots, and ledger writes.
 - Unit tests prove:
   - latest turn body wins when it has visible content;
   - empty latest process turns fall back to earlier visible turns;

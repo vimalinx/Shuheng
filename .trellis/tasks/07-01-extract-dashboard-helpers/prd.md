@@ -2,11 +2,11 @@
 
 ## Goal
 
-Start the `dashboard.py` decomposition phase by moving pure dashboard schema and normalization helpers out of `src/ga_tui/app.py`, while keeping stateful `State`/`SubAgentRuntime` projections, curses rendering, and home-line construction in `app.py`.
+Start the `dashboard.py` decomposition phase by moving pure dashboard schema and normalization helpers out of `src/shuheng/app.py`, while keeping stateful `State`/`SubAgentRuntime` projections, curses rendering, and home-line construction in `app.py`.
 
 ## Requirements
 
-- Create `src/ga_tui/dashboard.py`.
+- Create `src/shuheng/dashboard.py`.
 - Move pure dashboard helper constants/functions:
   - `SUPPORTED_DASHBOARD_SECTIONS`
   - `DEFAULT_DASHBOARD_SECTIONS`
@@ -15,14 +15,14 @@ Start the `dashboard.py` decomposition phase by moving pure dashboard schema and
   - `normalize_dashboard_sections(raw_sections)`
   - `normalize_dashboard_spec_payload(control, source, target)`
   - `dashboard_cache_signature(raw)`
-- Keep `src/ga_tui/app.py` compatibility aliases for moved names.
+- Keep `src/shuheng/app.py` compatibility aliases for moved names.
 - Preserve current `dashboard.v1` payload shape, section filtering, todo normalization, provenance fields, text bounds, and JSON signature behavior.
 - Add unit tests and policy gates for the new module boundary.
 - Update `.trellis/spec/backend/agent-control-protocol.md` with the dashboard helper boundary.
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.dashboard` imports without `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw functions.
+- [ ] `shuheng.dashboard` imports without `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw functions.
 - [ ] `app` exposes the moved constants/functions as direct aliases or behavior-identical wrappers.
 - [ ] Tests prove section normalization accepts string/dict inputs, filters unsupported sections, bounds title/markdown text, and preserves supported markdown.
 - [ ] Tests prove dashboard spec payload normalization includes schema, timestamp, source, target, provenance task/artifact refs, sections, status, todos, and markdown.
@@ -58,5 +58,5 @@ Consequences: Future dashboard/home extraction gets a stable lower-level base wi
 ## Technical Notes
 
 - Relevant decomposition plan: `docs/app-py-decomposition-plan.md`, Phase 6.
-- Existing dashboard helper cluster starts around the `SUPPORTED_DASHBOARD_SECTIONS` definition in `src/ga_tui/app.py`.
+- Existing dashboard helper cluster starts around the `SUPPORTED_DASHBOARD_SECTIONS` definition in `src/shuheng/app.py`.
 - `normalize_dashboard_spec_payload(...)` needs a timestamp; the new module should use a lower-level time helper and must not import `app.py`.

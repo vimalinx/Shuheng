@@ -3,13 +3,13 @@
 ## Goal
 
 Continue Goal 7 app.py decomposition by moving the deterministic vertical input
-cursor target calculation out of `src/ga_tui/app.py` and into the lower-level
-`src/ga_tui/input_controller.py` helper boundary, while preserving the existing
+cursor target calculation out of `src/shuheng/app.py` and into the lower-level
+`src/shuheng/input_controller.py` helper boundary, while preserving the existing
 `move_input_cursor_vertical(...)` public behavior in `app.py`.
 
 ## Requirements
 
-- Add a pure helper to `src/ga_tui/input_controller.py` that calculates the next
+- Add a pure helper to `src/shuheng/input_controller.py` that calculates the next
   raw cursor index for vertical input movement over explicit text, width, cursor,
   and direction inputs.
 - Preserve the existing behavior exactly:
@@ -20,7 +20,7 @@ cursor target calculation out of `src/ga_tui/app.py` and into the lower-level
   - moving to an available wrapped line keeps the same display cell x as closely
     as possible, including wide and combining characters
   - raw cursor output is clamped to the source text length
-- Keep `src/ga_tui/app.py` as the compatibility and Orchestrator facade:
+- Keep `src/shuheng/app.py` as the compatibility and Orchestrator facade:
   - `move_input_cursor_vertical(state, width, direction)` still mutates
     `state.input_cursor`, calls `clamp_input_cursor(state)`, calls
     `mark_dirty(state)` whenever an in-range target cursor is produced, and
@@ -30,13 +30,13 @@ cursor target calculation out of `src/ga_tui/app.py` and into the lower-level
 
 ## Acceptance Criteria
 
-- `src/ga_tui/input_controller.py` owns the pure vertical cursor target helper.
-- `src/ga_tui/app.py` exposes the helper as a compatibility alias or wrapper and
+- `src/shuheng/input_controller.py` owns the pure vertical cursor target helper.
+- `src/shuheng/app.py` exposes the helper as a compatibility alias or wrapper and
   no longer keeps duplicate pure target-calculation logic inline.
 - `move_input_cursor_vertical(...)` continues to own only app state mutation,
   dirty marking, and compatibility behavior.
 - Existing public helper names and key-handler call sites keep working.
-- Policy gates fail if `input_controller.py` imports `ga_tui.app`, curses,
+- Policy gates fail if `input_controller.py` imports `shuheng.app`, curses,
   mutable `State`, rendering types, command handlers, Web Console, dashboard, or
   runtime-dispatch owners.
 
@@ -69,8 +69,8 @@ cursor target calculation out of `src/ga_tui/app.py` and into the lower-level
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit: full Ruff, release hygiene, runtime smoke,
@@ -89,5 +89,5 @@ dashboard, and drawing.
 ## Rollback
 
 Revert the scoped commit or restore the target-calculation body in
-`src/ga_tui/app.py` if vertical cursor movement changes or
+`src/shuheng/app.py` if vertical cursor movement changes or
 `input_controller.py` gains forbidden dependencies.

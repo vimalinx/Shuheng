@@ -2,16 +2,16 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving pure subagent chat metadata/ref constants and matching logic into `src/ga_tui/subagent_store.py`, without moving conversation transcript ownership out of global Shuheng history.
+Continue decomposing `src/shuheng/app.py` by moving pure subagent chat metadata/ref constants and matching logic into `src/shuheng/subagent_store.py`, without moving conversation transcript ownership out of global Shuheng history.
 
 ## Requirements
 
-- Extend `src/ga_tui/subagent_store.py`.
+- Extend `src/shuheng/subagent_store.py`.
 - Move or re-home pure metadata/ref definitions:
   - `SUBAGENT_CHAT_HISTORY_SCOPE`
   - `SUBAGENT_CHAT_MESSAGES_META_KEY`
   - parameterized subagent chat history metadata matcher
-- Keep `src/ga_tui/app.py` compatibility constants/wrapper:
+- Keep `src/shuheng/app.py` compatibility constants/wrapper:
   - `SUBAGENT_CHAT_HISTORY_SCOPE`
   - `SUBAGENT_CHAT_MESSAGES_META_KEY`
   - `subagent_chat_history_meta_matches(meta, sub, session_id="")`
@@ -26,8 +26,8 @@ Continue decomposing `src/ga_tui/app.py` by moving pure subagent chat metadata/r
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.subagent_store` owns the subagent chat history scope constant and pure metadata matcher.
-- [ ] `ga_tui.app` preserves existing public constant values and wrapper behavior.
+- [ ] `shuheng.subagent_store` owns the subagent chat history scope constant and pure metadata matcher.
+- [ ] `shuheng.app` preserves existing public constant values and wrapper behavior.
 - [ ] New helper does not read `MODEL_RESPONSES_DIR`, write transcripts, parse transcript files, or inspect Secret Vault payloads.
 - [ ] Unit tests cover matching scope, wrong agent rejection, optional session id behavior, app wrapper parity, and absence of transcript ownership in `subagent_store.py`.
 - [ ] Phase exit verification passes.

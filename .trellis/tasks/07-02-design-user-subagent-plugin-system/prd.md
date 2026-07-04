@@ -30,7 +30,7 @@ For this feature, a plugin should be a local package that can contribute one or 
 
 - Agent templates: reusable agent name/profile/role/default skills/default dashboard/default model hints.
 - Dedicated skill packs: prompt/SOP/knowledge files attachable to specific subagents.
-- Workflow prompts: reusable task templates that create/delegate work through existing `ga-control.v2` / `agenttask.v2` paths.
+- Workflow prompts: reusable task templates that create/delegate work through existing `shuheng-control.v2` / `agenttask.v2` paths.
 - Read-only metadata surfaces: summaries for `/plugins`, `/agent info`, Web Console, gateway/A2A cards.
 
 It should not initially mean arbitrary Python/JS execution unless we explicitly choose that as a later, approval-gated phase.
@@ -116,7 +116,7 @@ Suggested manifest skeleton:
 
 ## Implementation Notes
 
-- Added `src/ga_tui/plugins.py` as a pure declarative registry module for local `plugin.json` discovery, manifest validation, stable `plugin://...` refs, metadata formatting, and manifest-declared local path resolution.
+- Added `src/shuheng/plugins.py` as a pure declarative registry module for local `plugin.json` discovery, manifest validation, stable `plugin://...` refs, metadata formatting, and manifest-declared local path resolution.
 - Added `SHUHENG_PLUGINS_DIR = os.path.join(SHUHENG_HOME, "plugins")` plus cached `user_plugin_registry(...)` wrappers in `app.py`.
 - Wired plugin skills into existing per-agent `skill_refs`, context packs, and `/agent plugin ...` commands without introducing a separate `plugin_refs` field.
 - Added `/plugins`, `/plugin info`, `/plugin template`, and `/plugin create` command surfaces. Agent templates still flow through `create_subagent(...)` and `set_subagent_skill_refs(...)`.
@@ -142,7 +142,7 @@ Suggested manifest skeleton:
 ## Technical Notes
 
 - Existing dedicated skill spec: `.trellis/spec/backend/agent-control-protocol.md` Scenario `Per-Agent Dedicated Skills`.
-- Existing skill resolution code: `src/ga_tui/app.py` around `subagent_skill_roots()`, `subagent_skill_file_for_ref(...)`, `subagent_skill_pack_for_refs(...)`, and `set_subagent_skill_refs(...)`.
-- Existing normalization owner: `src/ga_tui/subagent_store.py::normalize_subagent_skill_refs(...)`.
+- Existing skill resolution code: `src/shuheng/app.py` around `subagent_skill_roots()`, `subagent_skill_file_for_ref(...)`, `subagent_skill_pack_for_refs(...)`, and `set_subagent_skill_refs(...)`.
+- Existing normalization owner: `src/shuheng/subagent_store.py::normalize_subagent_skill_refs(...)`.
 - Existing policy gate: `scripts/check_policy_gates.py::assert_subagent_dedicated_skills_are_agent_scoped`.
-- Existing bridge boundary: `src/ga_tui/agent_bridge.py` is explicitly a thin facade and should not own plugin governance.
+- Existing bridge boundary: `src/shuheng/agent_bridge.py` is explicitly a thin facade and should not own plugin governance.

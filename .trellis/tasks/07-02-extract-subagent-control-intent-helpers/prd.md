@@ -2,13 +2,13 @@
 
 ## Goal
 
-Move the deterministic subagent control intent helpers out of `src/ga_tui/app.py` and into the protocol parsing boundary, while preserving executable behavior and the public compatibility surface.
+Move the deterministic subagent control intent helpers out of `src/shuheng/app.py` and into the protocol parsing boundary, while preserving executable behavior and the public compatibility surface.
 
 ## Scope
 
-- Extract `subagent_control_persistence_intent(...)` into `src/ga_tui/control_protocol.py`.
-- Extract `subagent_control_force_new_intent(...)` into `src/ga_tui/control_protocol.py`.
-- Keep `src/ga_tui/app.py` re-export aliases for both names.
+- Extract `subagent_control_persistence_intent(...)` into `src/shuheng/control_protocol.py`.
+- Extract `subagent_control_force_new_intent(...)` into `src/shuheng/control_protocol.py`.
+- Keep `src/shuheng/app.py` re-export aliases for both names.
 - Keep `apply_subagent_control(...)` and `register_subagent_control_aliases(...)` in `app.py`.
 - Add direct tests for protocol helper behavior and app alias parity.
 - Update policy gates and backend spec text so the ownership boundary is executable and documented.
@@ -38,8 +38,8 @@ Move the deterministic subagent control intent helpers out of `src/ga_tui/app.py
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gates when feasible: full Ruff, release hygiene, runtime smoke, compileall, `git diff --check`, full pytest, package build, wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent`.

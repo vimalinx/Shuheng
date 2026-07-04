@@ -2,7 +2,7 @@
 
 ## Objective
 
-Continue decomposing `src/ga_tui/app.py` by moving pure checkpoint/recovery read-model helpers into `src/ga_tui/governance.py` while preserving `app.py` compatibility wrappers and existing runtime behavior.
+Continue decomposing `src/shuheng/app.py` by moving pure checkpoint/recovery read-model helpers into `src/shuheng/governance.py` while preserving `app.py` compatibility wrappers and existing runtime behavior.
 
 ## Scope
 
@@ -15,7 +15,7 @@ Continue decomposing `src/ga_tui/app.py` by moving pure checkpoint/recovery read
   - `read_checkpoint_snapshot`
   - `recovery_replay_steps`
 - Keep same public names in `app.py` as wrappers that inject current app-owned ledger/checkpoint paths.
-- Keep helpers lower-level than the TUI: no `ga_tui.app` import, no curses import, no mutable `State`, no runtime classes, no rendering/panel/command code.
+- Keep helpers lower-level than the TUI: no `shuheng.app` import, no curses import, no mutable `State`, no runtime classes, no rendering/panel/command code.
 - Add direct unit tests for the lower-level helpers and wrapper parity checks for retargeted app paths.
 - Update policy gates and backend spec boundary text so checkpoint/recovery helper ownership is explicit.
 

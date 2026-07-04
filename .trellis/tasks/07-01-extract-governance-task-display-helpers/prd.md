@@ -2,7 +2,7 @@
 
 ## Objective
 
-Continue decomposing `src/ga_tui/app.py` by moving pure task-ledger display helper logic into `src/ga_tui/governance.py`, while keeping `app.py` wrappers responsible for mutable app-owned owner-name lookup.
+Continue decomposing `src/shuheng/app.py` by moving pure task-ledger display helper logic into `src/shuheng/governance.py`, while keeping `app.py` wrappers responsible for mutable app-owned owner-name lookup.
 
 ## Scope
 

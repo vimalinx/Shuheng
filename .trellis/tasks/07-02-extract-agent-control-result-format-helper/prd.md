@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move the deterministic agent-control result line formatter out of `src/ga_tui/app.py` and into `src/ga_tui/control_protocol.py`, preserving current visible result strings and keeping `app.py` as the Orchestrator owner for control execution and mutable state.
+Move the deterministic agent-control result line formatter out of `src/shuheng/app.py` and into `src/shuheng/control_protocol.py`, preserving current visible result strings and keeping `app.py` as the Orchestrator owner for control execution and mutable state.
 
 ## Scope
 
@@ -22,7 +22,7 @@ Move the deterministic agent-control result line formatter out of `src/ga_tui/ap
 - Do not move `apply_tui_controls_from_text(...)`.
 - Do not move `record_control_result(...)` or its nested state mutation.
 - Do not move `apply_dashboard_control(...)`, `apply_schedule_control(...)`, `apply_task_control(...)`, `apply_subagent_control(...)`, or session operation execution.
-- Do not change control parsing, ga-control schema handling, continuation behavior, system-message persistence, `State.last_error`, dirty marking, ledgers, approvals, artifacts, history, Secret Vault, Web Console, dashboard, rendering, commands, or storage roots.
+- Do not change control parsing, shuheng-control schema handling, continuation behavior, system-message persistence, `State.last_error`, dirty marking, ledgers, approvals, artifacts, history, Secret Vault, Web Console, dashboard, rendering, commands, or storage roots.
 
 ## Behavior To Preserve
 
@@ -34,8 +34,8 @@ Move the deterministic agent-control result line formatter out of `src/ga_tui/ap
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - When feasible for the slice, run full Ruff, release hygiene, runtime smoke, compileall, `git diff --check`, full pytest, package build, wheel/sdist smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent`.

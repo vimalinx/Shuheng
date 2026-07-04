@@ -2,12 +2,12 @@
 
 ## Goal
 
-Continue Goal 7 by moving deterministic subagent-result context-update text helpers out of `src/ga_tui/app.py` into the lower-level curses-free rendering helper boundary, while preserving app-owned ledger/session injection and existing behavior.
+Continue Goal 7 by moving deterministic subagent-result context-update text helpers out of `src/shuheng/app.py` into the lower-level curses-free rendering helper boundary, while preserving app-owned ledger/session injection and existing behavior.
 
 ## What I Already Know
 
-- `src/ga_tui/app.py` currently owns `subagent_result_reply_excerpt(...)`, `format_subagent_result_context_update(...)`, `subagent_result_context_update_from_notice(...)`, and `subagent_context_updates_from_messages(...)`.
-- Recent slices already moved subagent result notice parsing, metadata splitting, metadata summary/detail strings, notice-body shaping, and final notice assembly into `src/ga_tui/rendering.py`.
+- `src/shuheng/app.py` currently owns `subagent_result_reply_excerpt(...)`, `format_subagent_result_context_update(...)`, `subagent_result_context_update_from_notice(...)`, and `subagent_context_updates_from_messages(...)`.
+- Recent slices already moved subagent result notice parsing, metadata splitting, metadata summary/detail strings, notice-body shaping, and final notice assembly into `src/shuheng/rendering.py`.
 - `format_subagent_result_context_update(...)` still mixes deterministic text assembly with app-owned task-ledger lookups via `latest_task_records()`.
 - `subagent_context_updates_from_messages(...)` still mixes deterministic de-duplication/budget selection with app-owned `Message` objects and `session_key(path)` injection.
 - `docs/agent-harness-architecture.md` requires a strong Orchestrator: ledgers, approvals, artifacts, history, and side effects must remain app-owned or in governed service modules.
@@ -20,11 +20,11 @@ Continue Goal 7 by moving deterministic subagent-result context-update text help
 
 ## Requirements
 
-- Add a pure helper in `src/ga_tui/rendering.py` that builds a reply excerpt and metadata line tuple from an already-rendered subagent result body and an explicit limit.
-- Add a pure helper in `src/ga_tui/rendering.py` that extracts the first `Confidence` metadata value from already-parsed metadata lines, preserving inline-markdown cleanup and truncation behavior.
-- Add a pure helper in `src/ga_tui/rendering.py` that formats the final context-update text from explicit `session_key_value`, subagent identity, task/artifact ids, parent/plan ids, role, confidence, and reply excerpt.
-- Add a pure helper in `src/ga_tui/rendering.py` that selects bounded context-update strings from an explicit list using the existing newest-first, de-duplicate, count limit, and total-character budget behavior.
-- Keep `src/ga_tui/app.py` as the compatibility facade:
+- Add a pure helper in `src/shuheng/rendering.py` that builds a reply excerpt and metadata line tuple from an already-rendered subagent result body and an explicit limit.
+- Add a pure helper in `src/shuheng/rendering.py` that extracts the first `Confidence` metadata value from already-parsed metadata lines, preserving inline-markdown cleanup and truncation behavior.
+- Add a pure helper in `src/shuheng/rendering.py` that formats the final context-update text from explicit `session_key_value`, subagent identity, task/artifact ids, parent/plan ids, role, confidence, and reply excerpt.
+- Add a pure helper in `src/shuheng/rendering.py` that selects bounded context-update strings from an explicit list using the existing newest-first, de-duplicate, count limit, and total-character budget behavior.
+- Keep `src/shuheng/app.py` as the compatibility facade:
   - `subagent_result_reply_excerpt(...)` keeps injecting `render_subagent_result_body(...)` and the default `SUBAGENT_CONTEXT_REPLY_LIMIT`.
   - `format_subagent_result_context_update(...)` keeps injecting `latest_task_records()` task/parent/plan/role fields.
   - `subagent_result_context_update_from_notice(...)` keeps parsing notices and passing app-owned session defaults.
@@ -37,10 +37,10 @@ Continue Goal 7 by moving deterministic subagent-result context-update text help
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns pure helpers for subagent result reply excerpt shaping, context-update confidence extraction, final context-update text assembly, and bounded update selection.
-- [ ] `src/ga_tui/app.py` exposes compatibility aliases or wrappers for the public helper names and has no local duplicate implementation for newly moved pure helpers.
+- [ ] `src/shuheng/rendering.py` owns pure helpers for subagent result reply excerpt shaping, context-update confidence extraction, final context-update text assembly, and bounded update selection.
+- [ ] `src/shuheng/app.py` exposes compatibility aliases or wrappers for the public helper names and has no local duplicate implementation for newly moved pure helpers.
 - [ ] App-owned wrappers continue to inject rendered subagent bodies, task-ledger fields, session keys, and `Message` traversal.
-- [ ] `rendering.py` does not import `ga_tui.app`, curses, mutable `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, draw functions, storage-root owners, task ledgers, or artifact IO.
+- [ ] `rendering.py` does not import `shuheng.app`, curses, mutable `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, draw functions, storage-root owners, task ledgers, or artifact IO.
 - [ ] Tests cover direct helper output, app wrapper dependency injection/parity, long excerpt truncation, confidence cleanup, duplicate/update-budget selection, and existing notice-to-context behavior.
 - [ ] Policy gates cover helper ownership, representative behavior, wrapper parity, duplicate-definition absence, and the rendering no-reverse-dependency boundary.
 - [ ] Targeted tests, policy gates, full tests, release hygiene, package build, wheel smoke, `git diff --check`, and `shuheng-check` pass.
@@ -55,7 +55,7 @@ Continue Goal 7 by moving deterministic subagent-result context-update text help
 
 ## Technical Approach
 
-- Keep the extraction in `src/ga_tui/rendering.py` because these helpers are deterministic text transforms tied to the existing notice/metadata helper group.
+- Keep the extraction in `src/shuheng/rendering.py` because these helpers are deterministic text transforms tied to the existing notice/metadata helper group.
 - Use explicit inputs for every app-owned dependency:
   - already-rendered body text for excerpt shaping;
   - metadata lines for confidence extraction;

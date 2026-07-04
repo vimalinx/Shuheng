@@ -2,15 +2,15 @@
 
 ## Goal
 
-Rewrite the repository README so it clearly explains what GenericAgent-TUI is, how to install and run it, how it integrates with the external GenericAgent core, what user-facing TUI capabilities exist, and includes a lightweight promotional mention of https://linux.do/.
+Rewrite the repository README so it clearly explains what Shuheng is, how to install and run it, how it integrates with the external GenericAgent core, what user-facing TUI capabilities exist, and includes a lightweight promotional mention of https://linux.do/.
 
 ## What I Already Know
 
 * The user wants the README improved for this self-written TUI.
 * The user explicitly asked to include promotion for https://linux.do/.
 * The existing README is Chinese, so the new README should keep the same language style.
-* `pyproject.toml` exposes `ga-tui`, `ga-tui-check`, `ga-tui-install-core-shim`, and `ga-tui-integration`.
-* `src/ga_tui/app.py` is a stable curses TUI that avoids Textual any-motion mouse behavior.
+* `pyproject.toml` exposes `shuheng`, `shuheng-check`, `shuheng-install-core-shim`, and `shuheng-integration`.
+* `src/shuheng/app.py` is a stable curses TUI that avoids Textual any-motion mouse behavior.
 * The TUI integrates with an external GenericAgent checkout via `GENERICAGENT_ROOT` or auto-discovery.
 * The TUI includes session management, model management, persistent subagents, task ledger views, approvals, artifacts, recovery/eval views, gateway/baseline views, memory inspection, and local encrypted Secret Vault commands.
 * `docs/agent-harness-architecture.md` is the architecture baseline for harness-related work.
@@ -57,5 +57,5 @@ Rewrite the repository README so it clearly explains what GenericAgent-TUI is, h
 
 ## Technical Notes
 
-* Inspected `README.md`, `pyproject.toml`, `src/ga_tui/app.py`, `src/ga_tui/integration.py`, and `docs/agent-harness-architecture.md`.
+* Inspected `README.md`, `pyproject.toml`, `src/shuheng/app.py`, `src/shuheng/integration.py`, and `docs/agent-harness-architecture.md`.
 * The existing README already had uncommitted changes before this task; preserve useful content and expand it rather than reverting it.

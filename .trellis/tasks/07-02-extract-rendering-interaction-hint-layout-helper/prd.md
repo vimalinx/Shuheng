@@ -3,13 +3,13 @@
 ## Objective
 
 Continue Goal 7 by moving deterministic interaction hint text layout out of
-`src/ga_tui/app.py` and into the lower-level, curses-free
-`src/ga_tui/rendering.py` module, while preserving the legacy app wrapper and
+`src/shuheng/app.py` and into the lower-level, curses-free
+`src/shuheng/rendering.py` module, while preserving the legacy app wrapper and
 runtime behavior.
 
 ## Scope
 
-- Add a pure helper in `src/ga_tui/rendering.py` that returns neutral
+- Add a pure helper in `src/shuheng/rendering.py` that returns neutral
   interaction hint layout records over explicit inputs:
   - payload-present flag
   - tool name
@@ -50,7 +50,7 @@ runtime behavior.
   ledger reads/writes, `State.pending_interaction`, subagent pending interaction,
   Web Console, dashboard, runtime dispatch, history, Secret Vault, ledgers,
   artifacts, draw functions, or storage roots.
-- Do not import `ga_tui.app`, curses, mutable TUI `State`, runtime dispatch,
+- Do not import `shuheng.app`, curses, mutable TUI `State`, runtime dispatch,
   command handlers, Web Console, dashboard, input handlers, or draw functions
   from `rendering.py`.
 
@@ -66,8 +66,8 @@ runtime behavior.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 release-quality gate before commit.

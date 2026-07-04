@@ -2,17 +2,17 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving pure filesystem path normalization and containment helpers into a lower-level `src/ga_tui/path_utils.py` module, while preserving app-level compatibility wrappers and Shuheng storage-root behavior.
+Continue decomposing `src/shuheng/app.py` by moving pure filesystem path normalization and containment helpers into a lower-level `src/shuheng/path_utils.py` module, while preserving app-level compatibility wrappers and Shuheng storage-root behavior.
 
 ## Requirements
 
-- Add `src/ga_tui/path_utils.py`.
-- Move pure helpers out of `src/ga_tui/app.py`:
+- Add `src/shuheng/path_utils.py`.
+- Move pure helpers out of `src/shuheng/app.py`:
   - `normalized_path(path)`
   - `path_is_within(path, root)`
 - Add a low-level normal-history predicate that accepts explicit roots:
   - `is_normal_session_log_path(path, *, model_responses_dir, session_trash_dir)`
-- Keep `src/ga_tui/app.py` compatibility wrappers for existing callers and tests.
+- Keep `src/shuheng/app.py` compatibility wrappers for existing callers and tests.
 - Preserve current semantics:
   - `normalized_path` expands `~` and returns an absolute path.
   - `path_is_within` resolves real paths and returns `False` instead of raising.
@@ -22,9 +22,9 @@ Continue decomposing `src/ga_tui/app.py` by moving pure filesystem path normaliz
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.path_utils` owns the path helper implementations.
-- [ ] `ga_tui.app.normalized_path`, `ga_tui.app.path_is_within`, and `ga_tui.app.is_normal_session_log_path` remain behavior-compatible.
-- [ ] `path_utils.py` does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, history store, Secret Vault, runtime dispatch, command handlers, or rendering functions.
+- [ ] `shuheng.path_utils` owns the path helper implementations.
+- [ ] `shuheng.app.normalized_path`, `shuheng.app.path_is_within`, and `shuheng.app.is_normal_session_log_path` remain behavior-compatible.
+- [ ] `path_utils.py` does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, history store, Secret Vault, runtime dispatch, command handlers, or rendering functions.
 - [ ] Existing path-safety tests pass and include direct module coverage plus app wrapper parity.
 - [ ] Policy gates assert the ownership and lower-level dependency boundary.
 - [ ] Phase exit verification passes.
@@ -46,7 +46,7 @@ Context: History, Secret Vault import validation, Web Console session refs, work
 
 Decision: Create `path_utils.py` as a pure leaf module for path normalization and containment. App-global storage-root selection remains in `app.py`.
 
-Consequences: Future history/Secret/subagent-store extraction can share one path safety implementation without importing `ga_tui.app`; path root ownership remains app-configured and test-retargetable.
+Consequences: Future history/Secret/subagent-store extraction can share one path safety implementation without importing `shuheng.app`; path root ownership remains app-configured and test-retargetable.
 
 ## Out of Scope
 

@@ -2,22 +2,22 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving the deterministic ask-user/request-user-input card text renderer into the curses-free `src/ga_tui/rendering.py` helper layer, while preserving interactive tool visibility and keeping `app.py` responsible for payload extraction, pending interaction state, approvals, input handling, and curses hint rows.
+Continue decomposing `src/shuheng/app.py` by moving the deterministic ask-user/request-user-input card text renderer into the curses-free `src/shuheng/rendering.py` helper layer, while preserving interactive tool visibility and keeping `app.py` responsible for payload extraction, pending interaction state, approvals, input handling, and curses hint rows.
 
 ## Requirements
 
 - Add a pure rendering helper that formats an interaction request payload into the existing plain text card shown inside assistant/process output.
-- Keep `src/ga_tui/app.py` as the compatibility facade and owner of `extract_interaction_request(...)`, `request_payload_from_args(...)`, JSON-ish parsing, tool-name extraction, `State.pending_interaction`, approval interaction payloads, candidate selection, answer submission, `interaction_hint_lines(...)`, curses attrs, and input/key handling.
+- Keep `src/shuheng/app.py` as the compatibility facade and owner of `extract_interaction_request(...)`, `request_payload_from_args(...)`, JSON-ish parsing, tool-name extraction, `State.pending_interaction`, approval interaction payloads, candidate selection, answer submission, `interaction_hint_lines(...)`, curses attrs, and input/key handling.
 - Preserve existing `render_interaction_card(payload)` output for plain candidate prompts, approval candidate prompts, multi-question `request_user_input` prompts, and the default interactive fallback.
-- Re-export the new helper through `src/ga_tui/app.py` for compatibility.
+- Re-export the new helper through `src/shuheng/app.py` for compatibility.
 - Add direct unit coverage and app alias/wrapper parity coverage.
 - Extend policy gates so the helper is owned by `rendering.py`, not duplicated in `app.py`, and the rendering module boundary remains free of app/curses/state/runtime/command/Web/dashboard/input imports.
 - Update `.trellis/spec/backend/agent-control-protocol.md` to document the durable helper boundary.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns a deterministic interaction card formatting helper.
-- [ ] `src/ga_tui/app.py` keeps interaction request extraction and stateful interaction handling, and only delegates card text formatting.
+- [ ] `src/shuheng/rendering.py` owns a deterministic interaction card formatting helper.
+- [ ] `src/shuheng/app.py` keeps interaction request extraction and stateful interaction handling, and only delegates card text formatting.
 - [ ] Existing visible card strings are unchanged for normal candidates, approval candidates, multi-question request-user-input payloads, and empty fallback.
 - [ ] `tests/test_rendering.py` covers direct helper behavior and app wrapper/alias parity.
 - [ ] `scripts/check_policy_gates.py` covers helper ownership, representative behavior, app wrapper parity, duplicate-definition absence in `app.py`, and rendering boundary rules.
@@ -47,12 +47,12 @@ Consequences: The split reduces `app.py` rendering coupling without changing int
 
 - Moving `extract_interaction_request(...)`, `request_payload_from_args(...)`, `loose_interaction_args(...)`, `jsonish_objects(...)`, `process_tools(...)`, approval interaction payloads, `normalize_interaction_payload(...)`, `interaction_footer(...)`, `interaction_hint_lines(...)`, `interaction_current_candidates(...)`, `interaction_selection(...)`, answer submission, `State.pending_interaction`, subagent pending interaction handling, command/input handlers, `RenderLine` allocation, `cp(...)`, curses attrs, Web Console, dashboard, runtime dispatch, storage roots, ledgers, artifacts, Secret Vault behavior, or history ownership.
 - Changing visible interaction card copy or user-input behavior.
-- Introducing reverse imports from `rendering.py` to `ga_tui.app`.
+- Introducing reverse imports from `rendering.py` to `shuheng.app`.
 
 ## Technical Notes
 
-- Current function: `src/ga_tui/app.py::render_interaction_card(...)`.
-- Current call site: `src/ga_tui/app.py::visible_ask_user_text(...)`.
+- Current function: `src/shuheng/app.py::render_interaction_card(...)`.
+- Current call site: `src/shuheng/app.py::visible_ask_user_text(...)`.
 - Existing policy coverage: `scripts/check_policy_gates.py::assert_ask_user_tool_use_input_payload_visible(...)`, `assert_ask_user_multiline_tool_args_payload_visible(...)`, and approval interaction checks.
 - Policy gate owner: `scripts/check_policy_gates.py::assert_rendering_module_boundary()`.
 - Spec owner: `.trellis/spec/backend/agent-control-protocol.md`.

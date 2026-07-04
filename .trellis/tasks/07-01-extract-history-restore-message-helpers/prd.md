@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move pure history restore message shaping helpers out of `src/ga_tui/app.py` into `src/ga_tui/history_store.py`, while preserving existing behavior through `app.py` compatibility wrappers.
+Move pure history restore message shaping helpers out of `src/shuheng/app.py` into `src/shuheng/history_store.py`, while preserving existing behavior through `app.py` compatibility wrappers.
 
 ## Scope
 
@@ -34,13 +34,13 @@ Move pure history restore message shaping helpers out of `src/ga_tui/app.py` int
 
 - Global Shuheng history remains the owner of normal conversation transcripts.
 - `history_store.py` may shape already-parsed transcript pairs into restore-preview UI message records, but it must not own app runtime restore, provider reset/switching, sidebar rendering, or metadata writes.
-- Extracted modules must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
-- Public imports and call behavior from `ga_tui.app` remain compatible during decomposition.
+- Extracted modules must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- Public imports and call behavior from `shuheng.app` remain compatible during decomposition.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_history_store.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release-gate verification before commit, matching the goal-7 plan.

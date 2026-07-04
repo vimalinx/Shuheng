@@ -2,14 +2,14 @@
 
 ## Objective
 
-Continue decomposing `src/ga_tui/app.py` by moving curses-free selection geometry helpers into `src/ga_tui/rendering.py`, while preserving existing behavior and public compatibility names in `app.py`.
+Continue decomposing `src/shuheng/app.py` by moving curses-free selection geometry helpers into `src/shuheng/rendering.py`, while preserving existing behavior and public compatibility names in `app.py`.
 
 ## Scope
 
-- Move `char_index_for_cell(text, target_x)` into `src/ga_tui/rendering.py`.
+- Move `char_index_for_cell(text, target_x)` into `src/shuheng/rendering.py`.
 - Add a pure rendering helper for ordering explicit selection points without reading `State`.
 - Add a pure rendering helper for computing the selected character span for one rendered line from explicit selection points.
-- Keep `src/ga_tui/app.py` compatibility names so existing tests and callers can continue importing from `ga_tui.app`.
+- Keep `src/shuheng/app.py` compatibility names so existing tests and callers can continue importing from `shuheng.app`.
 - Keep app-owned wrappers for helpers whose existing public signatures accept `State`.
 - Add unit coverage for direct rendering helpers and app wrapper parity.
 - Expand policy gates so `rendering.py` remains a lower-level curses-free helper boundary.
@@ -20,7 +20,7 @@ Continue decomposing `src/ga_tui/app.py` by moving curses-free selection geometr
 - Do not move `clear_selection(...)`, `selected_text(...)`, `shift_selection_lines(...)`, `main_pos_at_mouse(...)`, `update_selection_end_from_mouse(...)`, or selection auto-scroll helpers.
 - Do not move `draw_text_with_selection(...)`, `draw_main(...)`, `record_running_indicator_rect(...)`, or any curses drawing.
 - Do not change selection behavior, clipboard behavior, Secret copy gates, mouse handling, scrolling, command routing, Web Console, dashboard, runtime dispatch, storage roots, ledgers, approvals, artifacts, history, or external memory.
-- Do not introduce imports from `ga_tui.app`, curses, mutable `State`, `SubAgentRuntime`, gateway handlers, Web Console, dashboard, command handlers, input handlers, or draw functions into `rendering.py`.
+- Do not introduce imports from `shuheng.app`, curses, mutable `State`, `SubAgentRuntime`, gateway handlers, Web Console, dashboard, command handlers, input handlers, or draw functions into `rendering.py`.
 
 ## Compatibility Contract
 
@@ -31,8 +31,8 @@ Continue decomposing `src/ga_tui/app.py` by moving curses-free selection geometr
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py tests/test_cell_utils.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`

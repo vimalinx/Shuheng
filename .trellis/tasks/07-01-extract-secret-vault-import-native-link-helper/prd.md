@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move the pure Secret Vault imported-session to native-session link predicate out of `src/ga_tui/app.py` into `src/ga_tui/secret_vault.py`, while preserving current sidebar and restore behavior through `app.py` wrappers.
+Move the pure Secret Vault imported-session to native-session link predicate out of `src/shuheng/app.py` into `src/shuheng/secret_vault.py`, while preserving current sidebar and restore behavior through `app.py` wrappers.
 
 ## Requirements
 
@@ -46,6 +46,6 @@ Add `secret_import_represented_by_native(import_entry, native_entries)` to `secr
 
 ## Technical Notes
 
-- Current implementation lives in `src/ga_tui/app.py` near `secret_import_represented_by_native(...)`.
-- Existing lower-level Secret helpers and tests live in `src/ga_tui/secret_vault.py` and `tests/test_secret_crypto.py`.
+- Current implementation lives in `src/shuheng/app.py` near `secret_import_represented_by_native(...)`.
+- Existing lower-level Secret helpers and tests live in `src/shuheng/secret_vault.py` and `tests/test_secret_crypto.py`.
 - The architecture baseline remains `docs/agent-harness-architecture.md`: this slice moves pure value matching lower while keeping app orchestration stateful and single-writer.

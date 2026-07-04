@@ -2,11 +2,11 @@
 
 ## Objective
 
-Continue Goal 7 by moving deterministic process/subagent metadata expansion key formatting out of `src/ga_tui/app.py` and into `src/ga_tui/rendering.py`, while preserving app compatibility wrappers and runtime behavior.
+Continue Goal 7 by moving deterministic process/subagent metadata expansion key formatting out of `src/shuheng/app.py` and into `src/shuheng/rendering.py`, while preserving app compatibility wrappers and runtime behavior.
 
 ## Scope
 
-- Add pure helpers in `src/ga_tui/rendering.py` for:
+- Add pure helpers in `src/shuheng/rendering.py` for:
   - process group expansion keys from an explicit display scope and group label
   - process turn expansion keys from an explicit display scope and turn label
   - subagent metadata expansion keys from an explicit display scope and metadata label
@@ -24,13 +24,13 @@ Continue Goal 7 by moving deterministic process/subagent metadata expansion key 
 ## Compatibility Requirements
 
 - Existing callers of `app.process_group_key(state, label)`, `app.process_turn_key(state, label)`, and `app.subagent_meta_key(state, label)` must return identical strings.
-- New helpers must accept only explicit strings and must not import `ga_tui.app`, curses, runtime classes, mutable state, Web Console, dashboard, input handlers, command handlers, or draw functions.
+- New helpers must accept only explicit strings and must not import `shuheng.app`, curses, runtime classes, mutable state, Web Console, dashboard, input handlers, command handlers, or draw functions.
 - `process_turn_scope_key(...)` must preserve the legacy group-prefix extraction for labels like `G2T7`, returning `<scope>:G2:G2T7`; labels without a group prefix must keep the existing empty middle segment.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 release-quality gate before commit.

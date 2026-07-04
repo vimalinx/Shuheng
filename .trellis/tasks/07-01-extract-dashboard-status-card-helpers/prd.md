@@ -2,11 +2,11 @@
 
 ## Goal
 
-Continue the `dashboard.py` decomposition by moving pure status-card text layout helpers out of `src/ga_tui/app.py`, while keeping curses attributes, `RenderLine` construction, home section assembly, runtime state reads, ledger reads, and action panels in `app.py`.
+Continue the `dashboard.py` decomposition by moving pure status-card text layout helpers out of `src/shuheng/app.py`, while keeping curses attributes, `RenderLine` construction, home section assembly, runtime state reads, ledger reads, and action panels in `app.py`.
 
 ## Requirements
 
-- Extend `src/ga_tui/dashboard.py`.
+- Extend `src/shuheng/dashboard.py`.
 - Move only pure status-card helper functions:
   - `status_card_header_line(title, card_width)`
   - `status_card_divider_line(title, card_width)`
@@ -15,16 +15,16 @@ Continue the `dashboard.py` decomposition by moving pure status-card text layout
   - `status_card_metric_rows(items, inner_width)`
   - `status_card_metric_header(metrics)`
   - `status_card_detail_rows(items, inner_width)`
-- Keep `src/ga_tui/app.py` compatibility aliases for moved names.
+- Keep `src/shuheng/app.py` compatibility aliases for moved names.
 - Preserve current box-drawing output, cell-width-aware truncation/padding, metric layout column behavior, empty metric/detail fallbacks, and detail-row wrapping.
 - Add unit tests and policy gates for the expanded `dashboard.py` boundary.
 - Update `.trellis/spec/backend/agent-control-protocol.md` with the status-card helper boundary.
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.dashboard` owns the moved status-card helper functions.
-- [ ] `ga_tui.app` exposes the moved status-card helpers as direct aliases or behavior-identical wrappers.
-- [ ] `dashboard.py` still does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, draw functions, home-line appenders, ledgers, schedulers, or approval/action dispatch.
+- [ ] `shuheng.dashboard` owns the moved status-card helper functions.
+- [ ] `shuheng.app` exposes the moved status-card helpers as direct aliases or behavior-identical wrappers.
+- [ ] `dashboard.py` still does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, draw functions, home-line appenders, ledgers, schedulers, or approval/action dispatch.
 - [ ] `append_status_card(...)` and `append_home_action_panel(...)` remain in `app.py` because they create `RenderLine` values and use curses attrs.
 - [ ] Tests prove header/divider/footer/content line construction, metric column fallback/layout, metric header counts, detail wrapping, empty metric/detail fallbacks, and app alias parity.
 - [ ] Existing dashboard helper tests continue to pass.
@@ -59,4 +59,4 @@ Consequences: `dashboard.py` gains another pure lower-level boundary useful for 
 
 - Relevant decomposition plan: `docs/app-py-decomposition-plan.md`, Phase 6 and Phase 7.
 - Relevant existing spec scenario: `.trellis/spec/backend/agent-control-protocol.md`, `Dashboard Helper Module Boundary`.
-- Existing helper cluster starts at `status_card_header_line(...)` in `src/ga_tui/app.py`.
+- Existing helper cluster starts at `status_card_header_line(...)` in `src/shuheng/app.py`.

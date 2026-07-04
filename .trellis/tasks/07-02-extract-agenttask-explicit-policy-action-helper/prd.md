@@ -2,7 +2,7 @@
 
 ## Requirement
 
-Move deterministic explicit policy-action extraction for `[GA TUI AgentTask Envelope v2]` prompts from `src/ga_tui/app.py` into `src/ga_tui/control_protocol.py`.
+Move deterministic explicit policy-action extraction for `[Shuheng AgentTask Envelope v2]` prompts from `src/shuheng/app.py` into `src/shuheng/control_protocol.py`.
 
 The moved helper must preserve existing behavior for:
 
@@ -35,7 +35,7 @@ Out of scope:
 
 ## Acceptance Criteria
 
-- `control_protocol.explicit_policy_action_for_subagent_task.__module__ == "ga_tui.control_protocol"`.
+- `control_protocol.explicit_policy_action_for_subagent_task.__module__ == "shuheng.control_protocol"`.
 - `app.explicit_policy_action_for_subagent_task is control_protocol.explicit_policy_action_for_subagent_task`.
 - Existing call sites continue to use the same public name without behavior changes.
 - Targeted control-protocol tests pass.

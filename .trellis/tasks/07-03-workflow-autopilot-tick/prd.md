@@ -6,8 +6,8 @@ Add a safe workflow autopilot tick that lets Shuheng automatically continue work
 
 ## Scope
 
-- Add a pure autopilot planning helper in `src/ga_tui/workflows.py` that inspects workflow run rows plus approval/task state and returns a bounded tick plan.
-- Add an app-owned command path in `src/ga_tui/app.py` for `/workflow tick` and `/workflow autopilot` that executes the plan by calling the existing `continue_workflow_run_v0(...)` Orchestrator bridge.
+- Add a pure autopilot planning helper in `src/shuheng/workflows.py` that inspects workflow run rows plus approval/task state and returns a bounded tick plan.
+- Add an app-owned command path in `src/shuheng/app.py` for `/workflow tick` and `/workflow autopilot` that executes the plan by calling the existing `continue_workflow_run_v0(...)` Orchestrator bridge.
 - Continue only runs whose `workflow_run_next_action_projection(...)` reports `next_action=continue`.
 - Report but do not mutate runs that require approval, are waiting on subagent tasks, are terminal/completed, missing, or require cancel/edit.
 - Append workflow event rows for the tick itself and for each run that was selected, skipped, or failed to continue.
@@ -41,7 +41,7 @@ Add a safe workflow autopilot tick that lets Shuheng automatically continue work
 ## Evidence
 
 - `python3 -m compileall -q src scripts tests`
-- `ruff check src/ga_tui/workflows.py src/ga_tui/app.py tests/test_workflows.py scripts/check_policy_gates.py`
+- `ruff check src/shuheng/workflows.py src/shuheng/app.py tests/test_workflows.py scripts/check_policy_gates.py`
 - `pytest -q tests/test_workflows.py`
 - `python3 scripts/check_policy_gates.py`
 - `PYTHONPATH=. pytest -q`

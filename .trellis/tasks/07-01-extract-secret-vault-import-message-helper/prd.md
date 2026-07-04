@@ -2,12 +2,12 @@
 
 ## Objective
 
-Move Secret imported-session message shaping out of `src/ga_tui/app.py` into the lower-level `src/ga_tui/secret_vault.py` boundary without changing restore behavior.
+Move Secret imported-session message shaping out of `src/shuheng/app.py` into the lower-level `src/shuheng/secret_vault.py` boundary without changing restore behavior.
 
 ## Scope
 
 - Add a pure Secret Vault helper that converts an imported session payload's `raw_log` text into restore messages and round/message counts.
-- Keep the existing `messages_from_secret_import_payload(payload)` public function available from `ga_tui.app` as a compatibility wrapper.
+- Keep the existing `messages_from_secret_import_payload(payload)` public function available from `shuheng.app` as a compatibility wrapper.
 - Keep app-owned transcript parsing and display policy injected from `app.py`: `_pairs`, `history_messages_from_pairs`, and `RESTORE_DISPLAY_ROUNDS`.
 - Preserve existing fallback behavior:
   - parsed raw-log pairs use `history_messages_from_pairs(..., RESTORE_DISPLAY_ROUNDS)`;
@@ -21,12 +21,12 @@ Move Secret imported-session message shaping out of `src/ga_tui/app.py` into the
 - Do not move `_pairs`, `_parse_native_history`, `history_messages_from_pairs`, restore orchestration, backend reset/restore, mutable `State`, UI commands, sidebar rendering, proxy env mutation, or encrypted Secret storage in this slice.
 - Do not change `restore_secret_imported_session(...)` behavior except for delegating message shaping through the compatibility wrapper.
 - Do not migrate storage roots or normal history transcript ownership.
-- Do not introduce `ga_tui.app` imports, curses imports, `State`, `SubAgentRuntime`, rendering types, gateway handlers, or runtime mutation helpers into `secret_vault.py`.
+- Do not introduce `shuheng.app` imports, curses imports, `State`, `SubAgentRuntime`, rendering types, gateway handlers, or runtime mutation helpers into `secret_vault.py`.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/test_secret_crypto.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release gate from `goal-7/plan.md` before commit.

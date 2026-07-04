@@ -7,7 +7,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: The active product, package, protocol, runtime prompt, tool, docs, and release naming surface is `Shuheng` / `枢衡`.
-- Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, HTTP gateway server/header identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, release checks, wheel/sdist smoke checks, and source distribution metadata.
+- Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, HTTP gateway server/header identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, active non-archive Trellis task guidance, release checks, wheel/sdist smoke checks, and source distribution metadata.
 - Non-goal: This does not remove the optional GenericAgent legacy provider, launcher shim target, non-destructive legacy history import, or quarantined historical prompt cleanup. Those surfaces must identify GenericAgent only as optional legacy compatibility, never as Shuheng's core runtime.
 
 ### 2. Signatures
@@ -28,7 +28,7 @@
 - Current protocol parsers must accept Shuheng control blocks/fences only.
 - `shuheng_query`, `shuheng_propose`, and typed OMP tools are Shuheng host tools. They may expose compatibility behavior only through bounded, governed Shuheng schemas.
 - OhMyPi / OMP is the default runtime core. GenericAgent remains selectable only as an optional legacy provider when a valid legacy checkout exists.
-- Historical Trellis task logs and quarantined compatibility cleanup may mention retired names as historical facts; active specs, docs, prompts, tests, release gates, and package metadata must describe the final Shuheng source of truth.
+- Archived Trellis task logs and quarantined compatibility cleanup may mention retired names as historical facts; active non-archive Trellis task guidance, specs, docs, prompts, tests, release gates, and package metadata must describe the final Shuheng source of truth.
 
 ### 4. Validation & Error Matrix
 
@@ -41,6 +41,7 @@
 - Doctor output requires GenericAgent for ordinary Shuheng checks -> runtime ownership regression.
 - Runtime strings identify the main orchestrator as a retired TUI alias or as GenericAgent core -> product identity regression.
 - HTTP gateway `Server` headers or handler `server_version` identify the service with a retired TUI alias -> product identity regression.
+- Active non-archive Trellis task guidance points future work at retired package paths, module commands, control schemas, bridge metadata keys, or GenericAgent-as-root language -> development guidance regression.
 
 ### 5. Good/Base/Bad Cases
 
@@ -58,6 +59,7 @@
 - Tests must assert integration doctor report identifies OhMyPi / OMP as the core runtime and GenericAgent as optional legacy provider only.
 - Tests must assert parser regexes, hidden control examples, and OMP proposal schemas use `shuheng-control.v2` / `shuheng_control`.
 - Tests must assert release/wheel smoke metadata uses `src/shuheng`, `shuheng` top-level package, and `integrations/omp-shuheng-plugin`.
+- Tests must assert active non-archive Trellis task guidance uses current Shuheng package paths, module commands, control schemas, and legacy-provider checkout wording.
 - `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments, while leaving optional GenericAgent legacy-provider references valid.
 - Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
 - `scripts/check_policy_gates.py` must assert `GatewayRequestHandler.server_version` and a live gateway HTTP response header use `ShuhengGateway/1`, not a retired TUI alias.

@@ -2,19 +2,19 @@
 
 ## Problem
 
-`src/ga_tui/app.py` still owns the top-level process-turn splitter used by process rendering and latest-visible-reply extraction. The splitter is deterministic text parsing over already-loaded assistant output, but it currently sits beside Orchestrator-owned rendering, interaction, queue, and runtime side-effect code. Keeping this parser in `app.py` makes later process rendering extraction harder because lower-level rendering helpers cannot own their own turn segmentation boundary.
+`src/shuheng/app.py` still owns the top-level process-turn splitter used by process rendering and latest-visible-reply extraction. The splitter is deterministic text parsing over already-loaded assistant output, but it currently sits beside Orchestrator-owned rendering, interaction, queue, and runtime side-effect code. Keeping this parser in `app.py` makes later process rendering extraction harder because lower-level rendering helpers cannot own their own turn segmentation boundary.
 
 ## Goal
 
-Move the smallest safe turn-marker splitting boundary into `src/ga_tui/rendering.py` while preserving existing behavior and public compatibility from `src/ga_tui/app.py`.
+Move the smallest safe turn-marker splitting boundary into `src/shuheng/rendering.py` while preserving existing behavior and public compatibility from `src/shuheng/app.py`.
 
 ## Requirements
 
-- Move `next_nonblank_line(lines, start)` into `src/ga_tui/rendering.py`.
-- Move `line_numbered_file_line(line)` into `src/ga_tui/rendering.py`.
-- Move `stray_line_numbered_fence_close(line, previous_nonblank, next_nonblank)` into `src/ga_tui/rendering.py`.
-- Move `split_top_level_turn_markers(text)` into `src/ga_tui/rendering.py`.
-- Keep `src/ga_tui/app.py` compatibility aliases with the same public names.
+- Move `next_nonblank_line(lines, start)` into `src/shuheng/rendering.py`.
+- Move `line_numbered_file_line(line)` into `src/shuheng/rendering.py`.
+- Move `stray_line_numbered_fence_close(line, previous_nonblank, next_nonblank)` into `src/shuheng/rendering.py`.
+- Move `split_top_level_turn_markers(text)` into `src/shuheng/rendering.py`.
+- Keep `src/shuheng/app.py` compatibility aliases with the same public names.
 - Preserve the existing protection that line-numbered file output inside fences is not misinterpreted as a top-level process turn split.
 - Reuse shared process marker semantics from `history_titles.TURN_MARKER_RE`.
 - Add tests for normal top-level turn splitting, fenced content opacity, stray line-numbered fence-close behavior, empty text behavior, and app alias parity.
@@ -32,10 +32,10 @@ Move the smallest safe turn-marker splitting boundary into `src/ga_tui/rendering
 
 ## Acceptance Criteria
 
-- `src/ga_tui/rendering.py` owns the selected helper implementations.
-- `src/ga_tui/app.py` keeps the public names as compatibility aliases.
+- `src/shuheng/rendering.py` owns the selected helper implementations.
+- `src/shuheng/app.py` keeps the public names as compatibility aliases.
 - Existing call sites continue to work without behavior changes.
-- `rendering.py` remains a lower-level curses-free helper boundary with no `ga_tui.app` import and no mutable TUI state dependency.
+- `rendering.py` remains a lower-level curses-free helper boundary with no `shuheng.app` import and no mutable TUI state dependency.
 - Targeted rendering tests pass.
 - Policy gates pass.
 - Full release gate passes before the work is committed.
@@ -48,8 +48,8 @@ Move the smallest safe turn-marker splitting boundary into `src/ga_tui/rendering
 
 ## Verification Plan
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py tests/test_cell_utils.py -q -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - `python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py`
@@ -64,4 +64,4 @@ Move the smallest safe turn-marker splitting boundary into `src/ga_tui/rendering
 
 ## Rollback Plan
 
-Revert the extraction commit or restore the helper implementations in `src/ga_tui/app.py` while keeping the tests as behavior references.
+Revert the extraction commit or restore the helper implementations in `src/shuheng/app.py` while keeping the tests as behavior references.

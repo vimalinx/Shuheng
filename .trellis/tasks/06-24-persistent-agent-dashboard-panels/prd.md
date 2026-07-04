@@ -16,8 +16,8 @@ Add a first usable version of dashboard home pages for the main Shuheng Orchestr
 - The last-opened interface does not need to persist across program restarts.
 - The desired boundary is declaration over execution: a persistent agent may describe what its dashboard should show, but the TUI owns rendering, data access, permissions, and audit behavior.
 - The architecture baseline requires a strong Orchestrator, shared task/progress ledgers, artifact references, single-writer enforcement, human approval gates, auditable communication, and external memory.
-- Existing scheduler code stores definitions and run audit rows centrally in `src/ga_tui/scheduler.py`; scheduled agent work maps into `agenttask.v2`.
-- Existing TUI panel infrastructure uses `PanelItem` plus `open_harness_panel(...)` in `src/ga_tui/app.py` for tasks, approvals, artifacts, recovery, eval/trace, gateway, and baseline panels.
+- Existing scheduler code stores definitions and run audit rows centrally in `src/shuheng/scheduler.py`; scheduled agent work maps into `agenttask.v2`.
+- Existing TUI panel infrastructure uses `PanelItem` plus `open_harness_panel(...)` in `src/shuheng/app.py` for tasks, approvals, artifacts, recovery, eval/trace, gateway, and baseline panels.
 - Existing subagent metadata includes `persistent`, `owner_session`, `role`, `status`, `chat_session_id`, `chat_title`, profile, memory, and per-agent session files.
 - Existing read-only host/query tools already expose agent, task, approval, artifact, capability, and schedule snapshots, so the dashboard should reuse the same governed facts rather than introduce a parallel state store.
 
@@ -169,9 +169,9 @@ Failure and edge cases:
 
 ## Technical Notes
 
-- Existing panel primitive: `PanelItem` dataclass and `open_harness_panel(...)` in `src/ga_tui/app.py`.
+- Existing panel primitive: `PanelItem` dataclass and `open_harness_panel(...)` in `src/shuheng/app.py`.
 - Existing subagent state: `SubAgentRuntime`, `save_subagent_meta(...)`, `load_subagents(...)`, `subagent_chat_session_entries(...)`.
-- Existing scheduler source of truth: `src/ga_tui/scheduler.py`, including `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
+- Existing scheduler source of truth: `src/shuheng/scheduler.py`, including `scheduled_task_registry(...)`, `latest_schedule_records(...)`, and schedule run audit helpers.
 - Existing shared task source: `latest_task_records(...)` and `task_panel_items(...)`.
 - Existing artifact source: `artifact_inventory(...)` and `artifact_preview(...)`.
 - Existing read-only query tools: `tui_tool_agent_list`, `tui_tool_agent_get`, `tui_tool_task_list`, `tui_tool_schedule_list`, and related host tool definitions.

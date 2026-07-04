@@ -2,19 +2,19 @@
 
 ## Summary
 
-Continue Goal 7 by moving deterministic `/approve` and `/reject` command completion row shaping from `src/ga_tui/app.py` into `src/ga_tui/commands.py`, while keeping approval ledger/state access and summary truncation policy in the app facade.
+Continue Goal 7 by moving deterministic `/approve` and `/reject` command completion row shaping from `src/shuheng/app.py` into `src/shuheng/commands.py`, while keeping approval ledger/state access and summary truncation policy in the app facade.
 
 ## Problem
 
-`src/ga_tui/app.py` still mixes app-owned pending approval retrieval with deterministic command row formatting. The approval source of truth must remain app-owned because it may depend on `State`, ledgers, and approval governance. The pure row matching over explicit approval candidates can be tested in `commands.py`.
+`src/shuheng/app.py` still mixes app-owned pending approval retrieval with deterministic command row formatting. The approval source of truth must remain app-owned because it may depend on `State`, ledgers, and approval governance. The pure row matching over explicit approval candidates can be tested in `commands.py`.
 
 ## Scope
 
-- Add a pure helper in `src/ga_tui/commands.py` for `/approve` and `/reject` completion rows.
+- Add a pure helper in `src/shuheng/commands.py` for `/approve` and `/reject` completion rows.
 - The helper must accept raw command text and an explicit iterable of `(approval_id, summary)` values.
 - Preserve existing prefix filtering and command casing behavior.
-- Keep `approval_command_matches(text, state)` in `src/ga_tui/app.py` as the compatibility wrapper that reads app-owned pending approvals and applies `truncate_cells(..., 70)` before delegation.
-- Re-export the new helper from `src/ga_tui/app.py`.
+- Keep `approval_command_matches(text, state)` in `src/shuheng/app.py` as the compatibility wrapper that reads app-owned pending approvals and applies `truncate_cells(..., 70)` before delegation.
+- Re-export the new helper from `src/shuheng/app.py`.
 - Expand command unit tests and policy gates.
 - Update `.trellis/spec/backend/agent-control-protocol.md` with the new boundary.
 

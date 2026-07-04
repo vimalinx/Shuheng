@@ -2,14 +2,14 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving the pure model response-body text parser into `src/ga_tui/history_store.py`, strengthening the history/transcript boundary without changing preview/title policy, session metadata ownership, Web Console behavior, or rendering.
+Continue decomposing `src/shuheng/app.py` by moving the pure model response-body text parser into `src/shuheng/history_store.py`, strengthening the history/transcript boundary without changing preview/title policy, session metadata ownership, Web Console behavior, or rendering.
 
 ## Requirements
 
-- Extend `src/ga_tui/history_store.py`.
+- Extend `src/shuheng/history_store.py`.
 - Move pure helper:
   - `assistant_text_from_response_body(response_body)`
-- Keep `src/ga_tui/app.py` compatibility alias for the moved helper.
+- Keep `src/shuheng/app.py` compatibility alias for the moved helper.
 - Preserve current parsing behavior:
   - Python literal list response bodies return joined text from `{"type": "text", "text": ...}` dicts and raw string blocks.
   - Python literal dict response bodies return joined `content` text-list items, or `content`, or `text`.
@@ -20,9 +20,9 @@ Continue decomposing `src/ga_tui/app.py` by moving the pure model response-body 
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.history_store` owns `assistant_text_from_response_body`.
-- [ ] `ga_tui.app` exposes `assistant_text_from_response_body` as a direct alias or behavior-identical wrapper.
-- [ ] `history_store.py` remains a low-level history/transcript module and does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or rendering functions.
+- [ ] `shuheng.history_store` owns `assistant_text_from_response_body`.
+- [ ] `shuheng.app` exposes `assistant_text_from_response_body` as a direct alias or behavior-identical wrapper.
+- [ ] `history_store.py` remains a low-level history/transcript module and does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or rendering functions.
 - [ ] Tests prove list, dict-with-content-list, dict-with-content-string, malformed body fallback, and app alias parity.
 - [ ] Existing history-store tests continue to pass.
 - [ ] Phase exit verification passes.

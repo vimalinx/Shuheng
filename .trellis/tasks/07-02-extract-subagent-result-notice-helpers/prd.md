@@ -2,12 +2,12 @@
 
 ## Goal
 
-Continue Goal 7 by moving deterministic subagent-result notice parsing and metadata summary helpers out of `src/ga_tui/app.py` into the lower-level curses-free rendering helper boundary, while preserving existing app compatibility names and behavior.
+Continue Goal 7 by moving deterministic subagent-result notice parsing and metadata summary helpers out of `src/shuheng/app.py` into the lower-level curses-free rendering helper boundary, while preserving existing app compatibility names and behavior.
 
 ## Requirements
 
-- Move pure subagent result notice parsing and metadata text helpers into `src/ga_tui/rendering.py`.
-- Keep `src/ga_tui/app.py` as the compatibility facade by re-exporting moved helper names.
+- Move pure subagent result notice parsing and metadata text helpers into `src/shuheng/rendering.py`.
+- Keep `src/shuheng/app.py` as the compatibility facade by re-exporting moved helper names.
 - Preserve current behavior for Chinese subagent result notices, optional task/artifact headers, body extraction, metadata footer detection, metadata label/value extraction, metadata entry grouping, metadata label lists, list-like count summaries, metadata summary text, and deterministic meta labels.
 - Keep app-owned subagent result card rendering in `app.py`.
 - Keep app-owned context update formatting, history/session key behavior, task ledger lookups, artifact IO, message block rendering, mutable state, caches, and curses attrs outside `rendering.py`.
@@ -17,8 +17,8 @@ Continue Goal 7 by moving deterministic subagent-result notice parsing and metad
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns `SUBAGENT_RESULT_HEADER_RE`, `SUBAGENT_RESULT_META_LABEL_RE`, `parse_subagent_result_notice(...)`, `subagent_result_metadata_separator(...)`, `subagent_result_metadata_label(...)`, `subagent_result_metadata_value(...)`, `split_subagent_result_reply_and_metadata(...)`, `subagent_result_metadata_labels(...)`, `count_list_like_metadata_value(...)`, `subagent_result_metadata_entries(...)`, `subagent_result_metadata_summary(...)`, and `subagent_meta_label(...)`.
-- [ ] `src/ga_tui/app.py` exposes the same public names as direct compatibility aliases and has no local definitions for those moved helpers.
+- [ ] `src/shuheng/rendering.py` owns `SUBAGENT_RESULT_HEADER_RE`, `SUBAGENT_RESULT_META_LABEL_RE`, `parse_subagent_result_notice(...)`, `subagent_result_metadata_separator(...)`, `subagent_result_metadata_label(...)`, `subagent_result_metadata_value(...)`, `split_subagent_result_reply_and_metadata(...)`, `subagent_result_metadata_labels(...)`, `count_list_like_metadata_value(...)`, `subagent_result_metadata_entries(...)`, `subagent_result_metadata_summary(...)`, and `subagent_meta_label(...)`.
+- [ ] `src/shuheng/app.py` exposes the same public names as direct compatibility aliases and has no local definitions for those moved helpers.
 - [ ] `subagent_result_card_blocks(...)`, `subagent_result_metadata_detail_blocks(...)`, `message_block_lines(...)`, `message_lines_from_cache(...)`, `RenderLine` allocation, curses attrs, mutable `State`, message cache ownership, Web Console, dashboard, runtime dispatch, commands, storage roots, approvals, artifacts, Secret Vault behavior, and history ownership remain outside `rendering.py`.
 - [ ] Targeted tests, policy gates, full tests, release hygiene, package build, wheel smoke, `git diff --check`, and `shuheng-check` pass.
 
@@ -34,7 +34,7 @@ Continue Goal 7 by moving deterministic subagent-result notice parsing and metad
 
 Use the same pattern as the recent rendering layout extractions:
 
-- Move only deterministic text transforms into `src/ga_tui/rendering.py`.
+- Move only deterministic text transforms into `src/shuheng/rendering.py`.
 - Keep `app.py` aliases for existing tests/callers.
 - Keep higher-level functions that allocate `RenderLine` or use `cp(...)` in `app.py`.
 - Reuse `rendering.strip_inline_markdown(...)`, `text_utils.clean_text(...)`, and `text_utils.truncate_cells(...)` from the lower-level module.
@@ -58,5 +58,5 @@ Consequences: This reduces `app.py` without changing UI behavior. The next later
 
 - `docs/app-py-decomposition-plan.md` defines `rendering.py` as the owner of curses-agnostic rendering transforms first.
 - `docs/agent-harness-architecture.md` requires the app facade to remain the strong Orchestrator for mutation, ledgers, approvals, artifacts, history, and side effects.
-- Existing helper cluster currently lives near `src/ga_tui/app.py` message rendering.
+- Existing helper cluster currently lives near `src/shuheng/app.py` message rendering.
 - Prior plain/markdown/table layout slices already established the compatibility-alias and policy-gate pattern.

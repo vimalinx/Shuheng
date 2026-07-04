@@ -6,8 +6,8 @@ Add the first durable workflow core slice by recording explicit workflow run eve
 
 ## Scope
 
-- Add a pure workflow event schema and helper functions in `src/ga_tui/workflows.py`.
-- Add an app-owned append-only workflow event ledger in `src/ga_tui/app.py`.
+- Add a pure workflow event schema and helper functions in `src/shuheng/workflows.py`.
+- Add an app-owned append-only workflow event ledger in `src/shuheng/app.py`.
 - Emit workflow events when a run is planned, advanced, continued, cancelled, bridged to approval, bridged to agent task, retried, or reaches a terminal/no-progress state.
 - Add idempotency keys to event rows so later durable execution can reason about duplicate lifecycle transitions.
 - Include workflow events in `/workflow trace <run-id>` without inlining raw payloads.
@@ -38,4 +38,4 @@ Add the first durable workflow core slice by recording explicit workflow run eve
 - Targeted pytest for workflow behavior.
 - `python3 scripts/check_policy_gates.py`.
 - `python3 -m compileall -q src scripts`.
-- `ruff check src/ga_tui/workflows.py src/ga_tui/app.py tests/test_workflows.py scripts/check_policy_gates.py`.
+- `ruff check src/shuheng/workflows.py src/shuheng/app.py tests/test_workflows.py scripts/check_policy_gates.py`.

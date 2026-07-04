@@ -2,8 +2,8 @@
 
 ## Goal
 
-Continue reducing `src/ga_tui/app.py` by moving deterministic interaction footer
-text selection into `src/ga_tui/rendering.py`, while preserving the app facade as
+Continue reducing `src/shuheng/app.py` by moving deterministic interaction footer
+text selection into `src/shuheng/rendering.py`, while preserving the app facade as
 the owner of pending interaction state, approval gates, selection mutation,
 curses hint rows, and input submission.
 
@@ -27,8 +27,8 @@ curses hint rows, and input submission.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns `interaction_footer_text(...)`.
-- [ ] `src/ga_tui/app.py` exposes `interaction_footer_text` as a compatibility
+- [ ] `src/shuheng/rendering.py` owns `interaction_footer_text(...)`.
+- [ ] `src/shuheng/app.py` exposes `interaction_footer_text` as a compatibility
       alias and keeps `interaction_footer(...)` as an app-owned wrapper.
 - [ ] `tests/test_rendering.py` covers direct helper behavior and wrapper
       parity for all footer branches.

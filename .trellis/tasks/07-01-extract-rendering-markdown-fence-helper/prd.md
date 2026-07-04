@@ -2,12 +2,12 @@
 
 ## Goal
 
-Continue Goal 7 app.py decomposition by moving the pure markdown fence balancing helper into `src/ga_tui/rendering.py`, while preserving existing rendering behavior and app-level compatibility.
+Continue Goal 7 app.py decomposition by moving the pure markdown fence balancing helper into `src/shuheng/rendering.py`, while preserving existing rendering behavior and app-level compatibility.
 
 ## Requirements
 
-- Move `close_unbalanced_markdown_fence(text)` from `src/ga_tui/app.py` into `src/ga_tui/rendering.py`.
-- Keep `src/ga_tui/app.py` exposing `close_unbalanced_markdown_fence` as a compatibility alias.
+- Move `close_unbalanced_markdown_fence(text)` from `src/shuheng/app.py` into `src/shuheng/rendering.py`.
+- Keep `src/shuheng/app.py` exposing `close_unbalanced_markdown_fence` as a compatibility alias.
 - Preserve current semantics:
   - Return the original text when markdown code fences are balanced.
   - Append the opening fence tick sequence when a fence remains open.
@@ -19,8 +19,8 @@ Continue Goal 7 app.py decomposition by moving the pure markdown fence balancing
 
 ## Acceptance Criteria
 
-- `src/ga_tui/rendering.py` owns the implementation.
-- `src/ga_tui/app.py` has no local implementation body for `close_unbalanced_markdown_fence`.
+- `src/shuheng/rendering.py` owns the implementation.
+- `src/shuheng/app.py` has no local implementation body for `close_unbalanced_markdown_fence`.
 - `append_process_turn(...)`, full assistant rendering, latest-visible-reply extraction, process tool parsing, process grouping/folding, message block rendering, mutable `State`, curses drawing, Web Console, dashboard, runtime dispatch, storage roots, and ledgers remain outside `rendering.py`.
 - Rendering tests cover balanced, unbalanced, longer closing fence, suffix-bearing closing fence, empty input, and app alias parity.
 - Policy gates verify no reverse dependency from `rendering.py` to app/UI/runtime owners and verify the markdown fence helper behavior.
@@ -44,5 +44,5 @@ The helper is a deterministic string transform and already uses only `re`. Move 
 ## Technical Notes
 
 - Current app line count before this slice: 26,226.
-- Previous rendering slices already moved running indicator, selection geometry, message cache keys, process summary cleanup, and turn marker splitting into `src/ga_tui/rendering.py`.
+- Previous rendering slices already moved running indicator, selection geometry, message cache keys, process summary cleanup, and turn marker splitting into `src/shuheng/rendering.py`.
 - The architecture baseline is `docs/agent-harness-architecture.md`: app remains the strong Orchestrator/composition facade for mutable UI state, side effects, ledgers, approvals, artifacts, history, and external memory.

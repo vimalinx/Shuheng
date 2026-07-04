@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move the pure history restore preview compaction helper out of `src/ga_tui/app.py` into `src/ga_tui/history_store.py`, while preserving existing behavior through an `app.py` compatibility wrapper.
+Move the pure history restore preview compaction helper out of `src/shuheng/app.py` into `src/shuheng/history_store.py`, while preserving existing behavior through an `app.py` compatibility wrapper.
 
 ## Scope
 
@@ -30,13 +30,13 @@ Move the pure history restore preview compaction helper out of `src/ga_tui/app.p
 
 - Global Shuheng history remains the owner of normal conversation transcripts.
 - Subagent homes remain profile/memory/runtime refs only, not normal transcript stores.
-- Extracted lower-level modules must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, gateway handlers, rendering functions, or runtime mutation helpers.
-- Public imports from `ga_tui.app` must remain compatible during decomposition.
+- Extracted lower-level modules must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, gateway handlers, rendering functions, or runtime mutation helpers.
+- Public imports from `shuheng.app` must remain compatible during decomposition.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/history_store.py tests/test_history_store.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_history_store.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release-gate verification before commit, matching the goal-7 plan.

@@ -2,14 +2,14 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving the pure transcript-bridge message selector into `src/ga_tui/history_store.py`, while keeping provider/runtime gating and transcript persistence orchestration in `app.py`.
+Continue decomposing `src/shuheng/app.py` by moving the pure transcript-bridge message selector into `src/shuheng/history_store.py`, while keeping provider/runtime gating and transcript persistence orchestration in `app.py`.
 
 ## Requirements
 
-- Extend `src/ga_tui/history_store.py`.
+- Extend `src/shuheng/history_store.py`.
 - Move pure helper:
   - `latest_user_message_text(messages)`
-- Keep `src/ga_tui/app.py` compatibility alias for the moved helper.
+- Keep `src/shuheng/app.py` compatibility alias for the moved helper.
 - Preserve current semantics:
   - Scan messages from newest to oldest.
   - Return the stripped content of the newest user message whose content is non-empty after stripping.
@@ -20,10 +20,10 @@ Continue decomposing `src/ga_tui/app.py` by moving the pure transcript-bridge me
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.history_store` owns `latest_user_message_text`.
-- [ ] `ga_tui.app.latest_user_message_text` remains a direct alias or behavior-identical wrapper.
+- [ ] `shuheng.history_store` owns `latest_user_message_text`.
+- [ ] `shuheng.app.latest_user_message_text` remains a direct alias or behavior-identical wrapper.
 - [ ] `persist_transcript_bridge_turn(...)` keeps using the same helper behavior but remains in `app.py` because it depends on runtime provider state, app storage roots, and agent log-path checks.
-- [ ] `history_store.py` still does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- [ ] `history_store.py` still does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 - [ ] Unit tests cover newest-user selection, blank-user skipping, no-user fallback, and app alias parity.
 - [ ] Phase exit verification passes.
 

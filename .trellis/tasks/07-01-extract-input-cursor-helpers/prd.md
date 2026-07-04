@@ -2,11 +2,11 @@
 
 ## Objective
 
-Continue decomposing `src/ga_tui/app.py` by moving pure input cursor/display conversion helpers into a new lower-level `src/ga_tui/input_controller.py` module, while preserving existing TUI behavior and `app.py` compatibility names.
+Continue decomposing `src/shuheng/app.py` by moving pure input cursor/display conversion helpers into a new lower-level `src/shuheng/input_controller.py` module, while preserving existing TUI behavior and `app.py` compatibility names.
 
 ## Scope
 
-- Create `src/ga_tui/input_controller.py` for pure text-input helper functions.
+- Create `src/shuheng/input_controller.py` for pure text-input helper functions.
 - Move these implementations out of `app.py`:
   - `raw_cursor_to_display(text, cursor)`
   - `display_cursor_to_raw(text, display_cursor)`
@@ -36,7 +36,7 @@ Continue decomposing `src/ga_tui/app.py` by moving pure input cursor/display con
 - `input_controller.py` owns the pure input cursor/display helper implementations and stays lower-level than the TUI.
 - `app.py` exposes the same public helper names for compatibility.
 - Tests cover newline display mapping, raw/display cursor round-trip behavior, segment wrapping, East Asian width/combining-mark behavior, display-index lookup, cursor info, and app wrapper parity.
-- `scripts/check_policy_gates.py` asserts the new module has no reverse dependency on `ga_tui.app`, curses, mutable TUI state, rendering, command handlers, Web Console, dashboard, or runtime dispatch.
+- `scripts/check_policy_gates.py` asserts the new module has no reverse dependency on `shuheng.app`, curses, mutable TUI state, rendering, command handlers, Web Console, dashboard, or runtime dispatch.
 - `.trellis/spec/backend/agent-control-protocol.md` records the input cursor helper boundary.
 - Targeted checks and the full release gate pass before commit.
 

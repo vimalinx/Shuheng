@@ -2,14 +2,14 @@
 
 ## Goal
 
-Move the deterministic inline markdown cleanup helper into the lower-level `src/ga_tui/rendering.py` module as a public helper, while keeping `src/ga_tui/app.py` as the compatibility facade and owner of table rendering, markdown block rendering, `RenderLine` allocation, curses attrs, process/tool parsing, mutable UI state, command/input handling, and runtime side effects.
+Move the deterministic inline markdown cleanup helper into the lower-level `src/shuheng/rendering.py` module as a public helper, while keeping `src/shuheng/app.py` as the compatibility facade and owner of table rendering, markdown block rendering, `RenderLine` allocation, curses attrs, process/tool parsing, mutable UI state, command/input handling, and runtime side effects.
 
 ## Requirements
 
-- `src/ga_tui/rendering.py` must expose `strip_inline_markdown(text: str) -> str`.
+- `src/shuheng/rendering.py` must expose `strip_inline_markdown(text: str) -> str`.
 - Existing rendering-internal callers must use the public `strip_inline_markdown(...)` helper instead of the private `_strip_inline_markdown(...)`.
-- `src/ga_tui/app.py` must re-export `strip_inline_markdown = rendering_helpers.strip_inline_markdown` for compatibility.
-- The local `def strip_inline_markdown(...)` implementation must be removed from `src/ga_tui/app.py`.
+- `src/shuheng/app.py` must re-export `strip_inline_markdown = rendering_helpers.strip_inline_markdown` for compatibility.
+- The local `def strip_inline_markdown(...)` implementation must be removed from `src/shuheng/app.py`.
 - Existing app-owned callers in table rendering, markdown block rendering, and metadata parsing may continue to call `strip_inline_markdown(...)` through the compatibility alias.
 - Tests must cover direct helper behavior and app alias parity.
 - Policy gates must assert helper ownership in `rendering.py`, app alias compatibility, representative behavior, absence of the local `app.py` implementation, and the existing rendering no-reverse-dependency boundary.
@@ -22,8 +22,8 @@ Move the deterministic inline markdown cleanup helper into the lower-level `src/
 - [ ] Inline code backticks are removed without changing the content.
 - [ ] Bold, italic, and underscore emphasis markers are removed without changing the content.
 - [ ] `app.strip_inline_markdown is rendering.strip_inline_markdown`.
-- [ ] `src/ga_tui/app.py` no longer defines a local `strip_inline_markdown(...)` function.
-- [ ] `rendering.py` remains curses-free and must not import `ga_tui.app`, mutable `State`, runtime agent classes, command/input handlers, Web Console, dashboard, storage roots, approvals, artifacts, history ownership, or gateway handlers.
+- [ ] `src/shuheng/app.py` no longer defines a local `strip_inline_markdown(...)` function.
+- [ ] `rendering.py` remains curses-free and must not import `shuheng.app`, mutable `State`, runtime agent classes, command/input handlers, Web Console, dashboard, storage roots, approvals, artifacts, history ownership, or gateway handlers.
 - [ ] Targeted compile, Ruff, rendering tests, policy gates, full release gates, package build, wheel smoke, and `shuheng-check` pass.
 
 ## Definition of Done
@@ -56,7 +56,7 @@ Consequences: text cleanup behavior becomes policy-gated in one place. Table ren
 ## Technical Notes
 
 - Current duplicate implementations:
-  - `src/ga_tui/rendering.py` has private `_strip_inline_markdown(...)` used by visible-reply policy helpers.
-  - `src/ga_tui/app.py` has public `strip_inline_markdown(...)` used by table/markdown block and metadata parsing helpers.
-- Existing rendering alias block in `src/ga_tui/app.py` already re-exports other pure rendering helpers such as `boxed_user_lines`.
+  - `src/shuheng/rendering.py` has private `_strip_inline_markdown(...)` used by visible-reply policy helpers.
+  - `src/shuheng/app.py` has public `strip_inline_markdown(...)` used by table/markdown block and metadata parsing helpers.
+- Existing rendering alias block in `src/shuheng/app.py` already re-exports other pure rendering helpers such as `boxed_user_lines`.
 - Relevant verification surfaces: `tests/test_rendering.py`, `scripts/check_policy_gates.py`, `.trellis/spec/backend/agent-control-protocol.md`, and `docs/agent-harness-architecture.md`.

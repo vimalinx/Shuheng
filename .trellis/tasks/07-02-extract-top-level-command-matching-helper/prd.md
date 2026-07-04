@@ -2,18 +2,18 @@
 
 ## Objective
 
-Move deterministic top-level command prefix matching out of `src/ga_tui/app.py` into `src/ga_tui/commands.py`, preserving the current completion behavior and keeping `app.py` as the Orchestrator facade for dynamic/stateful command completion and command execution.
+Move deterministic top-level command prefix matching out of `src/shuheng/app.py` into `src/shuheng/commands.py`, preserving the current completion behavior and keeping `app.py` as the Orchestrator facade for dynamic/stateful command completion and command execution.
 
 ## Scope
 
-- Add a pure helper in `src/ga_tui/commands.py` that receives explicit command candidates and returns matching top-level command completion rows.
+- Add a pure helper in `src/shuheng/commands.py` that receives explicit command candidates and returns matching top-level command completion rows.
 - Preserve existing top-level completion behavior:
   - Non-slash input returns no matches.
   - Slash input containing a space after stripping returns no top-level fallback matches.
   - Matching is case-insensitive.
   - `/mo` matches the visible `/model` row through the existing `COMMANDS` catalog.
   - Hidden model aliases such as `/ll` and `/models` do not appear unless they are present in the injected visible command catalog.
-- Keep `src/ga_tui/app.py` as the owner of:
+- Keep `src/shuheng/app.py` as the owner of:
   - `COMMANDS` visible command catalog.
   - `/agent` dynamic subagent and role completion expansion.
   - `/workspace(s)`, `/archived`, `/filter`, `/collapse`, `/expand`, `/approve`, and `/reject` stateful or specialized completion routing.
@@ -30,8 +30,8 @@ Move deterministic top-level command prefix matching out of `src/ga_tui/app.py` 
 
 ## Acceptance Criteria
 
-- `src/ga_tui/commands.py` owns the pure top-level command prefix helper.
-- `src/ga_tui/app.py` delegates the final top-level fallback in `command_matches(...)` to the new helper.
+- `src/shuheng/commands.py` owns the pure top-level command prefix helper.
+- `src/shuheng/app.py` delegates the final top-level fallback in `command_matches(...)` to the new helper.
 - `tests/test_commands.py` covers direct helper behavior and app wrapper/dispatch parity for slash, non-slash, spaces, case-insensitive matching, `/mo`, and hidden-alias exclusion.
 - `scripts/check_policy_gates.py` locks helper ownership, representative behavior, app compatibility, duplicate-definition absence in `app.py`, and the commands no-reverse-dependency boundary.
 - `.trellis/spec/backend/agent-control-protocol.md` documents the durable command module boundary update.
@@ -39,8 +39,8 @@ Move deterministic top-level command prefix matching out of `src/ga_tui/app.py` 
 
 ## Verification Plan
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/commands.py tests/test_commands.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/commands.py tests/test_commands.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/commands.py tests/test_commands.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/commands.py tests/test_commands.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_commands.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit:

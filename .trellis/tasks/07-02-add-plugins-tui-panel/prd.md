@@ -6,7 +6,7 @@ Make `/plugins` open a dedicated plugin browser inside the TUI, so users can ins
 
 ## What I Already Know
 
-- The declarative plugin MVP already exists in `src/ga_tui/plugins.py`.
+- The declarative plugin MVP already exists in `src/shuheng/plugins.py`.
 - Current `/plugins` is handled by `handle_plugin_command(...)` and returns `format_plugin_list(...)` as a system message.
 - Existing harness panels use `PanelItem` plus `open_harness_panel(...)` for `/tasks`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/gateway`, and `/baseline`.
 - Curses Enter handling opens harness panels before falling back to `submit(...)`.
@@ -65,6 +65,6 @@ Make `/plugins` open a dedicated plugin browser inside the TUI, so users can ins
 
 ## Technical Notes
 
-- Relevant code: `src/ga_tui/app.py`, `src/ga_tui/plugins.py`, `scripts/check_policy_gates.py`, `.trellis/spec/backend/agent-control-protocol.md`.
+- Relevant code: `src/shuheng/app.py`, `src/shuheng/plugins.py`, `scripts/check_policy_gates.py`, `.trellis/spec/backend/agent-control-protocol.md`.
 - Existing panel primitives: `PanelItem`, `draw_panel_browser(...)`, `open_harness_panel(...)`.
 - Existing plugin contract: `.trellis/spec/backend/agent-control-protocol.md` Scenario `Declarative User Plugins`.

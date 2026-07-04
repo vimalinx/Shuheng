@@ -2,18 +2,18 @@
 
 ## Goal
 
-Continue Goal 7 by extracting the pure boxed user-message text layout helper from `src/ga_tui/app.py` into the curses-free `src/ga_tui/rendering.py` helper boundary.
+Continue Goal 7 by extracting the pure boxed user-message text layout helper from `src/shuheng/app.py` into the curses-free `src/shuheng/rendering.py` helper boundary.
 
 ## Requirements
 
-- Move `boxed_user_lines(text, width)` into `src/ga_tui/rendering.py`.
+- Move `boxed_user_lines(text, width)` into `src/shuheng/rendering.py`.
 - Preserve existing behavior:
   - compute `inner_limit = max(8, width - 4)`;
   - wrap the body with terminal cell-aware wrapping;
   - render an empty body as one empty line inside the box;
   - compute the inner box width from wrapped body cell widths, bounded by `inner_limit`;
   - return top border, padded body rows, and bottom border as plain strings.
-- Keep `src/ga_tui/app.py` exposing `boxed_user_lines` as a compatibility alias.
+- Keep `src/shuheng/app.py` exposing `boxed_user_lines` as a compatibility alias.
 - Keep `message_block_lines(...)`, `RenderLine(...)` allocation, markdown/plain rendering, color attrs, curses drawing, process folding, input handling, Web Console, dashboard, runtime dispatch, storage roots, ledgers, approvals, artifacts, and history ownership outside `rendering.py`.
 - Update `tests/test_rendering.py` with direct helper behavior and app alias parity.
 - Update `scripts/check_policy_gates.py` so the rendering boundary includes this helper and continues forbidding reverse dependencies.
@@ -42,8 +42,8 @@ Continue Goal 7 by extracting the pure boxed user-message text layout helper fro
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py -q -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py tests/test_cell_utils.py -q -p no:cacheprovider`

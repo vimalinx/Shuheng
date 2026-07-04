@@ -2,7 +2,7 @@
 
 ## Goal
 
-Move pure Secret Vault session resolver logic out of `src/ga_tui/app.py` into `src/ga_tui/secret_vault.py`, while preserving current `ga_tui.app` compatibility wrappers and all restore/import behavior.
+Move pure Secret Vault session resolver logic out of `src/shuheng/app.py` into `src/shuheng/secret_vault.py`, while preserving current `shuheng.app` compatibility wrappers and all restore/import behavior.
 
 ## Requirements
 
@@ -19,7 +19,7 @@ Move pure Secret Vault session resolver logic out of `src/ga_tui/app.py` into `s
   - missing entries and unmatched targets return the same Chinese error text as today.
 - Keep `app.py` wrappers named `resolve_secret_imported_session(state, target)` and `resolve_secret_native_session(state, target)` so existing callers and tests remain compatible.
 - Add unit coverage for the new lower-level helpers and `app.py` wrapper parity where practical.
-- Extend policy gates so `secret_vault.py` remains a lower-level Secret module without reverse imports into `ga_tui.app`, curses, mutable TUI state, runtime providers, rendering, Web Console, or command handlers.
+- Extend policy gates so `secret_vault.py` remains a lower-level Secret module without reverse imports into `shuheng.app`, curses, mutable TUI state, runtime providers, rendering, Web Console, or command handlers.
 - Update `.trellis/spec/backend/agent-control-protocol.md` if the resolver boundary is established.
 
 ## Acceptance Criteria
@@ -53,7 +53,7 @@ Keep the stateful `app.py` wrappers responsible for calling `secret_imported_ses
 
 ## Technical Notes
 
-- Current wrappers live in `src/ga_tui/app.py` near `resolve_secret_imported_session(...)` and `resolve_secret_native_session(...)`.
-- Existing Secret lower-level helpers live in `src/ga_tui/secret_vault.py`.
+- Current wrappers live in `src/shuheng/app.py` near `resolve_secret_imported_session(...)` and `resolve_secret_native_session(...)`.
+- Existing Secret lower-level helpers live in `src/shuheng/secret_vault.py`.
 - Existing Secret tests live in `tests/test_secret_crypto.py`.
 - The architecture baseline remains `docs/agent-harness-architecture.md`: this slice should move pure value matching lower, while keeping the app facade as the orchestrator for mutable state and restore side effects.

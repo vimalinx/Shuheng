@@ -2,12 +2,12 @@
 
 ## Goal
 
-Continue Goal 7 by moving the remaining pure message render-cache signature helper out of `src/ga_tui/app.py` into `src/ga_tui/rendering.py`, while preserving the app facade and current cache behavior.
+Continue Goal 7 by moving the remaining pure message render-cache signature helper out of `src/shuheng/app.py` into `src/shuheng/rendering.py`, while preserving the app facade and current cache behavior.
 
 ## Requirements
 
-- Move only `message_cache_signature(messages)` into `src/ga_tui/rendering.py`.
-- Keep `src/ga_tui/app.py` as the compatibility facade by exposing `message_cache_signature` as a direct alias.
+- Move only `message_cache_signature(messages)` into `src/shuheng/rendering.py`.
+- Keep `src/shuheng/app.py` as the compatibility facade by exposing `message_cache_signature` as a direct alias.
 - Keep `message_lines_cached(...)`, `prune_message_block_cache(...)`, `message_lines_from_cache(...)`, `message_block_lines(...)`, `render_assistant_text(...)`, `render_table(...)`, `markdown_blocks(...)`, and `plain_blocks(...)` in `app.py`.
 - Preserve current cache invalidation semantics: message signature is based on message object identity, role string, content length, and done flag.
 - Keep the extracted helper generic over message-like objects so `rendering.py` does not need to import app-owned state.
@@ -25,8 +25,8 @@ Continue Goal 7 by moving the remaining pure message render-cache signature help
 
 ## Acceptance Criteria
 
-- `src/ga_tui/rendering.py` owns `message_cache_signature(messages)`.
-- `src/ga_tui/app.py` exposes `message_cache_signature` as a compatibility alias.
+- `src/shuheng/rendering.py` owns `message_cache_signature(messages)`.
+- `src/shuheng/app.py` exposes `message_cache_signature` as a compatibility alias.
 - Existing `message_lines_cached(...)` continues to call the public name and preserves current behavior.
 - Targeted rendering tests and policy gates pass.
 - Full release gate pattern from `goal-7/plan.md` passes before commit.
@@ -34,12 +34,12 @@ Continue Goal 7 by moving the remaining pure message render-cache signature help
 
 ## Technical Approach
 
-Implement `rendering.message_cache_signature(messages)` as the existing pure tuple comprehension over message-like objects using `getattr(...)` for role/content/done. This keeps `rendering.py` lower-level and avoids importing `Message`, `State`, or `ga_tui.app`. Remove the local app definition and add a direct alias beside the other rendering compatibility aliases.
+Implement `rendering.message_cache_signature(messages)` as the existing pure tuple comprehension over message-like objects using `getattr(...)` for role/content/done. This keeps `rendering.py` lower-level and avoids importing `Message`, `State`, or `shuheng.app`. Remove the local app definition and add a direct alias beside the other rendering compatibility aliases.
 
 ## Definition of Done
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py tests/test_cell_utils.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`

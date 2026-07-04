@@ -2,18 +2,18 @@
 
 ## Goal
 
-Move deterministic process-child detail text shaping out of `src/ga_tui/app.py`
-and into the curses-free `src/ga_tui/rendering.py` helper boundary.
+Move deterministic process-child detail text shaping out of `src/shuheng/app.py`
+and into the curses-free `src/shuheng/rendering.py` helper boundary.
 
 ## Scope
 
-- Add a pure helper in `src/ga_tui/rendering.py` that formats an already-cleaned
+- Add a pure helper in `src/shuheng/rendering.py` that formats an already-cleaned
   process detail body plus an already-computed preview into the indented child
   detail block used for expanded process groups.
 - Preserve the current truncation limit and truncation suffix.
 - Preserve the fallback behavior: when the cleaned detail is empty, use the
   preview text.
-- Keep `src/ga_tui/app.py` as the compatibility facade with the public
+- Keep `src/shuheng/app.py` as the compatibility facade with the public
   `process_child_detail(body, limit=12000)` function.
 - In the app wrapper, keep app-owned control stripping by applying
   `strip_tui_controls(...)` before delegating.
@@ -32,11 +32,11 @@ and into the curses-free `src/ga_tui/rendering.py` helper boundary.
 
 ## Compatibility
 
-- Existing imports from `ga_tui.app.process_child_detail` must keep working.
+- Existing imports from `shuheng.app.process_child_detail` must keep working.
 - Existing behavior for visible text, empty fallback, truncation, and indentation
   must remain unchanged.
 - `rendering.py` must remain a lower-level dependency and must not import
-  `ga_tui.app`, curses, mutable TUI state, runtime dispatch, Web Console,
+  `shuheng.app`, curses, mutable TUI state, runtime dispatch, Web Console,
   dashboard, command handlers, or input handlers.
 
 ## Verification

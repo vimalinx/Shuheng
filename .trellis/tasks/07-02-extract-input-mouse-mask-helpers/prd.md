@@ -3,19 +3,19 @@
 ## Objective
 
 Continue Goal 7 app.py decomposition by moving deterministic mouse bitmask
-classification logic out of `src/ga_tui/app.py` and into the lower-level
-`src/ga_tui/input_controller.py` helper boundary, while preserving existing
+classification logic out of `src/shuheng/app.py` and into the lower-level
+`src/shuheng/input_controller.py` helper boundary, while preserving existing
 `app.py` compatibility names and mouse behavior.
 
 ## Scope
 
-- Add pure helpers in `src/ga_tui/input_controller.py` that compute:
+- Add pure helpers in `src/shuheng/input_controller.py` that compute:
   - button-state masks for a given button number from explicit constants
   - modifier masks from explicit constants
   - known bstate masks from explicit constants
   - auxiliary-or-unknown mouse event detection
   - clean button-1 action detection
-- Keep `src/ga_tui/app.py` responsible for reading curses constants and exposing
+- Keep `src/shuheng/app.py` responsible for reading curses constants and exposing
   the existing public helper names:
   - `mouse_button_mask(button_no)`
   - `mouse_modifier_mask()`
@@ -35,7 +35,7 @@ classification logic out of `src/ga_tui/app.py` and into the lower-level
 - Do not move `handle_mouse(...)`, `toggle_process_at_line(...)`, mouse-driven
   selection mutation, sidebar activation, popup handling, input focus behavior,
   clipboard/Secret copy gates, draw functions, or curses event-loop code.
-- Do not import `ga_tui.app`, curses, mutable `State`, `RenderLine`,
+- Do not import `shuheng.app`, curses, mutable `State`, `RenderLine`,
   Web Console, dashboard, runtime dispatch, command handlers, storage roots,
   ledgers, approvals, artifacts, Secret Vault behavior, or history ownership
   from `input_controller.py`.
@@ -57,8 +57,8 @@ classification logic out of `src/ga_tui/app.py` and into the lower-level
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit: full Ruff, release hygiene, runtime smoke,
@@ -77,5 +77,5 @@ Secret Vault, Web Console, dashboard, and draw behavior.
 ## Rollback
 
 Revert the scoped commit or restore the mouse helper bodies in
-`src/ga_tui/app.py` if the extraction changes mouse behavior or introduces an
+`src/shuheng/app.py` if the extraction changes mouse behavior or introduces an
 input-controller dependency on app/curses/state owners.

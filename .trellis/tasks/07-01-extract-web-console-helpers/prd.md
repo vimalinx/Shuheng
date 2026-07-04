@@ -2,11 +2,11 @@
 
 ## Goal
 
-Move the first low-risk Web Console helper slice out of `src/ga_tui/app.py` into a lower-level `ga_tui.web_console` module, reducing the monolith while preserving all current Web Console behavior, browser contracts, compatibility imports, policy gates, and release checks.
+Move the first low-risk Web Console helper slice out of `src/shuheng/app.py` into a lower-level `shuheng.web_console` module, reducing the monolith while preserving all current Web Console behavior, browser contracts, compatibility imports, policy gates, and release checks.
 
 ## Requirements
 
-- Create `src/ga_tui/web_console.py` as the owner for pure Web Console constants and helper functions:
+- Create `src/shuheng/web_console.py` as the owner for pure Web Console constants and helper functions:
   - `WEB_CONSOLE_ACTION_REQUEST_SCHEMA`
   - `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA`
   - `WEB_CONSOLE_REF_KINDS`
@@ -15,7 +15,7 @@ Move the first low-risk Web Console helper slice out of `src/ga_tui/app.py` into
   - `web_console_clean_visible(...)`
   - `web_console_status_label(...)`
   - `web_console_metric(...)`
-- Keep `src/ga_tui/app.py` compatibility aliases or wrappers so existing imports and tests continue to work.
+- Keep `src/shuheng/app.py` compatibility aliases or wrappers so existing imports and tests continue to work.
 - Preserve current sanitized `ui_ref` behavior exactly enough for existing Web Console rows/actions to resolve server-side refs after a browser refresh.
 - Preserve visible text sanitization for raw artifact refs, approvals, tasks, schedule ids, temporary agents, raw agent ids, and approval-required process markers.
 - Add unit tests that cover helper behavior and app-wrapper parity.
@@ -24,7 +24,7 @@ Move the first low-risk Web Console helper slice out of `src/ga_tui/app.py` into
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.web_console` imports successfully without importing `ga_tui.app`, curses, mutable TUI state, runtime classes, rendering types, draw functions, command handlers, or `GatewayRequestHandler`.
+- [ ] `shuheng.web_console` imports successfully without importing `shuheng.app`, curses, mutable TUI state, runtime classes, rendering types, draw functions, command handlers, or `GatewayRequestHandler`.
 - [ ] `app.WEB_CONSOLE_ACTION_REQUEST_SCHEMA`, `app.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA`, and `app.WEB_CONSOLE_REF_KINDS` are the same public values as the new module.
 - [ ] `app.web_console_ref`, `app.web_console_timestamp`, `app.web_console_clean_visible`, `app.web_console_status_label`, and `app.web_console_metric` delegate to the new module or are direct aliases.
 - [ ] Tests prove opaque refs are stable, reject unknown kinds/blank ids, and do not expose raw ids.
@@ -74,6 +74,6 @@ Consequences: This reduces `app.py` safely and establishes the module boundary, 
 
 - Relevant decomposition plan: `docs/app-py-decomposition-plan.md`, Phase 6.
 - Relevant spec: `.trellis/spec/backend/agent-control-protocol.md`, Scenario `Local Web Console Gateway`.
-- Current helper cluster begins around `src/ga_tui/app.py` Web Console constants and helper functions.
+- Current helper cluster begins around `src/shuheng/app.py` Web Console constants and helper functions.
 - The extracted module must follow the no-reverse-import rule used by existing extracted modules.
 - Phase verification should include targeted helper tests, policy gates, full pytest, release hygiene, runtime smoke, package build, wheel smoke, and `shuheng-check`.

@@ -2,19 +2,19 @@
 
 ## Requirement
 
-Continue Goal 7 by extracting the next small curses-free rendering helper boundary from `src/ga_tui/app.py` into `src/ga_tui/rendering.py`.
+Continue Goal 7 by extracting the next small curses-free rendering helper boundary from `src/shuheng/app.py` into `src/shuheng/rendering.py`.
 
 This slice moves only the pure markdown table parsing helpers:
 
 - `is_table_separator(cells)`
 - `split_table_row(line)`
 
-`src/ga_tui/app.py` must keep compatibility aliases so existing imports, tests, and call sites continue to work.
+`src/shuheng/app.py` must keep compatibility aliases so existing imports, tests, and call sites continue to work.
 
 ## Scope
 
-- Add the helper implementations to `src/ga_tui/rendering.py`.
-- Re-export the helpers from `src/ga_tui/app.py` as direct compatibility aliases.
+- Add the helper implementations to `src/shuheng/rendering.py`.
+- Re-export the helpers from `src/shuheng/app.py` as direct compatibility aliases.
 - Keep `render_table(...)`, `markdown_blocks(...)`, `plain_blocks(...)`, `message_block_lines(...)`, `message_lines_from_cache(...)`, and `render_assistant_text(...)` in `app.py`.
 - Add focused tests to `tests/test_rendering.py` for separator detection, row splitting, inline markdown cleanup, whitespace/edge trimming, and app alias parity.
 - Update `scripts/check_policy_gates.py` to assert helper ownership, alias parity, representative behavior, absence of app-local definitions, and the rendering module no-reverse-dependency boundary.
@@ -30,8 +30,8 @@ This slice moves only the pure markdown table parsing helpers:
 
 ## Acceptance Criteria
 
-- `src/ga_tui/rendering.py` owns `is_table_separator(...)` and `split_table_row(...)`.
-- `src/ga_tui/app.py` exposes `is_table_separator` and `split_table_row` as compatibility aliases.
+- `src/shuheng/rendering.py` owns `is_table_separator(...)` and `split_table_row(...)`.
+- `src/shuheng/app.py` exposes `is_table_separator` and `split_table_row` as compatibility aliases.
 - App-owned `render_table(...)` still calls the same public names and preserves current behavior.
 - Targeted rendering tests and policy gates pass.
 - Full release gate pattern passes before commit.
@@ -39,8 +39,8 @@ This slice moves only the pure markdown table parsing helpers:
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py tests/test_cell_utils.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`

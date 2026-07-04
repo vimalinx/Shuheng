@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move pure subagent skill-reference normalization out of `src/ga_tui/app.py` into `src/ga_tui/subagent_store.py`, while preserving existing behavior through an `app.py` compatibility alias.
+Move pure subagent skill-reference normalization out of `src/shuheng/app.py` into `src/shuheng/subagent_store.py`, while preserving existing behavior through an `app.py` compatibility alias.
 
 ## Scope
 
@@ -22,18 +22,18 @@ Move pure subagent skill-reference normalization out of `src/ga_tui/app.py` into
 
 - Do not move `subagent_skill_roots(...)`, `subagent_skill_display_name(...)`, `subagent_skill_file_for_ref(...)`, `subagent_skill_summary_from_text(...)`, `subagent_skill_pack_for_refs(...)`, `format_subagent_skill_refs(...)`, `set_subagent_skill_refs(...)`, skill file IO, skill root discovery, subagent metadata persistence, Secret payload persistence, runtime dispatch, Web Console payloads, rendering, commands, or transcript storage.
 - Do not make `subagent_store.py` read local skill files or inspect runtime state.
-- Do not import `ga_tui.app` from extracted modules.
+- Do not import `shuheng.app` from extracted modules.
 
 ## Invariants
 
 - `subagent_store.py` may own skill-ref value normalization because it is metadata/ref shaping.
 - `subagent_store.py` must not own skill file resolution, skill pack assembly, UI formatting, metadata writes, Secret Vault storage, runtime providers, or command handling.
-- Public imports and call behavior from `ga_tui.app` remain compatible during decomposition.
+- Public imports and call behavior from `shuheng.app` remain compatible during decomposition.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/subagent_store.py tests/test_subagent_store.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/subagent_store.py tests/test_subagent_store.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/subagent_store.py tests/test_subagent_store.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/subagent_store.py tests/test_subagent_store.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_subagent_store.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release-gate verification before commit, matching the goal-7 plan.

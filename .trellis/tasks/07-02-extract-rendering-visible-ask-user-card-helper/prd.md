@@ -2,8 +2,8 @@
 
 ## Goal
 
-Continue reducing `src/ga_tui/app.py` by moving the deterministic visible
-ask-user/default-card text selection into `src/ga_tui/rendering.py`, while
+Continue reducing `src/shuheng/app.py` by moving the deterministic visible
+ask-user/default-card text selection into `src/shuheng/rendering.py`, while
 preserving `app.py` as the owner of interaction extraction and process/runtime
 control flow.
 
@@ -27,8 +27,8 @@ control flow.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns `visible_ask_user_card_text(...)`.
-- [ ] `src/ga_tui/app.py` exposes `visible_ask_user_card_text` as a
+- [ ] `src/shuheng/rendering.py` owns `visible_ask_user_card_text(...)`.
+- [ ] `src/shuheng/app.py` exposes `visible_ask_user_card_text` as a
       compatibility alias and keeps `visible_ask_user_text(...)` as an
       app-owned parser wrapper.
 - [ ] Existing visible ask-user card text is preserved for extracted payloads

@@ -2,17 +2,17 @@
 
 ## Goal
 
-Move the deterministic `/agent new ...` body parser out of `src/ga_tui/app.py`
-and into the lower-level `src/ga_tui/subagent_store.py` boundary, while keeping
+Move the deterministic `/agent new ...` body parser out of `src/shuheng/app.py`
+and into the lower-level `src/shuheng/subagent_store.py` boundary, while keeping
 `app.py` responsible for role-template policy, command handling, runtime state,
 metadata writes, and subagent creation side effects.
 
 ## Requirements
 
 - `subagent_store.py` must own a pure helper that parses the `/agent new` body into name, profile, role, persistence flag, and role note.
-- The lower-level helper must not import or reference `ga_tui.app`, `ROLE_TEMPLATES`, curses, `State`, `SubAgentRuntime`, runtime providers, Web Console, rendering, Secret Vault, or history transcript owners.
+- The lower-level helper must not import or reference `shuheng.app`, `ROLE_TEMPLATES`, curses, `State`, `SubAgentRuntime`, runtime providers, Web Console, rendering, Secret Vault, or history transcript owners.
 - Role recognition must be injected from `app.py` as a supported-role collection and role-normalization callable, so `ROLE_TEMPLATES` remains app-owned.
-- `src/ga_tui/app.py` must keep the public `parse_subagent_new_body(body)` compatibility function with the same signature and behavior.
+- `src/shuheng/app.py` must keep the public `parse_subagent_new_body(body)` compatibility function with the same signature and behavior.
 - Existing behavior must be preserved for:
   - `--persistent`, `--persist`, `--long-term`, `--long_term`, `--permanent`, `--durable`
   - `--temp`, `--temporary`, `--ephemeral`
@@ -26,8 +26,8 @@ metadata writes, and subagent creation side effects.
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/subagent_store.py` exposes the pure parser helper.
-- [ ] `src/ga_tui/app.py` no longer contains the parser implementation body and delegates through a compatibility wrapper.
+- [ ] `src/shuheng/subagent_store.py` exposes the pure parser helper.
+- [ ] `src/shuheng/app.py` no longer contains the parser implementation body and delegates through a compatibility wrapper.
 - [ ] `tests/test_subagent_store.py` covers flags, prefixes, profile splitting, role recognition, unsupported role fallback, app wrapper parity, and `main_orchestrator` role-note preservation.
 - [ ] `scripts/check_policy_gates.py` asserts the helper is owned by `subagent_store.py`, app wrapper parity holds, and `subagent_store.py` still has no forbidden dependencies.
 - [ ] `.trellis/spec/backend/agent-control-protocol.md` records the parser boundary and the role-template injection invariant.
@@ -90,8 +90,8 @@ turning `subagent_store.py` into a command or policy module.
 
 ## Technical Notes
 
-- Current parser location: `src/ga_tui/app.py::parse_subagent_new_body`.
-- Target module: `src/ga_tui/subagent_store.py`.
+- Current parser location: `src/shuheng/app.py::parse_subagent_new_body`.
+- Target module: `src/shuheng/subagent_store.py`.
 - Existing subagent-store boundary is documented in
   `.trellis/spec/backend/agent-control-protocol.md`.
 - Architecture baseline: `docs/agent-harness-architecture.md`.

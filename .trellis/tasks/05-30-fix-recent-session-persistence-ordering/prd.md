@@ -51,7 +51,7 @@ Make the ordinary left-sidebar `Recent` section behave as a recency-by-activity 
 
 ## Technical Notes
 
-* Main file: `src/ga_tui/app.py`.
+* Main file: `src/shuheng/app.py`.
 * `load_history()` loads `session_meta.json` and cached session rows.
 * `cached_session_rows()` computes and caches `last_user_at`.
 * `draw_sidebar()` currently builds `Recent` from `last_opened_at`.

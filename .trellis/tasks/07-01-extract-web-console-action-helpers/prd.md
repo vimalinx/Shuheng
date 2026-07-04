@@ -2,17 +2,17 @@
 
 ## Goal
 
-Move pure Web Console action helper logic out of `src/ga_tui/app.py` into `ga_tui.web_console` without moving the governed `/gui/action` mutation dispatcher, runtime pump, snapshot refresh, HTTP handler, or any ledger/model/subagent mutation path.
+Move pure Web Console action helper logic out of `src/shuheng/app.py` into `shuheng.web_console` without moving the governed `/gui/action` mutation dispatcher, runtime pump, snapshot refresh, HTTP handler, or any ledger/model/subagent mutation path.
 
 ## Requirements
 
-- Move these pure helpers to `src/ga_tui/web_console.py`:
+- Move these pure helpers to `src/shuheng/web_console.py`:
   - `web_console_resolve_ref(refs, ui_ref, expected_kind)`
   - `web_console_action_payload(payload)`
   - `web_console_action_message(text)`
   - `web_console_model_name_from_payload(action_data, refs)`
   - `web_console_schedule_control_from_payload(action_data, refs)`
-- Keep `src/ga_tui/app.py` compatibility aliases for the moved names.
+- Keep `src/shuheng/app.py` compatibility aliases for the moved names.
 - Preserve the current server-side sanitized `ui_ref` resolution behavior and Chinese user-facing errors.
 - Preserve schedule target-agent ref resolution into `execution.routing.selected_agent` and `target_selector.agent_id`.
 - Expand unit tests and policy gates so the new module boundary remains pure and app-compatible.
@@ -20,7 +20,7 @@ Move pure Web Console action helper logic out of `src/ga_tui/app.py` into `ga_tu
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.web_console` still imports without `ga_tui.app`, curses, mutable TUI state, runtime classes, rendering types, gateway handlers, or mutation helpers.
+- [ ] `shuheng.web_console` still imports without `shuheng.app`, curses, mutable TUI state, runtime classes, rendering types, gateway handlers, or mutation helpers.
 - [ ] `app.web_console_resolve_ref`, `app.web_console_action_payload`, `app.web_console_action_message`, `app.web_console_model_name_from_payload`, and `app.web_console_schedule_control_from_payload` are direct aliases or behavior-identical wrappers.
 - [ ] Tests cover successful ref resolution, missing refs, unknown refs, kind mismatch, and model-name extraction from either payload value or model `ui_ref`.
 - [ ] Tests cover schedule target-agent ref mapping into the existing scheduler control shape.
@@ -37,7 +37,7 @@ Move pure Web Console action helper logic out of `src/ga_tui/app.py` into `ga_tu
 
 ## Technical Approach
 
-Use the existing `ga_tui.web_console` helper module. Add pure functions that operate only on explicit payload/ref dictionaries and do not read or mutate runtime state. Replace local app implementations with compatibility aliases. Keep `web_console_action_error`, `web_console_action_response`, `web_console_apply_action`, `web_console_snapshot`, and runtime pump functions in `app.py`.
+Use the existing `shuheng.web_console` helper module. Add pure functions that operate only on explicit payload/ref dictionaries and do not read or mutate runtime state. Replace local app implementations with compatibility aliases. Keep `web_console_action_error`, `web_console_action_response`, `web_console_apply_action`, `web_console_snapshot`, and runtime pump functions in `app.py`.
 
 ## Decision (ADR-lite)
 
@@ -59,5 +59,5 @@ Consequences: The module boundary becomes more useful for future `/gui/action` e
 ## Technical Notes
 
 - Prior helper extraction commit: `59f9587 refactor: extract web console helpers`.
-- Relevant current functions are still in the Web Console block of `src/ga_tui/app.py`.
+- Relevant current functions are still in the Web Console block of `src/shuheng/app.py`.
 - This is a bridge slice before a later task can split stateful Web Console adapters through explicit callbacks or state facades.

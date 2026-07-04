@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move pure subagent identity normalization and id generation helpers out of `src/ga_tui/app.py` into `src/ga_tui/subagent_store.py`, while preserving existing behavior through `app.py` compatibility aliases/wrappers.
+Move pure subagent identity normalization and id generation helpers out of `src/shuheng/app.py` into `src/shuheng/subagent_store.py`, while preserving existing behavior through `app.py` compatibility aliases/wrappers.
 
 ## Scope
 
@@ -29,19 +29,19 @@ Move pure subagent identity normalization and id generation helpers out of `src/
 
 - Do not move `allowed_subagent_meta_fields(...)`, `subagent_runtime_meta_payload(...)`, Secret subagent payload persistence, `save_subagent_meta(...)`, profile/memory/event reads/writes, skill-ref discovery, runtime provider state, `State` mutation, Web Console payloads, rendering, commands, or transcript storage.
 - Do not make subagent homes own normal conversation transcripts.
-- Do not import `ga_tui.app` from extracted modules.
+- Do not import `shuheng.app` from extracted modules.
 
 ## Invariants
 
 - Global history remains the owner of ordinary non-secret subagent chat transcripts.
 - `subagent_store.py` may own identity/path/ref shaping, but must not inspect runtime state, decode Secret Vault payloads, parse/write history transcripts, render UI rows, or dispatch runtime work.
 - ID generation must preserve current user-facing shapes and collision behavior.
-- Public imports and call behavior from `ga_tui.app` remain compatible during decomposition.
+- Public imports and call behavior from `shuheng.app` remain compatible during decomposition.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/subagent_store.py tests/test_subagent_store.py tests/test_path_safety.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/subagent_store.py tests/test_subagent_store.py tests/test_path_safety.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/subagent_store.py tests/test_subagent_store.py tests/test_path_safety.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/subagent_store.py tests/test_subagent_store.py tests/test_path_safety.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_subagent_store.py tests/test_path_safety.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release-gate verification before commit, matching the goal-7 plan.

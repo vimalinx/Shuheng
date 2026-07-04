@@ -2,15 +2,15 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving pure compact title/category text helpers into `src/ga_tui/text_utils.py`, preparing for later history/sidebar extraction without changing session, metadata, rendering, or storage behavior.
+Continue decomposing `src/shuheng/app.py` by moving pure compact title/category text helpers into `src/shuheng/text_utils.py`, preparing for later history/sidebar extraction without changing session, metadata, rendering, or storage behavior.
 
 ## Requirements
 
-- Extend `src/ga_tui/text_utils.py`.
+- Extend `src/shuheng/text_utils.py`.
 - Move pure helper functions:
   - `compact_title(text, max_width=24)`
   - `compact_category(text)`
-- Keep `src/ga_tui/app.py` compatibility aliases for the moved names.
+- Keep `src/shuheng/app.py` compatibility aliases for the moved names.
 - Preserve current text cleaning behavior:
   - ANSI cleanup via `clean_text`.
   - fenced-code/html/markdown marker stripping.
@@ -23,9 +23,9 @@ Continue decomposing `src/ga_tui/app.py` by moving pure compact title/category t
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.text_utils` owns `compact_title` and `compact_category`.
-- [ ] `ga_tui.app` exposes `compact_title` and `compact_category` as direct aliases or behavior-identical wrappers.
-- [ ] `text_utils.py` remains a pure leaf module and does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, runtime providers, history storage, ledgers, Web Console, dashboard, or command handlers.
+- [ ] `shuheng.text_utils` owns `compact_title` and `compact_category`.
+- [ ] `shuheng.app` exposes `compact_title` and `compact_category` as direct aliases or behavior-identical wrappers.
+- [ ] `text_utils.py` remains a pure leaf module and does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, runtime providers, history storage, ledgers, Web Console, dashboard, or command handlers.
 - [ ] Tests prove title cleanup strips code/html/markdown markers, trims user/task boilerplate, keeps CJK width truncation behavior, and filters category sentinel values.
 - [ ] Existing cell/text utility tests continue to pass.
 - [ ] Phase exit verification passes.

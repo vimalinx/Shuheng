@@ -2,20 +2,20 @@
 
 ## Goal
 
-Continue Goal 7 by moving one more deterministic process-rendering decision out of `src/ga_tui/app.py` and into `src/ga_tui/rendering.py`, without changing transcript rendering behavior.
+Continue Goal 7 by moving one more deterministic process-rendering decision out of `src/shuheng/app.py` and into `src/shuheng/rendering.py`, without changing transcript rendering behavior.
 
 ## What I Already Know
 
-- `src/ga_tui/rendering.py` already owns pure process text helpers such as `process_summary_text(...)`, `process_title_text_from_parts(...)`, process-line string formatters, process-noise predicates, process-group header aggregation, and `process_turn_lines(...)`.
-- `src/ga_tui/app.py` still owns `append_process_summary_line(rendered, marker, body)`, which parses the raw process body, formats the final summary row, and mutates the caller-provided `rendered` list.
+- `src/shuheng/rendering.py` already owns pure process text helpers such as `process_summary_text(...)`, `process_title_text_from_parts(...)`, process-line string formatters, process-noise predicates, process-group header aggregation, and `process_turn_lines(...)`.
+- `src/shuheng/app.py` still owns `append_process_summary_line(rendered, marker, body)`, which parses the raw process body, formats the final summary row, and mutates the caller-provided `rendered` list.
 - The only pure policy inside `append_process_summary_line(...)` is whether a precomputed summary line should be appended: append when `summary` is non-empty and not equal to `执行中`.
 - `app.py` must remain the owner of raw body parsing, `process_tools(...)`, JSON-ish tool extraction, process-turn traversal, list mutation, `RenderLine` conversion, curses attrs, mutable `State`, Web Console, dashboard, runtime dispatch, ledgers, history, and Secret Vault behavior.
 - `docs/agent-harness-architecture.md` requires the decomposition to preserve a strong Orchestrator facade and move deterministic lower-level transforms behind auditable boundaries.
 
 ## Requirements
 
-- Add a pure helper in `src/ga_tui/rendering.py` that receives explicit summary and preformatted summary line values and returns the lines that should be appended for that process summary policy.
-- Keep `src/ga_tui/app.py` exposing the new helper as a compatibility alias.
+- Add a pure helper in `src/shuheng/rendering.py` that receives explicit summary and preformatted summary line values and returns the lines that should be appended for that process summary policy.
+- Keep `src/shuheng/app.py` exposing the new helper as a compatibility alias.
 - Keep `append_process_summary_line(rendered, marker, body)` in `app.py` as the compatibility wrapper that:
   - computes `summary = process_summary_text(body)`,
   - computes the formatted row with `process_speech_summary_line(marker, body, summary)`,
@@ -29,7 +29,7 @@ Continue Goal 7 by moving one more deterministic process-rendering decision out 
 
 ## Acceptance Criteria
 
-- `rendering.py` owns the new helper and the helper has no dependency on `ga_tui.app`, curses, mutable `State`, runtime dispatch, Web Console, dashboard, command/input handlers, ledgers, artifacts, history stores, Secret Vault storage, or JSON-ish tool parsing.
+- `rendering.py` owns the new helper and the helper has no dependency on `shuheng.app`, curses, mutable `State`, runtime dispatch, Web Console, dashboard, command/input handlers, ledgers, artifacts, history stores, Secret Vault storage, or JSON-ish tool parsing.
 - `app.py` contains no local implementation of the new helper beyond a compatibility alias.
 - Existing visible assistant/process rendering remains unchanged.
 - Tests cover direct helper behavior and `app.append_process_summary_line(...)` wrapper parity.
@@ -43,8 +43,8 @@ Continue Goal 7 by moving one more deterministic process-rendering decision out 
 
 ## Verification Plan
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full project Ruff, pytest, release hygiene, runtime smoke, compileall, `git diff --check`, package build, wheel smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent`.

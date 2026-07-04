@@ -11,7 +11,7 @@ Fix the Shuheng stable TUI hang where a main-runtime request that asks the model
 * The final visible assistant text stops at: `Started. Let me discover who's available — Shuheng agents and IRC peers.`
 * The running `shuheng` process is alive at PID `393058`.
 * The embedded `omp --mode rpc` child process is alive at PID `424556`.
-* The active OMP command uses model `ga-tui-opencode-go-deepseek-v4-flas-6094d65d/deepseek-v4-flash` and append prompt `/home/vimalinx/.shuheng/memory/agent_harness/runtime/ohmypi-ga-tui-memory.md`.
+* The active OMP command uses model `shuheng-opencode-go-deepseek-v4-flas-6094d65d/deepseek-v4-flash` and append prompt `/home/vimalinx/.shuheng/memory/agent_harness/runtime/ohmypi-shuheng-memory.md`.
 * The stalled communication-turn transcript is `/home/vimalinx/.shuheng/model_responses/model_responses_102106070390001.txt`.
 * The matching OMP session JSONL is `/home/vimalinx/.shuheng/memory/agent_harness/runtime/ohmypi/agent/sessions/-Programs-Shuheng/2026-06-23T10-41-47-438Z_019ef412-67ae-7000-963f-fd8edcc7854d.jsonl`.
 * Recent commits already include `d0dc323 fix: finish stalled ohmypi host tool turns`, so this is likely a related but not fully covered stall path.
@@ -61,7 +61,7 @@ Fix the Shuheng stable TUI hang where a main-runtime request that asks the model
 
 ## Technical Notes
 
-* Likely code paths: `src/ga_tui/ohmypi_provider.py`, `src/ga_tui/app.py`, and tests around OMP host tools/final text fallback.
+* Likely code paths: `src/shuheng/ohmypi_provider.py`, `src/shuheng/app.py`, and tests around OMP host tools/final text fallback.
 * Live process evidence should be gathered from `~/.shuheng/model_responses/`, `~/.shuheng/memory/agent_harness/*.jsonl`, and the live `shuheng`/`omp` process tree.
 * Prior memory indicates OMP is the preferred runtime-provider direction and previous fixes touched stalled host-tool turns and final reply enforcement.
 
@@ -71,6 +71,6 @@ Fix the Shuheng stable TUI hang where a main-runtime request that asks the model
 * Fix: `OhMyPiRpcAgent` now records the buffer boundary at each host tool result, refreshes follow-up activity on later OMP frames, waits for a full idle window before fallback, and only lets post-tool visible text suppress the provider fallback.
 * Safety fix: provider-owned host-tool watchdog fallback mixed with pre-tool progress text is filtered from Oh My Pi memory-candidate extraction.
 * Regression coverage: `scripts/check_policy_gates.py` now covers stalled host-tool fallback, post-tool activity deferring completion until final answer, pre-tool progress not suppressing fallback, and mixed fallback not becoming a memory candidate.
-* Verification passed: `python3 -m py_compile src/ga_tui/ohmypi_provider.py scripts/check_policy_gates.py`; `python3 -m compileall -q src scripts`; `python3 scripts/check_policy_gates.py`; `python3 -m pytest -q`; `git diff --check`.
+* Verification passed: `python3 -m py_compile src/shuheng/ohmypi_provider.py scripts/check_policy_gates.py`; `python3 -m compileall -q src scripts`; `python3 scripts/check_policy_gates.py`; `python3 -m pytest -q`; `git diff --check`.
 * Architecture baseline: the change keeps OMP as a bounded runtime provider, preserves Shuheng as the Orchestrator/ledger/memory owner, and moves the system closer to the governed-agent baseline by preventing provider progress/fallback from bypassing traceability or memory-candidate governance.
-* Runtime note: the currently running `shuheng` PID `393058` with OMP child `424556` is still using the old imported code. The pipx launcher imports this checkout's `src/ga_tui`, so no reinstall is needed; exit and relaunch `shuheng` to pick up the source fix.
+* Runtime note: the currently running `shuheng` PID `393058` with OMP child `424556` is still using the old imported code. The pipx launcher imports this checkout's `src/shuheng`, so no reinstall is needed; exit and relaunch `shuheng` to pick up the source fix.

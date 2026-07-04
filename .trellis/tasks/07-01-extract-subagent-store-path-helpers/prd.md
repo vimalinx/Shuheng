@@ -2,11 +2,11 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by introducing `src/ga_tui/subagent_store.py` for pure subagent identity, home-path, and sidebar-key helpers, while preserving the invariant that normal non-secret subagent conversations are stored in global Shuheng history, not in per-agent session files.
+Continue decomposing `src/shuheng/app.py` by introducing `src/shuheng/subagent_store.py` for pure subagent identity, home-path, and sidebar-key helpers, while preserving the invariant that normal non-secret subagent conversations are stored in global Shuheng history, not in per-agent session files.
 
 ## Requirements
 
-- Add `src/ga_tui/subagent_store.py`.
+- Add `src/shuheng/subagent_store.py`.
 - Move or re-home pure helpers that do not require `State`, `SubAgentRuntime`, runtime providers, Secret Vault payload IO, history transcript parsing, or rendering:
   - `subagent_home_session_key(agent_id)`
   - `home_subagent_id_from_key(key)`
@@ -22,7 +22,7 @@ Continue decomposing `src/ga_tui/app.py` by introducing `src/ga_tui/subagent_sto
   - `subagent_new_chat_session_id()`
   - `subagent_session_sidebar_key(agent_id, session_id)`
   - `subagent_session_from_sidebar_key(key)`
-- Keep `src/ga_tui/app.py` compatibility aliases or wrappers for all moved public names.
+- Keep `src/shuheng/app.py` compatibility aliases or wrappers for all moved public names.
 - Keep the existing `SUBAGENT_SESSION_PREFIX` value stable.
 - Keep parameterized store helpers free of app storage-root globals where the root must remain app-owned.
 - Add tests and policy gates for the new module boundary.
@@ -30,11 +30,11 @@ Continue decomposing `src/ga_tui/app.py` by introducing `src/ga_tui/subagent_sto
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.subagent_store` owns pure subagent path/key/session-id helpers.
-- [ ] `ga_tui.app` preserves existing public helper behavior through aliases or wrappers.
+- [ ] `shuheng.subagent_store` owns pure subagent path/key/session-id helpers.
+- [ ] `shuheng.app` preserves existing public helper behavior through aliases or wrappers.
 - [ ] Store helpers sanitize agent/session identifiers exactly as current `app.py` behavior does.
 - [ ] Lower-level path helpers accept `SUBAGENTS_DIR` as an explicit parameter instead of importing `app.py` or reading app-owned storage roots.
-- [ ] `subagent_store.py` does not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, runtime provider classes, Web Console, dashboard, history persistence, or rendering helpers.
+- [ ] `subagent_store.py` does not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, runtime provider classes, Web Console, dashboard, history persistence, or rendering helpers.
 - [ ] Unit tests cover sanitization, app wrapper parity, home-session keys, normal subagent file paths, secret virtual homes, chat session id shape, and sidebar-key round trips.
 - [ ] Phase exit verification passes.
 

@@ -2,20 +2,20 @@
 
 ## Goal
 
-Continue Goal 7 by moving the deterministic `/agent settings|model` target parser out of `src/ga_tui/app.py` into the lower-level `src/ga_tui/commands.py` helper module, while preserving public compatibility and executable behavior.
+Continue Goal 7 by moving the deterministic `/agent settings|model` target parser out of `src/shuheng/app.py` into the lower-level `src/shuheng/commands.py` helper module, while preserving public compatibility and executable behavior.
 
 ## What I Already Know
 
-- `src/ga_tui/app.py` still owns `subagent_settings_target_from_command(text)`.
+- `src/shuheng/app.py` still owns `subagent_settings_target_from_command(text)`.
 - The helper is a pure string parser: it returns the `<agent>` token for `/agent settings|setting|config|detail|details|prefs <agent>` and `/agent model <agent>`, otherwise `""`.
 - The only current call site is in input/key handling when deciding whether to open the subagent settings/model modal.
-- `src/ga_tui/commands.py` already owns deterministic command-completion and command-input parsing helpers with app-level compatibility aliases.
-- The command helper boundary requires `commands.py` to avoid imports of `ga_tui.app`, curses, mutable `State`, runtime dispatch, rendering, history, governance, Secret Vault, Web Console, dashboard, input handlers, storage roots, ledgers, or artifacts.
+- `src/shuheng/commands.py` already owns deterministic command-completion and command-input parsing helpers with app-level compatibility aliases.
+- The command helper boundary requires `commands.py` to avoid imports of `shuheng.app`, curses, mutable `State`, runtime dispatch, rendering, history, governance, Secret Vault, Web Console, dashboard, input handlers, storage roots, ledgers, or artifacts.
 
 ## Requirements
 
-- Move the implementation of `subagent_settings_target_from_command(text)` into `src/ga_tui/commands.py`.
-- Keep `src/ga_tui/app.py` exposing the same public name as a compatibility alias.
+- Move the implementation of `subagent_settings_target_from_command(text)` into `src/shuheng/commands.py`.
+- Keep `src/shuheng/app.py` exposing the same public name as a compatibility alias.
 - Preserve existing behavior exactly:
   - Match `/agent settings <agent>` and aliases `setting`, `config`, `detail`, `details`, and `prefs`.
   - Match `/agent model <agent>`.

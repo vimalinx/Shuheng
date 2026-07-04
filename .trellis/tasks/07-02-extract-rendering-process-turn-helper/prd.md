@@ -3,19 +3,19 @@
 ## Requirement
 
 Continue Goal 7 app.py decomposition by moving the deterministic
-`append_process_turn(...)` line-selection policy out of `src/ga_tui/app.py` and
-into the lower-level, curses-free `src/ga_tui/rendering.py` module.
+`append_process_turn(...)` line-selection policy out of `src/shuheng/app.py` and
+into the lower-level, curses-free `src/shuheng/rendering.py` module.
 
 The extracted helper should return a list of rendered process-turn text lines
-from already-computed inputs. `src/ga_tui/app.py` must keep the legacy public
+from already-computed inputs. `src/shuheng/app.py` must keep the legacy public
 `append_process_turn(rendered, marker, body, current, fold_details=True,
 collapse_whole=False)` wrapper and inject all app-owned dependencies.
 
 ## Scope
 
-- Add a pure helper in `src/ga_tui/rendering.py` for process-turn line
+- Add a pure helper in `src/shuheng/rendering.py` for process-turn line
   generation.
-- Keep `src/ga_tui/app.py` as the compatibility facade for the old mutating
+- Keep `src/shuheng/app.py` as the compatibility facade for the old mutating
   append API.
 - Pass app-owned decisions into the lower-level helper explicitly, including
   process noise flags, call noise flag, visible final text, summary/title text,
@@ -42,12 +42,12 @@ collapse_whole=False)` wrapper and inject all app-owned dependencies.
 - Do not touch mutable `State`, runtime dispatch, Web Console, dashboard,
   command/input handlers, storage roots, approvals, artifacts, ledgers, Secret
   Vault behavior, or history ownership.
-- Do not import `ga_tui.app`, curses, `State`, Web Console, dashboard,
+- Do not import `shuheng.app`, curses, `State`, Web Console, dashboard,
   runtime-dispatch, commands, or input handlers from `rendering.py`.
 
 ## Compatibility Contract
 
-- Existing imports and tests that call `ga_tui.app.append_process_turn(...)`
+- Existing imports and tests that call `shuheng.app.append_process_turn(...)`
   keep working.
 - `rendering.py` remains a lower-level dependency of `app.py`.
 - The helper in `rendering.py` must be deterministic over explicit inputs and
@@ -58,8 +58,8 @@ collapse_whole=False)` wrapper and inject all app-owned dependencies.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_rendering.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit: Ruff, release hygiene, runtime smoke,
@@ -72,5 +72,5 @@ collapse_whole=False)` wrapper and inject all app-owned dependencies.
 
 ## Rollback
 
-Revert the scoped commit or restore the wrapper body in `src/ga_tui/app.py` if
+Revert the scoped commit or restore the wrapper body in `src/shuheng/app.py` if
 the extracted helper changes rendering behavior or creates a reverse dependency.

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Continue Goal 7 by moving the deterministic plain-text block layout logic out of `src/ga_tui/app.py` and into the curses-free `src/ga_tui/rendering.py` helper boundary, preserving existing behavior and app compatibility.
+Continue Goal 7 by moving the deterministic plain-text block layout logic out of `src/shuheng/app.py` and into the curses-free `src/shuheng/rendering.py` helper boundary, preserving existing behavior and app compatibility.
 
 ## Requirements
 
@@ -15,8 +15,8 @@ Continue Goal 7 by moving the deterministic plain-text block layout logic out of
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns `plain_layout_lines(...)`.
-- [ ] `src/ga_tui/app.py` has no local pure implementation for plain layout beyond the `plain_blocks(...)` `RenderLine` wrapper.
+- [ ] `src/shuheng/rendering.py` owns `plain_layout_lines(...)`.
+- [ ] `src/shuheng/app.py` has no local pure implementation for plain layout beyond the `plain_blocks(...)` `RenderLine` wrapper.
 - [ ] `app.plain_layout_lines is rendering.plain_layout_lines`.
 - [ ] Unit tests cover direct helper output and wrapper attr conversion.
 - [ ] `scripts/check_policy_gates.py` asserts helper ownership, representative behavior, app alias parity, and absence of a local `def plain_layout_lines` in `app.py`.
@@ -59,4 +59,4 @@ Consequences: This is a low-risk step toward splitting message rendering without
 - Relevant plan: `docs/app-py-decomposition-plan.md`.
 - Architecture baseline: `docs/agent-harness-architecture.md`.
 - Existing adjacent helpers: `rendering.table_layout_lines(...)`, `rendering.markdown_layout_blocks(...)`, `app.render_table(...)`, and `app.markdown_blocks(...)`.
-- The invariant remains: lower-level rendering helpers must not import `ga_tui.app`, curses, mutable `State`, Web Console, dashboard, runtime dispatch, command/input handlers, storage roots, ledgers, approvals, artifacts, Secret Vault behavior, or history ownership.
+- The invariant remains: lower-level rendering helpers must not import `shuheng.app`, curses, mutable `State`, Web Console, dashboard, runtime dispatch, command/input handlers, storage roots, ledgers, approvals, artifacts, Secret Vault behavior, or history ownership.

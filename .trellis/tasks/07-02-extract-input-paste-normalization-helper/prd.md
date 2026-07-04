@@ -3,19 +3,19 @@
 ## Objective
 
 Continue Goal 7 app.py decomposition by moving deterministic pasted-text
-normalization out of `src/ga_tui/app.py` and into the lower-level
-`src/ga_tui/input_controller.py` helper boundary, while preserving existing
+normalization out of `src/shuheng/app.py` and into the lower-level
+`src/shuheng/input_controller.py` helper boundary, while preserving existing
 paste behavior and `app.py` compatibility.
 
 ## Scope
 
-- Add `normalize_pasted_text(text)` to `src/ga_tui/input_controller.py`.
+- Add `normalize_pasted_text(text)` to `src/shuheng/input_controller.py`.
 - Preserve the existing behavior exactly:
   - collapse one or more CR/LF runs plus surrounding spaces/tabs into one
     literal space
   - replace remaining tabs with four spaces
   - keep other text unchanged
-- Re-export `normalize_pasted_text` from `src/ga_tui/app.py` as a compatibility
+- Re-export `normalize_pasted_text` from `src/shuheng/app.py` as a compatibility
   alias.
 - Keep bracketed paste mode, paste buffer state, `handle_key(...)`,
   `read_terminal_key(...)`, `PASTE_START` / `PASTE_END` detection, TTY escape
@@ -30,7 +30,7 @@ paste behavior and `app.py` compatibility.
   `disable_bracketed_paste(...)`, `enable_mouse_drag(...)`,
   `disable_mouse_drag(...)`, or TTY/curses event-loop behavior.
 - Do not move paste buffer fields or mutation out of `State`.
-- Do not import `ga_tui.app`, curses, mutable `State`, `RenderLine`, Web Console,
+- Do not import `shuheng.app`, curses, mutable `State`, `RenderLine`, Web Console,
   dashboard, runtime dispatch, command handlers, storage roots, ledgers,
   approvals, artifacts, Secret Vault behavior, or history ownership from
   `input_controller.py`.
@@ -46,8 +46,8 @@ paste behavior and `app.py` compatibility.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit: full Ruff, release hygiene, runtime smoke,
@@ -65,5 +65,5 @@ Secret Vault, Web Console, dashboard, and drawing.
 
 ## Rollback
 
-Revert the scoped commit or restore the helper body in `src/ga_tui/app.py` if
+Revert the scoped commit or restore the helper body in `src/shuheng/app.py` if
 paste behavior changes or `input_controller.py` gains forbidden dependencies.

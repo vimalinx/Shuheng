@@ -3360,6 +3360,33 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert ("legacy-provider " + "root") not in integration_source, integration_source
     assert "GenericAgent legacy provider checkout:" in integration_source, integration_source
     assert "validate_legacy_provider_root(" in integration_source, integration_source
+    trellis_tasks = ROOT / ".trellis" / "tasks"
+    if trellis_tasks.is_dir():
+        retired_task_fragments = (
+            "src/" + "ga" + "_tui",
+            "ga" + "_tui" + ".",
+            "python -m " + "ga" + "_tui",
+            "python3 -m " + "ga" + "_tui",
+            "ga" + "-tui",
+            "GA" + "-TUI",
+            "GA" + " TUI",
+            "GA" + "TUI",
+            "ga" + "-control",
+            "ga" + "_control",
+            "GenericAgent" + "-TUI",
+            "genericagent" + "-tui",
+            "GenericAgent " + "root",
+            "legacy-provider " + "root",
+            "legacy_genericagent_" + "root",
+        )
+        for path in trellis_tasks.rglob("*"):
+            if not path.is_file() or "archive" in path.relative_to(trellis_tasks).parts:
+                continue
+            if path.suffix not in {".md", ".json", ".jsonl"}:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for forbidden in retired_task_fragments:
+                assert forbidden not in text, f"{path}: {forbidden}"
 
 
 def assert_shuheng_history_storage_owned() -> None:

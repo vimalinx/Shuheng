@@ -2,8 +2,8 @@
 
 ## Goal
 
-Move deterministic text-edit transition calculations out of `src/ga_tui/app.py`
-into `src/ga_tui/input_controller.py` while preserving the existing TUI
+Move deterministic text-edit transition calculations out of `src/shuheng/app.py`
+into `src/shuheng/input_controller.py` while preserving the existing TUI
 behavior and compatibility surface.
 
 ## Scope
@@ -14,7 +14,7 @@ behavior and compatibility surface.
   - deleting the character before the cursor;
   - deleting the character at the cursor;
   - moving the cursor by a horizontal delta with clamping.
-- Re-export the moved helpers from `src/ga_tui/app.py` as compatibility aliases.
+- Re-export the moved helpers from `src/shuheng/app.py` as compatibility aliases.
 - Update app-owned wrappers/call sites to delegate to the helpers while keeping
   existing mutation, command-index reset, history-browse reset, dirty marking,
   paste-mode handling, and curses key dispatch in `app.py`.

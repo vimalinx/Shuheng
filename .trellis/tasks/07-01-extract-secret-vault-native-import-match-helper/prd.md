@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move the pure "find the native Secret session represented by an imported Secret entry" logic out of `src/ga_tui/app.py` into `src/ga_tui/secret_vault.py`, while keeping `app.py` as the compatibility wrapper that loads native entries from `State`.
+Move the pure "find the native Secret session represented by an imported Secret entry" logic out of `src/shuheng/app.py` into `src/shuheng/secret_vault.py`, while keeping `app.py` as the compatibility wrapper that loads native entries from `State`.
 
 ## Scope
 
@@ -21,8 +21,8 @@ Move the pure "find the native Secret session represented by an imported Secret 
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/secret_vault.py tests/test_secret_crypto.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/test_secret_crypto.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release gate from `goal-7/plan.md` before commit.

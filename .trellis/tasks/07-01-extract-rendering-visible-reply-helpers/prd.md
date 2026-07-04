@@ -2,7 +2,7 @@
 
 ## Requirement
 
-Move pure visible-reply text cleanup helpers from `src/ga_tui/app.py` into the lower-level `src/ga_tui/rendering.py` module while preserving executable behavior and public compatibility imports from `ga_tui.app`.
+Move pure visible-reply text cleanup helpers from `src/shuheng/app.py` into the lower-level `src/shuheng/rendering.py` module while preserving executable behavior and public compatibility imports from `shuheng.app`.
 
 ## Scope
 
@@ -10,7 +10,7 @@ This slice owns only deterministic, curses-free assistant visible-reply cleanup:
 
 - Move `TOOL_CALL_BLOCK_RE`, `TOOL_RESULT_FENCE_RE`, and `FINAL_RESPONSE_INFO_RE` into `rendering.py`.
 - Move `strip_tool_output_blocks(text)`, `strip_standalone_dot_lines(text)`, and `visible_reply_text(body, hide_detail_fences=False)` into `rendering.py`.
-- Keep `src/ga_tui/app.py` compatibility aliases for every moved regex/helper.
+- Keep `src/shuheng/app.py` compatibility aliases for every moved regex/helper.
 - Preserve default `visible_reply_text(...)` behavior: hide `tool_use`, tool headers, and final-response info, but leave detail/tool-result fences unless `hide_detail_fences=True`.
 - Preserve hide-detail behavior: remove tool call blocks, `tool_use` blocks, tool result fences, tool headers, and final-response info.
 - Preserve standalone dot-line stripping and triple-newline collapse.

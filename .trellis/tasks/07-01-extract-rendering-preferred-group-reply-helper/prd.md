@@ -2,7 +2,7 @@
 
 ## Summary
 
-Continue Goal 7 by extracting the pure preferred group visible-reply selection logic from `src/ga_tui/app.py` into the curses-free `src/ga_tui/rendering.py` helper boundary.
+Continue Goal 7 by extracting the pure preferred group visible-reply selection logic from `src/shuheng/app.py` into the curses-free `src/shuheng/rendering.py` helper boundary.
 
 ## Requirements
 
@@ -26,8 +26,8 @@ Continue Goal 7 by extracting the pure preferred group visible-reply selection l
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py -q -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py tests/test_cell_utils.py -q -p no:cacheprovider`

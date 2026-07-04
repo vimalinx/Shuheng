@@ -3,13 +3,13 @@
 ## Goal
 
 Continue Goal 7 app.py decomposition by moving deterministic input-history
-browse target calculation out of `src/ga_tui/app.py` and into the lower-level
-`src/ga_tui/input_controller.py` helper boundary, while preserving the existing
+browse target calculation out of `src/shuheng/app.py` and into the lower-level
+`src/shuheng/input_controller.py` helper boundary, while preserving the existing
 public `browse_input_history(state, direction)` behavior in `app.py`.
 
 ## Requirements
 
-- Add a pure helper to `src/ga_tui/input_controller.py` that receives explicit
+- Add a pure helper to `src/shuheng/input_controller.py` that receives explicit
   input history state:
   - history entries
   - current input text and cursor
@@ -29,17 +29,17 @@ public `browse_input_history(state, direction)` behavior in `app.py`.
   - Down moves toward newer items
   - moving beyond the newest item restores the saved draft and clears browse state
   - every consumed browse event resets the command index and marks the UI dirty in `app.py`
-- Keep `src/ga_tui/app.py` as the compatibility and Orchestrator facade:
+- Keep `src/shuheng/app.py` as the compatibility and Orchestrator facade:
   - `browse_input_history(state, direction)` still owns `State` mutation,
     `set_input_text(...)`, `state.command_index = 0`, and `mark_dirty(state)`.
 
 ## Acceptance Criteria
 
-- `src/ga_tui/input_controller.py` owns the pure history-browse result helper.
-- `src/ga_tui/app.py` exposes the helper as a compatibility alias or wrapper and
+- `src/shuheng/input_controller.py` owns the pure history-browse result helper.
+- `src/shuheng/app.py` exposes the helper as a compatibility alias or wrapper and
   no longer keeps duplicate pure index/draft transition logic inline.
 - Existing public helper names and key-handler call sites keep working.
-- Policy gates fail if `input_controller.py` imports `ga_tui.app`, curses,
+- Policy gates fail if `input_controller.py` imports `shuheng.app`, curses,
   mutable `State`, rendering types, command handlers, Web Console, dashboard, or
   runtime-dispatch owners.
 
@@ -68,8 +68,8 @@ public `browse_input_history(state, direction)` behavior in `app.py`.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/input_controller.py tests/test_input_controller.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full Goal 7 gate before commit: full Ruff, release hygiene, runtime smoke,
@@ -88,5 +88,5 @@ Vault, Web Console, dashboard, and drawing.
 ## Rollback
 
 Revert the scoped commit or restore the transition body in
-`src/ga_tui/app.py` if input-history browsing changes or `input_controller.py`
+`src/shuheng/app.py` if input-history browsing changes or `input_controller.py`
 gains forbidden dependencies.

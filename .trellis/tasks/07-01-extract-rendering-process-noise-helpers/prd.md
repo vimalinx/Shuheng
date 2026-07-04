@@ -2,7 +2,7 @@
 
 ## Summary
 
-Continue Goal 7 by extracting the pure process-noise and search-noise predicates from `src/ga_tui/app.py` into the curses-free `src/ga_tui/rendering.py` helper boundary.
+Continue Goal 7 by extracting the pure process-noise and search-noise predicates from `src/shuheng/app.py` into the curses-free `src/shuheng/rendering.py` helper boundary.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ Continue Goal 7 by extracting the pure process-noise and search-noise predicates
   - `process_has_tool_result_noise(body)`
   - `process_has_tool_noise(body)`
   - `process_has_search_noise(body)`
-- `app.py` wrappers must inject `process_tools(body)` into rendering helpers so `rendering.py` does not parse JSON-ish tool payloads or import `ga_tui.app`.
+- `app.py` wrappers must inject `process_tools(body)` into rendering helpers so `rendering.py` does not parse JSON-ish tool payloads or import `shuheng.app`.
 - Preserve existing behavior for tool-call detection, result fence/final-response detection, combined tool-noise detection, and search/browser marker detection.
 - Update `tests/test_rendering.py` with direct helper tests and app wrapper parity.
 - Update `scripts/check_policy_gates.py` so the rendering boundary includes these helpers and continues forbidding reverse dependencies.
@@ -31,8 +31,8 @@ Continue Goal 7 by extracting the pure process-noise and search-noise predicates
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/rendering.py tests/test_rendering.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py -q -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_rendering.py tests/test_cell_utils.py -q -p no:cacheprovider`

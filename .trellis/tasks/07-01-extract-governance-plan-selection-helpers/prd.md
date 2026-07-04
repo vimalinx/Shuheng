@@ -2,7 +2,7 @@
 
 ## Objective
 
-Continue decomposing `src/ga_tui/app.py` by moving pure active-plan selection over already-loaded task rows into `src/ga_tui/governance.py`, while preserving `app.py` compatibility wrappers and runtime behavior.
+Continue decomposing `src/shuheng/app.py` by moving pure active-plan selection over already-loaded task rows into `src/shuheng/governance.py`, while preserving `app.py` compatibility wrappers and runtime behavior.
 
 ## Scope
 

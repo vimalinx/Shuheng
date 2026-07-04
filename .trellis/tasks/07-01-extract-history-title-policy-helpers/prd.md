@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move process-summary-safe session title, preview, description, and metadata-text policy out of `src/ga_tui/app.py` into a lower-level helper module, while preserving current behavior through `app.py` compatibility wrappers.
+Move process-summary-safe session title, preview, description, and metadata-text policy out of `src/shuheng/app.py` into a lower-level helper module, while preserving current behavior through `app.py` compatibility wrappers.
 
 ## Scope
 
@@ -36,20 +36,20 @@ Move process-summary-safe session title, preview, description, and metadata-text
 - Do not move transcript file parsing/writing, `_pairs(...)`, `_user_text(...)`, `read_history_messages(...)`, `load_history(...)`, `restore_backend_and_recent_messages(...)`, Web Console payloads, provider/backend restore orchestration, runtime dispatch, command handlers, or rendering functions.
 - Do not change session storage roots, Secret Vault behavior, subagent homes, global history ownership, or metadata write policy.
 - Do not make metadata refresh author persisted titles; main-runtime `session.rename` remains the title-write authority.
-- Do not import `ga_tui.app` from extracted modules.
+- Do not import `shuheng.app` from extracted modules.
 
 ## Invariants
 
 - Global Shuheng history remains the owner of normal conversation transcripts.
 - Process-only summaries such as `OMP 思考`, `执行中`, tool-call labels, hidden thinking, and tool-control blocks must not become session titles, previews, descriptions, or AI metadata context.
 - A normal non-process assistant `<summary>` can still be used as a title/preview candidate.
-- Extracted modules must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
-- Public imports and call behavior from `ga_tui.app` remain compatible during decomposition.
+- Extracted modules must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- Public imports and call behavior from `shuheng.app` remain compatible during decomposition.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/history_titles.py tests/test_history_titles.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/history_titles.py tests/test_history_titles.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/history_titles.py tests/test_history_titles.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/history_titles.py tests/test_history_titles.py scripts/check_policy_gates.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_history_titles.py tests/test_history_store.py -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - Full release-gate verification before commit, matching the goal-7 plan.

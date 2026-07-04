@@ -2,17 +2,17 @@
 
 ## Goal
 
-Continue decomposing `src/ga_tui/app.py` by moving pure subagent chat message normalization and preview/count helpers into `src/ga_tui/subagent_store.py`, while keeping transcript persistence, Secret Vault payload decoding, runtime state, and UI rendering in their existing owners.
+Continue decomposing `src/shuheng/app.py` by moving pure subagent chat message normalization and preview/count helpers into `src/shuheng/subagent_store.py`, while keeping transcript persistence, Secret Vault payload decoding, runtime state, and UI rendering in their existing owners.
 
 ## Requirements
 
-- Extend `src/ga_tui/subagent_store.py`.
+- Extend `src/shuheng/subagent_store.py`.
 - Move pure helpers:
   - `normalize_loaded_subagent_chat_messages(messages)`
   - `subagent_chat_history_preview_messages(messages, limit=20)`
   - `subagent_chat_history_rounds(messages)`
   - `subagent_chat_history_last_user_at(messages, fallback)`
-- Keep `src/ga_tui/app.py` compatibility aliases for all moved public names.
+- Keep `src/shuheng/app.py` compatibility aliases for all moved public names.
 - Preserve current semantics:
   - Interrupted trailing assistant messages are converted to done assistant messages with the existing interruption suffix.
   - Preview messages include only `user`, `assistant`, and `system` roles.
@@ -24,9 +24,9 @@ Continue decomposing `src/ga_tui/app.py` by moving pure subagent chat message no
 
 ## Acceptance Criteria
 
-- [ ] `ga_tui.subagent_store` owns the selected pure helpers.
-- [ ] `ga_tui.app` preserves wrapper/alias behavior for existing callers.
-- [ ] `subagent_store.py` may depend on `ui_types.Message` and `text_utils.clean_text`, but must not import `ga_tui.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `history_store`, `secret_vault`, runtime providers, Web Console, dashboard, or rendering helpers.
+- [ ] `shuheng.subagent_store` owns the selected pure helpers.
+- [ ] `shuheng.app` preserves wrapper/alias behavior for existing callers.
+- [ ] `subagent_store.py` may depend on `ui_types.Message` and `text_utils.clean_text`, but must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, `history_store`, `secret_vault`, runtime providers, Web Console, dashboard, or rendering helpers.
 - [ ] Unit tests cover interrupted assistant normalization, preview filtering/limit/cleaning, round count, fallback timestamp behavior, and app alias parity.
 - [ ] Phase exit verification passes.
 

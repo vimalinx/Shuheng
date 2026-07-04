@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move deterministic parsing of `[GA TUI AgentTask Envelope v2]` prompt blocks out of `src/ga_tui/app.py` and into `src/ga_tui/control_protocol.py`, preserving current policy-gate inputs while keeping policy decisions and approval side effects in the Orchestrator facade.
+Move deterministic parsing of `[Shuheng AgentTask Envelope v2]` prompt blocks out of `src/shuheng/app.py` and into `src/shuheng/control_protocol.py`, preserving current policy-gate inputs while keeping policy decisions and approval side effects in the Orchestrator facade.
 
 ## Scope
 
@@ -30,12 +30,12 @@ Move deterministic parsing of `[GA TUI AgentTask Envelope v2]` prompt blocks out
 - Policy gates continue to evaluate the objective inside the generated AgentTask envelope rather than scanning the full envelope JSON when the objective exists.
 - Explicit policy action lookup continues to use the parsed payload through the app compatibility alias.
 - Invalid envelopes are ignored safely without raising.
-- `control_protocol.py` remains lower-level: no `ga_tui.app`, curses, mutable `State`, runtime agent classes, ledgers, approvals, Web Console, dashboard, rendering, commands, or storage-root globals.
+- `control_protocol.py` remains lower-level: no `shuheng.app`, curses, mutable `State`, runtime agent classes, ledgers, approvals, Web Console, dashboard, rendering, commands, or storage-root globals.
 
 ## Verification
 
-- `python3 -m py_compile src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
-- `python3 -m ruff check src/ga_tui/app.py src/ga_tui/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m py_compile src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
+- `python3 -m ruff check src/shuheng/app.py src/shuheng/control_protocol.py tests/test_control_protocol.py scripts/check_policy_gates.py`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_control_protocol.py -p no:cacheprovider`
 - `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py`
 - When feasible for the slice, run full Ruff, release hygiene, runtime smoke, compileall, `git diff --check`, full pytest, package build, wheel/sdist smoke, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent`.

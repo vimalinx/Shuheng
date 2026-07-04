@@ -2,15 +2,15 @@
 
 ## Goal
 
-Continue Goal 7 by moving the remaining deterministic subagent-result notice formatting helpers out of `src/ga_tui/app.py` into the lower-level curses-free rendering helper boundary, while preserving existing app compatibility wrappers and behavior.
+Continue Goal 7 by moving the remaining deterministic subagent-result notice formatting helpers out of `src/shuheng/app.py` into the lower-level curses-free rendering helper boundary, while preserving existing app compatibility wrappers and behavior.
 
 ## Requirements
 
-- Move only pure subagent result notice formatting behavior into `src/ga_tui/rendering.py`.
+- Move only pure subagent result notice formatting behavior into `src/shuheng/rendering.py`.
 - Add a rendering helper that shapes the notice body from explicit `raw`, `rendered`, `final_reply`, `has_tool_noise`, and `limit` inputs.
 - Add a rendering helper that formats the final subagent result notice text from explicit `name`, `agent_id`, `bus_task_id`, `artifact_ref`, and already-shaped `body`.
 - Add a rendering helper that returns wrapped metadata detail strings for an already-parsed notice and metadata lines.
-- Keep `src/ga_tui/app.py` as the compatibility facade:
+- Keep `src/shuheng/app.py` as the compatibility facade:
   - `subagent_result_notice_body(...)` keeps injecting `clean_text(...)`, `render_assistant_text(...)`, `latest_visible_reply_text(...)`, and `process_has_tool_noise(...)`.
   - `format_subagent_result_notice(...)` keeps injecting `SubAgentRuntime` fields.
   - `format_subagent_result_notice_parts(...)` keeps the public signature and delegates final string assembly.
@@ -23,8 +23,8 @@ Continue Goal 7 by moving the remaining deterministic subagent-result notice for
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` owns pure helpers for subagent result notice body shaping, final notice string assembly, and metadata detail line wrapping.
-- [ ] `src/ga_tui/app.py` exposes compatibility aliases or wrappers for the public helper names and has no local duplicate implementation for newly moved pure helpers.
+- [ ] `src/shuheng/rendering.py` owns pure helpers for subagent result notice body shaping, final notice string assembly, and metadata detail line wrapping.
+- [ ] `src/shuheng/app.py` exposes compatibility aliases or wrappers for the public helper names and has no local duplicate implementation for newly moved pure helpers.
 - [ ] `render_subagent_result_body(...)`, `subagent_result_reply_excerpt(...)`, `format_subagent_result_context_update(...)`, `subagent_result_context_update_from_notice(...)`, `subagent_context_updates_from_messages(...)`, `subagent_result_card_blocks(...)`, `message_block_lines(...)`, `message_lines_from_cache(...)`, `RenderLine` allocation, curses attrs, mutable `State`, message cache ownership, Web Console, dashboard, runtime dispatch, commands, storage roots, approvals, artifacts, Secret Vault behavior, and history ownership remain outside `rendering.py`.
 - [ ] Tests cover direct rendering helper output, app wrapper dependency injection/parity, metadata detail wrapped strings, and `RenderLine` attr conversion remains app-owned.
 - [ ] Policy gates cover helper ownership, representative behavior, app wrapper parity, duplicate-definition absence, and the rendering no-reverse-dependency boundary.
@@ -42,9 +42,9 @@ Continue Goal 7 by moving the remaining deterministic subagent-result notice for
 
 Use the same extraction pattern as the recent rendering layout and subagent-result notice helper slices:
 
-- Move deterministic text transforms into `src/ga_tui/rendering.py`.
+- Move deterministic text transforms into `src/shuheng/rendering.py`.
 - Keep app wrappers responsible for app-only dependencies and existing public signatures.
-- Keep `RenderLine`, `cp(...)`, curses attrs, stateful caches, artifact/ledger IO, and context-update behavior in `src/ga_tui/app.py`.
+- Keep `RenderLine`, `cp(...)`, curses attrs, stateful caches, artifact/ledger IO, and context-update behavior in `src/shuheng/app.py`.
 - Prefer explicit inputs over importing app-level helpers into `rendering.py`.
 
 ## Decision (ADR-lite)

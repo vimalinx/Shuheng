@@ -2,12 +2,12 @@
 
 ## Goal
 
-Create the first low-risk `src/ga_tui/rendering.py` boundary by moving pure running-indicator helper behavior out of `src/ga_tui/app.py` while preserving existing TUI animation behavior and app-level compatibility imports.
+Create the first low-risk `src/shuheng/rendering.py` boundary by moving pure running-indicator helper behavior out of `src/shuheng/app.py` while preserving existing TUI animation behavior and app-level compatibility imports.
 
 ## Requirements
 
-- Move `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)` into `src/ga_tui/rendering.py`.
-- Keep `src/ga_tui/app.py` as a compatibility facade that exposes the same public names.
+- Move `RUN_FRAMES`, `running_indicator(frame)`, `running_indicator_cell_width()`, and `render_running_indicator_line(line, frame)` into `src/shuheng/rendering.py`.
+- Keep `src/shuheng/app.py` as a compatibility facade that exposes the same public names.
 - Keep `record_running_indicator_rect(...)`, `draw_running_indicator_frame(...)`, `message_block_lines(...)`, `draw_main(...)`, event-loop frame advancement, and all mutable `State` behavior in `app.py`.
 - The new rendering helper module may depend on lower-level `text_utils.cell_width` and `ui_types.RenderLine`.
 - Add unit tests for helper output, frame modulo behavior, width calculation, non-indicator line passthrough, indicator line prefixing, and app alias parity.
@@ -16,8 +16,8 @@ Create the first low-risk `src/ga_tui/rendering.py` boundary by moving pure runn
 
 ## Acceptance Criteria
 
-- [ ] `src/ga_tui/rendering.py` exists and owns the selected helper implementations.
-- [ ] `src/ga_tui/app.py` re-exports the selected names as compatibility aliases without behavior changes.
+- [ ] `src/shuheng/rendering.py` exists and owns the selected helper implementations.
+- [ ] `src/shuheng/app.py` re-exports the selected names as compatibility aliases without behavior changes.
 - [ ] Existing running-indicator lightweight redraw behavior remains app-owned and still passes policy gates.
 - [ ] New tests cover direct helper behavior and app alias parity.
 - [ ] Targeted compile, targeted Ruff, targeted tests, policy gates, full tests, release hygiene, runtime smoke, build, wheel smoke, `git diff --check`, and `shuheng-check` pass.
@@ -30,7 +30,7 @@ Create the first low-risk `src/ga_tui/rendering.py` boundary by moving pure runn
 
 ## Technical Approach
 
-Add `src/ga_tui/rendering.py` as a curses-free helper module. Move only pure string/line helper logic first. Import that module from `app.py` and assign compatibility aliases near the existing lower-level helper imports. Leave actual screen drawing, rectangle tracking, dirty-state decisions, cache behavior, and main loop animation in `app.py`.
+Add `src/shuheng/rendering.py` as a curses-free helper module. Move only pure string/line helper logic first. Import that module from `app.py` and assign compatibility aliases near the existing lower-level helper imports. Leave actual screen drawing, rectangle tracking, dirty-state decisions, cache behavior, and main loop animation in `app.py`.
 
 ## Decision (ADR-lite)
 
@@ -49,6 +49,6 @@ Consequences: This creates a policy-gated rendering boundary without moving high
 
 ## Technical Notes
 
-- Relevant code: `src/ga_tui/app.py` around `RUN_FRAMES`, `running_indicator(...)`, `message_block_lines(...)`, `record_running_indicator_rect(...)`, and `draw_running_indicator_frame(...)`.
+- Relevant code: `src/shuheng/app.py` around `RUN_FRAMES`, `running_indicator(...)`, `message_block_lines(...)`, `record_running_indicator_rect(...)`, and `draw_running_indicator_frame(...)`.
 - Relevant spec: `.trellis/spec/backend/agent-control-protocol.md` running-indicator animation contract and app decomposition boundaries.
 - Relevant tests/gates: `scripts/check_policy_gates.py`, a new `tests/test_rendering.py`, existing full pytest and release gates.
