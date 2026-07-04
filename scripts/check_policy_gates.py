@@ -5124,7 +5124,7 @@ def assert_ohmypi_rpc_process_blocks_fold_like_genericagent() -> None:
         "result": {"content": [{"type": "text", "text": "README contents that should stay folded."}]},
     })
     final_reply = (
-        "Validated durable lesson: OMP process blocks should fold in GA-TUI while final replies "
+        "Validated durable lesson: OMP process blocks should fold in Shuheng while final replies "
         "stay visible for memory approval and restored sessions."
     )
     process.stdout.push({
@@ -5586,7 +5586,7 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert typed_schedule["status"] == "ok", typed_schedule
     memory_context = typed_handler(
         "memory_context_get",
-        {"objective": "Prepare OMP with GA-TUI context.", "task_id": "task_omp_memory_context"},
+        {"objective": "Prepare OMP with Shuheng context.", "task_id": "task_omp_memory_context"},
     )
     assert memory_context["status"] == "ok", memory_context
     assert memory_context["kind"] == "memory.context", memory_context
@@ -5657,7 +5657,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "target": target.agent_id,
         "statement": (
             "type: project\n"
-            "Typed OMP memory_candidate_submit must queue a GA-TUI approval record instead of "
+            "Typed OMP memory_candidate_submit must queue a Shuheng approval record instead of "
             "writing long-term memory directly."
         ),
         "evidence_ref": "runtime://provider/ohmypi/typed-memory",
@@ -5821,7 +5821,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
         "action": "memory_context_get",
         "args": {
             "target": target.agent_id,
-            "objective": "Hydrate OMP with GA-TUI-owned bridge context.",
+            "objective": "Hydrate OMP with Shuheng-owned bridge context.",
             "task_id": "task_agent_bridge_context",
         },
     })
@@ -5837,7 +5837,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
             "target": target.agent_id,
             "statement": (
                 "type: project\n"
-                "Bridge clients must submit durable memories through GA-TUI "
+                "Bridge clients must submit durable memories through Shuheng "
                 "approval gates instead of writing provider-owned memory."
             ),
             "evidence_ref": "runtime://provider/ohmypi/plugin-test",
@@ -6630,10 +6630,12 @@ def assert_release_readiness_schema(report: dict) -> None:
     } <= set(distribution_smoke["public_console_scripts"]), report
     assert "wheel archive metadata/private member contract" in distribution_smoke["checks"], report
     assert "wheel RECORD hash/size integrity" in distribution_smoke["checks"], report
+    assert "wheel retired naming surface scan" in distribution_smoke["checks"], report
     assert "wheel artifact content leak scan" in distribution_smoke["checks"], report
     assert "sdist archive public/private member contract" in distribution_smoke["checks"], report
     assert "sdist metadata/entry points contract" in distribution_smoke["checks"], report
     assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"], report
+    assert "sdist retired naming surface scan" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
     assert "shuheng-check core plus optional GenericAgent legacy-provider stub" in distribution_smoke["checks"], report
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report

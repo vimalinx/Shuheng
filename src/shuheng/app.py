@@ -18029,7 +18029,6 @@ LOCAL_SESSION_CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "shuheng",
             "枢衡",
             "shuheng",
-            "genericagent-tui",
             "ohmypi",
             "oh my pi",
             "omp",

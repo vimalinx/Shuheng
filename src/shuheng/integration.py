@@ -202,7 +202,7 @@ def install_core_shim(
         ):
             raise FileExistsError(f"{path} exists; pass --overwrite to replace it")
     if path.exists() and target == "frontends/tuiapp.py":
-        backup = path.with_suffix(path.suffix + ".genericagent-tui.bak")
+        backup = path.with_suffix(path.suffix + ".shuheng-launcher.bak")
         if not backup.exists():
             backup.write_text(path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
     path.write_text(generated_core_shim(), encoding="utf-8")

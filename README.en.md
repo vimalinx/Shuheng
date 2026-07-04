@@ -248,7 +248,7 @@ shuheng-install-core-shim --target tuiapp --overwrite
 The first replacement keeps a backup:
 
 ```text
-frontends/tuiapp.py.genericagent-tui.bak
+frontends/tuiapp.py.shuheng-launcher.bak
 ```
 
 Install a sidecar without replacing `frontends/tuiapp.py`:

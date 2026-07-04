@@ -201,6 +201,41 @@ def text_release_leak_errors(text: str, path: str) -> list[str]:
     return shared_text_release_leak_errors(text, path, location="artifact member")
 
 
+def retired_naming_fragments() -> tuple[str, ...]:
+    retired_tui = "ga" + "-tui"
+    retired_package = "ga" + "_tui"
+    retired_control = "ga" + "-control"
+    retired_control_type = "ga" + "_control"
+    retired_product = "generic" + "agent-tui"
+    return (
+        retired_tui,
+        retired_tui.upper().replace("-", "_"),
+        retired_package,
+        retired_package.upper(),
+        retired_control,
+        retired_control_type,
+        "<" + retired_tui,
+        retired_product,
+    )
+
+
+def check_archive_text_has_no_retired_naming(rows: list[tuple[str, bytes]], *, artifact_kind: str) -> dict[str, object]:
+    errors: list[str] = []
+    fragments = retired_naming_fragments()
+    for path, data in rows:
+        text = data.decode("utf-8", errors="replace").lower()
+        for fragment in fragments:
+            if fragment.lower() in text:
+                errors.append(f"retired pre-Shuheng naming found in artifact member: {path}: {fragment}")
+    if errors:
+        raise ValueError(f"{artifact_kind} retired naming surface scan failed: " + "; ".join(errors))
+    return {
+        "command": f"{artifact_kind} retired naming surface scan",
+        "returncode": 0,
+        "scanned_members": len(rows),
+    }
+
+
 def check_archive_text_has_no_release_leaks(rows: list[tuple[str, bytes]], *, artifact_kind: str) -> dict[str, object]:
     errors: list[str] = []
     for path, data in rows:
@@ -595,9 +630,11 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
 def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = wheel_archive_contract_check(wheel)
     record_check = wheel_record_integrity_check(wheel)
-    content_check = check_archive_text_has_no_release_leaks(wheel_text_rows(wheel), artifact_kind="wheel")
+    text_rows = wheel_text_rows(wheel)
+    retired_naming_check = check_archive_text_has_no_retired_naming(text_rows, artifact_kind="wheel")
+    content_check = check_archive_text_has_no_release_leaks(text_rows, artifact_kind="wheel")
     report = run_artifact_smoke(wheel, artifact_kind="wheel", no_deps=no_deps)
-    report["checks"] = [archive_check, record_check, content_check, *list(report["checks"])]
+    report["checks"] = [archive_check, record_check, retired_naming_check, content_check, *list(report["checks"])]
     return report
 
 
@@ -605,9 +642,11 @@ def run_sdist_smoke(sdist: Path, *, no_deps: bool = False) -> dict[str, object]:
     archive_check = sdist_archive_contract_check(sdist)
     metadata_check = sdist_metadata_contract_check(sdist)
     sources_check = sdist_sources_integrity_check(sdist)
-    content_check = check_archive_text_has_no_release_leaks(sdist_text_rows(sdist), artifact_kind="sdist")
+    text_rows = sdist_text_rows(sdist)
+    retired_naming_check = check_archive_text_has_no_retired_naming(text_rows, artifact_kind="sdist")
+    content_check = check_archive_text_has_no_release_leaks(text_rows, artifact_kind="sdist")
     report = run_artifact_smoke(sdist, artifact_kind="sdist", no_deps=no_deps)
-    report["checks"] = [archive_check, metadata_check, sources_check, content_check, *list(report["checks"])]
+    report["checks"] = [archive_check, metadata_check, sources_check, retired_naming_check, content_check, *list(report["checks"])]
     return report
 
 

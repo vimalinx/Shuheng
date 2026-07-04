@@ -248,7 +248,7 @@ shuheng-install-core-shim --target tuiapp --overwrite
 第一次覆盖时会保留备份：
 
 ```text
-frontends/tuiapp.py.genericagent-tui.bak
+frontends/tuiapp.py.shuheng-launcher.bak
 ```
 
 不覆盖 `frontends/tuiapp.py`，只安装 sidecar：

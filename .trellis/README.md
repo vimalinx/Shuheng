@@ -17,4 +17,4 @@ state:
 The Python release artifacts intentionally exclude `.trellis/` via
 `MANIFEST.in`. Do not infer public product status from the count of task
 directories; product readiness is tracked through release gates, tests,
-documentation, and `src/ga_tui/release_readiness.py`.
+documentation, and `src/shuheng/release_readiness.py`.

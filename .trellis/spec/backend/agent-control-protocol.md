@@ -35,6 +35,7 @@
 - Missing `shuheng*` console script in `pyproject.toml` -> packaging regression.
 - Retired pre-Shuheng console script in `pyproject.toml` -> naming regression.
 - Built package metadata refers to the retired pre-Shuheng package or plugin directory -> package metadata regression.
+- Built wheel/sdist text members include retired pre-Shuheng package, console-script, protocol, proposal, or old TUI product identifiers -> release artifact naming regression.
 - Active parser regexes still target retired control blocks/fences -> protocol regression.
 - OMP host-tool proposal enum still exposes a retired control proposal type -> tool API naming regression.
 - Doctor output requires GenericAgent for ordinary Shuheng checks -> runtime ownership regression.
@@ -54,6 +55,7 @@
 - Tests must assert integration doctor report identifies OhMyPi / OMP as the core runtime and GenericAgent as optional legacy provider only.
 - Tests must assert parser regexes, hidden control examples, and OMP proposal schemas use `shuheng-control.v2` / `shuheng_control`.
 - Tests must assert release/wheel smoke metadata uses `src/shuheng`, `shuheng` top-level package, and `integrations/omp-shuheng-plugin`.
+- `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments, while leaving optional GenericAgent legacy-provider references valid.
 - Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
 - `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
@@ -4389,7 +4391,7 @@ last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
 
 - Trigger: OMP is used as the main Shuheng runtime provider and receives a generated context pack.
 - Applies to: `permissions_for_role()`, `build_context_pack()`, `build_main_runtime_context_pack()`, `format_context_pack_for_prompt()`, OMP runtime task requests, isolated OMP config generation, and OMP RPC extension-UI approval responses.
-- Non-goal: This does not give OMP direct ownership of GA-TUI memory, approvals, ledgers, schedules, or system-level `~/.omp/agent` configuration.
+- Non-goal: This does not give OMP direct ownership of Shuheng memory, approvals, ledgers, schedules, or system-level `~/.omp/agent` configuration.
 
 ### 2. Signatures
 
@@ -5259,7 +5261,7 @@ def put_agent_runtime_task(agent, request):
 - OMP may emit a standalone `"."` text delta as a tool-turn placeholder or as real punctuation inside normal prose, numbered lists, or decimals. The provider must delay standalone dot deltas until the next visible text delta: append them to the next text delta for normal prose, drop them when a process/tool block starts, and flush them before a normal terminal completion.
 - Oh My Pi non-final process frames must be normalized into the existing Shuheng foldable process text protocol instead of adding a second renderer. The emitted text uses `**LLM Running (Turn N) ...**`, `<summary>...</summary>`, tool args fences, and result fences that `render_assistant_text(..., fold_process:true)` already understands.
 - OMP `message_update` thinking/reasoning deltas are buffered and emitted as a bounded `<thinking>...</thinking>` process turn before the next visible text/tool/final event. The final assistant reply must remain normal assistant text, not hidden inside a thinking block.
-- OMP `tool_execution_start` / `tool_execution_end` frames and GA-TUI `host_tool_call` / `host_tool_result` bridge activity must become bounded, redacted tool process turns so tool args/results are folded by default while the final reply remains visible.
+- OMP `tool_execution_start` / `tool_execution_end` frames and Shuheng `host_tool_call` / `host_tool_result` bridge activity must become bounded, redacted tool process turns so tool args/results are folded by default while the final reply remains visible.
 - Generated OMP context packs, context refs, memory append prompts, and `memory_candidate_submit` descriptions must tell OMP to finish every user turn with a normal user-facing reply in the user's language. Tool results, `Result:` status lines, and memory-candidate submitted/deferred notices must not replace the final reply.
 - Generated OMP context packs, context refs, and memory append prompts must mark Shuheng context metadata as internal execution metadata. Follow-up pronouns such as `这个`, `这个东西`, `它`, `this`, or `that` must resolve to the recent visible conversation/task topic unless the user explicitly names the context pack/ref.
 - Generated OMP context packs, context refs, and memory append prompts must treat explicit user requests to create a persistent/long-term Shuheng agent as an executable control requirement: success requires `agent.create` with `lifecycle:"persistent"` / `persistent:true`, or reuse of a matching existing persistent `agent_id`. Scripts, schedules, memory candidates, or future-agent suggestions alone do not satisfy the request.
@@ -5294,7 +5296,7 @@ def put_agent_runtime_task(agent, request):
 - `OhMyPiRpcAgent` may register host tools through `set_host_tools` only from definitions injected by `app.py`; provider code must not invent writable tools or import TUI `State`.
 - Embedded OMP must use a Shuheng-owned runtime root and must not read or write system-level `~/.omp/agent/config.yml`, `~/.omp/agent/models.yml`, sessions, auth storage, or cache as its active agent directory.
 - Embedded OMP must run with the Shuheng app root as its subprocess `cwd`, while Shuheng harness paths, memory, ledgers, isolated OMP runtime files, and provider metadata use the `SHUHENG_HOME` / `${AGENT_HARNESS_DIR}` ownership boundary.
-- `app.py` owns translation from GA-TUI `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, OMP binary discovery, command construction, and RPC behavior.
+- `app.py` owns translation from Shuheng `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, OMP binary discovery, command construction, and RPC behavior.
 - After `/model` save, edit, delete, default selection, or reload while the TUI is idle, Shuheng must rebuild the isolated OMP config files and refresh the current OMP wrapper's configured model list, child env, and command without requiring a TUI restart.
 - `OhMyPiRpcAgent.load_llm_sessions()` must not overwrite Shuheng-projected `configured_models` with RPC `get_available_models` results when the app has already supplied a configured list. OMP's internal model discovery is only a fallback for unconfigured wrappers.
 - `OhMyPiRpcAgent` must initialize its active local `llmclient` from the projected default model selector so the TUI model panel and status card do not depend on a later OMP `get_state` response to display the default.
@@ -5302,12 +5304,12 @@ def put_agent_runtime_task(agent, request):
 - When Shuheng has supplied `configured_models`, OMP `set_model` / `cycle_model` confirmations may move the active index to a matching configured model and refresh context-window metadata, but must preserve Shuheng-projected display fields such as provider label, model id, and base URL.
 - Refreshing `OhMyPiRpcAgent.configured_models` must preserve the current model by selector, display name, provider/model id, or model/base URL where possible, and update any pending model switch so the next lazy RPC startup sends the refreshed provider/model pair.
 - OMP binary discovery order is explicit `binary` argument, `SHUHENG_OHMYPI_BIN`, `PATH` lookup for `omp`, then user-local Bun install at `$HOME/.bun/bin/omp`. A still-missing executable remains a visible startup error instead of mutating user shell configuration.
-- Generated OMP `config.yml` must set `modelRoles.default` to the GA-TUI default model selector when a complete matching `/model` entry exists.
+- Generated OMP `config.yml` must set `modelRoles.default` to the Shuheng default model selector when a complete matching `/model` entry exists.
 - Generated OMP `config.yml` must set `todo.eager:"default"` and must not write boolean `true` or `"always"` by default. Eager todo forces first-turn `tool_choice:"todo"`, which thinking-mode OpenAI-compatible providers such as DeepSeek can reject before the model answers.
-- Generated OMP `models.yml` must represent complete GA-TUI OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
+- Generated OMP `models.yml` must represent complete Shuheng OpenAI-compatible entries as custom OMP providers with `baseUrl`, `apiKey`, `api`, and `models[].id`; API keys must be referenced through child-process env var names instead of written as secrets in the generated file.
 - Generated OMP API protocol must be inferred from explicit `api_mode` and known endpoint shape, not only from the historical config variable prefix. In particular, `https://open.bigmodel.cn/api/coding/paas/v4` and `https://api.z.ai/api/paas/v4` are OpenAI-compatible PAAS v4 bases and must generate `api:"openai-completions"` unless `api_mode:"responses"` explicitly requests Responses; `https://open.bigmodel.cn/api/anthropic` remains Anthropic Messages.
 - Generated OMP `models.yml` must project `/model` `context_win` to OMP `models[].contextWindow`; if `max_tokens` is configured, it must project to `models[].maxTokens`.
-- Incomplete GA-TUI model entries without API key, base URL, or model id are skipped when generating OMP model providers.
+- Incomplete Shuheng model entries without API key, base URL, or model id are skipped when generating OMP model providers.
 - OMP runtime model rows exposed to the TUI must preserve enough provider/model/base URL metadata for `/model` current-session switching to call OMP `set_model` with structured `provider` and `modelId`.
 - Embedded OMP must not auto-resume stale internal OMP sessions; Shuheng owns visible session history and resets the OMP RPC session when Shuheng opens a fresh main/temporary/restored runtime context.
 - A long-running OMP process must receive at most one full `[Shuheng Context Pack]` prompt per Shuheng runtime session. Later context refreshes should pass a bounded `[Shuheng Context Ref]` with the artifact ref, so OMP history does not accumulate repeated full context packs.
@@ -5334,8 +5336,8 @@ def put_agent_runtime_task(agent, request):
 - When GenericAgent discovery is disabled or absent, the runtime registry may contain only `ohmypi`; this is a healthy Shuheng core state, not a degraded core.
 - The TUI should generate a bounded `Shuheng Layered Memory Guidance` append prompt from Shuheng-owned memory sources under `${SHUHENG_HOME}/memory` and pass it through `--append-system-prompt`.
 - Oh My Pi completion output may emit memory candidate signals, and `shuheng_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
-- Main OMP tasks and worker/subagent OMP tasks should include generated GA-TUI context pack artifacts when using the structured runtime request path.
-- OMP runtime events for requested tasks, host tool calls/results, completion, failure, and abort must be normalized into `runtime.task_event.v1` records and appended to GA-TUI traces when a concrete task id exists.
+- Main OMP tasks and worker/subagent OMP tasks should include generated Shuheng context pack artifacts when using the structured runtime request path.
+- OMP runtime events for requested tasks, host tool calls/results, completion, failure, and abort must be normalized into `runtime.task_event.v1` records and appended to Shuheng traces when a concrete task id exists.
 - OMP runtime events for Secret-context tasks must not be appended to the normal trace store, and OMP memory candidate extraction must ignore `secret-*` sources.
 
 ### 4. Validation & Error Matrix
@@ -5359,13 +5361,13 @@ def put_agent_runtime_task(agent, request):
 - OMP `host_tool_call` for an unregistered tool -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_call` whose callback raises -> provider sends `host_tool_result` with `isError:true`.
 - OMP `host_tool_cancel` -> provider records the cancellation safely and continues normal prompt handling.
-- Complete GA-TUI model entry -> isolated OMP `models.yml` gets one provider/model mapping and the child env gets a matching `SHUHENG_OMP_API_KEY_<digest>` value.
-- Complete GA-TUI model entry with historical `native_claude_config_*` name but PAAS v4 base such as `https://open.bigmodel.cn/api/coding/paas/v4` -> isolated OMP `models.yml` uses `api:"openai-completions"`, validation/probe use Bearer auth and `/chat/completions` / `/models`, and no `/v1/messages` suffix is appended.
-- Complete GA-TUI model entry with Anthropic base such as `https://open.bigmodel.cn/api/anthropic` -> isolated OMP `models.yml` uses `api:"anthropic-messages"` and validation/probe use `x-api-key` plus Anthropic Messages endpoints.
-- Complete GA-TUI model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
-- Incomplete GA-TUI model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
-- Selected GA-TUI default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
-- Selected GA-TUI default model -> a new OMP wrapper must queue that selected model for confirmed `set_model` synchronization before the first prompt, because OMP native sessions can otherwise retain a previous workspace model even when the Shuheng UI displays the projected default.
+- Complete Shuheng model entry -> isolated OMP `models.yml` gets one provider/model mapping and the child env gets a matching `SHUHENG_OMP_API_KEY_<digest>` value.
+- Complete Shuheng model entry with historical `native_claude_config_*` name but PAAS v4 base such as `https://open.bigmodel.cn/api/coding/paas/v4` -> isolated OMP `models.yml` uses `api:"openai-completions"`, validation/probe use Bearer auth and `/chat/completions` / `/models`, and no `/v1/messages` suffix is appended.
+- Complete Shuheng model entry with Anthropic base such as `https://open.bigmodel.cn/api/anthropic` -> isolated OMP `models.yml` uses `api:"anthropic-messages"` and validation/probe use `x-api-key` plus Anthropic Messages endpoints.
+- Complete Shuheng model entry with `context_win:1050000` -> isolated OMP `models.yml` writes `contextWindow:1050000` for that model.
+- Incomplete Shuheng model entry -> omitted from isolated OMP `models.yml`; no invalid OMP provider is generated.
+- Selected Shuheng default model -> OMP command may include `--model <isolated-provider>/<model-id>` and isolated `config.yml` carries the same `modelRoles.default`.
+- Selected Shuheng default model -> a new OMP wrapper must queue that selected model for confirmed `set_model` synchronization before the first prompt, because OMP native sessions can otherwise retain a previous workspace model even when the Shuheng UI displays the projected default.
 - DeepSeek or another thinking-mode OpenAI-compatible model -> isolated OMP `config.yml` carries `todo.eager:"default"` so OMP does not send a forced `tool_choice:"todo"` before the first model answer.
 - Existing OMP wrapper + changed `mykey.py` -> `refresh_agent_runtime_model_config(agent)` updates wrapper `configured_models`, regenerated env, command `--model`, and isolated files before the next switch/prompt.
 - Existing OMP wrapper + stale `get_state` model payload after a current-session switch -> the status card keeps the newly selected configured model instead of displaying old provider/model fields with the new base URL.
@@ -5416,9 +5418,9 @@ def put_agent_runtime_task(agent, request):
 - Base: Oh My Pi can propose current-schema actions through `shuheng_propose`, while Shuheng remains the Orchestrator and policy/ledger owner.
 - Base: Oh My Pi can submit a durable memory candidate through `shuheng_propose` or `memory_candidate_submit`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
 - Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
-- Base: Oh My Pi task request/completion/host-tool events are normalized into trace rows when they have a GA-TUI task id.
+- Base: Oh My Pi task request/completion/host-tool events are normalized into trace rows when they have a Shuheng task id.
 - Bad: The provider imports `app.py` to read TUI state or mutate ledgers directly.
-- Bad: Embedded OMP inherits `~/.omp/agent` or uses the user's system OMP `modelRoles.default`, because `/model` would no longer be the single GA-TUI settings surface.
+- Bad: Embedded OMP inherits `~/.omp/agent` or uses the user's system OMP `modelRoles.default`, because `/model` would no longer be the single Shuheng settings surface.
 - Bad: Generated OMP `models.yml` writes raw API key values.
 - Bad: Saving `mykey.py` but leaving the active `OhMyPiRpcAgent.llmclients` list unchanged until a full TUI restart, because `/model` then appears to do nothing.
 - Bad: Letting an RPC `get_available_models` response from an already-running process replace the Shuheng-projected `/model` list after a save.
@@ -6337,7 +6339,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 - Tests must assert memory candidate creation writes no memory candidate or approval rows during temporary sessions.
 - Tests must assert `/new` exits temporary mode and restores a normal `model_responses_*.txt` log path.
 
-## Scenario: GA-TUI Agent Bridge And OMP Plugin Client
+## Scenario: Shuheng Agent Bridge And OMP Plugin Client
 
 ### 1. Scope / Trigger
 
@@ -6386,8 +6388,8 @@ def context_layers_for_task(*, recent_traces, active_session):
 - The default OMP usage path should be process-local `omp --tool <repo>/integrations/omp-shuheng-plugin/tools/index.ts` so a user can test the plugin without linking it into the system OMP plugin store.
 - Persistent `omp plugin link <repo>/integrations/omp-shuheng-plugin` is optional and must be documented as an explicit user choice.
 - The OMP plugin must call the bridge CLI with `PYTHONPATH=<repo>/src` so it can run from a checkout without requiring package installation.
-- The OMP plugin must not read or write GA-TUI JSONL stores directly.
-- The OMP plugin must not call `queue_approval`, `queue_curated_memory_candidate`, scheduler helpers, or artifact writers itself; only Python GA-TUI code owns those operations.
+- The OMP plugin must not read or write Shuheng JSONL stores directly.
+- The OMP plugin must not call `queue_approval`, `queue_curated_memory_candidate`, scheduler helpers, or artifact writers itself; only Python Shuheng code owns those operations.
 - Bridge metadata must report owner `shuheng.control_plane`, supported actions, relevant paths, and policy fields showing provider direct writes are disabled.
 - Bridge metadata paths must distinguish `app_root_dir` from optional `legacy_genericagent_root`; it must not expose a generic `root_dir` that can be mistaken for the Shuheng core root.
 
@@ -6406,7 +6408,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 ### 5. Good/Base/Bad Cases
 
 - Good: OMP loads `shuheng_context_get` through `--tool`, requests project context, and receives a context-pack artifact ref without mutating any ledger except the context-pack artifact index.
-- Good: OMP calls `shuheng_memory_candidate_submit`; GA-TUI validates the target, builds a memory-candidate artifact, appends a pending candidate row, queues a human approval, and records provenance.
+- Good: OMP calls `shuheng_memory_candidate_submit`; Shuheng validates the target, builds a memory-candidate artifact, appends a pending candidate row, queues a human approval, and records provenance.
 - Base: A user links the plugin persistently with `omp plugin link` only after explicitly choosing to let OMP remember the repo-managed plugin.
 - Base: Codex or Claude Code later calls the same bridge action names and gets the same schemas without OMP-specific contract names.
 - Bad: A plugin writes directly to `${SUBAGENTS_DIR}/*/memory.md` or `memory_candidates.jsonl`.

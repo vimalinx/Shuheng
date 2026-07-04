@@ -302,6 +302,32 @@ def test_artifact_content_leak_scan_rejects_local_absolute_path() -> None:
         raise AssertionError("local absolute artifact content should fail")
 
 
+def test_artifact_retired_naming_scan_rejects_old_console_name() -> None:
+    retired_console = "ga" + "-tui"
+    try:
+        wheel_smoke.check_archive_text_has_no_retired_naming(
+            [("shuheng-0.1.0.dist-info/entry_points.txt", f"{retired_console} = shuheng.__main__:main\n".encode())],
+            artifact_kind="wheel",
+        )
+    except ValueError as exc:
+        assert "retired pre-Shuheng naming found in artifact member" in str(exc)
+    else:
+        raise AssertionError("retired artifact naming should fail")
+
+
+def test_artifact_retired_naming_scan_rejects_old_package_name() -> None:
+    retired_package = "ga" + "_tui"
+    try:
+        wheel_smoke.check_archive_text_has_no_retired_naming(
+            [("PKG-INFO", f"Requires-Dist: {retired_package}\n".encode())],
+            artifact_kind="sdist",
+        )
+    except ValueError as exc:
+        assert "retired pre-Shuheng naming found in artifact member" in str(exc)
+    else:
+        raise AssertionError("retired artifact package naming should fail")
+
+
 def test_wheel_archive_contract_accepts_metadata_and_public_members(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
     write_wheel_fixture(wheel, expected_wheel_members())
