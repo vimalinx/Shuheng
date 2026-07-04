@@ -1,8 +1,8 @@
-"""Runtime provider abstractions for the GA TUI control plane.
+"""Runtime provider abstractions for the Shuheng control plane.
 
 The TUI owns orchestration, ledgers, approvals, artifacts, model routing, and
-scheduled work. Concrete agent runtimes plug in through adapters so GenericAgent
-can remain available without being the only possible backend.
+scheduled work. OhMyPi/OMP is the default runtime core; legacy GenericAgent can
+plug in through an adapter when explicitly available.
 """
 from __future__ import annotations
 
@@ -217,7 +217,7 @@ def genericagent_provider_spec(
         provider_id="genericagent",
         name="GenericAgent",
         runtime_type="local_python_agent",
-        status="active",
+        status="legacy_available",
         transport="in_process_thread",
         entrypoints=["agentmain.GenericAgent", "continue_cmd.restore", "frontends/continue_cmd.py"],
         capabilities={
@@ -262,7 +262,7 @@ def genericagent_provider_spec(
             "resource_gateway": "resource://agent-mail",
         },
         notes=[
-            "GenericAgent remains available as the fallback/escape-hatch adapter.",
+            "GenericAgent is an optional legacy compatibility adapter, not the Shuheng core runtime.",
             "The TUI owns orchestration, model routing, scheduled jobs, ledgers, approvals, and artifacts.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",

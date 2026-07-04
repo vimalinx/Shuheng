@@ -11,6 +11,7 @@ import tempfile
 import time
 import json
 import hashlib
+import subprocess
 import threading
 import urllib.request
 import curses
@@ -3306,9 +3307,11 @@ def assert_shuheng_brand_entrypoints() -> None:
         assert f"{removed_script} =" not in pyproject, removed_script
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        assert integ._print_report(ROOT, []) == 0
+        assert integ._print_report(None, []) == 0
     report = buffer.getvalue()
     assert "Shuheng root:" in report, report
+    assert "Core runtime: OhMyPi / OMP" in report, report
+    assert "GenericAgent legacy provider: unavailable (optional)" in report, report
     assert "Launch without core patches: shuheng" in report, report
     assert "ga-tui" not in report, report
     app_source = Path(a.__file__).read_text(encoding="utf-8")
@@ -3741,7 +3744,9 @@ def assert_ohmypi_runtime_registry() -> None:
         registry = a.agent_runtime_registry()
         data = registry.to_record()
         assert data["default_provider_id"] == "ohmypi", data
-        assert {"genericagent", "ohmypi"} <= set(data["provider_ids"]), data
+        assert "ohmypi" in data["provider_ids"], data
+        if a.GENERICAGENT_PROVIDER_CONFIGURED:
+            assert "genericagent" in data["provider_ids"], data
         providers = {item["provider_id"]: item for item in data["providers"]}
         ohmypi = providers["ohmypi"]
         assert ohmypi["schema_version"] == "agentruntime.provider.v1", ohmypi
@@ -3761,12 +3766,53 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi
         assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
         os.environ["GA_TUI_RUNTIME_PROVIDER"] = "genericagent"
-        assert a.agent_runtime_registry().default().provider_id == "genericagent"
+        selected = a.agent_runtime_registry().default().provider_id
+        if a.GENERICAGENT_PROVIDER_CONFIGURED:
+            assert selected == "genericagent", selected
+        else:
+            assert selected == "ohmypi", selected
     finally:
         if old is None:
             os.environ.pop("GA_TUI_RUNTIME_PROVIDER", None)
         else:
             os.environ["GA_TUI_RUNTIME_PROVIDER"] = old
+
+
+def assert_ohmypi_core_without_genericagent_discovery() -> None:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    env["SHUHENG_DISABLE_GENERICAGENT"] = "1"
+    code = "\n".join([
+        "import contextlib, io, json",
+        "from ga_tui import app, integration",
+        "registry = app.agent_runtime_registry(write_memory_prompt_file=False).to_record()",
+        "buf = io.StringIO()",
+        "with contextlib.redirect_stdout(buf):",
+        "    doctor_rc = integration.doctor_main([])",
+        "print(json.dumps({",
+        "    'runtime_available': app.GENERICAGENT_RUNTIME_AVAILABLE,",
+        "    'provider_ids': registry['provider_ids'],",
+        "    'default_provider_id': registry['default_provider_id'],",
+        "    'doctor_rc': doctor_rc,",
+        "    'doctor_output': buf.getvalue(),",
+        "}, sort_keys=True))",
+    ])
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(ROOT),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["runtime_available"] is False, payload
+    assert payload["default_provider_id"] == "ohmypi", payload
+    assert payload["provider_ids"] == ["ohmypi"], payload
+    assert payload["doctor_rc"] == 0, payload
+    assert "Core runtime: OhMyPi / OMP" in payload["doctor_output"], payload
+    assert "GenericAgent legacy provider: unavailable (optional)" in payload["doctor_output"], payload
 
 
 def assert_ohmypi_memory_prompt_and_command() -> None:
@@ -5734,6 +5780,9 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert metadata["owner"] == "ga-tui.control_plane", metadata
     assert "memory_context_get" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
+    assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
+    assert metadata["paths"]["legacy_genericagent_root"] == a.GENERICAGENT_ROOT, metadata
+    assert "root_dir" not in metadata["paths"], metadata
     assert metadata["paths"]["shuheng_home"] == a.SHUHENG_HOME, metadata
     assert metadata["paths"]["shuheng_memory_dir"] == a.SHUHENG_MEMORY_DIR, metadata
     assert metadata["paths"]["harness_dir"] == a.AGENT_HARNESS_DIR, metadata
@@ -6477,18 +6526,22 @@ def assert_gateway_schema(registry: dict) -> None:
     assert capabilities["roles"]["researcher"]["permissions"]["write_policy"] == "none", capabilities
     assert capabilities["runtime_registry_ref"] == a.AGENT_RUNTIME_REGISTRY_PATH, capabilities
     capability_provider_ids = {item["provider_id"] for item in capabilities["runtime_providers"]}
-    assert {"genericagent", "ohmypi"} <= capability_provider_ids, capabilities
+    assert "ohmypi" in capability_provider_ids, capabilities
+    if a.GENERICAGENT_PROVIDER_CONFIGURED:
+        assert "genericagent" in capability_provider_ids, capabilities
     runtime_registry = registry["runtime_registry"]
     assert runtime_registry["schema_version"] == "agentruntime.registry.v1", runtime_registry
     assert runtime_registry["default_provider_id"] == "ohmypi", runtime_registry
-    assert "genericagent" in runtime_registry["provider_ids"], runtime_registry
     assert "ohmypi" in runtime_registry["provider_ids"], runtime_registry
     providers_by_id = {item["provider_id"]: item for item in runtime_registry["providers"]}
-    runtime_provider = providers_by_id["genericagent"]
-    assert runtime_provider["schema_version"] == "agentruntime.provider.v1", runtime_provider
-    assert runtime_provider["capabilities"]["streaming"] is True, runtime_provider
-    assert runtime_provider["model_routing"]["owner"] == "ga-tui.control_plane", runtime_provider
-    assert runtime_provider["scheduler"]["dispatch_contract"] == "agenttask.v2", runtime_provider
+    if a.GENERICAGENT_PROVIDER_CONFIGURED:
+        assert "genericagent" in runtime_registry["provider_ids"], runtime_registry
+        runtime_provider = providers_by_id["genericagent"]
+        assert runtime_provider["schema_version"] == "agentruntime.provider.v1", runtime_provider
+        assert runtime_provider["status"] == "legacy_available", runtime_provider
+        assert runtime_provider["capabilities"]["streaming"] is True, runtime_provider
+        assert runtime_provider["model_routing"]["owner"] == "ga-tui.control_plane", runtime_provider
+        assert runtime_provider["scheduler"]["dispatch_contract"] == "agenttask.v2", runtime_provider
     ohmypi_provider = providers_by_id["ohmypi"]
     assert ohmypi_provider["transport"] == "jsonl_stdio_rpc", ohmypi_provider
     assert ohmypi_provider["capabilities"]["streaming"] is True, ohmypi_provider
@@ -6556,7 +6609,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert "sdist metadata/entry points contract" in distribution_smoke["checks"], report
     assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
-    assert "shuheng-check against isolated GenericAgent stub" in distribution_smoke["checks"], report
+    assert "shuheng-check core plus optional GenericAgent legacy-provider stub" in distribution_smoke["checks"], report
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
     assert any("ruff check" in command for command in report["verification_commands"]), report
@@ -7521,7 +7574,7 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert "[GA TUI Direct SubAgent Chat]" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "name: Blocking Chat Agent" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "context_pack_ref:" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
-    assert "do not introduce yourself as the main GenericAgent" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
+    assert "do not introduce yourself as the main Shuheng Orchestrator" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert "persist before first token" in blocking_agent.prompts[0][0], blocking_agent.prompts[0][0]
     assert a.agent_log_path(blocking_sub.agent) == os.devnull, a.agent_log_path(blocking_sub.agent)
     assert not (Path(blocking_sub.home) / "model_responses.txt").exists(), "subagent runtime must not keep a private transcript log"
@@ -10135,6 +10188,8 @@ def assert_temp_subagent_current_fallback_is_reloadable() -> None:
 
 
 def assert_tui_query_tools_expose_dashboard_state() -> None:
+    if not a.GENERICAGENT_PROVIDER_CONFIGURED:
+        return
     root = tempfile.mkdtemp(prefix="ga_tui_query_tools_")
     retarget_harness(root)
     state = a.State(agent=FakeLLMAgent())
@@ -11163,6 +11218,7 @@ def run_checks() -> None:
     assert_progress_ledger_is_persistent_and_hydrated()
     assert_runtime_evidence_store_upgrades_baseline()
     assert_ohmypi_runtime_registry()
+    assert_ohmypi_core_without_genericagent_discovery()
     assert_ohmypi_memory_prompt_and_command()
     assert_ohmypi_rpc_command_discovers_user_bun_binary()
     assert_ohmypi_isolated_runtime_settings()

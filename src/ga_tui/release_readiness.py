@@ -202,7 +202,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "shuheng --help",
             "helper --help entrypoints",
             "python -m ga_tui.integration doctor",
-            "shuheng-check against isolated GenericAgent stub",
+            "shuheng-check core plus optional GenericAgent legacy-provider stub",
         ],
         "debug_options_not_release_gates": ["--no-deps", "--wheel-only"],
     }

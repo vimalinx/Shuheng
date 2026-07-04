@@ -1,8 +1,8 @@
 # Runtime Provider Control Plane
 
-Shuheng is evolving from a GenericAgent-only frontend into a local agent
-control plane. The TUI owns orchestration and governance; concrete agent systems
-plug in as runtime providers.
+Shuheng is an OhMyPi/OMP-centered local agent control plane. The TUI owns
+orchestration and governance; concrete agent systems plug in as runtime
+providers.
 
 ## Ownership
 
@@ -36,8 +36,9 @@ memory, schedules, artifacts, and traces in the TUI control plane.
 
 ## Storage Boundary
 
-GenericAgent remains a runtime/source dependency, not the owner of Shuheng state.
-By default Shuheng stores its durable control-plane data under `~/.shuheng`:
+GenericAgent is an optional legacy runtime/source provider, not the owner of
+Shuheng state and not required for normal startup. By default Shuheng stores its
+durable control-plane data under `~/.shuheng`:
 
 - `model_responses/`: canonical visible conversation history for main sessions and
   non-secret subagent direct chats, plus metadata, names, token usage, and trash.
@@ -104,10 +105,9 @@ Provider metadata must include:
 - `policy`: Approval owner, memory write policy, and risky action classes.
 - `a2a` / `mcp`: Gateway compatibility metadata.
 
-The first implemented provider is `genericagent`. On the
-`experiment/ohmypi-runtime-memory` branch, `ohmypi` is the default runtime while
-`genericagent` remains available as an explicit fallback through
-`GA_TUI_RUNTIME_PROVIDER=genericagent`.
+The default provider is `ohmypi`. `genericagent` is registered only when a valid
+GenericAgent legacy checkout is discovered and remains selectable through
+`GA_TUI_RUNTIME_PROVIDER=genericagent` for compatibility.
 
 OMP provider metadata must advertise `tui_typed_host_tools`,
 `runtime_task_requests`, and `runtime_task_events` when the app-layer bridge is
@@ -170,8 +170,8 @@ Runtime and top-level control metadata are exposed through:
 - Do not bind the Web Console/gateway to a non-loopback interface unless
   `GA_TUI_GATEWAY_ALLOW_REMOTE_BIND=1` is deliberately set and an external
   trusted access boundary is in place. The built-in gateway has no auth layer.
-- Keep provider selection explicit and reversible; this experiment branch defaults
-  to `ohmypi`, with `genericagent` retained as the fallback adapter.
+- Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`,
+  with `genericagent` retained only as an optional legacy adapter.
 - Do not make an OMP plugin a new memory owner. Plugin tools may read context and
   submit memory candidates; Shuheng validates, queues approvals, writes durable
   rows, and records provenance.

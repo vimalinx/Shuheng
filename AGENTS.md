@@ -1,8 +1,8 @@
-# GenericAgent-TUI Agent Harness Instructions
+# Shuheng Agent Harness Instructions
 
 ## Architecture Baseline
 
-The long-term architecture baseline for the GenericAgent multi-agent harness is stored in:
+The long-term architecture baseline for the Shuheng multi-agent harness is stored in:
 
 - `docs/agent-harness-architecture.md`
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import subprocess
 import sys
 
 from ga_tui import cli
@@ -27,3 +30,27 @@ def test_python_module_entrypoint_uses_lightweight_cli() -> None:
     main_module = importlib.import_module("ga_tui.__main__")
 
     assert main_module.main is cli.main
+
+
+def test_app_imports_without_genericagent_discovery() -> None:
+    env = dict(os.environ)
+    env["SHUHENG_DISABLE_GENERICAGENT"] = "1"
+    env["PYTHONPATH"] = "src"
+    code = (
+        "import json; "
+        "from ga_tui import app; "
+        "print(json.dumps(app.agent_runtime_registry(write_memory_prompt_file=False).to_record(), sort_keys=True))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["default_provider_id"] == "ohmypi"
+    assert payload["provider_ids"] == ["ohmypi"]

@@ -2643,10 +2643,10 @@ def ohmypi_provider_spec(
             "resource_gateway": "not_exposed",
         },
         notes=[
-            "Experiment branch default provider; GenericAgent remains available via GA_TUI_RUNTIME_PROVIDER=genericagent.",
+            "Default Shuheng runtime provider; GenericAgent is optional legacy compatibility via GA_TUI_RUNTIME_PROVIDER=genericagent when available.",
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
             "Embedded Oh My Pi uses a Shuheng-owned PI_CODING_AGENT_DIR instead of ~/.omp/agent.",
-            "GenericAgent/TUI memory is injected through --append-system-prompt.",
+            "Shuheng memory guidance is injected through --append-system-prompt.",
             "Shuheng emits provider-neutral runtime.task_request.v1 and runtime.task_event.v1 records around OMP execution.",
             "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
             "Default isolated OMP approval mode is yolo: runtime tools run without OMP approval prompts inside the Shuheng-owned isolated agent directory.",

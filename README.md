@@ -191,11 +191,11 @@ PYTHONPATH=src python -m ga_tui
 shuheng --help
 ```
 
-`shuheng --help` 不需要提前配置 GenericAgent 主项目；真正启动 TUI、运行 gateway 或执行 `shuheng-check` 时才需要有效的 GenericAgent root。
+`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 默认都不需要 GenericAgent 主项目。Shuheng 的默认 runtime core 是 OhMyPi / OMP。
 
-### 2. 指定 GenericAgent 主项目
+### 2. 可选指定 GenericAgent legacy provider
 
-TUI 会自动寻找 `GenericAgent` 主项目。如果自动发现失败，显式设置：
+如果你需要使用旧 GenericAgent provider 或安装 launcher shim，可以显式设置：
 
 ```bash
 export GENERICAGENT_ROOT=/path/to/GenericAgent
@@ -216,8 +216,8 @@ shuheng-check
 健康输出包含：
 
 ```text
+Core runtime: OhMyPi / OMP
 Status: OK
-Core imports: agentmain, continue_cmd
 Launch without core patches: shuheng
 ```
 
@@ -369,6 +369,7 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 │       ├── scheduler.py
 │       ├── release_readiness.py
 │       ├── control_protocol.py
+│       ├── frontend_history_compat.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
 │       ├── genericagent_provider.py
@@ -387,14 +388,15 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 | --- | --- |
 | `src/ga_tui/cli.py` | 轻量公开 CLI 入口；`--help` 不导入重型 TUI/runtime |
 | `src/ga_tui/app.py` | curses TUI 主实现、会话/记忆/审批/Secret Vault 核心逻辑 |
-| `src/ga_tui/integration.py` | GenericAgent 核心发现、doctor 检查和 launcher shim |
+| `src/ga_tui/integration.py` | Shuheng doctor 检查、可选 GenericAgent legacy provider 发现和 launcher shim |
 | `src/ga_tui/runtime.py` | runtime provider 抽象层与注册表 |
 | `src/ga_tui/scheduler.py` | 定时任务注册表与触发判定(cron / interval / at) |
 | `src/ga_tui/release_readiness.py` | 发布成熟度、baseline 证据等级、gateway 安全姿态和启发式 eval 纯函数 |
 | `src/ga_tui/control_protocol.py` | agent task 控制协议(v2)解析 |
+| `src/ga_tui/frontend_history_compat.py` | 缺少 GenericAgent frontends 时的 Shuheng 本地历史/命名 fallback |
 | `src/ga_tui/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
 | `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter(进程、host tool、usage 同步) |
-| `src/ga_tui/genericagent_provider.py` | GenericAgent runtime adapter |
+| `src/ga_tui/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
 | `src/ga_tui/compat_legacy.py` | 历史会话/记忆的兼容解析 |
 | `tests/` | pytest 测试套件,覆盖纯函数与加解密、解析器 |
 | `scripts/check_policy_gates.py` | harness policy gate 的函数级 smoke 检查 |
@@ -403,15 +405,15 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 
 ## 与 GenericAgent 的关系
 
-本仓库是 `GenericAgent` 的外置 TUI 层。
+Shuheng 的核心 runtime 是 OhMyPi / OMP，GenericAgent 只是可选 legacy provider 和 launcher shim 目标。
 
-当前仍复用主项目中的核心模块：
+当有效的 GenericAgent checkout 可用且被选用时，Shuheng 仍可复用这些 legacy 模块：
 
-- `agentmain.py`：主 agent runtime。
-- `frontends/continue_cmd.py`：历史恢复和 transcript 解析，运行时会被 Shuheng 重定向到自己的 `~/.shuheng/model_responses`。
-- `frontends/session_names.py`：可选会话命名能力，运行时会被 Shuheng 重定向到自己的 `session_names.json`。
+- `agentmain.py`：legacy GenericAgent runtime。
+- `frontends/continue_cmd.py`：legacy 历史恢复和 transcript 解析，运行时会被 Shuheng 重定向到自己的 `~/.shuheng/model_responses`。
+- `frontends/session_names.py`：legacy 可选会话命名能力，运行时会被 Shuheng 重定向到自己的 `session_names.json`。
 
-这个边界让主项目可以继续跟随上游更新，Shuheng 的会话、记忆、审批和运行时状态则独立存储和演进。后续可以继续把这些依赖抽象成 adapter，让外置边界更干净。
+没有 GenericAgent 时，Shuheng 使用自己的历史解析和 session name fallback；会话、记忆、审批和运行时状态始终独立存储在 Shuheng-owned 路径下。
 
 ## 架构方向
 

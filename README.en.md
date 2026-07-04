@@ -191,11 +191,11 @@ First confirm the public command entrypoint is available:
 shuheng --help
 ```
 
-`shuheng --help` does not require a configured GenericAgent checkout. Launching the TUI, serving the gateway, or running `shuheng-check` still requires a valid GenericAgent root.
+`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` do not require a configured GenericAgent checkout by default. Shuheng's default runtime core is OhMyPi / OMP.
 
-### 2. Point To GenericAgent Core
+### 2. Optionally Point To The GenericAgent Legacy Provider
 
-The TUI tries to discover the `GenericAgent` checkout automatically. If discovery fails:
+Set this only when you want to use the old GenericAgent provider or install the launcher shim:
 
 ```bash
 export GENERICAGENT_ROOT=/path/to/GenericAgent
@@ -216,8 +216,8 @@ shuheng-check
 Healthy output includes:
 
 ```text
+Core runtime: OhMyPi / OMP
 Status: OK
-Core imports: agentmain, continue_cmd
 Launch without core patches: shuheng
 ```
 
@@ -369,6 +369,7 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 │       ├── scheduler.py
 │       ├── release_readiness.py
 │       ├── control_protocol.py
+│       ├── frontend_history_compat.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
 │       ├── genericagent_provider.py
@@ -387,14 +388,15 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 | --- | --- |
 | `src/ga_tui/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
 | `src/ga_tui/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
-| `src/ga_tui/integration.py` | GenericAgent core discovery, doctor checks, launcher shim |
+| `src/ga_tui/integration.py` | Shuheng doctor checks, optional GenericAgent legacy-provider discovery, and launcher shim |
 | `src/ga_tui/runtime.py` | Runtime provider abstractions and registry |
 | `src/ga_tui/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
 | `src/ga_tui/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
 | `src/ga_tui/control_protocol.py` | Agent task control protocol (v2) parsing |
+| `src/ga_tui/frontend_history_compat.py` | Shuheng-owned history/name fallback when GenericAgent frontends are unavailable |
 | `src/ga_tui/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
 | `src/ga_tui/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
-| `src/ga_tui/genericagent_provider.py` | GenericAgent runtime adapter |
+| `src/ga_tui/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
 | `src/ga_tui/compat_legacy.py` | Legacy session/memory compatibility parsing |
 | `tests/` | pytest suite covering pure functions, crypto, and parsers |
 | `scripts/check_policy_gates.py` | Function-level smoke checks for harness policy gates |
@@ -403,15 +405,15 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 
 ## Relationship With GenericAgent
 
-This repository is the external TUI layer for `GenericAgent`.
+Shuheng's core runtime is OhMyPi / OMP. GenericAgent is an optional legacy provider and launcher-shim target.
 
-It currently reuses core modules from the main project:
+When a valid GenericAgent checkout is available and selected, Shuheng can still reuse these legacy modules:
 
-- `agentmain.py` for the main agent runtime.
-- `frontends/continue_cmd.py` for history restoration and transcript parsing.
-- `frontends/session_names.py` for optional session naming.
+- `agentmain.py` for the legacy GenericAgent runtime.
+- `frontends/continue_cmd.py` for legacy history restoration and transcript parsing.
+- `frontends/session_names.py` for optional legacy session naming.
 
-This boundary lets the core project follow upstream updates while the TUI can be tested, released, and evolved independently. Future adapter work can make the external boundary even cleaner.
+When GenericAgent is absent, Shuheng uses its own history parser and session-name fallback. Sessions, memory, approvals, and runtime state remain Shuheng-owned either way.
 
 ## Architecture Direction
 

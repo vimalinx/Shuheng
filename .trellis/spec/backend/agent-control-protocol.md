@@ -1,6 +1,6 @@
 # Agent Control Protocol
 
-> Executable contract for Shuheng / GenericAgent-TUI compatibility control blocks and governed subagent delegation.
+> Executable contract for Shuheng compatibility control blocks and governed subagent delegation.
 
 ## Scenario: Shuheng Brand Entry Points
 
@@ -5202,7 +5202,7 @@ def put_agent_runtime_task(agent, request):
 
 ### 1. Scope / Trigger
 
-- Trigger: GenericAgent-TUI integrates Oh My Pi as the experiment-branch default local runtime provider.
+- Trigger: Shuheng treats Oh My Pi / OMP as the default local runtime core.
 - Applies to: `src/ga_tui/ohmypi_provider.py`, runtime provider registration in `src/ga_tui/app.py`, runtime registry records, provider selection, Shuheng memory prompt injection, app-injected TUI host tool registration, typed host-tool routing, governed proposal routing, memory candidate signaling, runtime task request/event records, RPC queue/event mapping, and OMP usage-to-token-registry bridging.
 - Non-goal: This provider must not own curses rendering, mutable TUI `State`, GenericAgent tool schema injection, TUI approval storage, scheduler registries, or first-class TUI subagent ledger mutation.
 
@@ -5231,8 +5231,8 @@ def put_agent_runtime_task(agent, request):
 - Backward-compatible query callback helper: `ohmypi_tui_query_host_tool_handler(state=None)`.
 - Environment keys:
   - `SHUHENG_HOME` overrides the Shuheng-owned storage root; legacy internal `GA_TUI_HOME` remains an accepted compatibility override.
-  - unset `GA_TUI_RUNTIME_PROVIDER` selects `ohmypi` on this experiment branch.
-  - `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the fallback GenericAgent adapter.
+  - unset `GA_TUI_RUNTIME_PROVIDER` selects `ohmypi`.
+  - `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the optional legacy GenericAgent adapter only when a valid legacy checkout is available.
   - `GA_TUI_OHMYPI_BIN` overrides the executable.
   - `GA_TUI_OHMYPI_ARGS` appends shell-split extra CLI arguments.
 - OMP subprocess environment:
@@ -5318,8 +5318,10 @@ def put_agent_runtime_task(agent, request):
 - OMP `host_tool_cancel` frames must be accepted safely and must not mutate TUI state.
 - OMP terminal error details from `message_end`, `turn_end`, or `agent_end` must map to a visible queue `done` item when frames carry `stopReason:"error"`, `errorMessage`, or `errorStatus`; error turns must not become empty assistant replies.
 - Host URI schemes and TUI approval mapping remain disabled until a separate explicit task designs those governance contracts.
-- On this experiment branch, Oh My Pi is the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
-- GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent`.
+- Oh My Pi is the default runtime provider when `GA_TUI_RUNTIME_PROVIDER` is unset.
+- GenericAgent must remain selectable with `GA_TUI_RUNTIME_PROVIDER=genericagent` when a valid legacy checkout is available.
+- Missing GenericAgent must not break `import ga_tui.app`, `python -m ga_tui.app --help`, `python -m ga_tui --help`, `shuheng-check`, or OMP provider registration.
+- When GenericAgent discovery is disabled or absent, the runtime registry may contain only `ohmypi`; this is a healthy Shuheng core state, not a degraded core.
 - The TUI should generate a bounded `GA/TUI Memory Guidance` append prompt from Shuheng-owned memory sources under `${SHUHENG_HOME}/memory` and pass it through `--append-system-prompt`.
 - Oh My Pi completion output may emit memory candidate signals, and `ga_tui_propose` may submit curated memory candidates, but long-term memory writes remain governed by TUI memory candidate records and human approval.
 - Main OMP tasks and worker/subagent OMP tasks should include generated GA-TUI context pack artifacts when using the structured runtime request path.
@@ -5398,10 +5400,10 @@ def put_agent_runtime_task(agent, request):
 - Good: generated `models.yml` stores `apiKey: GA_TUI_OMP_API_KEY_<digest>` while the secret value is supplied only in the child process env.
 - Good: After adding a provider in `/model`, the running Shuheng wrapper's model list immediately includes it and a later selection uses the refreshed OMP provider id instead of a stale pending model.
 - Good: Missing `omp` produces an assistant-visible error message instead of crashing startup.
-- Base: `/runtimes` shows both `genericagent` and `ohmypi`, while the experiment-branch default is `ohmypi`.
+- Base: `/runtimes` shows `ohmypi` as default and shows `genericagent` only when the optional legacy provider is available.
 - Base: Oh My Pi can query bounded TUI governance facts through `ga_tui_query` without mutating task ledgers, approvals, artifacts, or long-term memory.
 - Base: Oh My Pi can use typed tools such as `agent_list`, `schedule_list`, and `memory_context_get`; compatibility aliases remain available during migration.
-- Base: Oh My Pi can propose current-schema actions through `ga_tui_propose`, while GenericAgent-TUI remains the Orchestrator and policy/ledger owner.
+- Base: Oh My Pi can propose current-schema actions through `ga_tui_propose`, while Shuheng remains the Orchestrator and policy/ledger owner.
 - Base: Oh My Pi can submit a durable memory candidate through `ga_tui_propose` or `memory_candidate_submit`, while the TUI Memory Curator creates artifacts and a human approval request before any long-term memory write.
 - Base: A durable completed Oh My Pi output records a memory candidate signal for later approval instead of writing long-term memory directly.
 - Base: Oh My Pi task request/completion/host-tool events are normalized into trace rows when they have a GA-TUI task id.
@@ -5415,8 +5417,9 @@ def put_agent_runtime_task(agent, request):
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `ohmypi` appears in the runtime registry and is the experiment-branch default.
-- Tests must assert `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the GenericAgent fallback adapter.
+- `scripts/check_policy_gates.py` must assert `ohmypi` appears in the runtime registry and is the default provider.
+- Tests must assert `GA_TUI_RUNTIME_PROVIDER=genericagent` selects the GenericAgent legacy adapter when it is configured, and falls back to healthy OMP core behavior when GenericAgent is unavailable.
+- Tests must assert disabling GenericAgent discovery still allows `ga_tui.app` import, `shuheng-check`, and an OMP-only runtime registry.
 - Tests must assert `ohmypi_provider.py` has no reverse import into `app.py` and no curses import.
 - Tests must assert the generated memory append prompt is bounded, redacted, and passed to `omp` through `--append-system-prompt`.
 - Tests must assert generated OMP context packs/context refs, memory append prompts, and memory-candidate tool descriptions contain the final-reply rule so memory-candidate status cannot become the only visible completion.
@@ -5936,7 +5939,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 
 ### 1. Scope / Trigger
 
-- Trigger: Shuheng must own its state independently of the GenericAgent checkout while still using GenericAgent as an optional runtime/source dependency.
+- Trigger: Shuheng must own its state independently of any legacy GenericAgent checkout while still allowing GenericAgent as an optional runtime/source provider.
 - Applies to: Shuheng storage path selection, `load_history()`, `cached_session_rows()`, `continue_cmd`, `session_meta.json`, `session_names.json`, harness ledgers/artifacts/traces, persistent and temporary subagents, Secret Vault, isolated OMP runtime files, sidebar display, and history restore behavior.
 - Non-goal: This bridge must not delete, move, unzip, or destructively modify legacy GenericAgent history or memory files.
 
@@ -5972,7 +5975,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 ### 3. Contracts
 
 - Physical archival must not remove a known sidebar row when TUI metadata still knows the session.
-- GenericAgent `ROOT_DIR` remains only a runtime/source discovery root, not a Shuheng state root.
+- `GENERICAGENT_ROOT` remains only an optional legacy runtime/source discovery root, not a Shuheng state root or core startup requirement.
 - Missing-source rows may use metadata preview, description, rounds, last-user timestamp, and display name to remain visible.
 - Missing-source rows must not pretend to be normal raw sessions.
 - New main-agent sessions must bind their agent/client/backend log path to the Shuheng-owned `MODEL_RESPONSES_DIR` before runtime work starts.
@@ -5982,7 +5985,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 - Persistent subagent home helpers must keep profile, memory, event, and metadata refs under `SUBAGENTS_DIR`; ordinary non-secret conversation turns remain history-owned under `MODEL_RESPONSES_DIR`.
 - Secret Vault encrypted storage must live under Shuheng-owned `SECRET_VAULT_DIR` by default.
 - OMP memory append prompts must read Shuheng-owned memory sources, not GenericAgent `memory/`.
-- On normal first launch with the default `~/.shuheng` home, Shuheng may bootstrap existing GenericAgent state by copying missing files from `${ROOT_DIR}/temp/model_responses` and `${ROOT_DIR}/memory` into the Shuheng-owned tree.
+- On normal first launch with the default `~/.shuheng` home and a discovered legacy GenericAgent checkout, Shuheng may bootstrap existing GenericAgent state by copying missing files from that checkout's `temp/model_responses` and `memory` directories into the Shuheng-owned tree.
 - Legacy bootstrap must be copy-missing-only: existing Shuheng files win over old GenericAgent files.
 - Legacy `session_meta.json`, `session_names.json`, and `session_token_usage.json` are merged as JSON objects when Shuheng sidecars already exist; Shuheng keys win on conflict.
 - Legacy bootstrap must not copy stale embedded runtime config from `memory/agent_harness/runtime/**`; isolated OMP runtime files are regenerated under Shuheng.
@@ -5994,6 +5997,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 
 - Default import with no env override -> `MODEL_RESPONSES_DIR` is `~/.shuheng/model_responses`.
 - Default import with no env override -> `AGENT_HARNESS_DIR`, `SUBAGENTS_DIR`, `TEMP_SUBAGENTS_DIR`, `SECRET_VAULT_DIR`, and isolated OMP runtime paths are all under `~/.shuheng`.
+- Default import with no GenericAgent checkout -> Shuheng still imports and `shuheng-check` reports OMP core healthy.
 - `SHUHENG_HOME=/tmp/shuheng-home` before import -> Shuheng history paths derive from `/tmp/shuheng-home`.
 - `GA_TUI_HOME=/tmp/compat-home` before import and no `SHUHENG_HOME` -> Shuheng history paths derive from `/tmp/compat-home`.
 - Normal default launch with old GenericAgent session files and empty Shuheng history -> copied Shuheng-owned session files appear in `load_history()` and the sidebar.
@@ -6355,7 +6359,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 - Environment keys:
   - `GA_TUI_REPO` or `GA_TUI_ROOT`: GenericAgent-TUI checkout used by the plugin when locating `src/ga_tui/agent_bridge.py`.
   - `GA_TUI_BRIDGE_PYTHON`: Python executable used by the OMP plugin, default `python3`.
-  - `GENERICAGENT_ROOT`: GenericAgent root override consumed by `ga_tui.app` discovery.
+  - `GENERICAGENT_ROOT`: optional GenericAgent legacy-provider override consumed by `ga_tui.app` discovery.
   - `GA_TUI_HARNESS_DIR`: harness directory override for bridge tests or isolated runs.
   - `GA_TUI_SECRET_VAULT_DIR`: secret vault directory override for bridge tests or isolated runs.
 
@@ -6372,6 +6376,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 - The OMP plugin must not read or write GA-TUI JSONL stores directly.
 - The OMP plugin must not call `queue_approval`, `queue_curated_memory_candidate`, scheduler helpers, or artifact writers itself; only Python GA-TUI code owns those operations.
 - Bridge metadata must report owner `ga-tui.control_plane`, supported actions, relevant paths, and policy fields showing provider direct writes are disabled.
+- Bridge metadata paths must distinguish `app_root_dir` from optional `legacy_genericagent_root`; it must not expose a generic `root_dir` that can be mistaken for the Shuheng core root.
 
 ### 4. Validation & Error Matrix
 
@@ -6398,6 +6403,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `AgentBridgeService` metadata includes `schema_version:"ga-tui.agent_bridge.v1"`, owner `ga-tui.control_plane`, supported bridge actions, and `provider_direct_writes:false`.
+- Tests must assert bridge metadata includes `app_root_dir` and `legacy_genericagent_root` and does not expose ambiguous `root_dir`.
 - Tests must assert bridge `memory_context_get` writes a context-pack artifact and returns a `ga-tui.query.v1` response with `context_pack_ref`.
 - Tests must assert bridge `memory_candidate_submit` queues a `ga-tui.proposal.v1` memory candidate through the existing approval path and records source `agent:omp_plugin`.
 - Tests must assert unknown bridge actions return a structured bridge error.

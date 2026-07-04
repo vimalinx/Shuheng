@@ -15,6 +15,7 @@ import copy
 import curses
 import glob
 import hashlib
+import importlib
 import itertools
 import json
 import locale
@@ -36,6 +37,7 @@ import urllib.request
 import unicodedata
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Optional
 
 locale.setlocale(locale.LC_ALL, "")
@@ -45,12 +47,17 @@ ARCHITECTURE_BASELINE_PATH = os.path.join(APP_ROOT_DIR, "docs", "agent-harness-a
 PROJECT_AGENTS_PATH = os.path.join(APP_ROOT_DIR, "AGENTS.md")
 
 try:
-    from .integration import find_genericagent_root as _find_genericagent_root
+    from .integration import (
+        ensure_core_import_path as _ensure_genericagent_import_path,
+        find_genericagent_root as _find_genericagent_root,
+        maybe_find_genericagent_root as _maybe_find_genericagent_root,
+    )
     from .compat_legacy import (
         historical_subagent_row_matches_session,
         parse_timestamp_value,
         session_control_blocks_with_historical_markers,
     )
+    from .frontend_history_compat import fallback_continue_cmd_module, fallback_session_names
     from .control_protocol import (
         AGENT_TASK_SCHEMA,
         CONTROL_CONTINUATION_ACTIONS,
@@ -191,12 +198,17 @@ try:
         SubagentDispatchResult,
     )
 except Exception:
-    from integration import find_genericagent_root as _find_genericagent_root  # type: ignore
+    from integration import (  # type: ignore
+        ensure_core_import_path as _ensure_genericagent_import_path,
+        find_genericagent_root as _find_genericagent_root,
+        maybe_find_genericagent_root as _maybe_find_genericagent_root,
+    )
     from compat_legacy import (  # type: ignore
         historical_subagent_row_matches_session,
         parse_timestamp_value,
         session_control_blocks_with_historical_markers,
     )
+    from frontend_history_compat import fallback_continue_cmd_module, fallback_session_names  # type: ignore
     from control_protocol import (  # type: ignore
         AGENT_TASK_SCHEMA,
         CONTROL_CONTINUATION_ACTIONS,
@@ -371,8 +383,14 @@ def find_genericagent_root() -> str:
     return str(_find_genericagent_root())
 
 
-ROOT_DIR = find_genericagent_root()
-FRONTENDS_DIR = os.path.join(ROOT_DIR, "frontends")
+def maybe_find_genericagent_root() -> str:
+    root = _maybe_find_genericagent_root()
+    return str(root) if root is not None else ""
+
+
+GENERICAGENT_ROOT = maybe_find_genericagent_root()
+ROOT_DIR = GENERICAGENT_ROOT or APP_ROOT_DIR
+FRONTENDS_DIR = os.path.join(GENERICAGENT_ROOT, "frontends") if GENERICAGENT_ROOT else ""
 
 
 def default_shuheng_home() -> str:
@@ -510,29 +528,61 @@ TOKEN_STAT_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
 TUI_POLL_TIMEOUT_MS = 25
 HOME_LINE_CACHE_TTL_SECONDS = 0.75
 STREAM_UI_FLUSH_INTERVAL = 0.05
-for path in (ROOT_DIR, FRONTENDS_DIR):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+agentmain = None
+GenericAgent = None
+StepOutcome = None
+GENERICAGENT_RUNTIME_IMPORT_ERROR = ""
+continue_cmd_module = fallback_continue_cmd_module()
+_format_response_segment = continue_cmd_module._format_response_segment
+_pairs = continue_cmd_module._pairs
+_parse_native_history = continue_cmd_module._parse_native_history
+_preview_text = continue_cmd_module._preview_text
+_tool_results_from_prompt = continue_cmd_module._tool_results_from_prompt
+_user_text = continue_cmd_module._user_text
+reset_conversation = continue_cmd_module.reset_conversation
+restore = continue_cmd_module.restore
+session_names = fallback_session_names()
 
-import agentmain
-from agent_loop import StepOutcome
-from agentmain import GenericAgent
-import continue_cmd as continue_cmd_module
-from continue_cmd import (
-    _format_response_segment,
-    _pairs,
-    _parse_native_history,
-    _preview_text,
-    _tool_results_from_prompt,
-    _user_text,
-    reset_conversation,
-    restore,
-)
 
-try:
-    import session_names
-except Exception:
-    session_names = None
+def load_optional_genericagent_runtime_modules() -> bool:
+    global GENERICAGENT_RUNTIME_IMPORT_ERROR
+    global agentmain, GenericAgent, StepOutcome, continue_cmd_module, session_names
+    global _format_response_segment, _pairs, _parse_native_history, _preview_text
+    global _tool_results_from_prompt, _user_text, reset_conversation, restore
+    if not GENERICAGENT_ROOT:
+        GENERICAGENT_RUNTIME_IMPORT_ERROR = "GenericAgent legacy root not found."
+        return False
+    try:
+        _ensure_genericagent_import_path(_maybe_find_genericagent_root() or Path(GENERICAGENT_ROOT).expanduser().resolve())
+        loaded_agentmain = importlib.import_module("agentmain")
+        loaded_loop = importlib.import_module("agent_loop")
+        loaded_continue = importlib.import_module("continue_cmd")
+        loaded_generic_agent = getattr(loaded_agentmain, "GenericAgent")
+        loaded_step_outcome = getattr(loaded_loop, "StepOutcome")
+    except Exception as exc:
+        GENERICAGENT_RUNTIME_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+        return False
+    agentmain = loaded_agentmain
+    GenericAgent = loaded_generic_agent
+    StepOutcome = loaded_step_outcome
+    continue_cmd_module = loaded_continue
+    _format_response_segment = getattr(loaded_continue, "_format_response_segment", _format_response_segment)
+    _pairs = getattr(loaded_continue, "_pairs", _pairs)
+    _parse_native_history = getattr(loaded_continue, "_parse_native_history", _parse_native_history)
+    _preview_text = getattr(loaded_continue, "_preview_text", _preview_text)
+    _tool_results_from_prompt = getattr(loaded_continue, "_tool_results_from_prompt", _tool_results_from_prompt)
+    _user_text = getattr(loaded_continue, "_user_text", _user_text)
+    reset_conversation = getattr(loaded_continue, "reset_conversation", reset_conversation)
+    restore = getattr(loaded_continue, "restore", restore)
+    try:
+        session_names = importlib.import_module("session_names")
+    except Exception:
+        session_names = fallback_session_names(MODEL_RESPONSES_DIR)
+    GENERICAGENT_RUNTIME_IMPORT_ERROR = ""
+    return True
+
+
+GENERICAGENT_RUNTIME_AVAILABLE = load_optional_genericagent_runtime_modules()
 
 
 def configure_frontend_history_storage() -> None:
@@ -1771,6 +1821,8 @@ def shuheng_legacy_import_allowed() -> bool:
         return False
     if env_flag_enabled("SHUHENG_IMPORT_LEGACY"):
         return True
+    if not GENERICAGENT_ROOT:
+        return False
     if os.environ.get("SHUHENG_HOME") or os.environ.get("GA_TUI_HOME"):
         return False
     return normalized_path(SHUHENG_HOME) == normalized_path("~/.shuheng")
@@ -11533,7 +11585,7 @@ Long-term memory:
 {memory or ("(disabled for ephemeral session agent)" if not sub.persistent else "(empty)")}
 
 规则：
-- 你拥有独立运行期上下文，但共享主 GenericAgent 的工具能力。
+- 你拥有独立运行期上下文，但共享 Shuheng 主控的受治理工具能力。
 - 只围绕自己的任务边界工作；不要假装自己是主 agent。
 - 遵守写策略；coder/ops 等写入型角色必须等待 TUI single-writer 锁和审批策略。
 - security_context=secret 时，禁止访问普通历史/普通明文 artifact，任何网络操作必须通过 Secret 代理/Tor 链且失败即停止。
@@ -11578,7 +11630,7 @@ def subagent_direct_chat_prompt(
     prompt = (prompt or "").strip()
     return f"""
 [GA TUI Direct SubAgent Chat]
-You are answering inside the selected subagent chat, not as the main GenericAgent.
+You are answering inside the selected subagent chat, not as the main Shuheng Orchestrator.
 Selected subagent:
 - name: {sub.name}
 - id: {sub.agent_id}
@@ -11590,8 +11642,8 @@ Selected subagent:
 
 Response rules:
 - Treat the context pack above as this subagent's startup memory hydration for the current direct-chat turn.
-- Prefer this subagent's own profile, memory, chat session, and context pack over the main GenericAgent global memory.
-- Answer as {sub.name}; do not introduce yourself as the main GenericAgent or the GenericAgent 主控代理.
+- Prefer this subagent's own profile, memory, chat session, and context pack over the main Shuheng control-plane memory.
+- Answer as {sub.name}; do not introduce yourself as the main Shuheng Orchestrator or Shuheng 主控代理.
 - If the user asks who you are, describe this subagent identity, role, and boundary.
 - If the user asks where your memory/session is stored, answer using the storage line above and this subagent's own profile/memory/chat session, not the main agent memory directory.
 - Keep the user's visible message semantics unchanged.
@@ -12605,7 +12657,7 @@ def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dic
 
 def tui_tool_agent_list(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
     if state is None:
-        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+        return tui_query_error("TUI state is not bound to this Shuheng runtime.")
     tui_query_refresh_subagents(state)
     role_filter = (args.get("role") or "").strip()
     status_filter = (args.get("status") or "").strip().lower()
@@ -12632,7 +12684,7 @@ def tui_tool_agent_list(state: Optional[State], args: dict[str, Any]) -> dict[st
 
 def tui_tool_agent_get(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
     if state is None:
-        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+        return tui_query_error("TUI state is not bound to this Shuheng runtime.")
     tui_query_refresh_subagents(state)
     target = str(args.get("target") or "").strip()
     sub = resolve_subagent(state, target)
@@ -12657,7 +12709,7 @@ def tui_query_capability_matches(required: str, available: list[str]) -> bool:
 
 def tui_tool_agent_match(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
     if state is None:
-        return tui_query_error("TUI state is not bound to this GenericAgent runtime.")
+        return tui_query_error("TUI state is not bound to this Shuheng runtime.")
     tui_query_refresh_subagents(state)
     objective = str(args.get("objective") or "").strip()
     if not objective:
@@ -12909,7 +12961,7 @@ def tui_tool_capability_list(state: Optional[State], args: dict[str, Any]) -> di
 
 def tui_tool_schedule_create(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
     if state is None:
-        return tui_tool_error("TUI state is not bound to this GenericAgent runtime.")
+        return tui_tool_error("TUI state is not bound to this Shuheng runtime.")
     control = dict(args or {})
     schedule_id = str(control.get("schedule_id") or control.get("id") or short_uid("sched")).strip()
     control["schedule_id"] = schedule_id
@@ -12952,24 +13004,31 @@ def tui_tool_schedule_list(state: Optional[State], args: dict[str, Any]) -> dict
     return tui_tool_ok("schedule.list", registry=tui_query_json_safe(data))
 
 
-configure_genericagent_provider_runtime(
-    agentmain=agentmain,
-    generic_agent_cls=GenericAgent,
-    step_outcome_cls=StepOutcome,
-    is_state=lambda value: isinstance(value, State),
-    tool_handlers={
-        "agent_list": tui_tool_agent_list,
-        "agent_get": tui_tool_agent_get,
-        "agent_match": tui_tool_agent_match,
-        "task_list": tui_tool_task_list,
-        "task_get": tui_tool_task_get,
-        "approval_list": tui_tool_approval_list,
-        "artifact_list": tui_tool_artifact_list,
-        "capability_list": tui_tool_capability_list,
-        "schedule_create": tui_tool_schedule_create,
-        "schedule_list": tui_tool_schedule_list,
-    },
-)
+GENERICAGENT_PROVIDER_CONFIGURED = False
+if GENERICAGENT_RUNTIME_AVAILABLE and agentmain is not None and GenericAgent is not None and StepOutcome is not None:
+    configure_genericagent_provider_runtime(
+        agentmain=agentmain,
+        generic_agent_cls=GenericAgent,
+        step_outcome_cls=StepOutcome,
+        is_state=lambda value: isinstance(value, State),
+        tool_handlers={
+            "agent_list": tui_tool_agent_list,
+            "agent_get": tui_tool_agent_get,
+            "agent_match": tui_tool_agent_match,
+            "task_list": tui_tool_task_list,
+            "task_get": tui_tool_task_get,
+            "approval_list": tui_tool_approval_list,
+            "artifact_list": tui_tool_artifact_list,
+            "capability_list": tui_tool_capability_list,
+            "schedule_create": tui_tool_schedule_create,
+            "schedule_list": tui_tool_schedule_list,
+        },
+    )
+    GENERICAGENT_PROVIDER_CONFIGURED = True
+
+
+def should_install_genericagent_runtime_hooks(agent: Any) -> bool:
+    return GENERICAGENT_PROVIDER_CONFIGURED and agent_runtime_provider_id(agent) == "genericagent"
 
 
 def subagent_brief(sub: SubAgentRuntime) -> str:
@@ -13940,8 +13999,9 @@ def set_agent_llm_index(agent: Any, index: int) -> tuple[bool, str]:
         else:
             agent.llm_no = index
             agent.llmclient = clients[index]
-        install_tui_query_runtime(agent)
-        install_tui_control_hint(agent)
+        if should_install_genericagent_runtime_hooks(agent):
+            install_tui_query_runtime(agent)
+            install_tui_control_hint(agent)
         return True, f"当前对话模型已切到 {agent.get_llm_name(model=True)}。"
     except Exception as exc:
         return False, f"切换模型失败: {type(exc).__name__}: {exc}"
@@ -14839,12 +14899,6 @@ def refresh_agent_runtime_model_config(agent: Any) -> str:
 def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeRegistry:
     requested = os.environ.get("GA_TUI_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
     registry = RuntimeRegistry(default_provider_id=requested)
-    registry.register(GenericAgentRuntimeAdapter(genericagent_provider_spec(
-        root_dir=ROOT_DIR,
-        harness_dir=AGENT_HARNESS_DIR,
-        recent_models_path=LLM_RECENT_MODELS_PATH,
-        schedules_path=AGENT_SCHEDULES_PATH,
-    )))
     maybe_bootstrap_shuheng_legacy_state()
     ensure_shuheng_layered_memory_files()
     ohmypi_append_prompt_path = (
@@ -14859,7 +14913,7 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         approval_mode=ohmypi_runtime_config.approval_mode,
     )
     registry.register(OhMyPiRuntimeAdapter(ohmypi_provider_spec(
-        root_dir=ROOT_DIR,
+        root_dir=APP_ROOT_DIR,
         harness_dir=AGENT_HARNESS_DIR,
         recent_models_path=LLM_RECENT_MODELS_PATH,
         schedules_path=AGENT_SCHEDULES_PATH,
@@ -14876,6 +14930,13 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         host_tool_handler=ohmypi_tui_host_tool_handler(None),
         runtime_event_sink=append_ohmypi_runtime_event,
     ))
+    if GENERICAGENT_PROVIDER_CONFIGURED:
+        registry.register(GenericAgentRuntimeAdapter(genericagent_provider_spec(
+            root_dir=GENERICAGENT_ROOT or ROOT_DIR,
+            harness_dir=AGENT_HARNESS_DIR,
+            recent_models_path=LLM_RECENT_MODELS_PATH,
+            schedules_path=AGENT_SCHEDULES_PATH,
+        )))
     return registry
 
 
@@ -14928,7 +14989,8 @@ def new_agent(log_path: Optional[str] = None) -> Any:
 def install_interaction_hook(state: State, agent: Any) -> None:
     if agent is None:
         return
-    install_tui_query_runtime(agent, state)
+    if should_install_genericagent_runtime_hooks(agent):
+        install_tui_query_runtime(agent, state)
     if hasattr(agent, "configure_host_tools"):
         try:
             agent.configure_host_tools(
@@ -16731,7 +16793,7 @@ def display_title(state: State) -> str:
         return "Scheduled Reports"
     if is_main_home_session_key(state.selected_session):
         return "Shuheng Home"
-    return "GenericAgent"
+    return "Shuheng"
 
 
 def top_bar_session_id(state: State) -> str:
