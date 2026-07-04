@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "General verification guide index for release rehearsal review."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for this single-repo Shuheng task."}
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Primary verification contract for Shuheng release posture, packaging gates, and architecture baseline comparison."}
