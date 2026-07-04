@@ -12,12 +12,14 @@ import pytest
 
 from ga_tui import app as app_module
 from ga_tui.secret_vault import (
+    LEGACY_SECRET_VAULT_SENTINELS,
     NACL_XCHACHA_ABYTES,
     NACL_XCHACHA_KEYBYTES,
     NACL_XCHACHA_NPUBBYTES,
     SecretVaultPaths,
     SecretVaultError,
     SECRET_DEFAULT_TOR_SOCKS,
+    SECRET_VAULT_SENTINEL,
     ensure_secret_vault_dirs,
     load_secret_vault_meta,
     normalize_secret_proxy_endpoint,
@@ -548,8 +550,40 @@ class TestSecretVaultStorage:
         paths = self.paths(tmp_path)
         created, key, message = secret_create_vault(paths, "Aa1!aaaa")
         assert created and key, message
+        meta = load_secret_vault_meta(paths)
+        verifier_plain = secret_decrypt_bytes(
+            key,
+            secret_unb64(str(meta.get("verifier_ciphertext") or "")),
+            b"secret-vault-verifier",
+        )
+        assert verifier_plain == SECRET_VAULT_SENTINEL
+        assert verifier_plain not in LEGACY_SECRET_VAULT_SENTINELS
 
         unlocked, unlocked_key, unlocked_message = secret_unlock_vault(paths, "Aa1!aaaa")
+
+        assert unlocked, unlocked_message
+        assert unlocked_key == key
+
+    def test_legacy_vault_verifier_still_unlocks(self, tmp_path: Path) -> None:
+        paths = self.paths(tmp_path)
+        password = "Aa1!aaaa"
+        salt = os.urandom(16)
+        key = secret_derive_key(password, salt)
+        legacy_verifier = secret_encrypt_bytes(
+            key,
+            LEGACY_SECRET_VAULT_SENTINELS[0],
+            b"secret-vault-verifier",
+        )
+        write_secret_vault_meta(
+            paths,
+            {
+                "schema_version": "secretvault.v1",
+                "salt": secret_b64(salt),
+                "verifier_ciphertext": secret_b64(legacy_verifier),
+            },
+        )
+
+        unlocked, unlocked_key, unlocked_message = secret_unlock_vault(paths, password)
 
         assert unlocked, unlocked_message
         assert unlocked_key == key

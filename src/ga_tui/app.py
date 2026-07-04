@@ -8877,12 +8877,12 @@ def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
         message="gateway server is accepting requests",
         command="serve",
     )
-    print(f"GA TUI gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
+    print(f"Shuheng gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
     print("Endpoints: /gui /gui/snapshot /gui/action /gateway /a2a /a2a/events /mcp /mcp/resources")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("GA TUI gateway stopped.")
+        print("Shuheng gateway stopped.")
     finally:
         server.server_close()
         write_gateway_daemon_status(

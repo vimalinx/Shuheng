@@ -49,7 +49,7 @@
 会话管理器 + 多 Agent 调度台 + 任务看板 + 记忆/审批治理层 + 自动化控制面板
 ```
 
-它负责让 OMP、GenericAgent、Codex、Claude Code 等本地 agent runtime 在终端中更可控、更耐用、更适合长任务；会话历史、harness 账本、子 agent、Secret Vault 和 OMP 隔离运行时默认都由 Shuheng 自己维护在 `~/.shuheng`。如果本机已有旧 GenericAgent 历史和记忆，Shuheng 首次正常启动会把缺失文件非破坏性复制到 `~/.shuheng`，左侧历史只读取复制后的 Shuheng 数据。
+它负责让 OMP、legacy GenericAgent、Codex、Claude Code 等本地 agent runtime 在终端中更可控、更耐用、更适合长任务；会话历史、harness 账本、子 agent、Secret Vault 和 OMP 隔离运行时默认都由 Shuheng 自己维护在 `~/.shuheng`。如果本机已有旧 GenericAgent 历史和记忆，Shuheng 首次正常启动会把缺失文件非破坏性复制到 `~/.shuheng`，左侧历史只读取复制后的 Shuheng 数据。
 
 > Runtimes execute. Shuheng governs the control surface.
 
@@ -191,7 +191,7 @@ PYTHONPATH=src python -m ga_tui
 shuheng --help
 ```
 
-`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 默认都不需要 GenericAgent 主项目。Shuheng 的默认 runtime core 是 OhMyPi / OMP。
+`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 默认都不需要 legacy GenericAgent checkout。Shuheng 的默认 runtime core 是 OhMyPi / OMP。
 
 ### 2. 可选指定 GenericAgent legacy provider
 
@@ -218,7 +218,7 @@ shuheng-check
 ```text
 Core runtime: OhMyPi / OMP
 Status: OK
-Launch without core patches: shuheng
+Launch without legacy patches: shuheng
 ```
 
 ### 4. 启动
@@ -230,18 +230,20 @@ shuheng
 推荐更新方式：
 
 ```bash
-cd /path/to/GenericAgent
-git pull
-
 cd /path/to/Shuheng
 shuheng
 ```
 
-这样可以让 `GenericAgent` 主项目正常更新，同时让 TUI 作为独立界面层持续迭代。
+如果你仍在使用 legacy GenericAgent provider 或 launcher shim，再单独更新那个旧 checkout：
 
-## 可选 Core Shim
+```bash
+cd /path/to/GenericAgent
+git pull
+```
 
-如果你希望在 `GenericAgent` 主项目里通过核心 launcher 进入这个外置 TUI，可以安装一个很小的 launcher shim。
+## 可选 Legacy Launcher Shim
+
+如果你希望从 legacy `GenericAgent` checkout 的旧 frontend 入口进入 Shuheng，可以安装一个很小的 launcher shim。
 
 覆盖主项目 `frontends/tuiapp.py`：
 

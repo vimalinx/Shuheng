@@ -7,7 +7,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: The user-facing product name is `Shuheng` / `枢衡`; legacy `ga-tui` command aliases have been removed from public entry points while protocol and Python module compatibility identifiers remain internal surfaces.
-- Applies to: `pyproject.toml` console scripts, README command examples, integration doctor output, core shim help text, runtime prompts, and OMP/tool descriptions.
+- Applies to: `pyproject.toml` console scripts, README command examples, integration doctor output, launcher-shim help text, runtime prompts, and OMP/tool descriptions.
 - Non-goal: This does not rename `src/ga_tui`, `GA_TUI_*` environment variables, `ga-tui.*` schema versions, `ga_tui_query`, `ga_tui_propose`, existing JSONL context ids, or historical compatibility markers.
 
 ### 2. Signatures
@@ -22,7 +22,7 @@
 - User-facing docs and doctor output should prefer `Shuheng` and `shuheng*` commands.
 - User-facing docs and doctor output must not advertise `ga-tui*` aliases.
 - Protocol-level identifiers keep their current stable values until an explicit migration task exists.
-- Core shim discovery should search both `Shuheng` and historical `GenericAgent-TUI` checkout directory names.
+- Launcher-shim discovery may search both `Shuheng` and historical pre-Shuheng checkout directory names, but user-facing output must present Shuheng as the product identity.
 
 ### 4. Validation & Error Matrix
 
@@ -31,11 +31,11 @@
 - Doctor output says primary launch is `ga-tui` -> brand regression.
 - Doctor output mentions a `ga-tui` compatibility alias -> brand regression.
 - Runtime strings identify the main orchestrator only as `GA-TUI` -> product identity regression.
-- Exit prompts or terminal shutdown messages mention `ga tui` -> brand regression.
+- Exit prompts or terminal shutdown messages mention the legacy lowercase two-word alias -> brand regression.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `shuheng-check --root <GenericAgent>` reports `Shuheng root` and `Launch without core patches: shuheng` without advertising a `ga-tui` alias.
+- Good: `shuheng-check --root <GenericAgent>` reports `Shuheng root` and `Launch without legacy patches: shuheng` without advertising a `ga-tui` alias.
 - Base: OMP host tools keep names such as `ga_tui_query` because they are protocol compatibility tool ids.
 - Bad: Re-adding public `ga-tui*` commands or exit messages while the product is Shuheng-only.
 - Bad: Renaming `ga_tui_query`, `GA_TUI_*`, or `ga-tui.query.v1` in a brand-only task, because that breaks external clients without a schema migration.
@@ -44,7 +44,7 @@
 
 - `scripts/check_policy_gates.py` must assert `pyproject.toml` contains all primary `shuheng*` scripts and no public `ga-tui*` scripts.
 - Tests must assert integration doctor report prefers `shuheng` and does not mention `ga-tui` as a compatibility command.
-- Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of `ga tui`.
+- Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of the legacy lowercase two-word alias.
 - `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
@@ -4377,7 +4377,7 @@ last_emit_at = time.monotonic() - STREAM_UI_FLUSH_INTERVAL
 
 ### 1. Scope / Trigger
 
-- Trigger: OMP is used as the main GA-TUI runtime provider and receives a generated context pack.
+- Trigger: OMP is used as the main Shuheng runtime provider and receives a generated context pack.
 - Applies to: `permissions_for_role()`, `build_context_pack()`, `build_main_runtime_context_pack()`, `format_context_pack_for_prompt()`, OMP runtime task requests, isolated OMP config generation, and OMP RPC extension-UI approval responses.
 - Non-goal: This does not give OMP direct ownership of GA-TUI memory, approvals, ledgers, schedules, or system-level `~/.omp/agent` configuration.
 
@@ -4585,7 +4585,7 @@ token panel -> OMP get_state.contextUsage
 - Automatic current-session title maintenance is an allowed `session.rename` control exception and the only automatic persisted-title path: the main runtime may emit it at the end of a normal reply when the title is stale or misleading, and must stay silent when the title is already accurate.
 - When a real control block is needed, append it after all user-visible prose. Do not place hidden controls in the middle of a visible section, because stripping the control block will leave the visible answer looking truncated.
 - Inline-code labels such as `` `<ga-control>` `` in visible prose are not executable control starts and must not consume a later real closing tag.
-- `install_tui_control_hint()` must replace any previous GenericAgent-TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
+- `install_tui_control_hint()` must replace any previous historical TUI hint block before installing the current `ga-control.v2` hint, and repeated installation must leave exactly one current hint block per backend prompt.
 - Protocol parser helpers must have one source of truth in `src/ga_tui/control_protocol.py`; do not redefine `extract_tui_controls()`, `strip_tui_controls()`, `lifecycle_is_persistent()`, `subagent_control_persistence_intent()`, `subagent_control_force_new_intent()`, `control_result_continuation_*()` helpers, `control_explicitly_requests_continuation()`, `format_control_result_continuation_prompt()`, `format_agent_control_result()`, `explicit_policy_action_for_subagent_task()`, `inferred_policy_action_for_subagent_task()`, `policy_relevant_subagent_prompt_text()`, `agenttask_*()` helpers, or schema/action constants inside `app.py`.
 - `src/ga_tui/control_protocol.py` must not import curses, GenericAgent runtime classes, or mutable TUI `State`. It may depend on quarantined compatibility cleanup from `compat_legacy.py` to strip retired markup without making retired vocabulary executable.
 
@@ -5247,7 +5247,7 @@ def put_agent_runtime_task(agent, request):
 - Durable `runtime.task_request.v1` records must not store the full prompt; they store bounded `prompt_preview`, `prompt_chars`, and artifact/context refs. The full prompt remains in-memory for runtime dispatch only.
 - Oh My Pi RPC `message_update` frames with `assistantMessageEvent.type:"text_delta"` map to queue items shaped as `{"next": <delta>, "source": "ohmypi"}`.
 - OMP may emit a standalone `"."` text delta as a tool-turn placeholder or as real punctuation inside normal prose, numbered lists, or decimals. The provider must delay standalone dot deltas until the next visible text delta: append them to the next text delta for normal prose, drop them when a process/tool block starts, and flush them before a normal terminal completion.
-- Oh My Pi non-final process frames must be normalized into the existing GenericAgent-TUI foldable process text protocol instead of adding a second renderer. The emitted text uses `**LLM Running (Turn N) ...**`, `<summary>...</summary>`, tool args fences, and result fences that `render_assistant_text(..., fold_process:true)` already understands.
+- Oh My Pi non-final process frames must be normalized into the existing Shuheng foldable process text protocol instead of adding a second renderer. The emitted text uses `**LLM Running (Turn N) ...**`, `<summary>...</summary>`, tool args fences, and result fences that `render_assistant_text(..., fold_process:true)` already understands.
 - OMP `message_update` thinking/reasoning deltas are buffered and emitted as a bounded `<thinking>...</thinking>` process turn before the next visible text/tool/final event. The final assistant reply must remain normal assistant text, not hidden inside a thinking block.
 - OMP `tool_execution_start` / `tool_execution_end` frames and GA-TUI `host_tool_call` / `host_tool_result` bridge activity must become bounded, redacted tool process turns so tool args/results are folded by default while the final reply remains visible.
 - Generated OMP context packs, context refs, memory append prompts, and `memory_candidate_submit` descriptions must tell OMP to finish every user turn with a normal user-facing reply in the user's language. Tool results, `Result:` status lines, and memory-candidate submitted/deferred notices must not replace the final reply.
@@ -5283,7 +5283,7 @@ def put_agent_runtime_task(agent, request):
 - Provider metadata must advertise `capabilities.runtime_task_requests:true` and `capabilities.runtime_task_events:true` once OMP execution is wrapped by `runtime.task_request.v1` and `runtime.task_event.v1`.
 - `OhMyPiRpcAgent` may register host tools through `set_host_tools` only from definitions injected by `app.py`; provider code must not invent writable tools or import TUI `State`.
 - Embedded OMP must use a Shuheng-owned runtime root and must not read or write system-level `~/.omp/agent/config.yml`, `~/.omp/agent/models.yml`, sessions, auth storage, or cache as its active agent directory.
-- Embedded OMP must run with the GenericAgent-TUI repository root as its subprocess `cwd`, while Shuheng harness paths, memory, ledgers, isolated OMP runtime files, and provider metadata use the `SHUHENG_HOME` / `${AGENT_HARNESS_DIR}` ownership boundary.
+- Embedded OMP must run with the Shuheng app root as its subprocess `cwd`, while Shuheng harness paths, memory, ledgers, isolated OMP runtime files, and provider metadata use the `SHUHENG_HOME` / `${AGENT_HARNESS_DIR}` ownership boundary.
 - `app.py` owns translation from GA-TUI `/model` entries to isolated OMP `config.yml` and `models.yml`; `ohmypi_provider.py` owns only generic runtime file writing, subprocess env, OMP binary discovery, command construction, and RPC behavior.
 - After `/model` save, edit, delete, default selection, or reload while the TUI is idle, Shuheng must rebuild the isolated OMP config files and refresh the current OMP wrapper's configured model list, child env, and command without requiring a TUI restart.
 - `OhMyPiRpcAgent.load_llm_sessions()` must not overwrite Shuheng-projected `configured_models` with RPC `get_available_models` results when the app has already supplied a configured list. OMP's internal model discovery is only a fallback for unconfigured wrappers.
@@ -5368,7 +5368,7 @@ def put_agent_runtime_task(agent, request):
 - Current-model UI lines and model orchestration registry must read the active effective model owner: active subagent runtime first, otherwise the main agent. They must not display the main agent model as the current model while the visible interaction target is a subagent.
 - New Shuheng main or temporary session -> active OMP RPC session receives a `new_session` reset when the process is running, and a later first runtime task may inject one fresh full context pack.
 - User system OMP config exists -> policy checks must verify its hash remains unchanged across embedded OMP runtime setup.
-- OMP adapter registration -> subprocess `cwd` is the GenericAgent-TUI app root so relative repo paths such as `AGENTS.md` resolve to the TUI project while isolated runtime files still live under the Shuheng-owned harness directory.
+- OMP adapter registration -> subprocess `cwd` is the Shuheng app root so relative repo paths such as `AGENTS.md` resolve to this project while isolated runtime files still live under the Shuheng-owned harness directory.
 - OMP error frame with `stopReason:"error"` and `errorMessage` -> active TUI queue receives a visible `[Oh My Pi] ...` done item.
 - OMP terminal runtime errors delivered through subagent task/chat streams, including `429`, `RPC prompt failed`, and `Agent is already processing`, must release the subagent active task state; subagent tasks record `failed` in task ledgers/mail/checkpoints/traces, keep an audit artifact, and must not create eval rows, memory candidates, orchestrator result injections, or plan continuations.
 - OMP `message_end` / assistant-message error frames are not final turn ownership by themselves. The wrapper must keep the active prompt busy until `agent_end` / `turn_end` or a bounded terminal grace expires, so OMP internal retries after a 429 cannot receive the next prompt and produce `Agent is already processing`.
@@ -5436,7 +5436,7 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert OMP incomplete terminal notices in subagent streams fail subagent task ledgers instead of being recorded as completed output.
 - Tests must assert `turn_end` carrying `stopReason:"toolUse"` or tool results waits for the final assistant answer instead of completing from the tool-result turn.
 - Tests must assert a stalled Shuheng host-tool follow-up exits running state through the host-tool watchdog fallback without creating an Oh My Pi memory candidate, including mixed outputs where pre-tool progress text precedes the provider fallback.
-- Tests must assert a fake RPC process maps OMP thinking/tool events into GenericAgent-TUI foldable process blocks, that the existing assistant renderer folds them, and that final replies remain visible.
+- Tests must assert a fake RPC process maps OMP thinking/tool events into Shuheng foldable process blocks, that the existing assistant renderer folds them, and that final replies remain visible.
 - Tests must assert `put_runtime_task(RuntimeTaskRequest)` emits `runtime.task_event.v1` rows that preserve `runtime.task_request.v1`, `prompt_preview`, `prompt_chars`, `context_pack_ref`, and artifact refs without storing the raw prompt.
 - Tests must assert a fake RPC process with no `text_delta` still produces non-empty `done` text when final assistant text is carried by `message_end.message.content` or terminal-frame `message.content`.
 - Tests must assert a fake RPC process receives app-injected `set_host_tools` definitions before the prompt frame.
@@ -5449,7 +5449,7 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert `ga_tui_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
 - Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
-- Tests must assert the OMP runtime adapter subprocess `cwd` is the GenericAgent-TUI app root, not the GenericAgent harness root.
+- Tests must assert the OMP runtime adapter subprocess `cwd` is the Shuheng app root, not the legacy GenericAgent root.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.
 - Tests must assert PAAS v4 OpenAI-compatible bases such as `https://open.bigmodel.cn/api/coding/paas/v4` do not inherit Anthropic `/v1/messages` routing from a historical `native_claude_config_*` variable name.
 - Tests must assert generated OMP model rows preserve `contextWindow` / `maxTokens` from `/model`, embedded OMP `config.yml` disables `autoResume`, and repeated runtime turns use a context ref instead of repeating the full context pack.
@@ -5691,7 +5691,7 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Final run rows reuse the same `run_id` and append status such as `dispatched`, `queued`, `approval_required`, `failed`, `rejected`, `duplicate`, `skipped`, or `invalid`.
 - Agent-task final run status must come from a structured dispatch result (`status`, `message`, `task_id`, `approval_id`, `error`, `provider_id`) rather than parsing localized UI text returned to ordinary callers.
 - The scheduler does not write report pages directly. Scheduled-report UI derives subagent replies from the final run row `task_id`, the latest task ledger row, and subagent-result artifact refs.
-- Schedule run rows must record `provider_id`. If a schedule does not explicitly carry a provider id, scheduler dispatch resolves it through the injected runtime default, which is `ohmypi` on this branch.
+- Schedule run rows must record `provider_id`. If a schedule does not explicitly carry a provider id, scheduler dispatch resolves it through the injected runtime default, which is `ohmypi`.
 - Agent-task final run rows should also record `runtime_provider_id` from the structured dispatch result or the resolved schedule provider.
 - After each run row, the latest schedule record is updated append-only with `last_run_id`, `last_run_status`, `last_run_at`, and `last_idempotency_key`.
 - Due calculation for interval schedules must use the latest real dispatch attempt (`starting`, `dispatched`, `queued`, `approval_required`, `failed`, or `rejected`) as its anchor. Observation-only rows such as `duplicate`, `skipped`, and `invalid` may be displayed as the latest run, but must not move the next interval due time.
@@ -5718,7 +5718,7 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Unsupported TUI action -> failed run row.
 - Target subagent not found -> failed run row.
 - Risky scheduled work -> governed subagent dispatch queues approval and writes a final schedule-run row with `status:"approval_required"`, `task_id`, and `approval_id`.
-- Schedule without explicit `provider_id` -> due run rows record `provider_id:"ohmypi"` and final agent-task rows record `runtime_provider_id:"ohmypi"` on this branch.
+- Schedule without explicit `provider_id` -> due run rows record `provider_id:"ohmypi"` and final agent-task rows record `runtime_provider_id:"ohmypi"`.
 
 ### 5. Good/Base/Bad Cases
 
@@ -5958,6 +5958,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 - Deterministic subagent control lifecycle/reuse intent helpers live in `control_protocol.py`: `subagent_control_persistence_intent(...)` interprets only explicit structured lifecycle fields and defaults to ephemeral/session-scoped behavior, while `subagent_control_force_new_intent(...)` interprets only explicit force-new/reuse fields. They must not infer persistence or no-reuse from natural-language target, value, name, profile, or context text.
 - `app.py` remains the Orchestrator owner for `register_subagent_control_aliases(...)`, `apply_subagent_control(...)`, runtime subagent resolution, state mutation, ledgers, approvals, artifacts, and dispatch side effects.
 - `SECRET_VAULT_DIR` defaults to `~/.shuheng/memory/secret_vault`.
+- New Secret Vault verifier plaintext is `Shuheng Secret Vault v1`; historical verifier plaintext may be accepted only during unlock compatibility and must not be written for newly created vaults.
 - OMP isolated runtime files default to `~/.shuheng/memory/agent_harness/runtime/ohmypi/agent`.
 - Legacy bootstrap marker: `~/.shuheng/.legacy_import.json`.
 - `SHUHENG_IMPORT_LEGACY=1` forces a non-destructive legacy import for targeted runs.
@@ -5984,6 +5985,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 - Persistent subagent memory must live under Shuheng-owned `SUBAGENTS_DIR`; temporary subagents must live under Shuheng-owned `TEMP_SUBAGENTS_DIR`.
 - Persistent subagent home helpers must keep profile, memory, event, and metadata refs under `SUBAGENTS_DIR`; ordinary non-secret conversation turns remain history-owned under `MODEL_RESPONSES_DIR`.
 - Secret Vault encrypted storage must live under Shuheng-owned `SECRET_VAULT_DIR` by default.
+- New Secret Vault creation must encrypt the Shuheng verifier sentinel; legacy sentinels are accepted only as an isolated compatibility path for existing encrypted vaults.
 - OMP memory append prompts must read Shuheng-owned memory sources, not GenericAgent `memory/`.
 - On normal first launch with the default `~/.shuheng` home and a discovered legacy GenericAgent checkout, Shuheng may bootstrap existing GenericAgent state by copying missing files from that checkout's `temp/model_responses` and `memory` directories into the Shuheng-owned tree.
 - Legacy bootstrap must be copy-missing-only: existing Shuheng files win over old GenericAgent files.
@@ -6026,6 +6028,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 
 - `scripts/check_policy_gates.py` must assert default session history paths are inside Shuheng home and not inside `GenericAgent/temp/model_responses`.
 - Tests must assert `AGENT_HARNESS_DIR`, `SUBAGENTS_DIR`, `TEMP_SUBAGENTS_DIR`, `SECRET_VAULT_DIR`, and isolated OMP runtime paths are inside Shuheng home and not inside the GenericAgent checkout.
+- Tests must assert new Secret Vaults use the Shuheng verifier sentinel while existing legacy verifier sentinels still unlock through the isolated compatibility path.
 - Tests must assert `continue_cmd` and `session_names` are retargeted to the active `MODEL_RESPONSES_DIR`.
 - Tests must assert legacy bootstrap copies old GenericAgent history and memory into Shuheng, preserves existing Shuheng conflicts, skips stale OMP runtime files, writes a marker, and does not delete source files.
 - Tests must assert `new_agent()` starts with a normal `model_responses_*.txt` log path under the active Shuheng history directory.
@@ -6357,7 +6360,7 @@ def context_layers_for_task(*, recent_traces, active_session):
 - OMP custom tool entry: `integrations/omp-ga-tui-plugin/tools/index.ts`.
 - OMP plugin tools: `ga_tui_context_get` and `ga_tui_memory_candidate_submit`.
 - Environment keys:
-  - `GA_TUI_REPO` or `GA_TUI_ROOT`: GenericAgent-TUI checkout used by the plugin when locating `src/ga_tui/agent_bridge.py`.
+  - `GA_TUI_REPO` or `GA_TUI_ROOT`: Shuheng checkout used by the plugin when locating `src/ga_tui/agent_bridge.py`.
   - `GA_TUI_BRIDGE_PYTHON`: Python executable used by the OMP plugin, default `python3`.
   - `GENERICAGENT_ROOT`: optional GenericAgent legacy-provider override consumed by `ga_tui.app` discovery.
   - `GA_TUI_HARNESS_DIR`: harness directory override for bridge tests or isolated runs.

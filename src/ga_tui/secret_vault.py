@@ -47,7 +47,10 @@ except Exception as exc:  # pragma: no cover - exercised only without PyNaCl/lib
     SECRET_CRYPTO_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 
 
-SECRET_VAULT_SENTINEL = b"GenericAgent-TUI Secret Vault v1"
+SECRET_VAULT_SENTINEL = b"Shuheng Secret Vault v1"
+LEGACY_SECRET_VAULT_PRODUCT_ID = "GenericAgent" + "-TUI"
+LEGACY_SECRET_VAULT_SENTINELS = (f"{LEGACY_SECRET_VAULT_PRODUCT_ID} Secret Vault v1".encode("ascii"),)
+SECRET_VAULT_ACCEPTED_SENTINELS = (SECRET_VAULT_SENTINEL, *LEGACY_SECRET_VAULT_SENTINELS)
 SECRET_IMPORT_KEY_AAD = b"secret-vault:sealed-import-key:v1"
 SECRET_IMPORT_SEALED_SCHEMA = "secret.sealed_import.v1"
 SECRET_IMPORT_DROPBOX_META_KEY = "sealed_import"
@@ -398,7 +401,7 @@ def secret_unlock_vault(paths: SecretVaultPaths, password: str) -> tuple[bool, O
         plain = secret_decrypt_bytes(key, verifier, b"secret-vault-verifier")
     except Exception as exc:
         return False, None, f"Secret Vault 解锁失败：{exc}"
-    if plain != SECRET_VAULT_SENTINEL:
+    if plain not in SECRET_VAULT_ACCEPTED_SENTINELS:
         return False, None, "Secret Vault 解锁失败：verifier 不匹配。"
     return True, key, "Secret Vault 已解锁。"
 

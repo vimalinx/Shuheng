@@ -159,7 +159,7 @@ Runtime and top-level control metadata are exposed through:
 - Scheduled jobs must reserve an idempotency key before dispatch, record the run result, and then delegate through `agenttask.v2`.
 - Scheduler run rows must record the resolved runtime provider. If a schedule
   omits `provider_id`, the injected runtime registry default is used, which is
-  `ohmypi` on this branch.
+  `ohmypi`.
 - Do not let model choice override policy gates. Model routing is subordinate to TUI governance.
 - Do not let OMP permission profiles override policy gates. `full` means normal
   runtime tool availability, not direct long-term memory writes or automatic

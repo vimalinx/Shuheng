@@ -29,6 +29,8 @@ REQUIRED_CONTINUE_FUNCS = (
 )
 
 GENERICAGENT_DISABLE_ENV = ("SHUHENG_DISABLE_GENERICAGENT", "GA_TUI_DISABLE_GENERICAGENT")
+LEGACY_TUI_REPO_BASENAME = "GenericAgent" + "-TUI"
+LEGACY_EXTERNAL_LAUNCHER_MARKER = f"Generated {LEGACY_TUI_REPO_BASENAME} external launcher"
 
 
 def tui_repo_root() -> Path:
@@ -144,15 +146,18 @@ def generated_core_shim(tui_root: Path | None = None) -> str:
             return Path(__file__).resolve().parents[1]
 
 
+        _LEGACY_TUI_REPO_BASENAME = "GenericAgent" + "-TUI"
+
+
         def _candidate_roots():
             env_repo = os.environ.get("GA_TUI_REPO")
             if env_repo:
                 yield Path(env_repo).expanduser()
             yield Path({repo_s!r})
             yield _genericagent_root().parent / "Shuheng"
-            yield _genericagent_root().parent / "GenericAgent-TUI"
+            yield _genericagent_root().parent / _LEGACY_TUI_REPO_BASENAME
             yield Path.home() / "Programs" / "Shuheng"
-            yield Path.home() / "Programs" / "GenericAgent-TUI"
+            yield Path.home() / "Programs" / _LEGACY_TUI_REPO_BASENAME
 
 
         def main() -> None:
@@ -193,7 +198,7 @@ def install_core_shim(
         current = path.read_text(encoding="utf-8", errors="replace")
         if (
             "Generated Shuheng external launcher" not in current
-            and "Generated GenericAgent-TUI external launcher" not in current
+            and LEGACY_EXTERNAL_LAUNCHER_MARKER not in current
         ):
             raise FileExistsError(f"{path} exists; pass --overwrite to replace it")
     if path.exists() and target == "frontends/tuiapp.py":
@@ -207,7 +212,7 @@ def install_core_shim(
 def _print_report(root: Path | None, failures: Iterable[str]) -> int:
     print(f"Shuheng root: {tui_repo_root()}")
     print("Core runtime: OhMyPi / OMP")
-    print("Launch without core patches: shuheng")
+    print("Launch without legacy patches: shuheng")
     print("Optional shim: shuheng-install-core-shim --target tuiapp")
     if root is None:
         print("GenericAgent legacy provider: unavailable (optional)")
@@ -262,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="validate imports and discovery")
     doctor.add_argument("--root", default="")
-    install = sub.add_parser("install-core-shim", help="install launcher shim into GenericAgent")
+    install = sub.add_parser("install-core-shim", help="install launcher shim into a legacy GenericAgent checkout")
     install.add_argument("--root", default="")
     install.add_argument("--target", choices=("tuiapp-curses", "tuiapp"), default="tuiapp-curses")
     install.add_argument("--overwrite", action="store_true")

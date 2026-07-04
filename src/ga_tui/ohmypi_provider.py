@@ -1,4 +1,4 @@
-"""Oh My Pi runtime provider for the GA TUI control plane.
+"""Oh My Pi runtime provider for the Shuheng control plane.
 
 The integration uses Oh My Pi's JSONL stdio RPC mode as a process boundary.
 The wrapper intentionally presents the small GenericAgent-shaped surface that

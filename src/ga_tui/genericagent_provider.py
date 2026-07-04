@@ -1,4 +1,4 @@
-"""GenericAgent provider glue for the GA TUI control plane.
+"""Legacy GenericAgent provider glue for the Shuheng control plane.
 
 This module owns GenericAgent-specific tool schema injection, handler patching,
 control-hint installation, and adapter lifecycle hooks. TUI state access stays
@@ -25,7 +25,7 @@ ThreadFactory = Callable[..., Any]
 
 TUI_AGENT_CONTROL_HINT = """
 
-[GenericAgent-TUI ga-control v2]
+[Shuheng ga-control v2]
 当用户要求你管理 TUI、拆任务或调度子 agent 时，当前唯一控制协议是 `ga-control.v2`，只能输出隐藏 `<ga-control>` 控制块。
 只有用户明确要求实际执行创建、委派、修改会话、更新计划等操作时才输出真实 `<ga-control>`。
 用户只是询问“能做什么 / 怎么用 / 举个例子 / 讲讲能力 / 演示一下概念”时属于能力说明，不要创建计划或子 agent，不要输出真实 `<ga-control>`。
@@ -79,11 +79,24 @@ TUI_AGENT_CONTROL_HINT = """
 - 除 TUI 本地提醒和已登记 workflow run 外，用户没有指定 `schedule_id` 时可以省略，让 TUI 自动生成；但必须在 `execution.mode:"agent_task"` 中提供明确目标 agent（优先先用 `agent_match` / `agent_list` 查询）和完整 `routing` / `work_order` / capability / context / output contracts，并通过 `agenttask.v2` 派发，不允许绕过任务账本和审批门。
 - 你是主控 Orchestrator；读任务可并行，写任务保持单写者；子 agent 返回 artifact/证据/摘要，不要无结构自由聊天。
 - 批量操作历史会话时优先用 `/sessions` 输出的稳定 `id:xxxxxx` 或完整文件名作为 target；不要用 `S01`/`1` 这种当前视图相对编号，除非同时提供 `expected_title`。
-[/GenericAgent-TUI ga-control v2]
+[/Shuheng ga-control v2]
 """
-TUI_CONTROL_HINT_MARKER = "[GenericAgent-TUI ga-control v2]"
+TUI_CONTROL_HINT_MARKER = "[Shuheng ga-control v2]"
+LEGACY_TUI_IDENTITY = "GenericAgent" + "-TUI"
+LEGACY_TUI_SESSION_CONTROL_MARKER = f"{LEGACY_TUI_IDENTITY} session control"
+LEGACY_TUI_GA_CONTROL_MARKER = f"{LEGACY_TUI_IDENTITY} ga-control v2"
+LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN = "|".join(
+    re.escape(marker)
+    for marker in (
+        LEGACY_TUI_SESSION_CONTROL_MARKER,
+        LEGACY_TUI_GA_CONTROL_MARKER,
+    )
+)
+# Keep historical injected control-hint blocks removable without exposing their
+# old product identity in the active Shuheng prompt.
 LEGACY_TUI_CONTROL_HINT_BLOCK_RE = re.compile(
-    r"\n?\[GenericAgent-TUI session control\][\s\S]*?\[/GenericAgent-TUI session control\]\s*",
+    rf"\n?\[(?:{LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN})\]"
+    rf"[\s\S]*?\[/(?:{LEGACY_TUI_CONTROL_HINT_MARKER_PATTERN})\]\s*",
     re.IGNORECASE,
 )
 TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -91,7 +104,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "agent_list",
-            "description": "Read-only TUI dashboard query. Lists current GenericAgent-TUI subagents before deciding whether to create, reuse, stop, or delegate. User-facing name: agent.list.",
+            "description": "Read-only Shuheng dashboard query. Lists current Shuheng subagents before deciding whether to create, reuse, stop, or delegate. User-facing name: agent.list.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -107,7 +120,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "agent_get",
-            "description": "Read-only TUI dashboard query. Gets one subagent's profile, permissions, queues, current task refs, and bounded memory/profile summaries. User-facing name: agent.get.",
+            "description": "Read-only Shuheng dashboard query. Gets one subagent's profile, permissions, queues, current task refs, and bounded memory/profile summaries. User-facing name: agent.get.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,7 +134,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "agent_match",
-            "description": "Read-only TUI dashboard query. Scores reusable subagents for an objective and recommends reuse vs create-new before emitting ga-control. User-facing name: agent.match.",
+            "description": "Read-only Shuheng dashboard query. Scores reusable subagents for an objective and recommends reuse vs create-new before emitting ga-control. User-facing name: agent.match.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -140,7 +153,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "task_list",
-            "description": "Read-only TUI dashboard query. Lists the shared task ledger with status/agent filters before updating plans or delegating. User-facing name: task.list.",
+            "description": "Read-only Shuheng dashboard query. Lists the shared task ledger with status/agent filters before updating plans or delegating. User-facing name: task.list.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -156,7 +169,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "task_get",
-            "description": "Read-only TUI dashboard query. Gets one task with latest ledger row, recent history, child tasks, traces, artifacts, and approval refs. User-facing name: task.get.",
+            "description": "Read-only Shuheng dashboard query. Gets one task with latest ledger row, recent history, child tasks, traces, artifacts, and approval refs. User-facing name: task.get.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -171,7 +184,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "approval_list",
-            "description": "Read-only TUI dashboard query. Lists pending approval gates without executing decisions. User-facing name: approval.list.",
+            "description": "Read-only Shuheng dashboard query. Lists pending approval gates without executing decisions. User-facing name: approval.list.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -185,7 +198,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "artifact_list",
-            "description": "Read-only TUI dashboard query. Lists artifact refs and metadata; does not inline artifact contents. User-facing name: artifact.list.",
+            "description": "Read-only Shuheng dashboard query. Lists artifact refs and metadata; does not inline artifact contents. User-facing name: artifact.list.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -200,7 +213,7 @@ TUI_QUERY_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "capability_list",
-            "description": "Read-only TUI dashboard query. Lists role templates, capabilities, write policies, and currently registered agents. User-facing name: capability.list.",
+            "description": "Read-only Shuheng dashboard query. Lists role templates, capabilities, write policies, and currently registered agents. User-facing name: capability.list.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -215,7 +228,7 @@ TUI_SCHEDULE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "schedule_create",
-            "description": "Governed TUI scheduling mutation. Creates a scheduled task in the TUI schedule registry through the same scheduledtask.v1 path as schedule.create controls. User-facing name: schedule.create.",
+            "description": "Governed Shuheng scheduling mutation. Creates a scheduled task in the Shuheng schedule registry through the same scheduledtask.v1 path as schedule.create controls. User-facing name: schedule.create.",
             "parameters": {
                 "type": "object",
                 "properties": {

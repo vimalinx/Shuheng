@@ -1,4 +1,4 @@
-"""Quarantined helpers for historical GenericAgent-TUI artifacts.
+"""Quarantined helpers for historical TUI artifacts.
 
 This module is intentionally not a source of current control protocol truth.
 It only strips or matches retired markup that may appear in old persisted

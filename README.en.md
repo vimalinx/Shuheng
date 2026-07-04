@@ -49,7 +49,7 @@ Think of it as:
 Session Manager + Multi-Agent Console + Task Board + Memory/Approval Governance + Automation Control Plane
 ```
 
-Shuheng makes OMP, GenericAgent, Codex, Claude Code, and other local agent runtimes easier to govern in long-running terminal workflows. The current compatibility layer still reuses the main `GenericAgent` project for history restoration and related core capabilities.
+Shuheng makes OMP, legacy GenericAgent, Codex, Claude Code, and other local agent runtimes easier to govern in long-running terminal workflows. When a legacy GenericAgent checkout is available, Shuheng may reuse its compatibility modules for old history restoration, but OMP remains the default core runtime.
 
 > Runtimes execute. Shuheng governs the control surface.
 
@@ -191,7 +191,7 @@ First confirm the public command entrypoint is available:
 shuheng --help
 ```
 
-`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` do not require a configured GenericAgent checkout by default. Shuheng's default runtime core is OhMyPi / OMP.
+`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` do not require a configured legacy GenericAgent checkout by default. Shuheng's default runtime core is OhMyPi / OMP.
 
 ### 2. Optionally Point To The GenericAgent Legacy Provider
 
@@ -218,7 +218,7 @@ Healthy output includes:
 ```text
 Core runtime: OhMyPi / OMP
 Status: OK
-Launch without core patches: shuheng
+Launch without legacy patches: shuheng
 ```
 
 ### 4. Launch
@@ -230,18 +230,20 @@ shuheng
 Recommended update flow:
 
 ```bash
-cd /path/to/GenericAgent
-git pull
-
 cd /path/to/Shuheng
 shuheng
 ```
 
-This lets the core `GenericAgent` project update normally while the TUI evolves as a separate interface layer.
+If you still use the legacy GenericAgent provider or launcher shim, update that legacy checkout separately:
 
-## Optional Core Shim
+```bash
+cd /path/to/GenericAgent
+git pull
+```
 
-If you want the `GenericAgent` checkout's core launcher to launch this external TUI, install a small launcher shim.
+## Optional Legacy Launcher Shim
+
+If you want to enter Shuheng through the old frontend entrypoint in a legacy `GenericAgent` checkout, install a small launcher shim.
 
 Replace `frontends/tuiapp.py`:
 

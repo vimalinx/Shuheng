@@ -1,4 +1,4 @@
-"""Current GenericAgent-TUI control protocol parsing helpers."""
+"""Current Shuheng control protocol parsing helpers."""
 from __future__ import annotations
 
 import hashlib

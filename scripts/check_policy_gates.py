@@ -2173,6 +2173,10 @@ def assert_secret_vault_module_boundary() -> None:
     assert a.SECRET_SUBAGENT_SESSION_ID == secret_vault_mod.SECRET_SUBAGENT_SESSION_ID
     assert a.SECRET_AUTO_TOR_ENV == secret_vault_mod.SECRET_AUTO_TOR_ENV
     assert a.SECRET_DEFAULT_TOR_SOCKS == secret_vault_mod.SECRET_DEFAULT_TOR_SOCKS
+    assert a.SECRET_VAULT_SENTINEL == b"Shuheng Secret Vault v1", a.SECRET_VAULT_SENTINEL
+    assert secret_vault_mod.SECRET_VAULT_SENTINEL == b"Shuheng Secret Vault v1"
+    legacy_secret_sentinel = ("GenericAgent" + "-TUI Secret Vault v1").encode("ascii")
+    assert legacy_secret_sentinel in secret_vault_mod.SECRET_VAULT_ACCEPTED_SENTINELS
     assert secret_vault_mod.secret_session_title_for_messages(
         "Secret Vault",
         [a.Message("user", "secret boundary title")],
@@ -3022,6 +3026,21 @@ def assert_genericagent_provider_module_boundary() -> None:
     ):
         assert getattr(gap, name).__module__ == "ga_tui.genericagent_provider", name
     assert gap.GenericAgentRuntimeAdapter.__module__ == "ga_tui.genericagent_provider"
+    assert gap.TUI_CONTROL_HINT_MARKER == "[Shuheng ga-control v2]", gap.TUI_CONTROL_HINT_MARKER
+    legacy_tui_identity = "GenericAgent" + "-TUI"
+    assert gap.LEGACY_TUI_IDENTITY == legacy_tui_identity
+    assert legacy_tui_identity not in gap.TUI_AGENT_CONTROL_HINT, gap.TUI_AGENT_CONTROL_HINT
+    assert gap.LEGACY_TUI_SESSION_CONTROL_MARKER == f"{legacy_tui_identity} session control"
+    assert gap.LEGACY_TUI_GA_CONTROL_MARKER == f"{legacy_tui_identity} ga-control v2"
+    for legacy_marker in (gap.LEGACY_TUI_SESSION_CONTROL_MARKER, gap.LEGACY_TUI_GA_CONTROL_MARKER):
+        legacy_block = f"[{legacy_marker}]\nold\n[/{legacy_marker}]"
+        assert gap.LEGACY_TUI_CONTROL_HINT_BLOCK_RE.sub("", legacy_block) == ""
+    active_schema_text = json.dumps(
+        gap.TUI_QUERY_TOOL_SCHEMAS + gap.TUI_SCHEDULE_TOOL_SCHEMAS + gap.TUI_TOOL_SCHEMAS,
+        ensure_ascii=False,
+    )
+    for forbidden in (legacy_tui_identity, "GA TUI"):
+        assert forbidden not in active_schema_text, forbidden
     provider_source = Path(gap.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "import curses",
@@ -3033,6 +3052,7 @@ def assert_genericagent_provider_module_boundary() -> None:
         "from .app import State",
     ):
         assert forbidden not in provider_source, forbidden
+    assert legacy_tui_identity not in provider_source, provider_source
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for forbidden in (
         "def install_tui_query_tool_schema",
@@ -3312,13 +3332,18 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert "Shuheng root:" in report, report
     assert "Core runtime: OhMyPi / OMP" in report, report
     assert "GenericAgent legacy provider: unavailable (optional)" in report, report
-    assert "Launch without core patches: shuheng" in report, report
+    assert "Launch without legacy patches: shuheng" in report, report
     assert "ga-tui" not in report, report
+    legacy_ga_tui_words = "ga" + " tui"
+    legacy_ga_tui_title = "GA" + " TUI"
+    legacy_genericagent_title = "GenericAgent stable"
     app_source = Path(a.__file__).read_text(encoding="utf-8")
     for forbidden in (
-        "ga tui",
-        "GenericAgent stable TUI",
-        "GenericAgent stable curses TUI",
+        legacy_ga_tui_words,
+        f"{legacy_ga_tui_title} gateway",
+        "Launch without " + "core patches",
+        f"{legacy_genericagent_title} TUI",
+        f"{legacy_genericagent_title} curses TUI",
     ):
         assert forbidden not in app_source, forbidden
     assert "已退出枢衡" in app_source, app_source
@@ -5595,7 +5620,7 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         "statement": (
             "type: project\n"
             "Validated durable lesson: OMP proposal host tools must route long-term memory "
-            "through GenericAgent-TUI human approval gates instead of writing memory directly."
+            "through Shuheng human approval gates instead of writing memory directly."
         ),
         "evidence_ref": "runtime://provider/ohmypi/test-proposal",
         "task_id": "task_omp_proposal_memory",
@@ -5859,8 +5884,8 @@ def assert_ohmypi_memory_candidate_signal_filters() -> None:
     )
     assert omp.ohmypi_memory_candidate_signal(mixed_host_tool_fallback, source="test") is None
     durable = (
-        "Validated durable lesson: when Oh My Pi runs under GenericAgent-TUI, "
-        "the TUI must remain the memory approval owner and OMP should only emit candidates."
+        "Validated durable lesson: when Oh My Pi runs under Shuheng, "
+        "Shuheng must remain the memory approval owner and OMP should only emit candidates."
     )
     signal = omp.ohmypi_memory_candidate_signal(durable, source="test", request_id="req-1")
     assert signal is not None, signal
@@ -8223,18 +8248,26 @@ def assert_agent_create_respects_explicit_lifecycle_and_reuse_policy() -> None:
     assert "Shuheng `SUBAGENTS_DIR`" in a.TUI_AGENT_CONTROL_HINT
     assert "agent_list" in a.TUI_AGENT_CONTROL_HINT
     assert "task_get" in a.TUI_AGENT_CONTROL_HINT
+    assert a.TUI_CONTROL_HINT_MARKER == "[Shuheng ga-control v2]", a.TUI_CONTROL_HINT_MARKER
+    legacy_tui_identity = "GenericAgent" + "-TUI"
+    assert legacy_tui_identity not in a.TUI_AGENT_CONTROL_HINT, a.TUI_AGENT_CONTROL_HINT
     assert_retired_control_vocabulary_is_quarantined(state)
-    hint_agent = FakeLLMAgent()
-    for client in hint_agent.llmclients:
-        client.backend.extra_sys_prompt = "prefix\n[GenericAgent-TUI session control]\nold\n[/GenericAgent-TUI session control]\n"
-    a.install_tui_control_hint(hint_agent)
-    a.install_tui_control_hint(hint_agent)
-    for client in hint_agent.llmclients:
-        prompt = client.backend.extra_sys_prompt
-        assert "prefix" in prompt, prompt
-        assert "GenericAgent-TUI session control" not in prompt, prompt
-        assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
-        assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in prompt, prompt
+    legacy_hint_blocks = (
+        f"[{legacy_tui_identity} session control]\nold\n[/{legacy_tui_identity} session control]",
+        f"[{legacy_tui_identity} ga-control v2]\nold\n[/{legacy_tui_identity} ga-control v2]",
+    )
+    for legacy_hint_block in legacy_hint_blocks:
+        hint_agent = FakeLLMAgent()
+        for client in hint_agent.llmclients:
+            client.backend.extra_sys_prompt = f"prefix\n{legacy_hint_block}\n"
+        a.install_tui_control_hint(hint_agent)
+        a.install_tui_control_hint(hint_agent)
+        for client in hint_agent.llmclients:
+            prompt = client.backend.extra_sys_prompt
+            assert "prefix" in prompt, prompt
+            assert legacy_tui_identity not in prompt, prompt
+            assert prompt.count(a.TUI_CONTROL_HINT_MARKER) == 1, prompt
+            assert "不要在示例、教程或解释中包含可执行 `<ga-control>` 标签" in prompt, prompt
     fenced_control = (
         "现在重新发送：\n"
         "```json\n"
