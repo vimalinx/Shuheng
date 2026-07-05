@@ -75,3 +75,36 @@ Ran the Shuheng 0.1.0 public alpha release rehearsal: updated changelog, built w
 ### Next Steps
 
 - None - task complete
+
+
+## Session 48: Make OMP core and gateway agent delivery
+
+**Date**: 2026-07-05
+**Task**: Make OMP core and gateway agent delivery
+**Branch**: `main`
+
+### Summary
+
+Completed the OMP-first runtime-core task by adding local gateway context/permission discovery plus A2A inbox message delivery, locking the contract in backend spec/docs, and passing policy, runtime, pytest, release, build, wheel, and shuheng-check gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1e6f27c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
