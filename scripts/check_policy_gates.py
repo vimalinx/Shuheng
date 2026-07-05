@@ -1813,6 +1813,16 @@ def assert_history_title_policy_module_boundary() -> None:
     assert a.TOOL_USE_BLOCK_RE is history_titles_mod.TOOL_USE_BLOCK_RE
     assert a.TOOL_HEADER_RE is history_titles_mod.TOOL_HEADER_RE
     assert a.DETAIL_FENCE_RE is history_titles_mod.DETAIL_FENCE_RE
+    assert a.SESSION_TITLE_CHARS == 16
+    assert a.SESSION_TITLE_WIDTH == 32
+    long_title = "修复左侧历史会话自动标题更新性能优化"
+    assert history_titles_mod.clamp_session_title_chars(long_title) == "修复左侧历史会话自动标题更新性能"
+    assert a.short_session_title(long_title) == history_titles_mod.short_session_title(
+        long_title,
+        title_width=a.SESSION_TITLE_WIDTH,
+        title_chars=a.SESSION_TITLE_CHARS,
+    )
+    assert len(a.short_session_title(long_title)) <= a.SESSION_TITLE_CHARS
     assert a.session_summary_titles_from_text(process_text) == history_titles_mod.session_summary_titles_from_text(process_text) == []
     assert a.session_summary_titles_from_text(normal_text) == history_titles_mod.session_summary_titles_from_text(normal_text) == [
         "有效历史标题"
@@ -2180,7 +2190,7 @@ def assert_secret_vault_module_boundary() -> None:
     assert secret_vault_mod.secret_session_title_for_messages(
         "Secret Vault",
         [a.Message("user", "secret boundary title")],
-    ) == "secret boundary title"
+    ) == "secret boundary"
     assert secret_vault_mod.parse_secret_import_args("归档 id:abc") == ("archive", "id:abc")
     assert secret_vault_mod.parse_secret_proxy_chain("tor -> host:9051; http://proxy") == [
         "tor",
@@ -6080,6 +6090,15 @@ class ScriptedMetadataBackend(FakeBackend):
         self.raw_prompts.append(prompt)
         if "生成一个简短标题" in prompt:
             text = self.title_queue.pop(0) if self.title_queue else "默认会话标题"
+        elif "维护左侧栏元数据" in prompt:
+            title = self.title_queue.pop(0) if self.title_queue else "默认会话标题"
+            text = json.dumps(
+                {
+                    "title": title,
+                    "description": "这是会话简介，说明主题和当前进展。",
+                },
+                ensure_ascii=False,
+            )
         elif "维护一个简介" in prompt:
             text = "这是会话简介，说明主题和当前进展。"
         elif "选择一个分类" in prompt:
@@ -10639,7 +10658,10 @@ def assert_model_owned_session_rename_is_title_path() -> None:
     if a.session_names is None:
         return
 
-    agent = ScriptedMetadataAgent(["后台标题不应消费"])
+    first_ai_title = "AI历史标题第一轮超长需要截断"
+    second_ai_title = "AI标题第二轮需要更新超长"
+    manual_guard_title = "AI不应覆盖手动标题"
+    agent = ScriptedMetadataAgent([first_ai_title, second_ai_title, manual_guard_title])
     path = a.new_session_log_path()
     a.set_agent_log_path(agent, path)
     state = a.State(agent=agent)
@@ -10651,9 +10673,15 @@ def assert_model_owned_session_rename_is_title_path() -> None:
 
     assert a.maybe_autoname_current_session(state) is True
     drain_ui(state)
-    assert a.session_names.name_for(path) != "后台标题不应消费", a.session_names._load()
-    assert agent.llmclient.backend.title_queue == ["后台标题不应消费"], agent.llmclient.backend.title_queue
+    assert a.session_names.name_for(path) == a.normalize_session_title(first_ai_title), a.session_names._load()
+    first_meta = a.load_session_meta_registry()[os.path.basename(path)]
+    assert first_meta["title_source"] == "ai", first_meta
+    assert first_meta.get("title_signature"), first_meta
+    assert first_meta["description"] == "这是会话简介，说明主题和当前进展", first_meta
+    assert first_meta["description_source"] == "ai", first_meta
+    assert len(a.session_names.name_for(path)) <= a.SESSION_TITLE_CHARS
     assert not any("生成一个简短标题" in prompt for prompt in agent.llmclient.backend.raw_prompts), agent.llmclient.backend.raw_prompts
+    assert sum("维护左侧栏元数据" in prompt for prompt in agent.llmclient.backend.raw_prompts) == 1
 
     state.messages.extend([
         a.Message("user", "第二轮：现在由主 runtime 自己维护标题。"),
@@ -10661,8 +10689,12 @@ def assert_model_owned_session_rename_is_title_path() -> None:
     ])
     assert a.maybe_autoname_current_session(state) is True
     drain_ui(state)
-    assert agent.llmclient.backend.title_queue == ["后台标题不应消费"], agent.llmclient.backend.title_queue
+    assert a.session_names.name_for(path) == a.normalize_session_title(second_ai_title), a.session_names._load()
+    second_meta = a.load_session_meta_registry()[os.path.basename(path)]
+    assert second_meta["title_source"] == "ai", second_meta
+    assert second_meta.get("title_signature") != first_meta.get("title_signature"), second_meta
     assert not any("生成一个简短标题" in prompt for prompt in agent.llmclient.backend.raw_prompts), agent.llmclient.backend.raw_prompts
+    assert sum("维护左侧栏元数据" in prompt for prompt in agent.llmclient.backend.raw_prompts) == 2
 
     a.apply_tui_controls_from_text(
         state,
@@ -10690,6 +10722,7 @@ def assert_model_owned_session_rename_is_title_path() -> None:
     assert a.session_names.name_for(path) == "固定手动标题", a.session_names._load()
     manual_meta = a.load_session_meta_registry()[os.path.basename(path)]
     assert manual_meta["title_source"] == "manual", manual_meta
+    assert sum("维护左侧栏元数据" in prompt for prompt in agent.llmclient.backend.raw_prompts) == 3
 
 
 def assert_ohmypi_process_summary_does_not_title_history() -> None:
@@ -10752,6 +10785,50 @@ def assert_ohmypi_process_summary_does_not_title_history() -> None:
     assert final_text in metadata_context, metadata_context
     assert "OMP 思考" not in metadata_context, metadata_context
     assert "Hidden OMP reasoning" not in metadata_context, metadata_context
+
+
+def assert_valid_history_cache_skips_session_sampling() -> None:
+    root = tempfile.mkdtemp(prefix="shuheng_history_cache_fast_")
+    retarget_harness(root)
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+    path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_cache_hit.txt")
+    Path(path).write_text(
+        "=== Prompt === 2026-01-01 12:00:00\n"
+        "=== USER ===\n"
+        "缓存命中不应采样全文\n"
+        "=== Response === 2026-01-01 12:01:00\n"
+        "已缓存的回复。\n",
+        encoding="utf-8",
+    )
+    stat = os.stat(path)
+    state = a.State(agent=FakeLLMAgent())
+    state.session_meta = {
+        os.path.basename(path): {
+            "cache_mtime": stat.st_mtime,
+            "cache_size": stat.st_size,
+            "hidden_subagent_log": False,
+            "preview": "缓存命中标题",
+            "rounds": 1,
+            "last_user_at": stat.st_mtime,
+            "ui_preview_messages": [{"role": "user", "content": "缓存命中不应采样全文"}],
+            "description": "缓存简介",
+        }
+    }
+    old_sample_file_text = a.sample_file_text
+
+    def forbidden_sample_file_text(_path: str, limit: int = 65536) -> str:
+        raise AssertionError("valid cached history rows must not sample transcript files")
+
+    a.sample_file_text = forbidden_sample_file_text
+    try:
+        rows, changed = a.cached_session_rows(state)
+    finally:
+        a.sample_file_text = old_sample_file_text
+    assert changed is False
+    assert len(rows) == 1, rows
+    assert rows[0][0] == path, rows
+    assert rows[0][2] == "缓存命中标题", rows
+    assert rows[0][4] == "缓存简介", rows
 
 
 def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
@@ -11354,6 +11431,7 @@ def run_checks() -> None:
     assert_historical_subagent_result_quarantine_backfill()
     assert_recent_sessions_use_last_message_activity()
     assert_history_curator_skill_uses_progressive_disclosure()
+    assert_valid_history_cache_skips_session_sampling()
     assert_ohmypi_process_summary_does_not_title_history()
     assert_ohmypi_local_category_fallback_for_sidebar()
     assert_missing_source_history_rows_restore_from_l4_archive()

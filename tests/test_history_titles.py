@@ -22,6 +22,16 @@ def test_process_marked_summary_is_not_title_candidate() -> None:
     assert app_module.session_summary_titles_from_text(text) == []
 
 
+def test_session_titles_are_clamped_to_16_chars() -> None:
+    long_title = "修复左侧历史会话自动标题更新性能优化"
+
+    assert history_titles.clamp_session_title_chars(long_title) == "修复左侧历史会话自动标题更新性能"
+    assert len(history_titles.short_session_title(long_title)) <= 16
+    assert len(app_module.short_session_title(long_title)) <= app_module.SESSION_TITLE_CHARS
+    assert len(app_module.normalize_session_title("标题： " + long_title)) <= app_module.SESSION_TITLE_CHARS
+    assert app_module.clean_ai_session_title("标题： " + long_title) == "修复左侧历史会话自动标题更新性能"
+
+
 def test_normal_summary_can_title_preview() -> None:
     text = "最终响应\n<summary>整理历史标题策略</summary>"
     body = repr([{"type": "text", "text": text}])

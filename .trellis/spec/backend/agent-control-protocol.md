@@ -330,12 +330,15 @@ and app.py monolith risk.
 
 - History row source: `cached_session_rows(state, exclude_pid)` returns `(path, last_user_at, preview, rounds, description)`.
 - Sidebar display source: `load_history()` maps `session_names.json` or `preview` into `state.history_names`.
+- Sidebar title limit: `SESSION_TITLE_CHARS == 16`; all normal, manual, local, and AI-maintained sidebar names pass through `normalize_session_title(...)` / `history_titles.short_session_title(...)`.
 - Recent row selector: `history_store.recent_history_items(history_entries, used_paths, limit)`, wrapped by `app.recent_history_items(...)` for the current default recent-session limit.
 - Restore preview compaction: `history_store.compact_ui_preview_messages_from_pairs(...)`, wrapped by `app.compact_ui_preview_messages_from_pairs(...)` to inject app-owned prompt parsing, assistant preview shaping, and default loaded-round count.
 - Restore message shaping: `history_store.history_round_count(...)`, `history_store.extract_recent_ui_messages_from_pairs(...)`, and `history_store.history_messages_from_pairs(...)`, wrapped by `app.py` to inject app-owned prompt parsing, tool-result extraction, response-segment formatting, and default loaded-round count.
 - Transcript message selector: `history_store.latest_user_message_text(messages)`, re-exported from `app.py` for compatibility.
-- Process filtering/title helpers: `history_titles.session_preview_from_pairs()`, `history_titles.session_response_preview_text()`, `history_titles.session_summary_titles_from_text()`, `history_titles.history_cache_has_process_only_preview()`, `history_titles.message_text_for_metadata_context()`, and `history_titles.suggested_session_title()`, wrapped by `app.py` where app-owned prompt parsing or visible-reply extraction is still required.
+- Process filtering/title helpers: `history_titles.clamp_session_title_chars()`, `history_titles.short_session_title()`, `history_titles.session_preview_from_pairs()`, `history_titles.session_response_preview_text()`, `history_titles.session_summary_titles_from_text()`, `history_titles.history_cache_has_process_only_preview()`, `history_titles.message_text_for_metadata_context()`, and `history_titles.suggested_session_title()`, wrapped by `app.py` where app-owned prompt parsing or visible-reply extraction is still required.
 - Low-level response-body parser: `history_store.assistant_text_from_response_body(response_body)`, re-exported from `app.py` for compatibility.
+- AI metadata refresh source: `generate_ai_session_metadata(agent, messages)` asks once for JSON shaped as `{"title":"...","description":"..."}` and persists title metadata through `description_done` only when the existing title is not manual.
+- Persisted title metadata fields: `title_source`, `title_signature`, and `title_updated_at`; manual titles use `title_source:"manual"`, AI/local-maintained titles use `title_source:"ai"`.
 
 ### 3. Contracts
 
@@ -344,9 +347,12 @@ and app.py monolith risk.
 - For process-marked responses, sidebar title fallback should prefer the first user message, then visible final assistant prose.
 - Existing cached metadata that already contains process-only preview text must be invalidated and recomputed from the raw model response file.
 - Explicit user names in `session_names.json` win unless they are process-only labels such as `OMP 思考`.
-- Main-runtime agents own persisted title maintenance by emitting `session.rename`; those model-owned title changes are recorded as `title_source:"ai"`.
-- Inline metadata jobs may maintain descriptions and categories when supported, but they must not author persisted session titles.
-- Manual `/rename` or history rename writes `title_source:"manual"` and must not be overwritten by later model-owned `session.rename`.
+- Persisted sidebar titles must be concrete descriptions of 16 characters or fewer. Display width may be wider for layout, but storage/display text is character-clamped.
+- Main-runtime `session.rename` remains a valid persisted title path and records model-owned title changes as `title_source:"ai"`.
+- Inline AI metadata jobs may maintain both title and description in one request. They write a title only when `title_source` is not `manual`, and write `title_signature` from the process-safe user/assistant content signature.
+- Local title fallback for non-inline metadata agents may persist `suggested_session_title(...)` as `title_source:"ai"` with `title_signature`; it must use the same process-summary-safe and 16-character title policy.
+- Manual `/rename` or history rename writes `title_source:"manual"` and must not be overwritten by later model-owned `session.rename`, inline metadata refresh, or local fallback.
+- A valid `session_meta.json` cache entry with matching `cache_mtime`, `cache_size`, `hidden_subagent_log`, `preview`, `rounds`, `last_user_at`, and `ui_preview_messages` must be served without sampling the transcript file.
 - Recent virtual history rows must be selected by normalized source path and descending positive activity timestamp, without mutating metadata or reading `State`.
 - Transcript bridge user prompt selection must scan stored `Message` rows from newest to oldest and return the stripped content of the newest non-empty `user` message.
 - Standalone progress-dot deltas from OMP (`.` on its own line) are process noise and must not render in the transcript.
@@ -358,7 +364,7 @@ and app.py monolith risk.
 - `compact_ui_preview_messages_from_pairs(...)` belongs to `history_store.py` because it is pure restore-preview message shaping over already-parsed transcript pairs. It accepts prompt-text and assistant-preview callables from the app facade and must not parse/write transcript files, inspect `State`, or own process-summary title policy.
 - `history_round_count(...)`, `extract_recent_ui_messages_from_pairs(...)`, and `history_messages_from_pairs(...)` belong to `history_store.py` because they shape already-parsed transcript pairs into recent restore message records. They accept app-provided prompt/tool/response-format callables and must not parse transcript files, switch providers, reset runtime backends, inspect UI state, write metadata, or own process-summary title policy.
 - `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
-- `short_session_title(...)`, `compact_description(...)`, `text_has_process_markers(...)`, `session_summary_titles_from_text(...)`, `session_response_preview_text(...)`, `session_preview_from_pairs(...)`, `is_process_only_session_title(...)`, `history_cache_has_process_only_preview(...)`, `message_text_for_metadata_context(...)`, `session_description_from_pairs(...)`, and `suggested_session_title(...)` belong to `history_titles.py` because they are process-summary-safe title/preview/description policy over already-parsed text, response bodies, message rows, or transcript pairs. App wrappers inject `_user_text(...)`, `latest_visible_reply_text(...)`, and current display limits where those dependencies remain app/rendering-owned.
+- `clamp_session_title_chars(...)`, `short_session_title(...)`, `compact_description(...)`, `text_has_process_markers(...)`, `session_summary_titles_from_text(...)`, `session_response_preview_text(...)`, `session_preview_from_pairs(...)`, `is_process_only_session_title(...)`, `history_cache_has_process_only_preview(...)`, `message_text_for_metadata_context(...)`, `session_description_from_pairs(...)`, and `suggested_session_title(...)` belong to `history_titles.py` because they are process-summary-safe title/preview/description policy over already-parsed text, response bodies, message rows, or transcript pairs. App wrappers inject `_user_text(...)`, `latest_visible_reply_text(...)`, and current display limits where those dependencies remain app/rendering-owned.
 - `history_store.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 - `history_titles.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
 
@@ -374,9 +380,13 @@ and app.py monolith risk.
 - Transcript helper receives assistant/system rows plus blank user rows -> returns `""`.
 - Transcript helper receives multiple user rows where the newest non-empty content has surrounding spaces -> returns that newest content stripped.
 - Cached metadata has `preview:"OMP 思考"` and matching file mtime/size -> cache is treated stale and recomputed.
+- Cached metadata has a matching file mtime/size and all required non-process cache fields -> history rows are returned without `sample_file_text(...)` or transcript parsing.
 - AI metadata context includes a process block -> context includes user text and visible final prose, not hidden thinking text.
-- New user/assistant content by itself does not persist a new title; the title changes only when the main runtime emits `session.rename`.
+- AI metadata returns a long title -> the persisted sidebar title is clamped to at most 16 characters.
+- AI metadata returns a new title for a new content signature -> the unlocked AI-owned sidebar title updates and `title_signature` changes.
+- Non-inline metadata runtime gets new process-safe user content -> local fallback may persist a 16-character AI-owned title without calling `raw_ask`.
 - Model-owned `session.rename` sees `title_source:"manual"` -> it does not overwrite the title.
+- Inline metadata refresh sees `title_source:"manual"` -> it may update description but does not overwrite the title.
 - Main-runtime `session.rename` changes an unlocked AI-owned title -> title source remains `ai`; the same control against a manual title is skipped.
 - Main transcript renderer sees process blocks -> folded process UI still shows the process label.
 - Main transcript renderer sees a legacy thinking block plus a standalone `.` line -> renders the thinking excerpt and suppresses the dot line.
@@ -387,6 +397,8 @@ and app.py monolith risk.
 ### 5. Good/Base/Bad Cases
 
 - Good: History row title is `修复左栏历史会话标题` while restored assistant preview says `已完成历史会话标题修复`.
+- Good: A long AI-generated sidebar title is stored as a specific 16-character-or-shorter description.
+- Good: Valid cached history metadata renders the sidebar row without re-sampling a large transcript file.
 - Good: Main transcript shows `过程 Turn 15: Let me observe the page...`, not `过程 Turn 15: OMP 思考`.
 - Good: A long OMP research turn with many thinking/tool/status blocks renders as one expandable `过程组` plus the final report, not dozens of separate `过程 Turn` lines.
 - Good: An OMP IRC demo shows the final conclusion and `IRC 回复` snippets from DemoAlpha/DemoBeta even if later turns only close the demo agents.
@@ -397,6 +409,8 @@ and app.py monolith risk.
 - Base: `app.history_messages_from_pairs(...)` remains the compatibility wrapper that supplies `RESTORE_DISPLAY_ROUNDS`, `_user_text`, `_tool_results_from_prompt`, `_format_response_segment`, and `Message` conversion behavior through `history_store.py`.
 - Base: `app.latest_user_message_text` remains a direct compatibility alias for callers in transcript bridge code.
 - Bad: Sidebar `Recent` shows `OMP 思考`, `执行中`, or a tool-call label as the session title.
+- Bad: Sidebar names store long prompt-like sentences, generic labels, or strings longer than 16 characters.
+- Bad: Startup scans every historical transcript with `sample_file_text(...)` even when cache identity and required cache fields are current.
 - Bad: `history_store.py` imports `app.py` so it can call `latest_visible_reply_text(...)`.
 - Bad: `history_store.py` imports app runtime provider helpers just to decide whether to persist a transcript bridge turn.
 - Bad: Recent selection compares raw paths without normalization, causing duplicate sidebar rows when callers pass normalized `used_paths`.
@@ -410,14 +424,15 @@ and app.py monolith risk.
 - `scripts/check_policy_gates.py` must assert `compact_ui_preview_messages_from_pairs` is owned by `history_store.py`, app wrapper parity holds, recent-round selection works, blank user prompts are skipped, and `执行中` assistant previews are excluded.
 - `scripts/check_policy_gates.py` must assert restore message shaping helpers are owned by `history_store.py`, app wrapper parity holds, user-round fallback works, promptless follow-up turns are grouped into assistant process markers, and loaded/total restore counts are preserved.
 - `scripts/check_policy_gates.py` must assert `latest_user_message_text` is owned by `history_store.py`, app alias parity holds, blank user rows are skipped, and the newest non-empty user content wins.
-- `scripts/check_policy_gates.py` must assert history title policy helpers are owned by `history_titles.py`, app wrapper parity holds, process-only summaries are excluded, normal non-process summaries remain valid title candidates, metadata-context text strips hidden process/control blocks, and `history_titles.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard/runtime dependencies.
+- `scripts/check_policy_gates.py` must assert history title policy helpers are owned by `history_titles.py`, app wrapper parity holds, session titles clamp to 16 characters, process-only summaries are excluded, normal non-process summaries remain valid title candidates, metadata-context text strips hidden process/control blocks, and `history_titles.py` has no reverse import into `app.py` or curses/TUI/rendering/Web/dashboard/runtime dependencies.
+- `scripts/check_policy_gates.py` must assert valid cached history rows with matching mtime/size and required cache fields do not call `sample_file_text(...)`.
 - Unit tests must assert response-body parser behavior for list bodies, dict `content` lists, dict fallback fields, and malformed raw bodies.
 - Unit tests must assert recent-history sorting, limit behavior, zero-timestamp exclusion, used-path de-duplication, and app wrapper parity.
 - Unit tests must assert transcript helper newest-user selection, blank-user skipping, no-user fallback, and app alias parity.
 - The test must seed a stale `session_meta.json` cache with `preview:"OMP 思考"` to prove cache invalidation.
 - The test must assert restored preview messages and AI metadata context exclude process-only summary and hidden reasoning.
-- Tests must assert automatic persisted title maintenance uses model-owned `session.rename`, while metadata refresh alone does not write titles and manual titles remain stable.
-- Tests must assert model-owned `session.rename` updates are marked AI-owned and do not override manual titles.
+- Tests must assert automatic persisted title maintenance can use inline AI metadata or model-owned `session.rename`, title updates are marked AI-owned, content-signature changes can update unlocked AI titles, and manual titles remain stable.
+- Tests must assert inline metadata title/description maintenance uses one JSON metadata request rather than separate title and description prompts.
 - Tests must assert OMP thinking summaries use thinking excerpts, legacy `OMP 思考` summaries render from `<thinking>`, and standalone dot deltas/lines are suppressed.
 - Tests must assert mixed OMP process turns, including thinking-only summaries, tool turns, and short progress prose, collapse into one expandable process group while the final response stays visible.
 - Tests must assert a grouped OMP IRC exchange preserves the substantive conclusion and bounded `Reply from ...` snippets when later housekeeping turns are shorter.

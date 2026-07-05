@@ -22,8 +22,17 @@ TOOL_HEADER_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*", re.I
 DETAIL_FENCE_RE = re.compile(r"`{3,}[^\n]*\n[\s\S]*?\n`{3,}", re.MULTILINE)
 
 
-def short_session_title(text: str, fallback: str = "历史会话", *, title_width: int = 24) -> str:
-    title = compact_title(text, title_width)
+def clamp_session_title_chars(title: str, max_chars: int = 16) -> str:
+    if max_chars <= 0:
+        return ""
+    title = compact_title(title, max(1, max_chars * 4))
+    if len(title) > max_chars:
+        title = title[:max_chars]
+    return title.strip(" -:：。,.，")
+
+
+def short_session_title(text: str, fallback: str = "历史会话", *, title_width: int = 32, title_chars: int = 16) -> str:
+    title = clamp_session_title_chars(compact_title(text, title_width), title_chars)
     return title or fallback
 
 

@@ -649,7 +649,8 @@ SUBAGENT_PROMPT_RE = re.compile(r"\n?\[Shuheng SubAgent Profile\][\s\S]*?\[/Shuh
 RESTORE_DISPLAY_ROUNDS = 3
 HISTORY_EXPAND_ROUNDS = 3
 RESTORE_CACHE_LIMIT = 8
-SESSION_TITLE_WIDTH = 24
+SESSION_TITLE_CHARS = 16
+SESSION_TITLE_WIDTH = 32
 SESSION_DESCRIPTION_LIMIT = 200
 RECENT_SESSION_LIMIT = 5
 PINNED_SESSION_LABEL = "置顶"
@@ -1441,7 +1442,7 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
         meta = dict(state.session_meta.get(key, {}))
         if bool(meta.get("deleted")) or bool(meta.get("hidden_subagent_log")):
             continue
-        title = compact_title(str(names.get(key) or ""), 80)
+        title = normalize_session_title(str(names.get(key) or ""))
         desc = compact_description(str(meta.get("description") or title or ""))
         preview = str(meta.get("preview") or desc or title or "已登记的历史会话").strip()
         last_user_at = max(
@@ -1479,44 +1480,46 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
 
 def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tuple[list[tuple[str, float, str, int, str]], bool]:
     tag = f"model_responses_{exclude_pid}.txt" if exclude_pid is not None else ""
-    paths = sorted(glob.glob(os.path.join(MODEL_RESPONSES_DIR, "model_responses*.txt")), key=os.path.getmtime, reverse=True)
+    path_stats: list[tuple[str, os.stat_result]] = []
+    try:
+        with os.scandir(MODEL_RESPONSES_DIR) as entries:
+            for entry in entries:
+                if not is_model_response_basename(entry.name):
+                    continue
+                path = entry.path
+                if tag and path.endswith(tag):
+                    continue
+                try:
+                    stat = entry.stat()
+                except OSError:
+                    continue
+                path_stats.append((path, stat))
+    except OSError:
+        path_stats = []
+    path_stats.sort(key=lambda item: item[1].st_mtime, reverse=True)
     rows: list[tuple[str, float, str, int, str]] = []
     changed = False
     existing_keys: set[str] = set()
-    for path in paths:
-        if tag and path.endswith(tag):
-            continue
+    for path, stat in path_stats:
         key = session_key(path)
         existing_keys.add(key)
-        try:
-            stat = os.stat(path)
-        except OSError:
-            continue
         meta = state.session_meta.get(key, {})
         cleaned_meta, cleaned = clear_missing_source_session_meta(meta)
         if cleaned:
             state.session_meta[key] = cleaned_meta
             meta = cleaned_meta
             changed = True
-        if bool(meta.get("hidden_subagent_log")):
-            continue
-        if is_subagent_session_log_sample(sample_file_text(path)):
-            entry = dict(meta)
-            entry["hidden_subagent_log"] = True
-            entry["cache_mtime"] = stat.st_mtime
-            entry["cache_size"] = stat.st_size
-            entry["preview"] = "subagent session log"
-            entry["rounds"] = 0
-            entry["last_user_at"] = stat.st_mtime
-            if entry != meta:
-                state.session_meta[key] = entry
-                changed = True
+        cache_identity_ok = (
+            float(meta.get("cache_mtime") or 0) == float(stat.st_mtime)
+            and int(meta.get("cache_size") or -1) == int(stat.st_size)
+        )
+        if bool(meta.get("hidden_subagent_log")) and cache_identity_ok:
             continue
         refresh_process_cache = history_cache_has_process_only_preview(meta)
         cache_ok = (
             not refresh_process_cache
-            and float(meta.get("cache_mtime") or 0) == float(stat.st_mtime)
-            and int(meta.get("cache_size") or -1) == int(stat.st_size)
+            and cache_identity_ok
+            and "hidden_subagent_log" in meta
             and "preview" in meta
             and "rounds" in meta
             and "last_user_at" in meta
@@ -1530,6 +1533,18 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
                 int(meta.get("rounds") or 0),
                 compact_description(str(meta.get("description") or "")),
             ))
+            continue
+        if is_subagent_session_log_sample(sample_file_text(path)):
+            entry = dict(meta)
+            entry["hidden_subagent_log"] = True
+            entry["cache_mtime"] = stat.st_mtime
+            entry["cache_size"] = stat.st_size
+            entry["preview"] = "subagent session log"
+            entry["rounds"] = 0
+            entry["last_user_at"] = stat.st_mtime
+            if entry != meta:
+                state.session_meta[key] = entry
+                changed = True
             continue
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
@@ -1550,6 +1565,7 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
         entry.update({
             "cache_mtime": stat.st_mtime,
             "cache_size": stat.st_size,
+            "hidden_subagent_log": False,
             "preview": preview,
             "rounds": rounds,
             "last_user_at": last_user_at,
@@ -15453,7 +15469,7 @@ def load_history(state: State, force: bool = False) -> bool:
                     name = ""
                 if not name:
                     name = preview
-                names[path] = compact_title(name, 80)
+                names[path] = normalize_session_title(name)
         if meta_changed:
             save_session_meta_registry(state.session_meta)
         changed = (
@@ -15494,7 +15510,7 @@ def cancel_normal_history_restore(state: State) -> None:
 
 
 def rename_current_session(state: State, raw_name: str, source: str = "manual") -> str:
-    name = compact_title(raw_name, 80)
+    name = normalize_session_title(raw_name)
     if not name:
         return "名称不能为空。"
     if state.temporary_session:
@@ -16196,7 +16212,7 @@ def title_source_for_rename(source: str) -> str:
 
 
 def rename_session_path(state: State, path: str, raw_name: str, source: str = "manual") -> str:
-    name = compact_title(raw_name, 80)
+    name = normalize_session_title(raw_name)
     if not name:
         return "名称不能为空。"
     if is_current_session_path(state, path):
@@ -17899,7 +17915,16 @@ def message_lines_cached(state: State, width: int) -> list[RenderLine]:
 
 
 def short_session_title(text: str, fallback: str = "历史会话") -> str:
-    return history_title_policy.short_session_title(text, fallback, title_width=SESSION_TITLE_WIDTH)
+    return history_title_policy.short_session_title(
+        text,
+        fallback,
+        title_width=SESSION_TITLE_WIDTH,
+        title_chars=SESSION_TITLE_CHARS,
+    )
+
+
+def normalize_session_title(text: str, fallback: str = "") -> str:
+    return short_session_title(text, fallback)
 
 
 def compact_description(text: str, max_chars: int = SESSION_DESCRIPTION_LIMIT) -> str:
@@ -18010,6 +18035,13 @@ def clean_ai_description(description: str) -> str:
     description = re.sub(r"^(简介|会话简介|Description|Session description)\s*[:：]\s*", "", description, flags=re.I)
     description = description.strip(" \t\"'“”‘’`#*-:：。,.，")
     return compact_description(description, SESSION_DESCRIPTION_LIMIT)
+
+
+def clean_ai_session_title(title: str) -> str:
+    title = clean_text(strip_tui_controls(title))
+    title = re.sub(r"^(标题|会话标题|Title|Session title)\s*[:：]\s*", "", title, flags=re.I)
+    title = title.strip(" \t\"'“”‘’`#*-:：。,.，")
+    return normalize_session_title(title)
 
 
 def clean_ai_category(category: str) -> str:
@@ -18153,11 +18185,51 @@ def generate_local_session_category(
 
 
 def generate_ai_session_description(agent: Any, messages: list[Message]) -> str:
+    _title, description = generate_ai_session_metadata(agent, messages)
+    return description
+
+
+def parse_ai_session_metadata(text: str) -> tuple[str, str]:
+    raw = clean_text(strip_tui_controls(text))
+    payload: Any = None
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if match:
+        try:
+            payload = json.loads(match.group(0))
+        except Exception:
+            payload = None
+    if isinstance(payload, dict):
+        return (
+            clean_ai_session_title(str(payload.get("title") or "")),
+            clean_ai_description(str(payload.get("description") or payload.get("desc") or "")),
+        )
+    title = ""
+    description = ""
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        title_match = re.match(r"^(?:标题|title)\s*[:：]\s*(.+)$", line, re.I)
+        if title_match:
+            title = title_match.group(1)
+            continue
+        desc_match = re.match(r"^(?:简介|描述|description|desc)\s*[:：]\s*(.+)$", line, re.I)
+        if desc_match:
+            description = desc_match.group(1)
+            continue
+        if not title:
+            title = line
+        elif not description:
+            description = line
+    return clean_ai_session_title(title), clean_ai_description(description)
+
+
+def generate_ai_session_metadata(agent: Any, messages: list[Message]) -> tuple[str, str]:
     if not agent_supports_inline_ai_metadata(agent):
-        return ""
+        return "", ""
     context = ai_metadata_context(messages, max_chars=5200)
     if not context:
-        return ""
+        return "", ""
     source_backend = agent.llmclient.backend
     try:
         source_backend = source_backend.primary
@@ -18170,13 +18242,14 @@ def generate_ai_session_description(agent: Any, messages: list[Message]) -> str:
         backend.tools = None
         backend.stream = False
         backend.temperature = 0
-        backend.max_tokens = max(128, min(int(getattr(backend, "max_tokens", 256) or 256), 256))
+        backend.max_tokens = max(160, min(int(getattr(backend, "max_tokens", 256) or 256), 256))
     except Exception:
         pass
     prompt = (
-        "请根据下面的对话内容，为这个会话维护一个简介。\n"
-        "要求：中文，一段话，小于200字；说明主题、用户目标、当前进展或结论；"
-        "不要标题、列表、Markdown、引号或换行；只输出简介本身。\n\n"
+        "请根据下面的对话内容，为这个会话维护左侧栏元数据。\n"
+        "要求：title 是中文短描述，最多16个字，必须具体；description 是一段话，小于200字，"
+        "说明主题、用户目标、当前进展或结论。只输出 JSON："
+        "{\"title\":\"...\",\"description\":\"...\"}，不要 Markdown、解释或代码块。\n\n"
         f"{context}"
     )
     request = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
@@ -18193,7 +18266,7 @@ def generate_ai_session_description(agent: Any, messages: list[Message]) -> str:
     if not content and isinstance(blocks, list):
         parts = [str(block.get("text") or "") for block in blocks if isinstance(block, dict) and block.get("type") == "text"]
         content = "\n".join(parts)
-    return clean_ai_description(content)
+    return parse_ai_session_metadata(content)
 
 
 def generate_ai_session_category(agent: Any, title: str, description: str, categories: list[tuple[str, str]]) -> str:
@@ -18261,17 +18334,18 @@ def ai_description_worker(
     thread_name = token_thread_name(agent)
     if thread_name:
         threading.current_thread().name = thread_name
+    title = ""
     description = ""
     error = ""
     try:
-        description = generate_ai_session_description(agent, messages)
-        if not description:
-            error = "empty description"
+        title, description = generate_ai_session_metadata(agent, messages)
+        if not title and not description:
+            error = "empty metadata"
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
     finally:
         threading.current_thread().name = old_name
-    ui_queue.put(("description_done", os.path.basename(path), path, description, error, signature))
+    ui_queue.put(("description_done", os.path.basename(path), path, title, description, error, signature))
 
 
 def ai_category_worker(
@@ -18312,11 +18386,23 @@ def maybe_start_ai_description_job(state: State, path: str, messages: list[Messa
     if not key or not signature or key in state.description_jobs:
         return False
     meta = state.session_meta.get(key, {})
+    title_source = str(meta.get("title_source") or "")
+    manual_title = title_source == "manual"
+    current_title = ""
+    try:
+        current_title = normalize_session_title(session_names.name_for(path)) if session_names is not None else ""
+    except Exception:
+        current_title = ""
+    title_current = manual_title or (
+        bool(current_title)
+        and meta.get("title_signature") == signature
+    )
+    description_current = bool(meta.get("description_signature") == signature and compact_description(str(meta.get("description") or "")))
     if (
         not force
         and (
             state.description_signatures.get(key) == signature
-            or (meta.get("description_signature") == signature and compact_description(str(meta.get("description") or "")))
+            or (title_current and description_current)
         )
     ):
         return False
@@ -18361,12 +18447,36 @@ def session_title_for_category(state: State, path: str) -> str:
         return title
     for item_path, _mtime, preview, _rounds in state.history:
         if normalized_path(item_path) == normalized_path(path):
-            return compact_title(preview, 80)
+            return normalize_session_title(preview)
     if normalized_path(path) == normalized_path(current_session_path(state)):
-        current = compact_title(state.current_title, 80)
+        current = normalize_session_title(state.current_title)
         if current not in {"", "main", "运行中会话", "空闲会话"}:
             return current
     return ""
+
+
+def persist_ai_session_title(state: State, path: str, title: str, signature: str) -> bool:
+    title = normalize_session_title(title)
+    if not path or not title or session_names is None:
+        return False
+    state.session_meta = load_session_meta_registry()
+    entry = dict(state.session_meta.get(session_key(path), {}))
+    if str(entry.get("title_source") or "") == "manual":
+        return False
+    try:
+        current = normalize_session_title(session_names.name_for(path))
+    except Exception:
+        current = ""
+    if current == title and entry.get("title_signature") == signature:
+        return False
+    session_names.set_name(path, title)
+    entry["title_source"] = "ai"
+    entry["title_signature"] = signature
+    entry["title_updated_at"] = time.time()
+    state.session_meta[session_key(path)] = entry
+    save_session_meta_registry(state.session_meta)
+    state.history_names[path] = title
+    return True
 
 
 def persist_local_session_category(
@@ -18472,13 +18582,27 @@ def maybe_autoname_current_session(state: State, force: bool = False) -> bool:
         current = session_names.name_for(path)
     except Exception:
         current = ""
-    current = compact_title(current, 80) if current else ""
+    current = normalize_session_title(current) if current else ""
     changed = False
     if current and not force:
         if state.current_title != current:
             state.current_title = current
             changed = True
-    title = suggested_session_title(state.messages)
+    signature = session_content_signature(state.messages)
+    title = normalize_session_title(suggested_session_title(state.messages))
+    if (
+        title
+        and not agent_supports_inline_ai_metadata(state.agent)
+        and signature
+        and str(session_meta_for(state, path).get("title_source") or "") != "manual"
+        and (not current or force or session_meta_for(state, path).get("title_signature") != signature)
+    ):
+        try:
+            if persist_ai_session_title(state, path, title, signature):
+                current = title
+                changed = True
+        except Exception as exc:
+            state.last_error = f"Local title save: {type(exc).__name__}: {exc}"
     if not current and title and state.current_title in {"", "main", "运行中会话", "空闲会话"}:
         state.current_title = title
         changed = True
@@ -18505,13 +18629,27 @@ def maybe_autoname_background_session(state: State, bg: BackgroundSession, force
         current = session_names.name_for(path)
     except Exception:
         current = ""
-    current = compact_title(current, 80) if current else ""
+    current = normalize_session_title(current) if current else ""
     changed = False
     if current and not force:
         if bg.title != current:
             bg.title = current
             changed = True
-    title = suggested_session_title(bg.messages)
+    signature = session_content_signature(bg.messages)
+    title = normalize_session_title(suggested_session_title(bg.messages))
+    if (
+        title
+        and not agent_supports_inline_ai_metadata(bg.agent)
+        and signature
+        and str(session_meta_for(state, path).get("title_source") or "") != "manual"
+        and (not current or force or session_meta_for(state, path).get("title_signature") != signature)
+    ):
+        try:
+            if persist_ai_session_title(state, path, title, signature):
+                current = title
+                changed = True
+        except Exception as exc:
+            state.last_error = f"Local title save: {type(exc).__name__}: {exc}"
     if not current and title and bg.title in {"", "main", "运行中会话", "空闲会话"}:
         bg.title = title
         changed = True
@@ -26212,19 +26350,44 @@ def process_ui_queue(state: State) -> bool:
             continue
 
         if kind == "description_done":
-            _kind, key, path, description, error, signature = item
+            if len(item) == 7:
+                _kind, key, path, title, description, error, signature = item
+            else:
+                _kind, key, path, description, error, signature = item
+                title = ""
             state.description_jobs.discard(key)
-            if description:
+            if title or description:
                 try:
                     state.session_meta = load_session_meta_registry()
                     entry = dict(state.session_meta.get(session_key(path), {}))
-                    entry["description"] = description
-                    entry["description_source"] = "ai"
-                    entry["description_signature"] = signature
-                    entry["description_updated_at"] = time.time()
+                    now = time.time()
+                    saved_title = ""
+                    if title and str(entry.get("title_source") or "") != "manual" and session_names is not None:
+                        try:
+                            session_names.set_name(path, title)
+                            entry["title_source"] = "ai"
+                            entry["title_signature"] = signature
+                            entry["title_updated_at"] = now
+                            state.history_names[path] = title
+                            saved_title = title
+                        except Exception as exc:
+                            state.last_error = f"AI title save: {type(exc).__name__}: {exc}"
+                    if description:
+                        entry["description"] = description
+                        entry["description_source"] = "ai"
+                        entry["description_signature"] = signature
+                        entry["description_updated_at"] = now
+                        state.history_descriptions[path] = description
                     state.session_meta[session_key(path)] = entry
                     save_session_meta_registry(state.session_meta)
-                    state.history_descriptions[path] = description
+                    if saved_title:
+                        if token_session_key(state.agent) == key and not path_is_active_history_view(state, path):
+                            state.current_title = saved_title
+                        else:
+                            for bg in state.background_sessions.values():
+                                if token_session_key(bg.agent) == key:
+                                    bg.title = saved_title
+                                    break
                     if load_history(state, force=True):
                         state.dirty = True
                     active_key = token_session_key(state.agent)
