@@ -3122,6 +3122,30 @@ class FakeRpcStdin:
         self.set_model_success = True
         self.set_model_error = "set_model failed"
         self.set_model_model_override: dict | None = None
+        self.subagent_subscription_level = "off"
+        self.subagents = [
+            {
+                "id": "subagent-1",
+                "index": 1,
+                "agent": "researcher",
+                "agentSource": "builtin",
+                "description": "Research subagent",
+                "status": "running",
+                "task": "collect evidence",
+                "assignment": "read docs",
+                "sessionFile": "/tmp/omp-subagent-session.jsonl",
+                "lastUpdate": 1780000000000,
+                "parentToolCallId": "tool-call-1",
+            }
+        ]
+        self.subagent_messages = {
+            "sessionFile": "/tmp/omp-subagent-session.jsonl",
+            "fromByte": 0,
+            "nextByte": 120,
+            "reset": False,
+            "entries": [{"type": "message", "id": "entry-1"}],
+            "messages": [{"role": "assistant", "content": [{"type": "text", "text": "native subagent reply"}]}],
+        }
 
     def write(self, payload: str) -> int:
         for line in payload.splitlines():
@@ -3231,6 +3255,53 @@ class FakeRpcStdin:
                     "success": True,
                     "data": {"toolNames": [str(tool.get("name") or "") for tool in tools if isinstance(tool, dict)]},
                 })
+            elif frame.get("type") == "set_subagent_subscription":
+                level = str(frame.get("level") or "")
+                if level not in {"off", "progress", "events"}:
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "set_subagent_subscription",
+                        "success": False,
+                        "error": f"Invalid subagent subscription level: {level}",
+                    })
+                else:
+                    self.subagent_subscription_level = level
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "set_subagent_subscription",
+                        "success": True,
+                        "data": {"level": self.subagent_subscription_level},
+                    })
+            elif frame.get("type") == "get_subagents":
+                self.stdout.push({
+                    "id": frame.get("id"),
+                    "type": "response",
+                    "command": "get_subagents",
+                    "success": True,
+                    "data": {"subagents": self.subagents},
+                })
+            elif frame.get("type") == "get_subagent_messages":
+                if not frame.get("subagentId") and not frame.get("sessionFile"):
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "get_subagent_messages",
+                        "success": False,
+                        "error": "get_subagent_messages requires subagentId or sessionFile",
+                    })
+                else:
+                    result = dict(self.subagent_messages)
+                    if frame.get("fromByte") is not None:
+                        result["fromByte"] = int(frame.get("fromByte") or 0)
+                    self.stdout.push({
+                        "id": frame.get("id"),
+                        "type": "response",
+                        "command": "get_subagent_messages",
+                        "success": True,
+                        "data": result,
+                    })
             elif frame.get("type") == "abort":
                 self.stdout.push({"id": frame.get("id"), "type": "response", "command": "abort", "success": True})
         return len(payload)
@@ -4611,6 +4682,99 @@ def assert_ohmypi_native_session_state_and_restore() -> None:
         assert "omp msgs 8" in rendered, rendered
     finally:
         a.cost_tracker = old_cost_tracker
+
+
+def assert_ohmypi_rpc_output_layer_surfaces() -> None:
+    cold_agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=lambda *_args, **_kwargs: FakeRpcProcess(auto_finish=False),
+        startup_timeout=1,
+    )
+    cold_result = cold_agent.get_runtime_subagents(timeout=0.1)
+    assert cold_result["status"] == "unsupported", cold_result
+    invalid_subscription = cold_agent.set_subagent_subscription("verbose")
+    assert invalid_subscription["status"] == "error", invalid_subscription
+    assert invalid_subscription["supported_levels"] == ["events", "off", "progress"], invalid_subscription
+
+    processes: list[FakeRpcProcess] = []
+    runtime_events: list[dict[str, object]] = []
+
+    def process_factory(*_args, **_kwargs):
+        process = FakeRpcProcess(auto_finish=False)
+        processes.append(process)
+        return process
+
+    agent = omp.OhMyPiRpcAgent(
+        command=["/fake/omp", "--mode", "rpc"],
+        cwd=str(ROOT),
+        process_factory=process_factory,
+        runtime_event_sink=lambda event: runtime_events.append(event.to_record()),
+        startup_timeout=1,
+    )
+    assert agent.switch_runtime_session("/tmp/omp-output-layer-session.jsonl") is True
+    process = wait_for_process(processes)
+
+    subscription = agent.set_subagent_subscription("events")
+    assert subscription["status"] == "ok", subscription
+    assert subscription["level"] == "events", subscription
+    assert any(item.get("type") == "set_subagent_subscription" and item.get("level") == "events" for item in process.stdin.writes), process.stdin.writes
+
+    subagents = agent.get_runtime_subagents()
+    assert subagents["status"] == "ok", subagents
+    assert subagents["subagents"][0]["id"] == "subagent-1", subagents
+    assert any(item.get("type") == "get_subagents" for item in process.stdin.writes), process.stdin.writes
+
+    messages = agent.get_runtime_subagent_messages(subagent_id="subagent-1", from_byte=7)
+    assert messages["status"] == "ok", messages
+    assert messages["fromByte"] == 7, messages
+    assert messages["messages"][0]["role"] == "assistant", messages
+    assert any(
+        item.get("type") == "get_subagent_messages"
+        and item.get("subagentId") == "subagent-1"
+        and item.get("fromByte") == 7
+        for item in process.stdin.writes
+    ), process.stdin.writes
+
+    process.stdout.push({
+        "type": "subagent_lifecycle",
+        "payload": {
+            "id": "subagent-1",
+            "index": 1,
+            "agent": "researcher",
+            "status": "started",
+            "sessionFile": "/tmp/omp-subagent-session.jsonl",
+        },
+    })
+    process.stdout.push({
+        "type": "extension_ui_request",
+        "id": "ui-notify-1",
+        "method": "notify",
+        "message": "Started external login; api_key=secret-value",
+        "notifyType": "info",
+    })
+
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        lifecycle_event = next((event for event in runtime_events if event.get("event_type") == "runtime_subagent_lifecycle"), None)
+        extension_event = next((event for event in runtime_events if event.get("event_type") == "runtime_extension_ui_request"), None)
+        if lifecycle_event and extension_event:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError(runtime_events)
+
+    lifecycle_event = next(event for event in runtime_events if event.get("event_type") == "runtime_subagent_lifecycle")
+    assert lifecycle_event["status"] == "started", lifecycle_event
+    assert lifecycle_event["payload"]["payload"]["id"] == "subagent-1", lifecycle_event
+
+    extension_event = next(event for event in runtime_events if event.get("event_type") == "runtime_extension_ui_request")
+    assert extension_event["payload"]["method"] == "notify", extension_event
+    assert "[REDACTED]" in extension_event["payload"]["frame"]["message"], extension_event
+    assert not any(item.get("type") == "extension_ui_response" and item.get("id") == "ui-notify-1" for item in process.stdin.writes), process.stdin.writes
+
+    agent.close()
+    cold_agent.close()
 
 
 def assert_ohmypi_rpc_final_text_fallback() -> None:
@@ -11572,6 +11736,7 @@ def run_checks() -> None:
     assert_ohmypi_rpc_queue_mapping()
     assert_ohmypi_rpc_usage_tracking()
     assert_ohmypi_native_session_state_and_restore()
+    assert_ohmypi_rpc_output_layer_surfaces()
     assert_ohmypi_rpc_final_text_fallback()
     assert_ohmypi_rpc_streamed_final_text_dedupes_terminal_message()
     assert_ohmypi_rpc_waits_for_agent_end_before_next_prompt()

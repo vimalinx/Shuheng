@@ -129,6 +129,15 @@ ends because of tool use, Shuheng waits for the later final assistant message or
 `agent_end` before releasing the active prompt, so folded tool output does not
 replace the visible final reply.
 
+OMP remains the execution kernel for the agent loop, tool loop, retry,
+compaction, plugin execution, session lifecycle, and native subagent lifecycle.
+Shuheng exposes OMP native RPC output/control surfaces such as
+`set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, and
+`extension_ui_request` observability through the provider adapter. These surfaces
+are passthrough output facts: they do not let Shuheng synthesize OMP-native
+subagent state from its own ledgers, and they do not transfer approval, memory,
+schedule, artifact, or gateway execution ownership away from the control plane.
+
 ## Registry Surfaces
 
 Runtime and top-level control metadata are exposed through:
@@ -155,6 +164,9 @@ Runtime and top-level control metadata are exposed through:
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
+- OMP native RPC output layer: provider methods expose subagent subscription,
+  subagent summaries, subagent transcript reads, and extension UI request events
+  from the live OMP RPC process without creating hidden runtime work.
 - OMP plugin tools: repo-managed Shuheng plugin
   `integrations/omp-shuheng-plugin` exposes compatibility tools
   `shuheng_context_get` and `shuheng_memory_candidate_submit` by calling the

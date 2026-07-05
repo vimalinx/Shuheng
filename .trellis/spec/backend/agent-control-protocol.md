@@ -5286,6 +5286,10 @@ def put_agent_runtime_task(agent, request):
 - Provider metadata helper: `ohmypi_provider_spec(root_dir, harness_dir, recent_models_path, schedules_path, binary=None, command=None)`.
 - App-layer refresh helper: `refresh_agent_runtime_model_config(agent)`.
 - Provider-local refresh method: `OhMyPiRpcAgent.refresh_configured_models(models, env=None, command=None)`.
+- Native OMP output-layer RPC methods:
+  `OhMyPiRpcAgent.set_subagent_subscription(level)`,
+  `OhMyPiRpcAgent.get_runtime_subagents()`, and
+  `OhMyPiRpcAgent.get_runtime_subagent_messages(...)`.
 - Provider-neutral runtime envelopes: `RuntimeTaskRequest` and `RuntimeTaskEvent` in `src/shuheng/runtime.py`.
 - RPC command helpers: `resolve_ohmypi_binary(binary=None)` and `ohmypi_rpc_command(binary=None, extra_args=None, append_system_prompt=None)`.
 - Memory append prompt helpers: `write_ohmypi_memory_prompt(root_dir, harness_dir)` and `ohmypi_memory_prompt_path(harness_dir)`.
@@ -5326,6 +5330,33 @@ def put_agent_runtime_task(agent, request):
 - Generated OMP context packs, context refs, and memory append prompts must treat explicit user requests to create a persistent/long-term Shuheng agent as an executable control requirement: success requires `agent.create` with `lifecycle:"persistent"` / `persistent:true`, or reuse of a matching existing persistent `agent_id`. Scripts, schedules, memory candidates, or future-agent suggestions alone do not satisfy the request.
 - OMP memory-candidate governance must reject target mismatches from declared candidate responsibility metadata. If a candidate declares `target_role`, `scope`, or `responsibility`, the selected persistent subagent's role/name/profile must match that declaration; otherwise the candidate must not be queued or approved.
 - Process normalization belongs inside `ohmypi_provider.py`; `app.py` must not contain OMP-specific RPC parsing or a second OMP renderer.
+- OMP remains the execution kernel for agent loop, tool loop, session lifecycle,
+  retry, compaction, plugin execution, and native subagent lifecycle. Shuheng is
+  the governed RPC output/control layer that owns UI rendering, ledgers,
+  approvals, artifact refs, memory candidates, runtime event normalization, and
+  gateway discovery.
+- `set_subagent_subscription(...)`, `get_runtime_subagents()`, and
+  `get_runtime_subagent_messages(...)` must pass through native OMP RPC commands
+  `set_subagent_subscription`, `get_subagents`, and `get_subagent_messages`
+  when a live OMP RPC process exists. They must return bounded JSON-safe
+  `ohmypi.rpc_result.v1` records and must not synthesize local Shuheng subagent
+  state as OMP-native data.
+- Native OMP subagent passthrough queries must not lazily start the RPC process.
+  If no live ready process exists, they return `status:"unsupported"` rather
+  than creating hidden runtime state.
+- OMP `subagent_lifecycle`, `subagent_progress`, and `subagent_event` frames
+  are output-layer facts. The provider may emit provider-neutral runtime events
+  for observability, but Shuheng ledger mutation and subagent task completion
+  remain app/Orchestrator-owned.
+- OMP `extension_ui_request` frames must be preserved as runtime output-layer
+  events. Approval/select/input/editor responses may be handled by the provider
+  only through the existing conservative UI response policy; fire-and-forget UI
+  methods such as `notify`, `setStatus`, `setWidget`, `setTitle`,
+  `set_editor_text`, and `open_url` must not be silently lost.
+- Compatibility terminal grace fallback, incomplete-final continuation, and
+  host-tool follow-up watchdogs are recovery paths, not the normal completion
+  authority. Normal completion is owned by OMP terminal semantics such as
+  `agent_end`.
 - OMP process args/results included in assistant text must be bounded and secret-redacted before entering the display queue, history, artifacts, traces, or memory-candidate extraction.
 - OMP memory-candidate signal extraction must strip normalized process markers, `<thinking>` blocks, tool args, and tool result fences before deciding whether a durable candidate exists.
 - Oh My Pi RPC `turn_end` captures the completed visible turn but must not release the active prompt until `agent_end`, because real OMP may still be finalizing UI/status events and will reject a next prompt as `Agent is already processing`.
@@ -5519,6 +5550,13 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert `memory_context_get` writes a Shuheng context-pack artifact under the harness and returns its artifact ref.
 - Tests must assert `shuheng_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
 - Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.
+- Tests must assert native OMP subagent RPC passthrough methods return
+  `unsupported` without a live process, forward `set_subagent_subscription`,
+  `get_subagents`, and `get_subagent_messages` to a live RPC process, and expose
+  bounded JSON-safe OMP response data without using Shuheng local subagent cache.
+- Tests must assert OMP `subagent_lifecycle` / `subagent_progress` /
+  `subagent_event` frames and non-approval `extension_ui_request` frames are
+  preserved as runtime output-layer events with secret-redacted payloads.
 - Tests must assert isolated OMP runtime files are generated under `${AGENT_HARNESS_DIR}/runtime/ohmypi/agent`, not under `~/.omp/agent`.
 - Tests must assert the OMP runtime adapter subprocess `cwd` is the Shuheng app root, not a legacy-provider checkout.
 - Tests must assert generated OMP API keys are env references in `models.yml`, raw key values are absent from generated files, and child-process env carries `PI_CODING_AGENT_DIR`.

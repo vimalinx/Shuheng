@@ -37,6 +37,10 @@ OHMYPI_AGENT_DIRNAME = "agent"
 MAX_HOST_TOOL_RESULT_CHARS = 12000
 MAX_PROCESS_ARGS_CHARS = 4000
 MAX_PROCESS_RESULT_CHARS = 6000
+MAX_RPC_OUTPUT_STRING_CHARS = 2400
+MAX_RPC_OUTPUT_COLLECTION_ITEMS = 80
+MAX_RPC_OUTPUT_DEPTH = 5
+OMP_SUBAGENT_SUBSCRIPTION_LEVELS = {"off", "progress", "events"}
 _PROCESS_TURN_MARKER_RE = re.compile(r"(?m)^[ \t]*\**LLM Running \(Turn \d+\) \.\.\.\**[ \t\r]*$")
 _PROCESS_META_BLOCK_RE = re.compile(r"<(?:summary|thinking|think)>[\s\S]*?</(?:summary|thinking|think)>", re.IGNORECASE)
 _PROCESS_TOOL_ARGS_BLOCK_RE = re.compile(
@@ -364,6 +368,52 @@ def _bounded_process_text(text: str, *, max_chars: int = MAX_HOST_TOOL_RESULT_CH
     if len(result) > max_chars:
         result = result[:max_chars].rstrip() + "\n...[truncated]"
     return result
+
+
+def _bounded_rpc_output_value(
+    value: Any,
+    *,
+    max_string_chars: int = MAX_RPC_OUTPUT_STRING_CHARS,
+    max_items: int = MAX_RPC_OUTPUT_COLLECTION_ITEMS,
+    depth: int = MAX_RPC_OUTPUT_DEPTH,
+) -> Any:
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if value == value and value not in (float("inf"), float("-inf")) else 0.0
+    if isinstance(value, str):
+        return _bounded_process_text(value, max_chars=max_string_chars)
+    if depth <= 0:
+        return _bounded_process_text(str(value), max_chars=min(max_string_chars, 500))
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for idx, (key, item) in enumerate(value.items()):
+            if idx >= max_items:
+                result["__truncated__"] = True
+                break
+            result[str(key)[:120]] = _bounded_rpc_output_value(
+                item,
+                max_string_chars=max_string_chars,
+                max_items=max_items,
+                depth=depth - 1,
+            )
+        return result
+    if isinstance(value, (list, tuple, set)):
+        result = [
+            _bounded_rpc_output_value(
+                item,
+                max_string_chars=max_string_chars,
+                max_items=max_items,
+                depth=depth - 1,
+            )
+            for item in list(value)[:max_items]
+        ]
+        if len(value) > max_items:
+            result.append({"__truncated__": True, "omitted": len(value) - max_items})
+        return result
+    return _bounded_process_text(str(value), max_chars=max_string_chars)
 
 
 def _compact_process_summary(text: str, *, max_chars: int = 140) -> str:
@@ -959,6 +1009,122 @@ class OhMyPiRpcAgent:
         except Exception:
             return False
 
+    def _rpc_process_ready(self) -> bool:
+        process = self._process
+        return bool(process is not None and process.poll() is None and self._ready.is_set())
+
+    def _native_rpc_command_result(
+        self,
+        command: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        command = str(command or "").strip()
+        if not command:
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "error",
+                "command": "",
+                "error": "missing RPC command",
+            }
+        if not self._rpc_process_ready():
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "unsupported",
+                "command": command,
+                "error": "Oh My Pi RPC process is not running.",
+            }
+        request: dict[str, Any] = {"id": self._next_request_id(command.replace("_", "-")), "type": command}
+        request.update(dict(payload or {}))
+        try:
+            frame = self._send_and_wait(request, timeout=timeout)
+        except Exception as exc:
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "error",
+                "command": command,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        if frame.get("success") is False:
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "error",
+                "command": command,
+                "error": _bounded_process_text(str(frame.get("error") or "unknown RPC error"), max_chars=1000),
+            }
+        data = frame.get("data")
+        return {
+            "schema_version": "ohmypi.rpc_result.v1",
+            "status": "ok",
+            "command": command,
+            "data": _bounded_rpc_output_value(data if data is not None else {}),
+        }
+
+    def set_subagent_subscription(self, level: str, *, timeout: float = 5.0) -> dict[str, Any]:
+        normalized = str(level or "").strip().lower()
+        if normalized not in OMP_SUBAGENT_SUBSCRIPTION_LEVELS:
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "error",
+                "command": "set_subagent_subscription",
+                "error": f"invalid subagent subscription level: {level}",
+                "supported_levels": sorted(OMP_SUBAGENT_SUBSCRIPTION_LEVELS),
+            }
+        result = self._native_rpc_command_result(
+            "set_subagent_subscription",
+            {"level": normalized},
+            timeout=timeout,
+        )
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        if result.get("status") == "ok":
+            result["level"] = str(data.get("level") or normalized)
+        return result
+
+    def get_runtime_subagents(self, *, timeout: float = 5.0) -> dict[str, Any]:
+        result = self._native_rpc_command_result("get_subagents", timeout=timeout)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        subagents = data.get("subagents") if isinstance(data, dict) else []
+        result["subagents"] = subagents if isinstance(subagents, list) else []
+        return result
+
+    def get_runtime_subagent_messages(
+        self,
+        *,
+        subagent_id: str = "",
+        session_file: str = "",
+        from_byte: int | float | None = None,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if str(subagent_id or "").strip():
+            payload["subagentId"] = str(subagent_id).strip()
+        if str(session_file or "").strip():
+            payload["sessionFile"] = str(session_file).strip()
+        if from_byte is not None:
+            try:
+                payload["fromByte"] = max(0, int(float(from_byte)))
+            except Exception:
+                return {
+                    "schema_version": "ohmypi.rpc_result.v1",
+                    "status": "error",
+                    "command": "get_subagent_messages",
+                    "error": "from_byte must be a finite number",
+                }
+        if not payload.get("subagentId") and not payload.get("sessionFile"):
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "error",
+                "command": "get_subagent_messages",
+                "error": "subagent_id or session_file is required",
+            }
+        result = self._native_rpc_command_result("get_subagent_messages", payload, timeout=timeout)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        for key in ("sessionFile", "fromByte", "nextByte", "reset", "entries", "messages"):
+            if key in data:
+                result[key] = data[key]
+        return result
+
     def switch_runtime_session(self, session_path: str, *, timeout: float = 8.0) -> bool:
         session_path = str(session_path or "").strip()
         if not session_path:
@@ -1242,6 +1408,9 @@ class OhMyPiRpcAgent:
             self._note_active_host_tool_followup_activity()
             self._handle_tool_execution_event(frame)
             return
+        if frame_type in {"subagent_lifecycle", "subagent_progress", "subagent_event"}:
+            self._handle_subagent_output_frame(frame)
+            return
         if frame_type == "message_update":
             self._note_active_host_tool_followup_activity()
             event = frame.get("assistantMessageEvent")
@@ -1284,6 +1453,24 @@ class OhMyPiRpcAgent:
         if frame_type == "extension_ui_request":
             self._answer_extension_ui(frame)
             return
+
+    def _handle_subagent_output_frame(self, frame: dict[str, Any]) -> None:
+        frame_type = str(frame.get("type") or "")
+        payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
+        status = ""
+        if isinstance(payload, dict):
+            status = str(payload.get("status") or "")
+            progress = payload.get("progress")
+            if not status and isinstance(progress, dict):
+                status = str(progress.get("status") or "")
+        self._emit_runtime_event(
+            f"runtime_{frame_type}",
+            status=status or "observed",
+            payload={
+                "frame_type": frame_type,
+                "payload": _bounded_rpc_output_value(payload),
+            },
+        )
 
     def _handle_message_update_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "")
@@ -2147,8 +2334,27 @@ class OhMyPiRpcAgent:
         if not request_id:
             return
         method = str(frame.get("method") or "")
+        self._emit_runtime_event(
+            "runtime_extension_ui_request",
+            status="observed",
+            payload={
+                "request_id": str(request_id),
+                "method": method,
+                "frame": _bounded_rpc_output_value(frame),
+            },
+        )
         if method == "confirm":
             self._send({"type": "extension_ui_response", "id": request_id, "confirmed": False})
+            self._emit_runtime_event(
+                "runtime_extension_ui_response",
+                status="denied",
+                payload={
+                    "request_id": str(request_id),
+                    "method": "confirm",
+                    "reason": "Shuheng does not auto-confirm extension UI prompts.",
+                    "title": str(frame.get("title") or "")[:500],
+                },
+            )
         elif method == "select":
             approved, reason = self._should_auto_approve_extension_select(frame)
             self._emit_runtime_event(
@@ -2167,6 +2373,16 @@ class OhMyPiRpcAgent:
                 self._send({"type": "extension_ui_response", "id": request_id, "value": "Deny"})
         elif method in {"input", "editor"}:
             self._send({"type": "extension_ui_response", "id": request_id, "cancelled": True})
+            self._emit_runtime_event(
+                "runtime_extension_ui_response",
+                status="cancelled",
+                payload={
+                    "request_id": str(request_id),
+                    "method": method,
+                    "reason": "Interactive extension input is not owned by the output layer.",
+                    "title": str(frame.get("title") or "")[:500],
+                },
+            )
 
     def _register_host_tools(self) -> None:
         if self._host_tools_registered or not self.host_tool_definitions:
@@ -2603,6 +2819,10 @@ def ohmypi_provider_spec(
             "human_approval": False,
             "subagents": True,
             "provider_owned_subagents": True,
+            "native_subagent_rpc": True,
+            "native_subagent_subscription": True,
+            "native_subagent_messages": True,
+            "extension_ui_events": True,
         },
         model_routing={
             "owner": "shuheng.control_plane",
@@ -2644,6 +2864,9 @@ def ohmypi_provider_spec(
         notes=[
             "Default Shuheng runtime provider.",
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
+            "Oh My Pi remains the execution kernel; Shuheng is the governed RPC output/control layer.",
+            "Native OMP subagent subscription and transcript queries are exposed through provider passthrough methods.",
+            "OMP extension UI requests are preserved as runtime output-layer events; approval gates remain Shuheng-owned.",
             "Embedded Oh My Pi uses a Shuheng-owned PI_CODING_AGENT_DIR instead of ~/.omp/agent.",
             "Shuheng memory guidance is injected through --append-system-prompt.",
             "Shuheng emits provider-neutral runtime.task_request.v1 and runtime.task_event.v1 records around OMP execution.",
