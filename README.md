@@ -49,7 +49,7 @@
 会话管理器 + 多 Agent 调度台 + 任务看板 + 记忆/审批治理层 + 自动化控制面板
 ```
 
-它负责让 OMP、legacy GenericAgent、Codex、Claude Code 等本地 agent runtime 在终端中更可控、更耐用、更适合长任务；会话历史、harness 账本、子 agent、Secret Vault 和 OMP 隔离运行时默认都由 Shuheng 自己维护在 `~/.shuheng`。如果本机已有旧 GenericAgent 历史和记忆，Shuheng 首次正常启动会把缺失文件非破坏性复制到 `~/.shuheng`，左侧历史只读取复制后的 Shuheng 数据。
+它负责让 OMP、Codex、Claude Code 等本地 agent runtime 在终端中更可控、更耐用、更适合长任务；会话历史、harness 账本、子 agent、Secret Vault 和 OMP 隔离运行时默认都由 Shuheng 自己维护在 `~/.shuheng`。
 
 > Runtimes execute. Shuheng governs the control surface.
 
@@ -191,17 +191,9 @@ PYTHONPATH=src python -m shuheng
 shuheng --help
 ```
 
-`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 默认都不需要 legacy GenericAgent checkout。Shuheng 的默认 runtime core 是 OhMyPi / OMP。
+`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 都走 Shuheng 自己的本地控制面。默认 runtime core 是 OhMyPi / OMP。
 
-### 2. 可选指定 GenericAgent legacy provider
-
-如果你需要使用旧 GenericAgent provider 或安装 launcher shim，可以显式设置：
-
-```bash
-export GENERICAGENT_ROOT=/path/to/GenericAgent
-```
-
-### 3. 检查接入状态
+### 2. 检查接入状态
 
 ```bash
 shuheng-check
@@ -215,7 +207,7 @@ Status: OK
 Launch without legacy patches: shuheng
 ```
 
-### 4. 启动
+### 3. 启动
 
 ```bash
 shuheng
@@ -226,43 +218,6 @@ shuheng
 ```bash
 cd /path/to/Shuheng
 shuheng
-```
-
-如果你仍在使用 legacy GenericAgent provider 或 launcher shim，再单独更新那个旧 checkout：
-
-```bash
-cd /path/to/GenericAgent
-git pull
-```
-
-## 可选 Legacy Launcher Shim
-
-如果你希望从 legacy `GenericAgent` checkout 的旧 frontend 入口进入 Shuheng，可以安装一个很小的 launcher shim。
-
-覆盖主项目 `frontends/tuiapp.py`：
-
-```bash
-shuheng-install-core-shim --target tuiapp --overwrite
-```
-
-第一次覆盖时会保留备份：
-
-```text
-frontends/tuiapp.py.shuheng-launcher.bak
-```
-
-不覆盖 `frontends/tuiapp.py`，只安装 sidecar：
-
-```bash
-shuheng-install-core-shim
-python /path/to/GenericAgent/frontends/tuiapp_curses.py
-```
-
-显式调用集成工具：
-
-```bash
-shuheng-integration doctor --root /path/to/GenericAgent
-shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuiapp-curses
 ```
 
 ## 命令入口
@@ -368,7 +323,6 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 │       ├── frontend_history_compat.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
-│       ├── genericagent_provider.py
 │       └── compat_legacy.py
 └── tests/
     ├── conftest.py
@@ -384,32 +338,19 @@ shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuia
 | --- | --- |
 | `src/shuheng/cli.py` | 轻量公开 CLI 入口；`--help` 不导入重型 TUI/runtime |
 | `src/shuheng/app.py` | curses TUI 主实现、会话/记忆/审批/Secret Vault 核心逻辑 |
-| `src/shuheng/integration.py` | Shuheng doctor 检查、可选 GenericAgent legacy provider 发现和 launcher shim |
+| `src/shuheng/integration.py` | Shuheng doctor 检查和本地集成工具 |
 | `src/shuheng/runtime.py` | runtime provider 抽象层与注册表 |
 | `src/shuheng/scheduler.py` | 定时任务注册表与触发判定(cron / interval / at) |
 | `src/shuheng/release_readiness.py` | 发布成熟度、baseline 证据等级、gateway 安全姿态和启发式 eval 纯函数 |
 | `src/shuheng/control_protocol.py` | agent task 控制协议(v2)解析 |
-| `src/shuheng/frontend_history_compat.py` | 缺少 GenericAgent frontends 时的 Shuheng 本地历史/命名 fallback |
+| `src/shuheng/frontend_history_compat.py` | Shuheng 本地历史/命名 fallback |
 | `src/shuheng/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
 | `src/shuheng/ohmypi_provider.py` | OMP runtime adapter(进程、host tool、usage 同步) |
-| `src/shuheng/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
 | `src/shuheng/compat_legacy.py` | 历史会话/记忆的兼容解析 |
 | `tests/` | pytest 测试套件,覆盖纯函数与加解密、解析器 |
 | `scripts/check_policy_gates.py` | harness policy gate 的函数级 smoke 检查 |
 | `docs/agent-harness-architecture.md` | 长期 agent harness 架构基线 |
 | `pyproject.toml` | Python 包配置、依赖与命令入口 |
-
-## 与 GenericAgent 的关系
-
-Shuheng 的核心 runtime 是 OhMyPi / OMP，GenericAgent 只是可选 legacy provider 和 launcher shim 目标。
-
-当有效的 GenericAgent checkout 可用且被选用时，Shuheng 仍可复用这些 legacy 模块：
-
-- `agentmain.py`：legacy GenericAgent runtime。
-- `frontends/continue_cmd.py`：legacy 历史恢复和 transcript 解析，运行时会被 Shuheng 重定向到自己的 `~/.shuheng/model_responses`。
-- `frontends/session_names.py`：legacy 可选会话命名能力，运行时会被 Shuheng 重定向到自己的 `session_names.json`。
-
-没有 GenericAgent 时，Shuheng 使用自己的历史解析和 session name fallback；会话、记忆、审批和运行时状态始终独立存储在 Shuheng-owned 路径下。
 
 ## 架构方向
 

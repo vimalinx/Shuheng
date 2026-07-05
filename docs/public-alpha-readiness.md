@@ -33,8 +33,7 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-
 git diff --check
 ```
 
-Also run `shuheng-check` in the target checkout. A GenericAgent checkout is only
-needed when validating the optional legacy provider or launcher shim.
+Also run `shuheng-check` in the target checkout.
 
 ## Trellis Repository State
 
@@ -75,12 +74,10 @@ A new contributor should be able to:
 
 1. Create a virtual environment.
 2. Install `.[dev]`.
-3. Run `shuheng --help` before configuring any optional legacy provider.
-4. Run `shuheng-check` or `python -m shuheng.integration doctor` without a
-   GenericAgent checkout.
-5. Optionally set `GENERICAGENT_ROOT` to validate the legacy GenericAgent
-   provider / shim path.
-6. Run the release hygiene and runtime smoke checks without maintainer-local
+3. Run `shuheng --help` before configuring any optional external adapter.
+4. Run `shuheng-check` or `python -m shuheng.integration doctor` without extra
+   local runtime checkouts.
+5. Run the release hygiene and runtime smoke checks without maintainer-local
    state.
 
 If one of those steps requires local secrets, normal session history, or a

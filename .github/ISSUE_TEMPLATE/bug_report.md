@@ -16,7 +16,7 @@ Describe the visible problem and what you expected instead.
 - Python version:
 - OS and terminal:
 - Install mode: source editable / wheel / sdist / other
-- Optional GenericAgent legacy-provider checkout configured: yes / no / not relevant
+- Extra runtime checkout configured: yes / no / not relevant
 
 ## Reproduction
 

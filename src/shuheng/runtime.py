@@ -1,8 +1,8 @@
 """Runtime provider abstractions for the Shuheng control plane.
 
 The TUI owns orchestration, ledgers, approvals, artifacts, model routing, and
-scheduled work. OhMyPi/OMP is the default runtime core; legacy GenericAgent can
-plug in through an adapter when explicitly available.
+scheduled work. OhMyPi/OMP is the default runtime core; optional compatibility
+adapters can plug in when explicitly available.
 """
 from __future__ import annotations
 
@@ -215,11 +215,11 @@ def genericagent_provider_spec(
 ) -> RuntimeProviderSpec:
     return RuntimeProviderSpec(
         provider_id="genericagent",
-        name="GenericAgent",
+        name="Compatibility Adapter",
         runtime_type="local_python_agent",
         status="legacy_available",
         transport="in_process_thread",
-        entrypoints=["agentmain.GenericAgent", "continue_cmd.restore", "frontends/continue_cmd.py"],
+        entrypoints=["agentmain", "continue_cmd.restore", "frontends/continue_cmd.py"],
         capabilities={
             "streaming": True,
             "interrupt": True,
@@ -253,7 +253,7 @@ def genericagent_provider_spec(
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],
         },
         a2a={
-            "agent_card": "runtime://provider/genericagent",
+            "agent_card": "runtime://provider/compatibility",
             "task_transport": "internal-agent-mail",
             "artifact_transport": "artifact_ref",
         },
@@ -262,7 +262,7 @@ def genericagent_provider_spec(
             "resource_gateway": "resource://agent-mail",
         },
         notes=[
-            "GenericAgent is an optional legacy compatibility adapter, not the Shuheng core runtime.",
+            "This optional compatibility adapter is not the Shuheng core runtime.",
             "The TUI owns orchestration, model routing, scheduled jobs, ledgers, approvals, and artifacts.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",

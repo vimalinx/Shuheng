@@ -204,7 +204,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "shuheng --help",
             "helper --help entrypoints",
             "python -m shuheng.integration doctor",
-            "shuheng-check core plus optional GenericAgent legacy-provider stub",
+            "shuheng-check core in isolated install",
         ],
         "debug_options_not_release_gates": ["--no-deps", "--wheel-only"],
     }

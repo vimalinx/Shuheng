@@ -396,7 +396,7 @@ For phases touching packaging, release, Web, runtime dispatch, or storage:
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/runtime_smoke.py`
 - `python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist`
-- `shuheng-check --root <GenericAgent-legacy-provider-root>`
+- `shuheng-check`
 
 ## Stop Conditions
 

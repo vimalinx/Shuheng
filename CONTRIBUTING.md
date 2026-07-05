@@ -35,13 +35,6 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-
 git diff --check
 ```
 
-If you are touching the optional GenericAgent legacy provider or launcher shim,
-also run:
-
-```bash
-PYTHONPATH=src python -m shuheng.integration doctor --root /path/to/GenericAgent
-```
-
 ## Pull Request Guidelines
 
 - Keep user-facing product wording as Shuheng or 枢衡.

@@ -548,7 +548,7 @@ def load_optional_genericagent_runtime_modules() -> bool:
     global _format_response_segment, _pairs, _parse_native_history, _preview_text
     global _tool_results_from_prompt, _user_text, reset_conversation, restore
     if not GENERICAGENT_ROOT:
-        GENERICAGENT_RUNTIME_IMPORT_ERROR = "GenericAgent legacy-provider checkout not found."
+        GENERICAGENT_RUNTIME_IMPORT_ERROR = "Optional compatibility checkout not found."
         return False
     try:
         _ensure_legacy_provider_import_path(_maybe_find_genericagent_root() or Path(GENERICAGENT_ROOT).expanduser().resolve())

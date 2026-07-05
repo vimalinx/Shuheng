@@ -1,9 +1,8 @@
 """Oh My Pi runtime provider for the Shuheng control plane.
 
 The integration uses Oh My Pi's JSONL stdio RPC mode as a process boundary.
-The wrapper intentionally presents the small GenericAgent-shaped surface that
-the current TUI still consumes while keeping Oh My Pi protocol details local to
-this module.
+The wrapper presents the small task/abort/model surface that the current TUI
+still consumes while keeping Oh My Pi protocol details local to this module.
 """
 from __future__ import annotations
 
@@ -2643,7 +2642,7 @@ def ohmypi_provider_spec(
             "resource_gateway": "not_exposed",
         },
         notes=[
-            "Default Shuheng runtime provider; GenericAgent is optional legacy compatibility via SHUHENG_RUNTIME_PROVIDER=genericagent when available.",
+            "Default Shuheng runtime provider.",
             "Oh My Pi runs out-of-process through JSONL stdio RPC.",
             "Embedded Oh My Pi uses a Shuheng-owned PI_CODING_AGENT_DIR instead of ~/.omp/agent.",
             "Shuheng memory guidance is injected through --append-system-prompt.",

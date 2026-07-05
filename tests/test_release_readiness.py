@@ -23,6 +23,6 @@ def test_release_readiness_exposes_distribution_smoke_contract() -> None:
     assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"]
     assert "sdist retired naming surface scan" in distribution_smoke["checks"]
     assert "sdist artifact content leak scan" in distribution_smoke["checks"]
-    assert "shuheng-check core plus optional GenericAgent legacy-provider stub" in distribution_smoke["checks"]
+    assert "shuheng-check core in isolated install" in distribution_smoke["checks"]
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"])
     assert "git diff --check" in report["verification_commands"]

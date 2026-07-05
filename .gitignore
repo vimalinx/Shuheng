@@ -6,6 +6,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+uv.lock
 
 # Local agent/dev workflow runtime state. Track Trellis project metadata,
 # specs, tasks, journals, scripts, workflow, and bundled skills.

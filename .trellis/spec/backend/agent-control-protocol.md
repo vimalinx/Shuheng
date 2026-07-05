@@ -8,7 +8,7 @@
 
 - Trigger: The active product, package, protocol, runtime prompt, tool, docs, and release naming surface is `Shuheng` / `枢衡`.
 - Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, HTTP gateway server/header identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, active non-archive Trellis task guidance, release checks, wheel/sdist smoke checks, and source distribution metadata.
-- Non-goal: This does not remove the optional GenericAgent legacy provider, launcher shim target, non-destructive legacy history import, or quarantined historical prompt cleanup. Those surfaces must identify GenericAgent only as optional legacy compatibility, never as Shuheng's core runtime.
+- Non-goal: This does not remove internal compatibility adapters or quarantined historical prompt cleanup. Those internals must not appear in public release docs, default health-check output, bridge metadata path values, or release-readiness wording.
 
 ### 2. Signatures
 
@@ -19,7 +19,10 @@
 - Distribution name in `pyproject.toml`: `shuheng`.
 - Current control schema and hidden block: `shuheng-control.v2` and `<shuheng-control>...</shuheng-control>`.
 - Current OMP proposal type for governed controls: `proposal_type:"shuheng_control"`.
-- Canonical environment variables use `SHUHENG_*`; the optional legacy-provider checkout override is `GENERICAGENT_ROOT`.
+- Canonical public environment variables use `SHUHENG_*`.
+- Default health check: `shuheng-check` / `python -m shuheng.integration doctor`.
+- Explicit compatibility check: `python -m shuheng.integration doctor --root <checkout>`.
+- Bridge metadata path key: `external_runtime_checkout_configured` is boolean-only and must not expose a local checkout path.
 
 ### 3. Contracts
 
@@ -27,8 +30,11 @@
 - User-facing docs and doctor output must not advertise retired pre-Shuheng aliases as current entry points.
 - Current protocol parsers must accept Shuheng control blocks/fences only.
 - `shuheng_query`, `shuheng_propose`, and typed OMP tools are Shuheng host tools. They may expose compatibility behavior only through bounded, governed Shuheng schemas.
-- OhMyPi / OMP is the default runtime core. GenericAgent remains selectable only as an optional legacy provider when a valid legacy checkout exists.
-- Archived Trellis task logs and quarantined compatibility cleanup may mention retired names as historical facts; active non-archive Trellis task guidance, specs, docs, prompts, tests, release gates, and package metadata must describe the final Shuheng source of truth.
+- OhMyPi / OMP is the default runtime core.
+- Default `shuheng-check` must not auto-discover or print optional external runtime checkout details; it validates the Shuheng core by default.
+- Explicit `--root` compatibility validation may report configured/unconfigured status, but it must not echo local absolute checkout paths or retired runtime branding.
+- Public README, contribution docs, public alpha docs, GitHub issue templates, release-readiness metadata, provider notes, and bridge metadata must describe the final Shuheng source of truth without naming retired runtime branding.
+- Archived Trellis task logs and quarantined compatibility cleanup may contain historical facts; active specs and current release-facing docs must describe Shuheng/OMP as the source of truth.
 
 ### 4. Validation & Error Matrix
 
@@ -38,42 +44,47 @@
 - Built wheel/sdist text members include retired pre-Shuheng package, console-script, protocol, proposal, or old TUI product identifiers -> release artifact naming regression.
 - Active parser regexes still target retired control blocks/fences -> protocol regression.
 - OMP host-tool proposal enum still exposes a retired control proposal type -> tool API naming regression.
-- Doctor output requires GenericAgent for ordinary Shuheng checks -> runtime ownership regression.
-- Runtime strings identify the main orchestrator as a retired TUI alias or as GenericAgent core -> product identity regression.
+- Doctor output requires an optional external checkout for ordinary Shuheng checks -> runtime ownership regression.
+- Runtime strings identify the main orchestrator as a retired TUI alias or as an external core runtime -> product identity regression.
 - HTTP gateway `Server` headers or handler `server_version` identify the service with a retired TUI alias -> product identity regression.
-- Active non-archive Trellis task guidance points future work at retired package paths, module commands, control schemas, bridge metadata keys, or GenericAgent-as-root language -> development guidance regression.
+- Active non-archive Trellis task guidance points future work at retired package paths, module commands, control schemas, bridge metadata keys, or external-runtime-as-root language -> development guidance regression.
+- Public release wording files mention retired runtime branding -> release hygiene regression.
+- Bridge metadata exposes a local external runtime checkout path instead of a boolean configured flag -> metadata privacy regression.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `shuheng-check` reports `Shuheng root`, `Core runtime: OhMyPi / OMP`, and `Launch without legacy patches: shuheng`.
-- Good: `python -m shuheng --help`, `python -m shuheng.integration doctor`, and package smoke checks run without requiring GenericAgent.
+- Good: `shuheng-check` reports `Shuheng root`, `Core runtime: OhMyPi / OMP`, `Launch without legacy patches: shuheng`, and `Status: OK`.
+- Good: `python -m shuheng --help`, `python -m shuheng.integration doctor`, and package smoke checks run without requiring any optional external checkout.
 - Good: the local gateway response header contains `ShuhengGateway/1` and installed `shuheng*` wrappers import from `shuheng.*`.
-- Base: `GENERICAGENT_ROOT` is still accepted for explicit legacy-provider or launcher-shim operations.
+- Base: explicit compatibility checks can be run with `--root <checkout>` when a local adapter validation task needs it.
 - Bad: Re-adding retired pre-Shuheng commands, module docs, env aliases, or proposal types as active behavior.
-- Bad: Describing GenericAgent as the Shuheng root/core runtime.
+- Bad: Describing an optional external adapter as the Shuheng root/core runtime.
 - Bad: `shuheng-check` or gateway wrappers are exported with Shuheng command names but still import from retired module names.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `pyproject.toml` contains all primary `shuheng*` scripts and no retired pre-Shuheng scripts.
-- Tests must assert integration doctor report identifies OhMyPi / OMP as the core runtime and GenericAgent as optional legacy provider only.
+- Tests must assert integration doctor report identifies OhMyPi / OMP as the core runtime and avoids optional adapter branding in default output.
+- Tests must assert default integration doctor output contains no retired runtime branding and does not auto-print optional checkout details.
+- Tests must assert bridge metadata exposes `external_runtime_checkout_configured` as a boolean and does not expose external checkout paths.
+- Release hygiene must assert public release wording files contain no retired runtime branding.
 - Tests must assert parser regexes, hidden control examples, and OMP proposal schemas use `shuheng-control.v2` / `shuheng_control`.
 - Tests must assert release/wheel smoke metadata uses `src/shuheng`, `shuheng` top-level package, and `integrations/omp-shuheng-plugin`.
 - Tests must assert active non-archive Trellis task guidance uses current Shuheng package paths, module commands, control schemas, and legacy-provider checkout wording.
-- `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments, while leaving optional GenericAgent legacy-provider references valid.
+- `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments.
 - Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
 - `scripts/check_policy_gates.py` must assert `GatewayRequestHandler.server_version` and a live gateway HTTP response header use `ShuhengGateway/1`, not a retired TUI alias.
-- `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check` must pass.
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
-Move the package to `src/shuheng` but leave built metadata, parser regexes, host-tool enums, or public docs pointing at retired pre-Shuheng identities or GenericAgent-as-core.
+Move the package to `src/shuheng` but leave built metadata, parser regexes, host-tool enums, public docs, default health checks, or bridge metadata pointing at retired identities or external-runtime-as-core.
 
 #### Correct
 
-Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, docs, and release identity. Keep GenericAgent only inside explicit legacy-provider and migration/import boundaries.
+Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, docs, and release identity. Keep compatibility internals bounded and absent from public release wording/default outputs.
 
 ## Scenario: Open-Source Release Hygiene
 
@@ -101,6 +112,12 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   `goal-*`, `memory/`, `temp/`, `tmp/`, local Trellis runtime/cache files,
   `docs/foreign-student-acquisition-research.md`, and
   `docs/homework-pricing-research.md`.
+- Local dependency lock: `uv.lock` is ignored for this package-style alpha
+  unless a future task explicitly adopts uv-locked application releases.
+- Public wording files guarded by release hygiene: `README.md`,
+  `README.en.md`, `CONTRIBUTING.md`, `docs/public-alpha-readiness.md`,
+  `docs/runtime-provider-control-plane.md`, `docs/app-py-decomposition-plan.md`,
+  and `.github/ISSUE_TEMPLATE/bug_report.md`.
 
 ### 3. Contracts
 
@@ -112,6 +129,9 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   inclusions/private exclusions, or missing public alpha/security wording.
 - Public secret/local literal scanning must include packaged test files because
   `tests/` is part of the source distribution.
+- Public wording files must not mention retired runtime branding; describe
+  Shuheng/OMP as the public source of truth and use provider-neutral
+  compatibility wording for explicit adapter checks.
 - CI must run Ruff check, release hygiene, policy gates, runtime smoke, pytest,
   compileall, package build, wheel smoke, and `git diff --check`.
 - `CONTRIBUTING.md` must list the same reproducible local release checks so
@@ -192,6 +212,10 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
 - Public file contains realistic API key/private-key material -> release hygiene
   fails.
 - Public file contains a local absolute user path -> release hygiene fails.
+- Public wording file mentions retired runtime branding -> release hygiene
+  fails.
+- `uv.lock` shows as an untracked commit candidate -> release preparation is not
+  clean because local dependency resolution state is not intentionally tracked.
 - Packaged test file contains realistic API key/private-key material or local
   absolute user paths -> release hygiene fails.
 - `pyproject.toml` exports public `shuheng*` scripts -> release hygiene fails.
@@ -215,6 +239,8 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   research docs or local runtime state.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
   `shuheng_context_get` and `shuheng_memory_candidate_submit`.
+- Good: `git status --short` does not show `uv.lock`, because it is ignored as
+  local dependency resolution state.
 - Base: Internal schemas and env names keep `shuheng` / `SHUHENG` identifiers for
   compatibility.
 - Bad: Publishing `docs/homework-pricing-research.md` or a machine-specific MCP
@@ -256,7 +282,7 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   absolute user paths before installing either artifact. It may run `--help`
   for helper scripts that do not import the full TUI runtime, must run
   `shuheng --help` after each dependency-resolving install, and must run
-  installed `shuheng-check` against an isolated GenericAgent stub.
+  installed `shuheng-check` in an isolated install.
 - Release hygiene and wheel smoke tests must keep realistic secret/local path
   scanning sourced from `scripts/release_scan_rules.py`, and the shared helper
   must be included in MANIFEST/sdist and public Ruff command lists.
@@ -266,6 +292,8 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
 - `scripts/check_release_hygiene.py` must assert CI runs `git diff --check`.
 - `scripts/check_release_hygiene.py` must assert `CONTRIBUTING.md` lists the
   current public release-check commands.
+- `scripts/check_release_hygiene.py` must assert public wording files contain no
+  retired runtime branding.
 - `scripts/check_release_hygiene.py` must assert runtime state directories such
   as `memory/`, `temp/`, `tmp/`, `goal-*`, and local Trellis runtime/cache files
   are not tracked or unignored and stay excluded from the release manifest.

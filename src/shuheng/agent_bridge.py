@@ -95,7 +95,7 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
         },
         "paths": {
             "app_root_dir": getattr(app, "APP_ROOT_DIR", ""),
-            "genericagent_legacy_provider_checkout": getattr(app, "GENERICAGENT_ROOT", ""),
+            "external_runtime_checkout_configured": bool(getattr(app, "GENERICAGENT_ROOT", "")),
             "shuheng_home": getattr(app, "SHUHENG_HOME", ""),
             "shuheng_memory_dir": getattr(app, "SHUHENG_MEMORY_DIR", ""),
             "harness_dir": getattr(app, "AGENT_HARNESS_DIR", ""),
@@ -249,7 +249,7 @@ def run_bridge_call(payload: dict[str, Any], options: BridgeOptions | None = Non
 
 
 def _common_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider checkout path")
+    parser.add_argument("--root", default="", help="optional compatibility checkout path")
     parser.add_argument("--harness-dir", default="", help="Shuheng harness directory override")
     parser.add_argument("--secret-vault-dir", default="", help="Shuheng secret vault directory override")
 

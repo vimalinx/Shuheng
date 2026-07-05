@@ -36,9 +36,9 @@ memory, schedules, artifacts, and traces in the TUI control plane.
 
 ## Storage Boundary
 
-GenericAgent is an optional legacy runtime/source provider, not the owner of
-Shuheng state and not required for normal startup. By default Shuheng stores its
-durable control-plane data under `~/.shuheng`:
+External compatibility providers are not the owner of Shuheng state and are not
+required for normal startup. By default Shuheng stores its durable control-plane
+data under `~/.shuheng`:
 
 - `model_responses/`: canonical visible conversation history for main sessions and
   non-secret subagent direct chats, plus metadata, names, token usage, and trash.
@@ -50,14 +50,16 @@ durable control-plane data under `~/.shuheng`:
 
 `SHUHENG_HOME` overrides the whole Shuheng-owned storage root. Targeted test or
 bridge runs may override `SHUHENG_HARNESS_DIR` or `SHUHENG_SECRET_VAULT_DIR`,
-but normal runtime state must not default back into the GenericAgent checkout.
+but normal runtime state must not default back into an external runtime
+checkout.
 
-On the normal default home, Shuheng performs a one-time, non-destructive legacy
-bootstrap when old GenericAgent state exists: missing `model_responses*.txt`
-files, session sidecars, global memory files, and persistent subagent memories
-are copied into `~/.shuheng`. Existing Shuheng files win on conflict, stale
-`memory/agent_harness/runtime/**` files are skipped, and the old GenericAgent
-tree is left untouched. The marker is `~/.shuheng/.legacy_import.json`.
+On the normal default home, Shuheng may perform a one-time, non-destructive
+legacy bootstrap from an older local runtime checkout: missing
+`model_responses*.txt` files, session sidecars, global memory files, and
+persistent subagent memories are copied into `~/.shuheng`. Existing Shuheng
+files win on conflict, stale `memory/agent_harness/runtime/**` files are
+skipped, and the source tree is left untouched. The marker is
+`~/.shuheng/.legacy_import.json`.
 
 ## Runtime Task Boundary
 
@@ -97,16 +99,15 @@ The discoverable metadata contract is `RuntimeProviderSpec`.
 
 Provider metadata must include:
 
-- `provider_id`: Stable id such as `genericagent`, `codex`, or `a2a.remote.researcher`.
+- `provider_id`: Stable id such as `ohmypi`, `codex`, or `a2a.remote.researcher`.
 - `capabilities`: Streaming, interrupt, session restore, tool calling, artifact refs, memory candidates, and approval support.
 - `model_routing`: Whether the provider supports current-session switching, defaults, per-agent defaults, and how model selection is addressed.
 - `scheduler`: How scheduled jobs dispatch into the provider, normally through `agenttask.v2`.
 - `policy`: Approval owner, memory write policy, and risky action classes.
 - `a2a` / `mcp`: Gateway compatibility metadata.
 
-The default provider is `ohmypi`. `genericagent` is registered only when a valid
-GenericAgent legacy checkout is discovered and remains selectable through
-`SHUHENG_RUNTIME_PROVIDER=genericagent` for compatibility.
+The default provider is `ohmypi`. Optional provider adapters may register only
+after their required checkout or binary is explicitly available.
 
 OMP provider metadata must advertise `tui_typed_host_tools`,
 `runtime_task_requests`, and `runtime_task_events` when the app-layer bridge is
@@ -169,8 +170,7 @@ Runtime and top-level control metadata are exposed through:
 - Do not bind the Web Console/gateway to a non-loopback interface unless
   `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` is deliberately set and an external
   trusted access boundary is in place. The built-in gateway has no auth layer.
-- Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`,
-  with `genericagent` retained only as an optional legacy adapter.
+- Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`.
 - Do not make an OMP plugin a new memory owner. Plugin tools may read context and
   submit memory candidates; Shuheng validates, queues approvals, writes durable
   rows, and records provenance.

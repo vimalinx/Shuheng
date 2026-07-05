@@ -49,7 +49,7 @@ Think of it as:
 Session Manager + Multi-Agent Console + Task Board + Memory/Approval Governance + Automation Control Plane
 ```
 
-Shuheng makes OMP, legacy GenericAgent, Codex, Claude Code, and other local agent runtimes easier to govern in long-running terminal workflows. When a legacy GenericAgent checkout is available, Shuheng may reuse its compatibility modules for old history restoration, but OMP remains the default core runtime.
+Shuheng makes OMP, Codex, Claude Code, and other local agent runtimes easier to govern in long-running terminal workflows. OMP remains the default core runtime, while Shuheng owns session history, harness ledgers, subagents, Secret Vault state, and isolated runtime files under `~/.shuheng`.
 
 > Runtimes execute. Shuheng governs the control surface.
 
@@ -191,17 +191,9 @@ First confirm the public command entrypoint is available:
 shuheng --help
 ```
 
-`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` do not require a configured legacy GenericAgent checkout by default. Shuheng's default runtime core is OhMyPi / OMP.
+`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` use Shuheng's own local control plane. The default runtime core is OhMyPi / OMP.
 
-### 2. Optionally Point To The GenericAgent Legacy Provider
-
-Set this only when you want to use the old GenericAgent provider or install the launcher shim:
-
-```bash
-export GENERICAGENT_ROOT=/path/to/GenericAgent
-```
-
-### 3. Validate Integration
+### 2. Validate Integration
 
 ```bash
 shuheng-check
@@ -215,7 +207,7 @@ Status: OK
 Launch without legacy patches: shuheng
 ```
 
-### 4. Launch
+### 3. Launch
 
 ```bash
 shuheng
@@ -226,43 +218,6 @@ Recommended update flow:
 ```bash
 cd /path/to/Shuheng
 shuheng
-```
-
-If you still use the legacy GenericAgent provider or launcher shim, update that legacy checkout separately:
-
-```bash
-cd /path/to/GenericAgent
-git pull
-```
-
-## Optional Legacy Launcher Shim
-
-If you want to enter Shuheng through the old frontend entrypoint in a legacy `GenericAgent` checkout, install a small launcher shim.
-
-Replace `frontends/tuiapp.py`:
-
-```bash
-shuheng-install-core-shim --target tuiapp --overwrite
-```
-
-The first replacement keeps a backup:
-
-```text
-frontends/tuiapp.py.shuheng-launcher.bak
-```
-
-Install a sidecar without replacing `frontends/tuiapp.py`:
-
-```bash
-shuheng-install-core-shim
-python /path/to/GenericAgent/frontends/tuiapp_curses.py
-```
-
-Call integration utilities explicitly:
-
-```bash
-shuheng-integration doctor --root /path/to/GenericAgent
-shuheng-integration install-core-shim --root /path/to/GenericAgent --target tuiapp-curses
 ```
 
 ## Command Surface
@@ -368,7 +323,6 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 │       ├── frontend_history_compat.py
 │       ├── agent_bridge.py
 │       ├── ohmypi_provider.py
-│       ├── genericagent_provider.py
 │       └── compat_legacy.py
 └── tests/
     ├── conftest.py
@@ -384,32 +338,19 @@ The local Web GUI now lives in a standalone project. This gateway still provides
 | --- | --- |
 | `src/shuheng/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
 | `src/shuheng/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
-| `src/shuheng/integration.py` | Shuheng doctor checks, optional GenericAgent legacy-provider discovery, and launcher shim |
+| `src/shuheng/integration.py` | Shuheng doctor checks and local integration utilities |
 | `src/shuheng/runtime.py` | Runtime provider abstractions and registry |
 | `src/shuheng/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
 | `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
 | `src/shuheng/control_protocol.py` | Agent task control protocol (v2) parsing |
-| `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback when GenericAgent frontends are unavailable |
+| `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback |
 | `src/shuheng/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
 | `src/shuheng/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
-| `src/shuheng/genericagent_provider.py` | Legacy GenericAgent runtime adapter |
 | `src/shuheng/compat_legacy.py` | Legacy session/memory compatibility parsing |
 | `tests/` | pytest suite covering pure functions, crypto, and parsers |
 | `scripts/check_policy_gates.py` | Function-level smoke checks for harness policy gates |
 | `docs/agent-harness-architecture.md` | Long-term agent harness architecture baseline |
 | `pyproject.toml` | Python package metadata, dependencies, and command entry points |
-
-## Relationship With GenericAgent
-
-Shuheng's core runtime is OhMyPi / OMP. GenericAgent is an optional legacy provider and launcher-shim target.
-
-When a valid GenericAgent checkout is available and selected, Shuheng can still reuse these legacy modules:
-
-- `agentmain.py` for the legacy GenericAgent runtime.
-- `frontends/continue_cmd.py` for legacy history restoration and transcript parsing.
-- `frontends/session_names.py` for optional legacy session naming.
-
-When GenericAgent is absent, Shuheng uses its own history parser and session-name fallback. Sessions, memory, approvals, and runtime state remain Shuheng-owned either way.
 
 ## Architecture Direction
 

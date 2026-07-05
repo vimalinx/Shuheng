@@ -83,6 +83,16 @@ PUBLIC_SCAN_FILES = {
     "pyproject.toml",
 }
 
+PUBLIC_WORDING_FILES = (
+    ".github/ISSUE_TEMPLATE/bug_report.md",
+    "CONTRIBUTING.md",
+    "README.en.md",
+    "README.md",
+    "docs/app-py-decomposition-plan.md",
+    "docs/public-alpha-readiness.md",
+    "docs/runtime-provider-control-plane.md",
+)
+
 REQUIRED_MANIFEST_LINES = (
     "include README.md",
     "include README.en.md",
@@ -176,6 +186,14 @@ def check_secret_and_local_literals(errors: list[str]) -> None:
             continue
         text = read_text(path)
         errors.extend(text_release_leak_errors(text, path, location="public file"))
+
+
+def check_public_wording(errors: list[str]) -> None:
+    retired_runtime = "Generic" + "Agent"
+    for path in PUBLIC_WORDING_FILES:
+        text = read_text(path)
+        if retired_runtime in text or retired_runtime.lower() in text.lower():
+            errors.append(f"{path} must not mention retired runtime branding in public release wording")
 
 
 def check_pyproject_metadata(errors: list[str]) -> None:
@@ -319,6 +337,7 @@ def main() -> int:
     check_required_files(errors)
     check_private_files_are_not_tracked(errors)
     check_secret_and_local_literals(errors)
+    check_public_wording(errors)
     check_pyproject_metadata(errors)
     check_python_support_ci_coverage(errors)
     check_manifest_contract(errors)

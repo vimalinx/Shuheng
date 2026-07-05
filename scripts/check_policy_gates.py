@@ -3326,8 +3326,9 @@ def assert_shuheng_brand_entrypoints() -> None:
     report = buffer.getvalue()
     assert "Shuheng root:" in report, report
     assert "Core runtime: OhMyPi / OMP" in report, report
-    assert "GenericAgent legacy provider: unavailable (optional)" in report, report
+    assert "Status: OK" in report, report
     assert "Launch without legacy patches: shuheng" in report, report
+    assert ("Generic" + "Agent") not in report, report
     assert retired_script_prefix not in report, report
     legacy_shuheng_words = "ga" + " tui"
     legacy_shuheng_title = "GA" + " TUI"
@@ -3348,7 +3349,8 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert "已退出枢衡" in app_source, app_source
     assert "确认退出枢衡" in app_source, app_source
     issue_template = Path(ROOT, ".github/ISSUE_TEMPLATE/bug_report.md").read_text(encoding="utf-8")
-    assert "Optional GenericAgent legacy-provider checkout configured" in issue_template, issue_template
+    assert "Extra runtime checkout configured" in issue_template, issue_template
+    assert ("Generic" + "Agent") not in issue_template, issue_template
     assert ("GenericAgent " + "root available") not in issue_template, issue_template
     integration_source = Path(integ.__file__).read_text(encoding="utf-8")
     assert ("def validate" + "_core(") not in integration_source, integration_source
@@ -3358,7 +3360,7 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert ("GenericAgent " + "root not found") not in integration_source, integration_source
     assert ("GenericAgent legacy provider " + "root:") not in integration_source, integration_source
     assert ("legacy-provider " + "root") not in integration_source, integration_source
-    assert "GenericAgent legacy provider checkout:" in integration_source, integration_source
+    assert "External runtime checkout:" in integration_source, integration_source
     assert "validate_legacy_provider_root(" in integration_source, integration_source
     trellis_tasks = ROOT / ".trellis" / "tasks"
     if trellis_tasks.is_dir():
@@ -3876,7 +3878,7 @@ def assert_ohmypi_core_without_genericagent_discovery() -> None:
     assert payload["provider_ids"] == ["ohmypi"], payload
     assert payload["doctor_rc"] == 0, payload
     assert "Core runtime: OhMyPi / OMP" in payload["doctor_output"], payload
-    assert "GenericAgent legacy provider: unavailable (optional)" in payload["doctor_output"], payload
+    assert ("Generic" + "Agent") not in payload["doctor_output"], payload
 
 
 def assert_ohmypi_memory_prompt_and_command() -> None:
@@ -5845,7 +5847,9 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert "memory_context_get" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
     assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
-    assert metadata["paths"]["genericagent_legacy_provider_checkout"] == a.GENERICAGENT_ROOT, metadata
+    assert metadata["paths"]["external_runtime_checkout_configured"] == bool(a.GENERICAGENT_ROOT), metadata
+    assert "external_runtime_checkout" not in metadata["paths"], metadata
+    assert "genericagent_legacy_provider_checkout" not in metadata["paths"], metadata
     assert "root_dir" not in metadata["paths"], metadata
     assert ("legacy_genericagent_" + "root") not in metadata["paths"], metadata
     assert metadata["paths"]["shuheng_home"] == a.SHUHENG_HOME, metadata
@@ -6676,7 +6680,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"], report
     assert "sdist retired naming surface scan" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
-    assert "shuheng-check core plus optional GenericAgent legacy-provider stub" in distribution_smoke["checks"], report
+    assert "shuheng-check core in isolated install" in distribution_smoke["checks"], report
     assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
     assert any("ruff check" in command for command in report["verification_commands"]), report

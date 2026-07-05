@@ -1,8 +1,7 @@
 """Integration helpers for Shuheng runtime/provider compatibility.
 
-Shuheng's normal runtime core is OhMyPi/OMP.  GenericAgent is an optional
-legacy compatibility provider and shim target, so discovery failures must not
-break ordinary Shuheng checks or CLI startup.
+Shuheng's normal runtime core is OhMyPi/OMP. Optional compatibility discovery
+must not break ordinary Shuheng checks or CLI startup.
 """
 from __future__ import annotations
 
@@ -52,7 +51,7 @@ def genericagent_root_candidates(start: str | os.PathLike[str] | None = None) ->
 
 
 def maybe_find_genericagent_root(start: str | os.PathLike[str] | None = None) -> Path | None:
-    """Find an optional GenericAgent checkout without importing runtime modules."""
+    """Find an optional compatibility checkout without importing runtime modules."""
 
     if genericagent_discovery_disabled():
         return None
@@ -66,12 +65,12 @@ def maybe_find_genericagent_root(start: str | os.PathLike[str] | None = None) ->
 
 
 def find_genericagent_root(start: str | os.PathLike[str] | None = None) -> Path:
-    """Find a GenericAgent checkout for explicit legacy-provider operations."""
+    """Find a compatibility checkout for explicit provider operations."""
 
     root = maybe_find_genericagent_root(start)
     if root is not None:
         return root
-    raise RuntimeError("GenericAgent legacy-provider checkout not found; set GENERICAGENT_ROOT=/path/to/GenericAgent")
+    raise RuntimeError("compatible provider checkout not found; set the provider root override")
 
 
 def is_genericagent_legacy_provider_root(root: Path) -> bool:
@@ -90,11 +89,11 @@ def ensure_legacy_provider_import_path(root: Path) -> None:
 
 
 def validate_legacy_provider_root(root: Path) -> list[str]:
-    """Return human-readable validation failures for a GenericAgent checkout."""
+    """Return human-readable validation failures for a compatibility checkout."""
 
     failures: list[str] = []
     if not is_genericagent_legacy_provider_root(root):
-        failures.append(f"{root} does not look like a GenericAgent legacy-provider checkout")
+        failures.append("path does not look like a compatible provider checkout")
         return failures
     for name in REQUIRED_FRONTEND_FILES:
         if not (root / "frontends" / name).is_file():
@@ -121,7 +120,7 @@ def validate_legacy_provider_root(root: Path) -> list[str]:
 
 
 def generated_core_shim(tui_root: Path | None = None) -> str:
-    """Return a small launcher that delegates from a legacy GenericAgent checkout."""
+    """Return a small launcher that delegates from an external checkout."""
 
     repo = tui_root or tui_repo_root()
     repo_s = str(repo)
@@ -129,8 +128,8 @@ def generated_core_shim(tui_root: Path | None = None) -> str:
         f'''\
         """Generated Shuheng external launcher.
 
-        Re-run `shuheng-install-core-shim` after upstream GenericAgent updates
-        if this file is replaced.  Shuheng runs outside the legacy GenericAgent checkout.
+        Re-run `shuheng-install-core-shim` after upstream launcher updates if
+        this file is replaced. Shuheng runs from its own repository checkout.
         """
         from __future__ import annotations
 
@@ -205,34 +204,32 @@ def _print_report(root: Path | None, failures: Iterable[str]) -> int:
     print("Launch without legacy patches: shuheng")
     print("Optional shim: shuheng-install-core-shim --target tuiapp")
     if root is None:
-        print("GenericAgent legacy provider: unavailable (optional)")
         print("Status: OK")
         return 0
-    print(f"GenericAgent legacy provider checkout: {root}")
+    print("External runtime checkout: configured")
     if failures:
         print("Status: FAIL")
         for failure in failures:
             print(f"- {failure}")
         return 1
     print("Status: OK")
-    print("GenericAgent legacy imports: agentmain, continue_cmd")
+    print("External runtime imports: agentmain, continue_cmd")
     return 0
 
 
 def doctor_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate Shuheng core integration")
-    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider checkout path")
+    parser.add_argument("--root", default="", help="optional compatibility checkout path")
     args = parser.parse_args(argv)
     if args.root:
         root = Path(args.root).expanduser().resolve()
         return _print_report(root, validate_legacy_provider_root(root))
-    root = maybe_find_genericagent_root()
-    return _print_report(root, validate_legacy_provider_root(root) if root is not None else [])
+    return _print_report(None, [])
 
 
 def install_core_shim_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install an external Shuheng launcher shim")
-    parser.add_argument("--root", default="", help="optional GenericAgent legacy-provider checkout path; defaults to auto-discovery")
+    parser.add_argument("--root", default="", help="optional compatibility checkout path; defaults to auto-discovery")
     parser.add_argument(
         "--target",
         choices=("tuiapp-curses", "tuiapp"),
@@ -257,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="validate imports and discovery")
     doctor.add_argument("--root", default="")
-    install = sub.add_parser("install-core-shim", help="install launcher shim into a legacy GenericAgent checkout")
+    install = sub.add_parser("install-core-shim", help="install launcher shim into an external checkout")
     install.add_argument("--root", default="")
     install.add_argument("--target", choices=("tuiapp-curses", "tuiapp"), default="tuiapp-curses")
     install.add_argument("--overwrite", action="store_true")
