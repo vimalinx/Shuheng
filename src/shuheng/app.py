@@ -14974,6 +14974,8 @@ OHMYPI_TUI_QUERY_ENDPOINTS = (
     "artifact_list",
     "schedule_list",
     "memory_context_get",
+    "runtime_subagent_list",
+    "runtime_subagent_messages",
 )
 OHMYPI_TUI_PROPOSAL_TYPES = ("shuheng_control", "memory_candidate")
 OHMYPI_TYPED_READONLY_TOOL_NAMES = (
@@ -14987,6 +14989,8 @@ OHMYPI_TYPED_READONLY_TOOL_NAMES = (
     "capability_list",
     "schedule_list",
     "memory_context_get",
+    "runtime_subagent_list",
+    "runtime_subagent_messages",
 )
 OHMYPI_TYPED_GOVERNED_TOOL_NAMES = (
     "proposal_submit",
@@ -15037,6 +15041,9 @@ def ohmypi_typed_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]
             "objective": {"type": "string", "description": "Objective for matching agents or generating memory context."},
             "limit": {"type": "integer", "description": "Maximum number of records to return."},
             "status": {"type": "string", "description": "Optional status filter."},
+            "subagent_id": {"type": "string", "description": "OMP-native runtime subagent id for runtime_subagent_messages."},
+            "session_file": {"type": "string", "description": "OMP-native runtime subagent session file for transcript queries."},
+            "from_byte": {"type": "integer", "description": "Byte offset for incremental OMP-native runtime subagent transcript reads."},
         },
     }
     descriptions = {
@@ -15050,6 +15057,8 @@ def ohmypi_typed_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]
         "capability_list": "Read roles, tools, runtime providers, and gateway capabilities.",
         "schedule_list": "Read scheduled task registry and run audit metadata.",
         "memory_context_get": "Generate and return a Shuheng memory/context pack artifact reference for OMP execution.",
+        "runtime_subagent_list": "Read live OMP-native runtime subagent snapshots from the active RPC process; does not create Shuheng agents.",
+        "runtime_subagent_messages": "Read bounded OMP-native runtime subagent transcript messages by subagent_id or session_file.",
     }
     return [
         RpcHostToolDefinition(
@@ -15209,6 +15218,83 @@ def ohmypi_tui_memory_context_get(state: Optional[State], args: dict[str, Any]) 
     )
 
 
+def ohmypi_tui_runtime_query_agent(state: Optional[State], runtime_agent: Any = None) -> Any:
+    if runtime_agent is not None:
+        return runtime_agent
+    if state is not None:
+        return getattr(state, "agent", None)
+    return None
+
+
+def ohmypi_tui_runtime_subagent_list(
+    state: Optional[State],
+    args: dict[str, Any],
+    *,
+    runtime_agent: Any = None,
+) -> dict[str, Any]:
+    del args
+    if state is None and runtime_agent is None:
+        return tui_query_error("TUI state is not bound; runtime_subagent_list requires an active runtime agent.")
+    agent = ohmypi_tui_runtime_query_agent(state, runtime_agent)
+    getter = getattr(agent, "get_runtime_subagents", None)
+    if not callable(getter):
+        return tui_query_error(
+            "Active runtime does not support OMP-native subagent queries.",
+            kind="runtime.subagent.list",
+            runtime_provider_id=agent_runtime_provider_id(agent) if agent is not None else "",
+        )
+    try:
+        result = getter()
+    except Exception as exc:
+        return tui_query_error(
+            f"{type(exc).__name__}: {exc}",
+            kind="runtime.subagent.list",
+            runtime_provider_id=agent_runtime_provider_id(agent),
+        )
+    return tui_query_ok(
+        "runtime.subagent.list",
+        runtime_provider_id=agent_runtime_provider_id(agent),
+        result=tui_query_json_safe(result),
+        subagents=tui_query_json_safe(result.get("subagents") if isinstance(result, dict) else []),
+    )
+
+
+def ohmypi_tui_runtime_subagent_messages(
+    state: Optional[State],
+    args: dict[str, Any],
+    *,
+    runtime_agent: Any = None,
+) -> dict[str, Any]:
+    if state is None and runtime_agent is None:
+        return tui_query_error("TUI state is not bound; runtime_subagent_messages requires an active runtime agent.")
+    agent = ohmypi_tui_runtime_query_agent(state, runtime_agent)
+    getter = getattr(agent, "get_runtime_subagent_messages", None)
+    if not callable(getter):
+        return tui_query_error(
+            "Active runtime does not support OMP-native subagent transcript queries.",
+            kind="runtime.subagent.messages",
+            runtime_provider_id=agent_runtime_provider_id(agent) if agent is not None else "",
+        )
+    try:
+        result = getter(
+            subagent_id=str(args.get("subagent_id") or args.get("target") or "").strip(),
+            session_file=str(args.get("session_file") or args.get("sessionFile") or "").strip(),
+            from_byte=args.get("from_byte") if "from_byte" in args else args.get("fromByte"),
+        )
+    except Exception as exc:
+        return tui_query_error(
+            f"{type(exc).__name__}: {exc}",
+            kind="runtime.subagent.messages",
+            runtime_provider_id=agent_runtime_provider_id(agent),
+        )
+    return tui_query_ok(
+        "runtime.subagent.messages",
+        runtime_provider_id=agent_runtime_provider_id(agent),
+        result=tui_query_json_safe(result),
+        messages=tui_query_json_safe(result.get("messages") if isinstance(result, dict) else []),
+    )
+
+
 def ohmypi_proposal_error(message: str, **extra: Any) -> dict[str, Any]:
     return {
         "schema_version": "shuheng.proposal.v1",
@@ -15339,7 +15425,13 @@ def ohmypi_tui_propose_host_tool_handler(state: Optional[State], args: dict[str,
         )
 
 
-def ohmypi_tui_query_endpoint(state: Optional[State], endpoint: str, endpoint_args: dict[str, Any]) -> dict[str, Any]:
+def ohmypi_tui_query_endpoint(
+    state: Optional[State],
+    endpoint: str,
+    endpoint_args: dict[str, Any],
+    *,
+    runtime_agent: Any = None,
+) -> dict[str, Any]:
     if endpoint == "runtime_registry":
         return tui_query_ok(
             "runtime.registry",
@@ -15373,6 +15465,10 @@ def ohmypi_tui_query_endpoint(state: Optional[State], endpoint: str, endpoint_ar
         return tui_tool_schedule_list(state, endpoint_args)
     if endpoint == "memory_context_get":
         return ohmypi_tui_memory_context_get(state, endpoint_args)
+    if endpoint == "runtime_subagent_list":
+        return ohmypi_tui_runtime_subagent_list(state, endpoint_args, runtime_agent=runtime_agent)
+    if endpoint == "runtime_subagent_messages":
+        return ohmypi_tui_runtime_subagent_messages(state, endpoint_args, runtime_agent=runtime_agent)
     return tui_query_error(
         "Unsupported endpoint.",
         endpoint=endpoint,
@@ -15380,10 +15476,15 @@ def ohmypi_tui_query_endpoint(state: Optional[State], endpoint: str, endpoint_ar
     )
 
 
-def ohmypi_tui_host_tool_handler(state: Optional[State] = None):
+def ohmypi_tui_host_tool_handler(state: Optional[State] = None, *, runtime_agent: Any = None):
     def _handler(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         if tool_name in OHMYPI_TYPED_READONLY_TOOL_NAMES:
-            return ohmypi_tui_query_endpoint(state, tool_name, args if isinstance(args, dict) else {})
+            return ohmypi_tui_query_endpoint(
+                state,
+                tool_name,
+                args if isinstance(args, dict) else {},
+                runtime_agent=runtime_agent,
+            )
         if tool_name == "proposal_submit":
             return ohmypi_tui_propose_host_tool_handler(state, args if isinstance(args, dict) else {})
         if tool_name == "memory_candidate_submit":
@@ -15406,13 +15507,13 @@ def ohmypi_tui_host_tool_handler(state: Optional[State] = None):
             endpoint_args = raw_endpoint_args
         else:
             return tui_query_error("args must be an object.", endpoint=endpoint)
-        return ohmypi_tui_query_endpoint(state, endpoint, endpoint_args)
+        return ohmypi_tui_query_endpoint(state, endpoint, endpoint_args, runtime_agent=runtime_agent)
 
     return _handler
 
 
-def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None):
-    return ohmypi_tui_host_tool_handler(state)
+def ohmypi_tui_query_host_tool_handler(state: Optional[State] = None, *, runtime_agent: Any = None):
+    return ohmypi_tui_host_tool_handler(state, runtime_agent=runtime_agent)
 
 
 def ohmypi_model_api_for_entry(entry: LLMConfigEntry) -> str:
@@ -15668,7 +15769,7 @@ def install_interaction_hook(state: State, agent: Any) -> None:
         try:
             agent.configure_host_tools(
                 host_tool_definitions=ohmypi_tui_host_tool_definitions(),
-                host_tool_handler=ohmypi_tui_host_tool_handler(state),
+                host_tool_handler=ohmypi_tui_host_tool_handler(state, runtime_agent=agent),
             )
         except Exception:
             pass

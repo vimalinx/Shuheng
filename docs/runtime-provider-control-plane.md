@@ -163,10 +163,16 @@ Runtime and top-level control metadata are exposed through:
   the Shuheng Orchestrator/TUI.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
-  `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
+  `memory_context_get`, `runtime_subagent_list`,
+  `runtime_subagent_messages`, `memory_candidate_submit`, and
+  `schedule_create`.
 - OMP native RPC output layer: provider methods expose subagent subscription,
   subagent summaries, subagent transcript reads, and extension UI request events
   from the live OMP RPC process without creating hidden runtime work.
+  The read-only query names `runtime_subagent_list` and
+  `runtime_subagent_messages` are app-layer projections of those provider
+  methods; they are distinct from `agent_list`, which reports Shuheng-managed
+  workers from TUI state.
 - OMP plugin tools: repo-managed Shuheng plugin
   `integrations/omp-shuheng-plugin` exposes compatibility tools
   `shuheng_context_get` and `shuheng_memory_candidate_submit` by calling the

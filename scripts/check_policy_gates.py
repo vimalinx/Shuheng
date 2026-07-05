@@ -5731,12 +5731,44 @@ def assert_ohmypi_host_tool_bridge() -> None:
 
 
 def assert_ohmypi_tui_query_host_tool_contract() -> None:
+    class NativeRuntimeQueryAgent(FakeLLMAgent):
+        _shuheng_runtime_provider_id = "ohmypi"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.runtime_query_calls: list[tuple[object, ...]] = []
+
+        def get_runtime_subagents(self) -> dict[str, object]:
+            self.runtime_query_calls.append(("list",))
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "ok",
+                "subagents": [{"id": "sub-1", "name": "Runtime Worker", "status": "running"}],
+            }
+
+        def get_runtime_subagent_messages(
+            self,
+            *,
+            subagent_id: str = "",
+            session_file: str = "",
+            from_byte: object = None,
+        ) -> dict[str, object]:
+            self.runtime_query_calls.append(("messages", subagent_id, session_file, from_byte))
+            return {
+                "schema_version": "ohmypi.rpc_result.v1",
+                "status": "ok",
+                "messages": [{"role": "assistant", "content": "runtime reply"}],
+                "fromByte": from_byte,
+            }
+
     tools = a.ohmypi_tui_readonly_host_tool_definitions()
     assert len(tools) == 1, tools
     tool = tools[0].to_rpc()
     assert tool["name"] == "shuheng_query", tool
     assert "runtime_registry" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
     assert "artifact_list" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
+    assert "runtime_subagent_list" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
+    assert "runtime_subagent_messages" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
 
     handler = a.ohmypi_tui_query_host_tool_handler(None)
     runtime = handler("shuheng_query", {"endpoint": "runtime_registry"})
@@ -5754,11 +5786,15 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     agent_list = handler("shuheng_query", {"endpoint": "agent_list"})
     assert agent_list["status"] == "error", agent_list
     assert "TUI state is not bound" in agent_list["error"], agent_list
+    runtime_without_state = handler("runtime_subagent_list", {})
+    assert runtime_without_state["status"] == "error", runtime_without_state
+    assert "runtime_subagent_list requires an active runtime agent" in runtime_without_state["error"], runtime_without_state
 
     unknown = handler("shuheng_query", {"endpoint": "not-real"})
     assert unknown["status"] == "error", unknown
     assert "runtime_registry" in unknown["supported_endpoints"], unknown
     assert "memory_context_get" in unknown["supported_endpoints"], unknown
+    assert "runtime_subagent_list" in unknown["supported_endpoints"], unknown
 
     root = tempfile.mkdtemp(prefix="shuheng_omp_typed_tools_")
     retarget_harness(root)
@@ -5772,9 +5808,21 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     )
     all_tools = [item.to_rpc() for item in a.ohmypi_tui_host_tool_definitions()]
     tool_names = {str(item.get("name") or "") for item in all_tools}
-    assert {"shuheng_query", "agent_list", "schedule_list", "memory_context_get", "memory_candidate_submit"} <= tool_names, all_tools
+    assert {
+        "shuheng_query",
+        "agent_list",
+        "schedule_list",
+        "memory_context_get",
+        "memory_candidate_submit",
+        "runtime_subagent_list",
+        "runtime_subagent_messages",
+    } <= tool_names, all_tools
     query_tool = next(item for item in all_tools if item["name"] == "shuheng_query")
     assert "or sends messages to agents" in query_tool["description"], query_tool
+    typed_runtime_tool = next(item for item in all_tools if item["name"] == "runtime_subagent_messages")
+    assert "subagent_id" in typed_runtime_tool["parameters"]["properties"], typed_runtime_tool
+    assert "session_file" in typed_runtime_tool["parameters"]["properties"], typed_runtime_tool
+    assert "from_byte" in typed_runtime_tool["parameters"]["properties"], typed_runtime_tool
     typed_agent_get_tool = next(item for item in all_tools if item["name"] == "agent_get")
     assert "identity/interaction rules" in typed_agent_get_tool["description"], typed_agent_get_tool
     typed_agent_match_tool = next(item for item in all_tools if item["name"] == "agent_match")
@@ -5783,10 +5831,33 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert "only when a concrete persistent subagent target is known" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
     assert "target_role, scope, or responsibility" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
     assert "Submitted/deferred status must never replace the final user reply" in typed_memory_candidate_tool["description"], typed_memory_candidate_tool
-    typed_handler = a.ohmypi_tui_host_tool_handler(state)
+    native_runtime = NativeRuntimeQueryAgent()
+    typed_handler = a.ohmypi_tui_host_tool_handler(state, runtime_agent=native_runtime)
+    runtime_subagents = typed_handler("runtime_subagent_list", {})
+    assert runtime_subagents["schema_version"] == "shuheng.query.v1", runtime_subagents
+    assert runtime_subagents["kind"] == "runtime.subagent.list", runtime_subagents
+    assert runtime_subagents["runtime_provider_id"] == "ohmypi", runtime_subagents
+    assert runtime_subagents["subagents"][0]["id"] == "sub-1", runtime_subagents
+    assert native_runtime.runtime_query_calls[-1] == ("list",), native_runtime.runtime_query_calls
+    runtime_messages = typed_handler("runtime_subagent_messages", {"subagent_id": "sub-1", "from_byte": 5})
+    assert runtime_messages["schema_version"] == "shuheng.query.v1", runtime_messages
+    assert runtime_messages["kind"] == "runtime.subagent.messages", runtime_messages
+    assert runtime_messages["messages"][0]["content"] == "runtime reply", runtime_messages
+    assert native_runtime.runtime_query_calls[-1] == ("messages", "sub-1", "", 5), native_runtime.runtime_query_calls
+    runtime_messages_compat = typed_handler(
+        "shuheng_query",
+        {"endpoint": "runtime_subagent_messages", "args": {"session_file": "session.jsonl", "fromByte": 9}},
+    )
+    assert runtime_messages_compat["status"] == "ok", runtime_messages_compat
+    assert native_runtime.runtime_query_calls[-1] == ("messages", "", "session.jsonl", 9), native_runtime.runtime_query_calls
+    unsupported_runtime = a.ohmypi_tui_host_tool_handler(state, runtime_agent=FakeLLMAgent())("runtime_subagent_list", {})
+    assert unsupported_runtime["status"] == "error", unsupported_runtime
+    assert unsupported_runtime["kind"] == "runtime.subagent.list", unsupported_runtime
+    assert "does not support" in unsupported_runtime["error"], unsupported_runtime
     typed_agents = typed_handler("agent_list", {"limit": 5})
     assert typed_agents["schema_version"] == "shuheng.query.v1", typed_agents
     assert typed_agents["kind"] == "agent.list", typed_agents
+    assert native_runtime.runtime_query_calls[-1] == ("messages", "", "session.jsonl", 9), native_runtime.runtime_query_calls
     typed_agent = next(row for row in typed_agents["agents"] if row["agent_id"] == steward.agent_id)
     assert typed_agent["runtime_loaded"] is False, typed_agent
     assert typed_agent["interaction_modes"]["same_agent_task"]["command"] == f"/agent ask {steward.agent_id} <prompt>", typed_agent
