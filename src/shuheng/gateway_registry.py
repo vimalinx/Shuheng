@@ -20,8 +20,6 @@ def mcp_resource_registry(paths: dict[str, str]) -> list[dict[str, Any]]:
         {"uri": "resource://agent-mail/recovery-plans", "path": paths["recovery_plans"], "description": "Replayable recovery plan JSONL"},
         {"uri": "resource://agent-mail/runtime-evidence", "path": paths["runtime_evidence"], "description": "Runtime and E2E smoke evidence JSONL"},
         {"uri": "resource://agent-mail/runtime-providers", "path": paths["runtime_providers"], "description": "Agent runtime provider registry JSON"},
-        {"uri": "resource://agent-mail/context-inspector", "path": paths["context_inspector"], "description": "Context inspector snapshot JSON"},
-        {"uri": "resource://agent-mail/permission-matrix", "path": paths["permission_matrix"], "description": "Unified agent/plugin/workflow permission matrix JSON"},
         {"uri": "resource://agent-mail/schedules", "path": paths["schedules"], "description": "Top-level scheduled task registry JSONL"},
         {"uri": "resource://agent-mail/schedule-runs", "path": paths["schedule_runs"], "description": "Scheduled task run audit JSONL"},
         {"uri": "resource://agent-mail/gateway-daemon", "path": paths["gateway_daemon_status"], "description": "Gateway daemon status JSON"},
@@ -59,8 +57,7 @@ def gateway_service_descriptor(
             "mcp": f"{base_url}/mcp",
             "a2a_task_query": f"{base_url}/a2a/tasks/query",
             "a2a_message_send": f"{base_url}/a2a/messages",
-            "context_inspector": f"{base_url}/gateway/context",
-            "permission_matrix": f"{base_url}/gateway/permissions",
+            "agent_directory": f"{base_url}/gateway/agents",
             "mcp_resource_read": f"{base_url}/mcp/resource?uri=resource://agent-mail/tasks",
         },
         "sse": {

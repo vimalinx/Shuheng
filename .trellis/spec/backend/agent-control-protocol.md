@@ -6528,9 +6528,15 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
   - `security.local_only`
   - `security.allowed`
   - `release_posture:"experimental_alpha"`
-  - `request_response.context_inspector:"/gateway/context"`
-  - `request_response.permission_matrix:"/gateway/permissions"`
+  - `request_response.agent_directory:"/gateway/agents"`
   - `request_response.a2a_message_send:"/a2a/messages"`
+- Public gateway HTTP registry:
+  - `schema_version:"agentgateway.public.v1"`
+  - `agent_directory.schema_version:"shuheng.agent_directory.v1"`
+  - `release_readiness.schema_version:"shuheng.release_readiness.v1"`
+  - `public_contract.context_exposed:false`
+  - `public_contract.permission_matrix_exposed:false`
+  - `gateway_service` omits internal registry, daemon, push-store, context, permission, and MCP resource-read path inventories.
 - Gateway baseline evidence:
   - `gateway_baseline_evidence(state=None) -> dict`
   - `a2a_gateway.schema_version:"a2a.gateway.v1"`
@@ -6542,6 +6548,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
   - `mcp_gateway.schema_version:"mcp.gateway.v1"`
   - `mcp_gateway.tools[]`, `resources[]`
   - `capability_registry`
+  - `agent_directory.schema_version:"shuheng.agent_directory.v1"`
   - `context_inspector.schema_version:"shuheng.context_inspector.v1"`
   - `permission_matrix.schema_version:"shuheng.permission_matrix.v1"`
   - `governance_components`
@@ -6554,9 +6561,15 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
   - `delivery.mode:"agent_mail_inbox"`
   - `delivery.auto_dispatch:false`
   - `auth.policy` says execution inherits the Shuheng/TUI policy gate.
+- External agent directory entries:
+  - `schema_version:"shuheng.agent_directory.v1"`
+  - role/subagent entries expose `agent_id`, `kind`, `name`, `role`, `purpose`, `status`, `delivery`, `input_modes`, `output_modes`, `write_policy`, and `safety`.
+  - Subagent skill/plugin refs, when present, are short display labels only.
+  - Entries must not expose project context, spec paths, memory paths, workflow run internals, raw permission matrix rows, local skill/plugin paths, or Secret Vault plaintext.
 - MCP gateway resources include:
-  - `resource://agent-mail/context-inspector`
-  - `resource://agent-mail/permission-matrix`
+  - `resource://agent-mail/runtime-providers`
+  - `resource://agent-mail/schedules`
+  - `resource://agent-mail/schedule-runs`
 - Baseline item fields:
   - `evidence_checks[]` with `ok`, `description`, and `level`
   - `evidence_levels`
@@ -6583,13 +6596,16 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Public release posture must be explicit: stable local surfaces, experimental surfaces, and known gaps are separate lists.
 - A2A and MCP gateway metadata must use compatibility-surface wording until real third-party client end-to-end tests exist.
 - Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1`.
-- `/gateway/context` exposes a `shuheng.context_inspector.v1` snapshot for external agents to inspect project/spec/rules, runtime providers, memory/context-pack stores, plugin registry, workflow runs, MCP resources, gateway paths, and loading policy without reading raw transcripts or Secret Vault plaintext.
-- `/gateway/permissions` exposes a `shuheng.permission_matrix.v1` snapshot of role templates, discovered agents, plugin metadata, plugin agent templates, workflow definitions, and MCP tool policies. This is inspection metadata; it must not grant capabilities or bypass approval gates.
+- `/gateway` is the public HTTP registry for external agents. It must expose agent discovery and inbox-delivery metadata, not the full internal gateway registry.
+- `/health` is a public liveness response and must use the same path-stripped public service descriptor shape as `/gateway`.
+- `/gateway/agents` exposes a `shuheng.agent_directory.v1` directory for external agents to inspect what Shuheng roles/subagents are for and how to message them.
+- External gateway discovery must not expose broad project context, active spec paths, memory paths, workflow run internals, full permission matrices, Secret Vault plaintext, or internal ledger path inventories.
+- `context_inspector_snapshot(...)`, `/context`, `permission_matrix(...)`, and `/permissions` remain internal TUI/control-plane inspection surfaces. They may write durable local files for operator use, but they are not external gateway endpoints or MCP resources by default.
 - `POST /a2a/messages` accepts external agent messages only into Agent Mail, the task ledger, and trace rows. It must create a `kind:"gateway_message"` task row and an `agent_mail_inbox` message, but it must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
 - A2A agent cards must advertise `/a2a/messages` delivery with `auto_dispatch:false` so other agents know how to message discovered agents without assuming execution.
 - Message targets must resolve to the main orchestrator, a known role template, or a gateway-discovered subagent. Unknown targets are rejected and must not create phantom agent tasks.
 - Stateless gateway discovery may load persisted non-secret subagent metadata from the Shuheng-owned subagent store. Secret Vault subagents are visible only through unlocked TUI state and must not be discovered from plaintext stateless metadata.
-- MCP must expose `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` as resource reads over the same local compatibility gateway.
+- MCP must not expose context-inspector or permission-matrix resources by default. External tool/resource discovery remains narrower than local operator inspection.
 - Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
 - Runtime/e2e checks must be persisted in `runtime_evidence.jsonl` under the Shuheng-owned `AGENT_HARNESS_DIR`; baseline reports may upgrade an item's strongest evidence level only from passed runtime evidence whose `target_items` match that baseline item.
 - Runtime evidence from local smoke tests is behavioral evidence for Shuheng's local harness path. It must not be described as A2A/MCP protocol certification or third-party client conformance.
@@ -6608,8 +6624,10 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 4. Validation & Error Matrix
 
 - `/gateway` registry missing `release_readiness` -> release posture regression.
-- `/gateway/context` missing `shuheng.context_inspector.v1` or `/gateway/permissions` missing `shuheng.permission_matrix.v1` -> gateway inspection regression.
-- `/gateway` or MCP resources omit `resource://agent-mail/context-inspector` or `resource://agent-mail/permission-matrix` -> cross-surface inspection regression.
+- `/gateway` returns the full internal registry, internal ledger paths, context inspector, or permission matrix -> external exposure regression.
+- `/health` exposes `registry_path`, daemon path fields, push-store path fields, or MCP resource-read path inventories -> external path exposure regression.
+- `/gateway/agents` missing `shuheng.agent_directory.v1` or agent purpose/delivery fields -> discovery regression.
+- `/gateway/context`, `/gateway/permissions`, `resource://agent-mail/context-inspector`, or `resource://agent-mail/permission-matrix` are externally readable by default -> context exposure regression.
 - A2A agent cards do not advertise `endpoint.transport:"http+agent-mail"`, `endpoint.uri:"/a2a/messages"`, or `delivery.auto_dispatch:false` -> external-agent delivery contract regression.
 - `POST /a2a/messages` dispatches a runtime, approves a policy action, writes long-term memory, or executes a workflow directly -> Orchestrator ownership regression.
 - `POST /a2a/messages` accepts an unknown target and creates a task for a phantom agent -> gateway discoverability regression.
@@ -6629,8 +6647,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 5. Good/Base/Bad Cases
 
 - Good: `/gateway` says Shuheng is `experimental_alpha`, A2A/MCP are compatibility surfaces, gateway auth is `none`, and baseline items show structural evidence limits.
-- Good: `/gateway/context` shows the active backend spec, plugin/workflow/runtime summaries, MCP resource URIs, and `/a2a/messages` endpoint while keeping raw logs and Secret Vault plaintext out of the snapshot.
-- Good: `/gateway/permissions` lists role, agent, plugin, workflow, and MCP-tool policy metadata while preserving `least_privilege` and approval-required policy wording.
+- Good: `/gateway/agents` lists a researcher role and persistent non-secret subagents with purpose text plus `/a2a/messages` delivery targets, without exposing project context or full permission rows.
 - Good: an external agent posts a text message to a discovered subagent via `/a2a/messages`; Shuheng writes a `gateway_message` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
 - Good: `architecture_baseline_report()` called directly still reports A2A/MCP, governance, and external bridge evidence from a no-write snapshot.
 - Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and loopback HTTP only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
@@ -6638,6 +6655,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Base: Local `127.0.0.1` gateway works without auth because it is loopback-only by default.
 - Base: Operator deliberately sets `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
 - Bad: README or gateway metadata implies production-ready remote gateway or certified A2A/MCP support without client E2E evidence.
+- Bad: external `/gateway` or MCP resource reads expose active spec paths, context-pack directories, memory paths, workflow run ids, or permission matrix entries.
 - Bad: an external message to `/a2a/messages` immediately starts a subagent, auto-approves an approval row, or writes memory.
 - Bad: stateless `/gateway` lists Secret Vault subagents by reading normal plaintext metadata.
 - Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
@@ -6647,11 +6665,13 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert `/gateway` contains `release_readiness` with stable, experimental, and known-gap lists.
-- `scripts/check_policy_gates.py` must assert `/gateway` contains `context_inspector.schema_version:"shuheng.context_inspector.v1"` and `permission_matrix.schema_version:"shuheng.permission_matrix.v1"`.
-- `scripts/check_policy_gates.py` must assert gateway service descriptors expose `/gateway/context`, `/gateway/permissions`, and `/a2a/messages`.
+- `scripts/check_policy_gates.py` must assert internal `ensure_gateway_registry(...)` still builds `context_inspector` and `permission_matrix` for local operator use.
+- `scripts/check_policy_gates.py` must assert public `/gateway` returns `agentgateway.public.v1`, includes `shuheng.agent_directory.v1`, and omits `context_inspector`, `permission_matrix`, and `internal_agent_mail`.
+- `scripts/check_policy_gates.py` must assert public `/gateway` and `/health` do not expose local harness paths, daemon file paths, push-store file paths, or MCP resource-read path hints.
+- `scripts/check_policy_gates.py` must assert gateway service descriptors expose `/gateway/agents` and `/a2a/messages`, not `/gateway/context` or `/gateway/permissions`.
 - Tests must assert A2A agent cards use `endpoint.transport:"http+agent-mail"`, `endpoint.uri:"/a2a/messages"`, `delivery.mode:"agent_mail_inbox"`, and `delivery.auto_dispatch:false`.
 - Tests must assert `POST /a2a/messages` writes a `kind:"gateway_message"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
-- Tests must assert MCP resources include and can read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix`.
+- Tests must assert MCP resources omit and cannot read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` by default.
 - Tests must assert `/gateway` release readiness exposes structured
   distribution-smoke metadata for wheel+sdist, dependency-resolving install
   mode, public console scripts, and debug-only non-gate options.

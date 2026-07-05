@@ -286,11 +286,36 @@ def run_gateway_http_smoke(a: Any, completed_task_id: str) -> None:
         health = get_json(f"{base}/health")
         if not health.get("ok"):
             raise AssertionError(health)
+        if "registry_path" in health or "mcp_resource_read" in health["service"]["request_response"]:
+            raise AssertionError(health)
+        if "subscriptions_path" in health["service"]["push_notifications"]:
+            raise AssertionError(health)
+        if "pid_path" in health["service"]["daemon"].get("state", {}):
+            raise AssertionError(health)
         gateway = get_json(f"{base}/gateway")
+        if gateway.get("schema_version") != "agentgateway.public.v1":
+            raise AssertionError(gateway)
+        if "context_inspector" in gateway or "permission_matrix" in gateway:
+            raise AssertionError(gateway)
+        if gateway.get("release_readiness", {}).get("status") != "experimental_alpha":
+            raise AssertionError(gateway)
+        if "mcp_resource_read" in gateway["gateway_service"]["request_response"]:
+            raise AssertionError(gateway["gateway_service"])
+        if "subscriptions_path" in gateway["gateway_service"]["push_notifications"]:
+            raise AssertionError(gateway["gateway_service"])
+        if "pid_path" in gateway["gateway_service"]["daemon"].get("state", {}):
+            raise AssertionError(gateway["gateway_service"])
         if gateway["a2a_gateway"]["compatibility"]["certification"] != "not_protocol_certified":
             raise AssertionError(gateway["a2a_gateway"]["compatibility"])
-        if gateway["mcp_gateway"]["compatibility"]["certification"] != "not_protocol_certified":
-            raise AssertionError(gateway["mcp_gateway"]["compatibility"])
+        directory = get_json(f"{base}/gateway/agents")
+        if directory.get("schema_version") != "shuheng.agent_directory.v1" or not directory.get("roles"):
+            raise AssertionError(directory)
+        a2a = get_json(f"{base}/a2a")
+        if "tasks" in a2a or "messages" in a2a or "artifacts" in a2a:
+            raise AssertionError(a2a)
+        mcp = get_json(f"{base}/mcp")
+        if mcp["compatibility"]["certification"] != "not_protocol_certified":
+            raise AssertionError(mcp["compatibility"])
         resource_uri = urllib.parse.quote("resource://agent-mail/runtime-evidence", safe="")
         evidence_resource = get_json(f"{base}/mcp/resource?uri={resource_uri}")
         if "subagent_task_artifact_eval_trace" not in json.dumps(evidence_resource, ensure_ascii=False):

@@ -137,10 +137,13 @@ Runtime and top-level control metadata are exposed through:
 - `model_orchestration`: `model_orchestration.v1`, built from the TUI model manager state.
 - `scheduled_task_registry`: `scheduledtask.registry.v1`, persisted at `schedules.jsonl`.
 - `scheduledtask.run.v1`: Scheduler run audit rows persisted at `schedule_runs.jsonl`.
-- `context_inspector`: `shuheng.context_inspector.v1`, exposed at
-  `/gateway/context` and `resource://agent-mail/context-inspector`.
-- `permission_matrix`: `shuheng.permission_matrix.v1`, exposed at
-  `/gateway/permissions` and `resource://agent-mail/permission-matrix`.
+- `agent_directory`: `shuheng.agent_directory.v1`, exposed at
+  `/gateway/agents` and summarized by `/gateway`. This is the external-facing
+  discovery surface for other agents.
+- `context_inspector`: `shuheng.context_inspector.v1`, kept as an internal
+  TUI/control-plane projection for local operator inspection.
+- `permission_matrix`: `shuheng.permission_matrix.v1`, kept as an internal
+  TUI/control-plane projection for local operator inspection.
 - `shuheng-control.v2` schedule actions: `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, and `schedule.delete`.
 - `capability_registry.runtime_providers`: Provider details available to query tools.
 - A2A agent cards: discovered role templates and visible subagents advertise
@@ -157,8 +160,6 @@ Runtime and top-level control metadata are exposed through:
   `shuheng_context_get` and `shuheng_memory_candidate_submit` by calling the
   local Shuheng bridge CLI.
 - MCP resources: `resource://agent-mail/runtime-providers`,
-  `resource://agent-mail/context-inspector`,
-  `resource://agent-mail/permission-matrix`,
   `resource://agent-mail/schedules`, and
   `resource://agent-mail/schedule-runs`.
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
@@ -187,6 +188,12 @@ Runtime and top-level control metadata are exposed through:
 - Do not let `/a2a/messages` become a hidden executor. External agent messages
   are inbox entries and ledger facts until the Orchestrator/TUI decides what to
   run.
+- Do not expose broad project context, active specs, memory paths, workflow run
+  internals, or full permission matrices to external agents by default. External
+  discovery should describe what each agent/role is for and how to message it.
+- Do not include local harness paths, daemon pid/status/log paths, push-store
+  JSONL paths, or local skill/plugin filesystem paths in public `/gateway`,
+  `/gateway/agents`, or `/health` payloads.
 - Do not create phantom message targets. Gateway message targets must resolve to
   the main orchestrator, a known role template, or a gateway-discovered subagent.
 - Do not list Secret Vault subagents from stateless plaintext metadata. Secret

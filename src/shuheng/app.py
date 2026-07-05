@@ -7300,6 +7300,88 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
     }
 
 
+def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
+    """External-facing, low-context directory for agent discovery."""
+    roles: list[dict[str, Any]] = []
+    for role, template in sorted(ROLE_TEMPLATES.items()):
+        roles.append(
+            {
+                "agent_id": f"role.{role}",
+                "kind": "role_template",
+                "name": f"{role} role template",
+                "role": role,
+                "purpose": str(template.get("description") or ""),
+                "status": "template",
+                "delivery": {"endpoint": "/a2a/messages", "target": f"role.{role}", "auto_dispatch": False},
+                "input_modes": ["text/plain"],
+                "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
+                "write_policy": str(template.get("write_policy") or "none"),
+                "safety": "Messages enter Shuheng Agent Mail; execution remains Orchestrator-owned.",
+            }
+        )
+    agents: list[dict[str, Any]] = []
+    for sub in gateway_visible_subagents(state):
+        role = normalized_subagent_role(sub.role)
+        agents.append(
+            {
+                "agent_id": sub.agent_id,
+                "kind": "subagent",
+                "name": sub.name,
+                "role": role,
+                "purpose": role_template(role).get("description", ""),
+                "status": sub.status,
+                "security_context": sub.security_context,
+                "delivery": {"endpoint": "/a2a/messages", "target": sub.agent_id, "auto_dispatch": False},
+                "input_modes": ["text/plain"],
+                "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
+                "write_policy": role_write_policy(role),
+                "skill_refs": gateway_public_skill_refs(sub.skill_refs),
+                "safety": "Messages enter Shuheng Agent Mail; execution remains Orchestrator-owned.",
+            }
+        )
+    return {
+        "schema_version": "shuheng.agent_directory.v1",
+        "updated_at": now_iso(),
+        "purpose": "Let external agents discover what Shuheng agents are for and where to send inbox messages.",
+        "discovery_policy": {
+            "external_scope": "agent_purpose_and_delivery_only",
+            "context_exposed": False,
+            "permission_matrix_exposed": False,
+            "auto_dispatch": False,
+            "secret_subagents": "only visible through unlocked TUI state",
+        },
+        "message_endpoint": "/a2a/messages",
+        "roles": roles,
+        "agents": agents,
+        "counts": {"roles": len(roles), "agents": len(agents), "total": len(roles) + len(agents)},
+    }
+
+
+def gateway_public_skill_refs(refs: Any, *, limit: int = 8) -> list[str]:
+    """Return short skill/plugin labels without local filesystem paths."""
+    public_refs: list[str] = []
+    seen: set[str] = set()
+    for ref in normalize_subagent_skill_refs(refs, limit=limit):
+        text = str(ref or "").strip().removeprefix("skill://").strip()
+        if not text:
+            continue
+        if is_plugin_skill_ref(text):
+            label = plugin_skill_display_name(text, user_plugin_registry()) or text
+        elif "/" in text or "\\" in text:
+            label = os.path.basename(text.rstrip("/\\")) or "skill"
+        else:
+            label = text
+        label = truncate_cells(clean_text(label).strip(), 80)
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        public_refs.append(label)
+    return public_refs
+
+
 def effective_model_display_agent(state: State) -> Any:
     try:
         sub = active_subagent_view(state)
@@ -8032,10 +8114,48 @@ def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dic
     )
 
 
+def gateway_public_service_descriptor(service: dict[str, Any]) -> dict[str, Any]:
+    """External service descriptor stripped of local storage paths."""
+    request_response = service.get("request_response") if isinstance(service.get("request_response"), dict) else {}
+    public_request_response = {
+        key: request_response[key]
+        for key in ("health", "registry", "a2a", "agent_directory", "a2a_message_send")
+        if key in request_response
+    }
+    if "agent_cards" not in public_request_response and "a2a" in request_response:
+        public_request_response["agent_cards"] = str(request_response["a2a"]).rstrip("/") + "/agent-cards"
+    push = service.get("push_notifications") if isinstance(service.get("push_notifications"), dict) else {}
+    daemon = service.get("daemon") if isinstance(service.get("daemon"), dict) else {}
+    daemon_state = daemon.get("state") if isinstance(daemon.get("state"), dict) else {}
+    public_daemon_state = {
+        key: value
+        for key, value in daemon_state.items()
+        if key not in {"pid_path", "status_path", "log_path"}
+    }
+    return {
+        "schema_version": service.get("schema_version") or "agentgateway.service.v1",
+        "status": service.get("status") or "local_no_auth_compatibility_surface",
+        "bind": service.get("bind") or {},
+        "base_url": service.get("base_url") or "",
+        "security": service.get("security") or {},
+        "release_posture": service.get("release_posture") or "experimental_alpha",
+        "request_response": public_request_response,
+        "sse": service.get("sse") or {},
+        "push_notifications": {
+            "subscribe_endpoint": push.get("subscribe_endpoint", ""),
+            "test_endpoint": push.get("test_endpoint", ""),
+            "default_endpoint_policy": push.get("default_endpoint_policy", ""),
+            "auth": push.get("auth", "none"),
+        },
+        "daemon": {
+            "commands": daemon.get("commands", []),
+            "state": public_daemon_state,
+        },
+    }
+
+
 def mcp_resource_contents(uri: str) -> dict[str, Any]:
     uri = str(uri or "")
-    if uri in {"resource://agent-mail/context-inspector", "resource://agent-mail/permission-matrix"}:
-        ensure_gateway_registry(None)
     registry = {row.get("uri", ""): row for row in mcp_resource_registry()}
     resource = registry.get(uri)
     if not resource:
@@ -9196,20 +9316,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path in {"/", "/health"}:
             actual_host, actual_port = self.server.server_address[:2]
-            self.send_json({"ok": True, "service": gateway_service_descriptor(str(actual_host), int(actual_port)), "registry_path": AGENT_GATEWAY_PATH})
+            service = gateway_public_service_descriptor(gateway_service_descriptor(str(actual_host), int(actual_port)))
+            self.send_json({"ok": True, "service": service})
             return
         registry = ensure_gateway_registry(None)
         if path == "/gateway":
-            self.send_json(registry)
+            self.send_json(gateway_public_registry(registry))
             return
-        if path == "/gateway/context":
-            self.send_json(registry["context_inspector"])
-            return
-        if path == "/gateway/permissions":
-            self.send_json(registry["permission_matrix"])
+        if path == "/gateway/agents":
+            self.send_json(registry["agent_directory"])
             return
         if path == "/a2a":
-            self.send_json(registry["a2a_gateway"])
+            self.send_json(gateway_public_registry(registry)["a2a_gateway"])
             return
         if path == "/a2a/agent-cards":
             self.send_json({"schema_version": "a2a.agent_cards.v1", "agent_cards": registry["a2a_gateway"].get("agent_cards") or []})
@@ -9256,7 +9374,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         payload = self.read_json_body()
         if path == "/health":
             actual_host, actual_port = self.server.server_address[:2]
-            self.send_json({"ok": True, "service": gateway_service_descriptor(str(actual_host), int(actual_port)), "received": payload})
+            service = gateway_public_service_descriptor(gateway_service_descriptor(str(actual_host), int(actual_port)))
+            self.send_json({"ok": True, "service": service, "received": payload})
             return
         if path == "/gui/action":
             response, status = web_console_apply_action(payload)
@@ -9371,7 +9490,7 @@ def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
         command="serve",
     )
     print(f"Shuheng gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
-    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /gateway/context /gateway/permissions /a2a /a2a/messages /a2a/events /mcp /mcp/resources")
+    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /gateway/agents /a2a /a2a/messages /a2a/events /mcp /mcp/resources")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -10055,6 +10174,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
     model_registry = model_orchestration_registry(state)
     schedule_registry = scheduled_task_registry(state)
     capability_registry = gateway_capability_registry(state)
+    agent_directory = gateway_agent_directory(state)
     context_data = context_inspector_snapshot(state)
     permissions_data = permission_matrix(state)
     governance_registry = governance_component_registry(state)
@@ -10123,6 +10243,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "contextId": "shuheng",
             "request_response": {
                 "registry": "/a2a",
+                "agent_directory": "/gateway/agents",
                 "agent_cards": "/a2a/agent-cards",
                 "tasks": "/a2a/tasks",
                 "task_query": "/a2a/tasks/query",
@@ -10147,6 +10268,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
                 "push_delivery_store": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
             },
         },
+        "agent_directory": agent_directory,
         "capability_registry": capability_registry,
         "context_inspector": context_data,
         "permission_matrix": permissions_data,
@@ -10169,6 +10291,52 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
     data["baseline_comparison"] = architecture_baseline_report(state, gateway_data=data)
     write_text_atomic(AGENT_GATEWAY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return data
+
+
+def gateway_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
+    """Return the external gateway view without context or permission internals."""
+    a2a = registry.get("a2a_gateway") if isinstance(registry.get("a2a_gateway"), dict) else {}
+    full_service = registry.get("gateway_service") if isinstance(registry.get("gateway_service"), dict) else gateway_service_descriptor()
+    service = gateway_public_service_descriptor(full_service)
+    directory = registry.get("agent_directory") if isinstance(registry.get("agent_directory"), dict) else gateway_agent_directory(None)
+    release_readiness = registry.get("release_readiness") if isinstance(registry.get("release_readiness"), dict) else current_release_readiness_report()
+    return {
+        "schema_version": "agentgateway.public.v1",
+        "updated_at": registry.get("updated_at") or now_iso(),
+        "status": "local_no_auth_compatibility_surface",
+        "release_posture": "experimental_alpha",
+        "security": service.get("security") or {},
+        "gateway_service": service,
+        "release_readiness": release_readiness,
+        "agent_directory": directory,
+        "a2a_gateway": {
+            "schema_version": a2a.get("schema_version") or "a2a.gateway.v1",
+            "status": a2a.get("status") or "compatibility_surface",
+            "purpose": "agent-to-agent discovery and inbox delivery compatibility surface",
+            "compatibility": a2a.get("compatibility") or protocol_compatibility_metadata("A2A"),
+            "contextId": a2a.get("contextId") or "shuheng",
+            "request_response": {
+                "registry": "/a2a",
+                "agent_directory": "/gateway/agents",
+                "agent_cards": "/a2a/agent-cards",
+                "message_send": "/a2a/messages",
+                "task_query": "/a2a/tasks/query",
+            },
+            "delivery": a2a.get("delivery") or {
+                "message_endpoint": "/a2a/messages",
+                "mode": "agent_mail_inbox",
+                "auto_dispatch": False,
+                "execution_owner": "shuheng.orchestrator",
+            },
+            "agent_cards": a2a.get("agent_cards") or [],
+        },
+        "public_contract": {
+            "context_exposed": False,
+            "permission_matrix_exposed": False,
+            "message_delivery": "agent_mail_inbox",
+            "auto_dispatch": False,
+        },
+    }
 
 
 def append_agent_mail(
