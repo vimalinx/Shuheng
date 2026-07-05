@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 50
-- **Last Active**: 2026-07-05
+- **Total Sessions**: 51
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~176 | Active |
+| `journal-2.md` | ~209 | Active |
 | `journal-1.md` | ~1982 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 51 | 2026-07-06 | Expose OMP runtime output in TUI | `31c11a2` | `main` |
 | 50 | 2026-07-05 | Expose OMP runtime output queries | `df66940` | `main` |
 | 49 | 2026-07-05 | Narrow gateway agent discovery | `6d84a43` | `main` |
 | 48 | 2026-07-05 | Make OMP core and gateway agent delivery | `1e6f27c` | `main` |

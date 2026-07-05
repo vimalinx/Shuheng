@@ -174,3 +174,36 @@ Exposed OMP-native runtime subagent list/message read-only query surfaces throug
 ### Next Steps
 
 - None - task complete
+
+
+## Session 51: Expose OMP runtime output in TUI
+
+**Date**: 2026-07-06
+**Task**: Expose OMP runtime output in TUI
+**Branch**: `main`
+
+### Summary
+
+Added the read-only /runtime-output TUI command for OMP-native runtime subagent snapshots and bounded message previews, with policy-gate coverage and spec/docs updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31c11a2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
