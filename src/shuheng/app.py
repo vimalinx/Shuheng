@@ -1440,7 +1440,7 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
         if os.path.exists(path):
             continue
         meta = dict(state.session_meta.get(key, {}))
-        if bool(meta.get("deleted")) or bool(meta.get("hidden_subagent_log")):
+        if bool(meta.get("deleted")) or bool(meta.get("hidden_subagent_log")) or bool(meta.get("hidden_internal_task_log")):
             continue
         title = normalize_session_title(str(names.get(key) or ""))
         desc = compact_description(str(meta.get("description") or title or ""))
@@ -1515,6 +1515,20 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
         )
         if bool(meta.get("hidden_subagent_log")) and cache_identity_ok:
             continue
+        if bool(meta.get("hidden_internal_task_log")) and cache_identity_ok:
+            continue
+        if history_cache_has_internal_task_preview(meta):
+            entry = dict(meta)
+            entry["hidden_internal_task_log"] = True
+            entry["cache_mtime"] = stat.st_mtime
+            entry["cache_size"] = stat.st_size
+            entry["preview"] = "internal task session log"
+            entry["rounds"] = int(entry.get("rounds") or 0)
+            entry["last_user_at"] = float(entry.get("last_user_at") or stat.st_mtime)
+            if entry != meta:
+                state.session_meta[key] = entry
+                changed = True
+            continue
         refresh_process_cache = history_cache_has_process_only_preview(meta)
         cache_ok = (
             not refresh_process_cache
@@ -1557,6 +1571,19 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
         preview = session_preview_from_pairs(pairs) or _preview_text(pairs)
         rounds = len(pairs)
         last_user_at = session_last_user_time_from_content(content, stat.st_mtime)
+        first_user_text = _user_text(pairs[0][0]) if pairs else ""
+        if is_internal_task_session_title(preview) or is_internal_task_session_title(first_user_text):
+            entry = dict(meta)
+            entry["hidden_internal_task_log"] = True
+            entry["cache_mtime"] = stat.st_mtime
+            entry["cache_size"] = stat.st_size
+            entry["preview"] = "internal task session log"
+            entry["rounds"] = rounds
+            entry["last_user_at"] = last_user_at
+            if entry != meta:
+                state.session_meta[key] = entry
+                changed = True
+            continue
         desc = "" if refresh_process_cache else compact_description(str(meta.get("description") or ""))
         if not desc:
             desc = session_description_from_pairs(pairs, preview)
@@ -17957,6 +17984,14 @@ def session_preview_from_pairs(pairs: list[tuple[str, str]]) -> str:
 
 def is_process_only_session_title(text: str) -> bool:
     return history_title_policy.is_process_only_session_title(text)
+
+
+def is_internal_task_session_title(text: str) -> bool:
+    return history_title_policy.is_internal_task_session_title(text)
+
+
+def history_cache_has_internal_task_preview(meta: dict[str, Any]) -> bool:
+    return history_title_policy.history_cache_has_internal_task_preview(meta)
 
 
 def history_cache_has_process_only_preview(meta: dict[str, Any]) -> bool:

@@ -20,6 +20,13 @@ META_BLOCK_RE = re.compile(r"<(?:summary|thinking|think)>[\s\S]*?</(?:summary|th
 TOOL_USE_BLOCK_RE = re.compile(r"<tool_use>[\s\S]*?</tool_use>", re.IGNORECASE)
 TOOL_HEADER_RE = re.compile(r"🛠️\s*Tool:\s*`[^`]+`\s*📥\s*args:\s*", re.IGNORECASE)
 DETAIL_FENCE_RE = re.compile(r"`{3,}[^\n]*\n[\s\S]*?\n`{3,}", re.MULTILINE)
+INTERNAL_WORKFLOW_EXACT_TITLES = {
+    "review source quality",
+    "collect evidence ref",
+    "collect evidence refs",
+    "do unrelated work",
+    "use upstream refs",
+}
 
 
 def clamp_session_title_chars(title: str, max_chars: int = 16) -> str:
@@ -114,6 +121,30 @@ def is_process_only_session_title(text: str) -> bool:
     if title in {"omp 思考", "思考", "thinking", "执行中", "搜索/浏览输出已折叠"}:
         return True
     return title.startswith(("omp 工具", "调用 omp 工具", "调用工具", "tool "))
+
+
+def is_internal_task_session_title(text: str) -> bool:
+    title = compact_description(text, 220)
+    if not title:
+        return False
+    folded = title.casefold()
+    if "子 agent 工作单" in folded and ("发送给" in folded or "调度模式" in folded or "目标" in folded):
+        return True
+    if folded.strip(" -:：。,.，") in INTERNAL_WORKFLOW_EXACT_TITLES:
+        return True
+    return folded.startswith("use upstream refs. workflow upstream context")
+
+
+def history_cache_has_internal_task_preview(meta: dict[str, Any]) -> bool:
+    for key in ("preview", "description"):
+        if is_internal_task_session_title(str(meta.get(key) or "")):
+            return True
+    raw_preview_messages = meta.get("ui_preview_messages")
+    if isinstance(raw_preview_messages, list):
+        for item in raw_preview_messages:
+            if isinstance(item, dict) and is_internal_task_session_title(str(item.get("content") or "")):
+                return True
+    return False
 
 
 def history_cache_has_process_only_preview(meta: dict[str, Any]) -> bool:

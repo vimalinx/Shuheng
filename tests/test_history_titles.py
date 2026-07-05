@@ -107,6 +107,24 @@ def test_history_cache_detects_process_only_preview_markers() -> None:
     assert app_module.is_process_only_session_title("（预览）OMP 思考")
 
 
+def test_internal_task_session_titles_are_hidden_from_history() -> None:
+    assert history_titles.is_internal_task_session_title("Review source quality.")
+    assert history_titles.is_internal_task_session_title("Collect evidence refs.")
+    assert history_titles.is_internal_task_session_title("Use upstream refs. Workflow upstream context")
+    assert history_titles.is_internal_task_session_title("Do unrelated work.")
+    assert history_titles.is_internal_task_session_title(
+        "╭─ 子 Agent 工作单\n│ 发送给：agent-1\n│ 调度模式：agent_as_tool\n│\n│ 目标\n│ Review source quality."
+    )
+    assert history_titles.history_cache_has_internal_task_preview({
+        "preview": "Review source quality.",
+        "ui_preview_messages": [{"role": "user", "content": "Collect evidence refs."}],
+    })
+    assert not history_titles.is_internal_task_session_title("请 review source quality 相关功能怎么做")
+    assert not history_titles.is_internal_task_session_title("Review source quality 相关功能怎么做")
+    assert not history_titles.is_internal_task_session_title("Use upstream refs for workflow design")
+    assert app_module.is_internal_task_session_title("Do unrelated work.")
+
+
 def test_message_text_for_metadata_context_strips_process_and_control_text() -> None:
     user = Message(
         "user",

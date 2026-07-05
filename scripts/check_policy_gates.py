@@ -1813,6 +1813,17 @@ def assert_history_title_policy_module_boundary() -> None:
     assert a.TOOL_USE_BLOCK_RE is history_titles_mod.TOOL_USE_BLOCK_RE
     assert a.TOOL_HEADER_RE is history_titles_mod.TOOL_HEADER_RE
     assert a.DETAIL_FENCE_RE is history_titles_mod.DETAIL_FENCE_RE
+    assert a.is_internal_task_session_title("Review source quality.") is True
+    assert a.is_internal_task_session_title("Collect evidence refs.") is True
+    assert a.is_internal_task_session_title("Use upstream refs. Workflow upstream context") is True
+    assert a.is_internal_task_session_title("Do unrelated work.") is True
+    assert a.is_internal_task_session_title(
+        "╭─ 子 Agent 工作单\n│ 发送给：agent-1\n│ 调度模式：agent_as_tool\n│\n│ 目标\n│ Review source quality."
+    ) is True
+    assert a.is_internal_task_session_title("请 review source quality 相关功能怎么做") is False
+    assert a.is_internal_task_session_title("Review source quality 相关功能怎么做") is False
+    assert a.is_internal_task_session_title("Use upstream refs for workflow design") is False
+    assert a.history_cache_has_internal_task_preview({"preview": "Do unrelated work."}) is True
     assert a.SESSION_TITLE_CHARS == 16
     assert a.SESSION_TITLE_WIDTH == 32
     long_title = "修复左侧历史会话自动标题更新性能优化"
@@ -10831,6 +10842,49 @@ def assert_valid_history_cache_skips_session_sampling() -> None:
     assert rows[0][4] == "缓存简介", rows
 
 
+def assert_internal_task_sessions_stay_out_of_history_sidebar() -> None:
+    root = tempfile.mkdtemp(prefix="shuheng_internal_task_history_")
+    retarget_harness(root)
+    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
+
+    def write_session(name: str, prompt_text: str, response_text: str = "agent task result") -> str:
+        path = os.path.join(a.MODEL_RESPONSES_DIR, name)
+        prompt = {"role": "user", "content": [{"type": "text", "text": prompt_text}]}
+        response = [{"type": "text", "text": response_text}]
+        a.write_text_atomic(
+            path,
+            "=== Prompt === 2026-07-03 22:42:34\n"
+            + json.dumps(prompt, ensure_ascii=False, indent=2)
+            + "\n\n=== Response === 2026-07-03 22:42:35\n"
+            + repr(response)
+            + "\n",
+        )
+        return path
+
+    workflow_path = write_session("model_responses_workflow_noise.txt", "Review source quality.")
+    subagent_path = write_session(
+        "model_responses_subagent_work_order.txt",
+        "╭─ 子 Agent 工作单\n"
+        "│ 发送给：agent-1\n"
+        "│ 调度模式：agent_as_tool\n"
+        "│\n"
+        "│ 目标\n"
+        "│ Review source quality.",
+    )
+    user_path = write_session("model_responses_user_review.txt", "请 review source quality 相关功能怎么做")
+
+    state = a.State(agent=None)
+    assert a.load_history(state, force=True) is True
+    assert workflow_path not in [row[0] for row in state.history], state.history
+    assert subagent_path not in [row[0] for row in state.history], state.history
+    assert user_path in [row[0] for row in state.history], state.history
+
+    meta = a.load_session_meta_registry()
+    assert meta[os.path.basename(workflow_path)]["hidden_internal_task_log"] is True, meta
+    assert meta[os.path.basename(subagent_path)]["hidden_internal_task_log"] is True, meta
+    assert not meta.get(os.path.basename(user_path), {}).get("hidden_internal_task_log"), meta
+
+
 def assert_ohmypi_local_category_fallback_for_sidebar() -> None:
     root = tempfile.mkdtemp(prefix="shuheng_omp_category_")
     retarget_harness(root)
@@ -11432,6 +11486,7 @@ def run_checks() -> None:
     assert_recent_sessions_use_last_message_activity()
     assert_history_curator_skill_uses_progressive_disclosure()
     assert_valid_history_cache_skips_session_sampling()
+    assert_internal_task_sessions_stay_out_of_history_sidebar()
     assert_ohmypi_process_summary_does_not_title_history()
     assert_ohmypi_local_category_fallback_for_sidebar()
     assert_missing_source_history_rows_restore_from_l4_archive()
