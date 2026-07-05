@@ -46,6 +46,8 @@ def test_gateway_resource_registry_and_descriptor_shapes() -> None:
         "recovery_plans": "/h/recovery_plans.jsonl",
         "runtime_evidence": "/h/runtime_evidence.jsonl",
         "runtime_providers": "/h/runtime_providers.json",
+        "context_inspector": "/h/context_inspector.json",
+        "permission_matrix": "/h/permission_matrix.json",
         "schedules": "/h/schedules.jsonl",
         "schedule_runs": "/h/schedule_runs.jsonl",
         "gateway_daemon_status": "/h/gateway_daemon.json",
@@ -69,6 +71,11 @@ def test_gateway_resource_registry_and_descriptor_shapes() -> None:
     )
 
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources)
+    assert any(item["uri"] == "resource://agent-mail/context-inspector" for item in resources)
+    assert any(item["uri"] == "resource://agent-mail/permission-matrix" for item in resources)
     assert descriptor["base_url"] == "http://127.0.0.1:8765"
     assert descriptor["status"] == "local_no_auth_compatibility_surface"
+    assert descriptor["request_response"]["a2a_message_send"].endswith("/a2a/messages")
+    assert descriptor["request_response"]["context_inspector"].endswith("/gateway/context")
+    assert descriptor["request_response"]["permission_matrix"].endswith("/gateway/permissions")
     assert descriptor["push_notifications"]["auth"] == "none"

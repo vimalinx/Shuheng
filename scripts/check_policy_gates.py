@@ -88,6 +88,8 @@ def retarget_harness(root: str) -> None:
     a.AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(a.AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
     a.AGENT_LOCKS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "locks.json")
     a.AGENT_GATEWAY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway.json")
+    a.AGENT_CONTEXT_INSPECTOR_PATH = os.path.join(a.AGENT_HARNESS_DIR, "context_inspector.json")
+    a.AGENT_PERMISSION_MATRIX_PATH = os.path.join(a.AGENT_HARNESS_DIR, "permission_matrix.json")
     a.AGENT_POLICY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "policy.json")
     a.AGENT_POLICY_DECISIONS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "policy_decisions.jsonl")
     a.AGENT_ORCHESTRATOR_PLANS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "orchestrator_plans.jsonl")
@@ -6576,6 +6578,11 @@ def assert_gateway_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.v1", registry
     assert registry["internal_agent_mail"]["governance"] == a.AGENT_GOVERNANCE_PATH, registry
     assert registry["internal_agent_mail"]["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
+    assert registry["internal_agent_mail"]["context_inspector"] == a.AGENT_CONTEXT_INSPECTOR_PATH, registry
+    assert registry["internal_agent_mail"]["permission_matrix"] == a.AGENT_PERMISSION_MATRIX_PATH, registry
+    assert registry["context_inspector"]["schema_version"] == "shuheng.context_inspector.v1", registry
+    assert registry["permission_matrix"]["schema_version"] == "shuheng.permission_matrix.v1", registry
+    assert registry["permission_matrix"]["entries"], registry
     assert registry["runtime_evidence"]["schema_version"] == "agentruntime.evidence_summary.v1", registry
     assert registry["runtime_evidence"]["path"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
     assert_release_readiness_schema(registry["release_readiness"])
@@ -6586,6 +6593,9 @@ def assert_gateway_schema(registry: dict) -> None:
     assert service["security"]["local_only"] is True, service
     assert service["release_posture"] == "experimental_alpha", service
     assert service["request_response"]["registry"].endswith("/gateway"), service
+    assert service["request_response"]["context_inspector"].endswith("/gateway/context"), service
+    assert service["request_response"]["permission_matrix"].endswith("/gateway/permissions"), service
+    assert service["request_response"]["a2a_message_send"].endswith("/a2a/messages"), service
     assert service["sse"]["endpoint"].endswith("/a2a/events"), service
     assert service["push_notifications"]["subscriptions_path"] == a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, service
     assert service["push_notifications"]["auth"] == "none", service
@@ -6601,6 +6611,9 @@ def assert_gateway_schema(registry: dict) -> None:
     for key in ("agent_cards", "tasks", "messages", "artifacts"):
         assert isinstance(a2a[key], list), a2a
     assert a2a["request_response"]["task_query"] == "/a2a/tasks/query", a2a
+    assert a2a["request_response"]["message_send"] == "/a2a/messages", a2a
+    assert a2a["delivery"]["mode"] == "agent_mail_inbox", a2a
+    assert a2a["delivery"]["auto_dispatch"] is False, a2a
     assert a2a["subscriptions"]["streaming"] == "/a2a/events", a2a
     assert a2a["subscriptions"]["push_notifications"] == "/a2a/push-subscriptions", a2a
     mcp = registry["mcp_gateway"]
@@ -6613,6 +6626,8 @@ def assert_gateway_schema(registry: dict) -> None:
     assert any(item["uri"] == "resource://agent-mail/checkpoints" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/recovery-plans" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/runtime-providers" for item in mcp["resources"]), mcp
+    assert any(item["uri"] == "resource://agent-mail/context-inspector" for item in mcp["resources"]), mcp
+    assert any(item["uri"] == "resource://agent-mail/permission-matrix" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedules" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedule-runs" for item in mcp["resources"]), mcp
@@ -6786,7 +6801,10 @@ def assert_baseline_report_schema(report: dict) -> None:
 def assert_agent_card_schema(card: dict) -> None:
     assert card["schema_version"] == "a2a.agent_card.v1", card
     assert card["agent_id"], card
-    assert card["endpoint"]["transport"] == "internal-agent-mail", card
+    assert card["endpoint"]["transport"] == "http+agent-mail", card
+    assert card["endpoint"]["uri"] == "/a2a/messages", card
+    assert card["delivery"]["mode"] == "agent_mail_inbox", card
+    assert card["delivery"]["auto_dispatch"] is False, card
     assert card["capabilities"]["artifact_refs"] is True, card
     assert card["capabilities"]["human_approval"] is True, card
     assert card["auth"]["type"] == "local_runtime", card
@@ -7077,14 +7095,55 @@ def run_gateway_server_checks() -> None:
         assert health["service"]["schema_version"] == "agentgateway.service.v1", health
         gateway = get_json(f"{base}/gateway")
         assert_gateway_schema(gateway)
+        context_snapshot = get_json(f"{base}/gateway/context")
+        assert context_snapshot["schema_version"] == "shuheng.context_inspector.v1", context_snapshot
+        assert context_snapshot["gateway"]["message_send_endpoint"] == "/a2a/messages", context_snapshot
+        permission_snapshot = get_json(f"{base}/gateway/permissions")
+        assert permission_snapshot["schema_version"] == "shuheng.permission_matrix.v1", permission_snapshot
+        assert any(row.get("subject_id") == sample_subagent.agent_id for row in permission_snapshot["entries"]), permission_snapshot
         a2a = get_json(f"{base}/a2a")
         assert a2a["schema_version"] == "a2a.gateway.v1", a2a
+        cards = get_json(f"{base}/a2a/agent-cards")
+        assert any(card.get("agent_id") == sample_subagent.agent_id for card in cards["agent_cards"]), cards
         mcp = get_json(f"{base}/mcp")
         assert mcp["schema_version"] == "mcp.gateway.v1", mcp
         resource = get_json(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Ftasks")
         assert resource["schema_version"] == "mcp.resource.contents.v1", resource
+        context_resource = get_json(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Fcontext-inspector")
+        assert "shuheng.context_inspector.v1" in context_resource["contents"][0]["text"], context_resource
+        permission_resource = get_json(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Fpermission-matrix")
+        assert "shuheng.permission_matrix.v1" in permission_resource["contents"][0]["text"], permission_resource
+        sent_message = post_json(
+            f"{base}/a2a/messages",
+            {
+                "from": {"agent_id": "external.researcher"},
+                "to": {"target": sample_subagent.agent_id},
+                "intent": "delegate",
+                "parts": [{"kind": "text", "text": "Summarize gateway message delivery semantics."}],
+            },
+        )
+        assert sent_message["schema_version"] == "a2a.message_send_response.v1", sent_message
+        assert sent_message["accepted"] is True, sent_message
+        assert sent_message["delivery"]["mode"] == "agent_mail_inbox", sent_message
+        assert sent_message["delivery"]["auto_dispatch"] is False, sent_message
+        gateway_task_id = sent_message["task"]["id"]
+        assert gateway_task_id in a.latest_task_records(), a.latest_task_records()
+        assert a.latest_task_records()[gateway_task_id]["kind"] == "gateway_message", a.latest_task_records()[gateway_task_id]
+        unknown_target = post_json_any_status(
+            f"{base}/a2a/messages",
+            {
+                "from": {"agent_id": "external.researcher"},
+                "to": {"target": "agent://unknown-gateway-target"},
+                "parts": [{"kind": "text", "text": "This should not create a phantom gateway task."}],
+            },
+        )
+        assert unknown_target["accepted"] is False, unknown_target
+        assert unknown_target["_http_status"] == 404, unknown_target
+        assert unknown_target["delivery"]["auto_dispatch"] is False, unknown_target
         query = post_json(f"{base}/a2a/tasks/query", {"task_id": "task_direct_schema"})
         assert query["schema_version"] == "a2a.query_response.v1", query
+        sent_query = post_json(f"{base}/a2a/tasks/query", {"task_id": gateway_task_id})
+        assert sent_query["tasks"] and sent_query["tasks"][-1]["id"] == gateway_task_id, sent_query
         with urllib.request.urlopen(f"{base}/a2a/events?once=1", timeout=5) as response:
             frame = response.read().decode("utf-8")
         assert "event:" in frame and "data:" in frame, frame

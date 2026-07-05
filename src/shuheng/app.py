@@ -461,6 +461,8 @@ AGENT_EVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "evals.jsonl")
 AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
 AGENT_LOCKS_PATH = os.path.join(AGENT_HARNESS_DIR, "locks.json")
 AGENT_GATEWAY_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway.json")
+AGENT_CONTEXT_INSPECTOR_PATH = os.path.join(AGENT_HARNESS_DIR, "context_inspector.json")
+AGENT_PERMISSION_MATRIX_PATH = os.path.join(AGENT_HARNESS_DIR, "permission_matrix.json")
 AGENT_POLICY_PATH = os.path.join(AGENT_HARNESS_DIR, "policy.json")
 AGENT_POLICY_DECISIONS_PATH = os.path.join(AGENT_HARNESS_DIR, "policy_decisions.jsonl")
 AGENT_ORCHESTRATOR_PLANS_PATH = os.path.join(AGENT_HARNESS_DIR, "orchestrator_plans.jsonl")
@@ -771,6 +773,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/plugin", "<cmd>", "查看插件详情或创建插件 agent", False),
     ("/workflows", "", "查看声明式 workflow 注册表", True),
     ("/workflow", "<cmd>", "生成、保存、查看或运行声明式 workflow", False),
+    ("/context", "", "查看当前控制面上下文来源", True),
+    ("/permissions", "", "查看统一权限矩阵", True),
     ("/workspace", "<cmd>", "查看项目工作区 provenance", False),
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
@@ -4536,7 +4540,7 @@ def secret_status_text(state: State) -> str:
 
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
-    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/continue", "/sessions",
+    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
     "/workspace", "/workspaces",
     "/temp",
 }
@@ -7079,7 +7083,7 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
         "agent_id": sub.agent_id,
         "name": sub.name,
         "provider": {"organization": "local.Shuheng", "url": "local://shuheng"},
-        "endpoint": {"transport": "internal-agent-mail", "uri": f"agent://{sub.agent_id}"},
+        "endpoint": {"transport": "http+agent-mail", "uri": "/a2a/messages", "target": sub.agent_id},
         "capabilities": {
             "streaming": True,
             "push_notifications": False,
@@ -7114,6 +7118,11 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
                 "output": "summary, findings, evidence_refs, risks, artifact_refs, confidence",
             }
         ],
+        "delivery": {
+            "message_endpoint": "/a2a/messages",
+            "mode": "agent_mail_inbox",
+            "auto_dispatch": False,
+        },
     }
 
 
@@ -7126,7 +7135,7 @@ def a2a_agent_card_for_role(role: str, template: Optional[dict[str, Any]] = None
         "agent_id": f"role.{role}",
         "name": f"{role} role template",
         "provider": {"organization": "local.Shuheng", "url": "local://shuheng"},
-        "endpoint": {"transport": "internal-agent-mail", "uri": f"agent-role://{role}"},
+        "endpoint": {"transport": "http+agent-mail", "uri": "/a2a/messages", "target": f"role.{role}"},
         "capabilities": {
             "streaming": True,
             "push_notifications": True,
@@ -7149,6 +7158,11 @@ def a2a_agent_card_for_role(role: str, template: Optional[dict[str, Any]] = None
                 "output": "summary, findings, evidence_refs, risks, artifact_refs, confidence",
             }
         ],
+        "delivery": {
+            "message_endpoint": "/a2a/messages",
+            "mode": "agent_mail_inbox",
+            "auto_dispatch": False,
+        },
     }
 
 
@@ -7258,20 +7272,19 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
         }
         for role, template in sorted(ROLE_TEMPLATES.items())
     }
-    agents = []
-    if state is not None:
-        agents = [
-            {
-                "agent_id": sub.agent_id,
-                "role": normalized_subagent_role(sub.role),
-                "security_context": sub.security_context,
-                "capabilities_ref": f"capability://role/{normalized_subagent_role(sub.role)}",
-                "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
-                "status": sub.status,
-                "active_task_id": sub.active_bus_task_id,
-            }
-            for sub in sorted(state.subagents.values(), key=lambda item: item.agent_id)
-        ]
+    agents = [
+        {
+            "agent_id": sub.agent_id,
+            "role": normalized_subagent_role(sub.role),
+            "security_context": sub.security_context,
+            "capabilities_ref": f"capability://role/{normalized_subagent_role(sub.role)}",
+            "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
+            "status": sub.status,
+            "active_task_id": sub.active_bus_task_id,
+            "source": "state" if state is not None and sub.agent_id in state.subagents else "subagent_meta",
+        }
+        for sub in gateway_visible_subagents(state)
+    ]
     return {
         "schema_version": "agentcapabilities.v1",
         "roles": role_capabilities,
@@ -7351,6 +7364,313 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
             "fallback": "inherit global default when an agent has no explicit model",
         },
     }
+
+
+def persistent_subagents_for_gateway() -> list[SubAgentRuntime]:
+    """Load persisted non-secret subagent metadata for stateless gateway discovery."""
+    records: list[SubAgentRuntime] = []
+    if not os.path.isdir(SUBAGENTS_DIR):
+        return records
+    for name in sorted(os.listdir(SUBAGENTS_DIR)):
+        home = subagent_home(name)
+        if not os.path.isdir(home):
+            continue
+        meta = load_subagent_meta_file(os.path.join(home, "meta.json"))
+        if meta.get("deleted"):
+            continue
+        agent_id = str(meta.get("id") or os.path.basename(home)).strip()
+        if not agent_id:
+            continue
+        records.append(
+            SubAgentRuntime(
+                agent_id=agent_id,
+                name=str(meta.get("name") or agent_id),
+                home=home,
+                role=normalized_subagent_role(str(meta.get("role") or "specialist")),
+                default_model=str(meta.get("default_model") or ""),
+                security_context=normalized_security_context(str(meta.get("security_context") or "standard")),
+                owner_session=str(meta.get("owner_session") or ""),
+                persistent=bool(meta.get("persistent", True)),
+                created_at=float(meta.get("created_at") or time.time()),
+                updated_at=float(meta.get("updated_at") or time.time()),
+                chat_session_id=str(meta.get("chat_session_id") or ""),
+                chat_title=str(meta.get("chat_title") or ""),
+                status=str(meta.get("status") or "idle"),
+                dashboard=meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {},
+                skill_refs=normalize_subagent_skill_refs(meta.get("skill_refs") or meta.get("skills") or []),
+            )
+        )
+    return records
+
+
+def gateway_visible_subagents(state: Optional[State] = None) -> list[SubAgentRuntime]:
+    if state is not None:
+        return sorted(state.subagents.values(), key=lambda item: item.agent_id)
+    return persistent_subagents_for_gateway()
+
+
+def plugin_registry_snapshot(registry: Optional[PluginRegistry] = None) -> dict[str, Any]:
+    registry = registry or user_plugin_registry()
+    roots = user_plugin_roots()
+    plugin_rows: list[dict[str, Any]] = []
+    for plugin_id in sorted(registry.plugins):
+        plugin = registry.plugins[plugin_id]
+        try:
+            manifest_hash = artifact_sha256(plugin.manifest_path)
+        except Exception:
+            manifest_hash = ""
+        plugin_rows.append(
+            {
+                "plugin_id": plugin.plugin_id,
+                "name": plugin.name,
+                "version": plugin.version,
+                "root": plugin.root,
+                "manifest_path": plugin.manifest_path,
+                "manifest_hash": manifest_hash,
+                "contributes": {
+                    "skills": [skill.ref for skill in plugin.skills],
+                    "agent_templates": [template.ref for template in plugin.agent_templates],
+                    "workflows": [workflow.ref for workflow in plugin.workflows],
+                },
+                "permissions": plugin.permissions or {},
+                "status": "warning" if any(issue.plugin_id == plugin.plugin_id for issue in registry.issues) else "ok",
+            }
+        )
+    return {
+        "schema_version": "shuheng.plugin_registry_snapshot.v1",
+        "roots": roots,
+        "plugins": plugin_rows,
+        "issues": [
+            {
+                "plugin_id": issue.plugin_id,
+                "manifest_path": issue.manifest_path,
+                "message": issue.message,
+            }
+            for issue in registry.issues
+        ],
+        "counts": {
+            "plugins": len(registry.plugins),
+            "skills": sum(len(plugin.skills) for plugin in registry.plugins.values()),
+            "agent_templates": sum(len(plugin.agent_templates) for plugin in registry.plugins.values()),
+            "workflows": sum(len(plugin.workflows) for plugin in registry.plugins.values()),
+            "issues": len(registry.issues),
+        },
+    }
+
+
+def permission_matrix(state: Optional[State] = None, *, registry: Optional[PluginRegistry] = None) -> dict[str, Any]:
+    registry = registry or user_plugin_registry()
+    entries: list[dict[str, Any]] = []
+
+    for role, template in sorted(ROLE_TEMPLATES.items()):
+        entries.append(
+            {
+                "subject_type": "role",
+                "subject_id": f"role.{role}",
+                "display_name": f"{role} role template",
+                "source": "ROLE_TEMPLATES",
+                "permissions": permissions_for_role(role),
+                "capabilities": {
+                    "tools_allowed": list(template.get("tools_allowed") or []),
+                    "write_policy": template.get("write_policy", "none"),
+                    "output_contract": list(template.get("output_contract") or []),
+                },
+                "risk_level": "approval_required" if role in {"coder", "ops"} else "bounded",
+                "approval_required_actions": [
+                    action for action, rule in POLICY_ACTIONS.items()
+                    if isinstance(rule, dict) and rule.get("mode") == "approval_required"
+                ],
+            }
+        )
+
+    for sub in gateway_visible_subagents(state):
+        role = normalized_subagent_role(sub.role)
+        entries.append(
+            {
+                "subject_type": "agent",
+                "subject_id": sub.agent_id,
+                "display_name": sub.name,
+                "source": "state" if state is not None and sub.agent_id in state.subagents else "subagent_meta",
+                "permissions": permissions_for_role(role, security_context=sub.security_context),
+                "capabilities": {
+                    "role": role,
+                    "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
+                    "security_context": sub.security_context,
+                    "persistent": bool(sub.persistent),
+                    "status": sub.status,
+                },
+                "risk_level": "secret" if sub.security_context == "secret" else "bounded",
+                "approval_required_actions": ["repo_write", "deploy", "access_secret", "modify_permission_policy"],
+            }
+        )
+
+    for plugin_id in sorted(registry.plugins):
+        plugin = registry.plugins[plugin_id]
+        entries.append(
+            {
+                "subject_type": "plugin",
+                "subject_id": plugin.plugin_id,
+                "display_name": plugin.name,
+                "source": plugin.manifest_path,
+                "permissions": plugin.permissions or {},
+                "capabilities": {
+                    "skills": [skill.ref for skill in plugin.skills],
+                    "agent_templates": [template.ref for template in plugin.agent_templates],
+                    "workflows": [workflow.ref for workflow in plugin.workflows],
+                },
+                "risk_level": "metadata_only",
+                "approval_required_actions": list((plugin.permissions or {}).get("approval_required_actions") or []),
+            }
+        )
+        for template in plugin.agent_templates:
+            entries.append(
+                {
+                    "subject_type": "agent_template",
+                    "subject_id": template.ref,
+                    "display_name": template.name,
+                    "source": plugin.manifest_path,
+                    "permissions": permissions_for_role(template.role),
+                    "capabilities": {
+                        "role": template.role,
+                        "profile": template.profile,
+                        "persistent": template.persistent,
+                        "skill_refs": list(template.skill_refs),
+                        "default_model": template.default_model,
+                    },
+                    "risk_level": "bounded",
+                    "approval_required_actions": ["repo_write", "deploy", "access_secret", "modify_permission_policy"],
+                }
+            )
+
+    for result in workflow_helpers.all_workflow_load_results(registry):
+        definition = result.definition
+        if definition is None:
+            continue
+        approval_steps = [step for step in definition.steps if step.step_type == "approval"]
+        entries.append(
+            {
+                "subject_type": "workflow",
+                "subject_id": definition.workflow_ref,
+                "display_name": definition.name,
+                "source": definition.path,
+                "permissions": definition.permissions or {},
+                "capabilities": {
+                    "inputs": [item.input_id for item in definition.inputs],
+                    "steps": [{"id": step.step_id, "type": step.step_type, "agent": step.agent} for step in definition.steps],
+                    "safe_runner_step_types": sorted(workflow_helpers.WORKFLOW_RUNNER_V0_SAFE_STEP_TYPES),
+                },
+                "risk_level": "approval_required" if approval_steps else "bounded",
+                "approval_required_actions": ["workflow_approval_step"] if approval_steps else [],
+            }
+        )
+
+    for tool in mcp_tool_registry():
+        entries.append(
+            {
+                "subject_type": "mcp_tool",
+                "subject_id": str(tool.get("name") or ""),
+                "display_name": str(tool.get("name") or ""),
+                "source": "mcp_tool_registry",
+                "permissions": {
+                    "policy_action": tool.get("policy_action"),
+                    "approval_required": bool(tool.get("approval_required")),
+                },
+                "capabilities": {"roles": tool.get("roles") or []},
+                "risk_level": "approval_required" if tool.get("approval_required") else "bounded",
+                "approval_required_actions": [str(tool.get("policy_action") or "")] if tool.get("approval_required") else [],
+            }
+        )
+
+    summary: dict[str, int] = {}
+    for entry in entries:
+        key = str(entry.get("subject_type") or "unknown")
+        summary[key] = summary.get(key, 0) + 1
+    matrix = {
+        "schema_version": "shuheng.permission_matrix.v1",
+        "updated_at": now_iso(),
+        "policy": {
+            "owner": "shuheng.orchestrator",
+            "default": "least_privilege",
+            "risky_actions": sorted(POLICY_ACTIONS),
+            "write_model": "read_parallel_write_serial_unless_isolated",
+        },
+        "summary": summary,
+        "entries": entries,
+    }
+    write_text_atomic(AGENT_PERMISSION_MATRIX_PATH, json.dumps(matrix, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return matrix
+
+
+def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
+    registry = user_plugin_registry()
+    workflow_rows = workflow_run_records()
+    latest_runs = workflow_helpers.latest_workflow_run_rows(workflow_rows)
+    context_pack_count = 0
+    if os.path.isdir(AGENT_CONTEXT_PACKS_DIR):
+        for _base, _dirs, files in os.walk(AGENT_CONTEXT_PACKS_DIR):
+            context_pack_count += len([name for name in files if not name.startswith(".")])
+    subagents = gateway_visible_subagents(state)
+    snapshot = {
+        "schema_version": "shuheng.context_inspector.v1",
+        "updated_at": now_iso(),
+        "project": {
+            "app_root": APP_ROOT_DIR,
+            "shuheng_home": SHUHENG_HOME,
+            "harness_dir": AGENT_HARNESS_DIR,
+            "architecture_baseline": ARCHITECTURE_BASELINE_PATH,
+            "project_agents": PROJECT_AGENTS_PATH,
+        },
+        "rules": {
+            "agents_md": PROJECT_AGENTS_PATH,
+            "architecture_baseline": ARCHITECTURE_BASELINE_PATH,
+            "active_backend_spec": os.path.join(APP_ROOT_DIR, ".trellis", "spec", "backend", "agent-control-protocol.md"),
+            "shared_guides": os.path.join(APP_ROOT_DIR, ".trellis", "spec", "guides", "index.md"),
+        },
+        "runtime": {
+            "providers": runtime_registry_record().get("provider_ids", []),
+            "models": model_orchestration_registry(state).get("model_count", 0),
+            "selected_session": getattr(state, "selected_session", "") if state is not None else "",
+            "status": getattr(state, "status", "stateless_gateway") if state is not None else "stateless_gateway",
+        },
+        "memory": {
+            "subagents_dir": SUBAGENTS_DIR,
+            "subagent_count": len(subagents),
+            "context_packs_dir": AGENT_CONTEXT_PACKS_DIR,
+            "context_pack_count": context_pack_count,
+            "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
+        },
+        "plugins": plugin_registry_snapshot(registry),
+        "workflows": {
+            "run_store": AGENT_WORKFLOW_RUNS_PATH,
+            "event_store": AGENT_WORKFLOW_EVENTS_PATH,
+            "latest_run_count": len(latest_runs),
+            "active_run_ids": [
+                str(row.get("run_id") or "")
+                for row in latest_runs
+                if str(row.get("status") or "") not in workflow_helpers.WORKFLOW_RUN_TERMINAL_STATUSES
+            ],
+        },
+        "mcp": {
+            "tool_count": len(mcp_tool_registry()),
+            "resource_count": len(mcp_resource_registry()),
+            "resources": [item.get("uri") for item in mcp_resource_registry()],
+        },
+        "gateway": {
+            "registry_path": AGENT_GATEWAY_PATH,
+            "context_inspector_path": AGENT_CONTEXT_INSPECTOR_PATH,
+            "permission_matrix_path": AGENT_PERMISSION_MATRIX_PATH,
+            "daemon": read_gateway_daemon_status(),
+            "message_send_endpoint": "/a2a/messages",
+        },
+        "loading_policy": {
+            "artifact_reference_only": True,
+            "include_raw_logs": False,
+            "skill_loading": "progressive_disclosure",
+            "subagent_context": "isolated_context_pack",
+        },
+    }
+    write_text_atomic(AGENT_CONTEXT_INSPECTOR_PATH, json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return snapshot
 
 
 
@@ -7570,6 +7890,8 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
         "recovery_plans": AGENT_RECOVERY_PLANS_PATH,
         "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
         "runtime_providers": AGENT_RUNTIME_REGISTRY_PATH,
+        "context_inspector": AGENT_CONTEXT_INSPECTOR_PATH,
+        "permission_matrix": AGENT_PERMISSION_MATRIX_PATH,
         "schedules": AGENT_SCHEDULES_PATH,
         "schedule_runs": AGENT_SCHEDULE_RUNS_PATH,
         "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
@@ -7712,6 +8034,8 @@ def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dic
 
 def mcp_resource_contents(uri: str) -> dict[str, Any]:
     uri = str(uri or "")
+    if uri in {"resource://agent-mail/context-inspector", "resource://agent-mail/permission-matrix"}:
+        ensure_gateway_registry(None)
     registry = {row.get("uri", ""): row for row in mcp_resource_registry()}
     resource = registry.get(uri)
     if not resource:
@@ -8699,6 +9023,124 @@ def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def gateway_message_text(payload: dict[str, Any]) -> str:
+    for key in ("message", "text", "content", "objective"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parts = payload.get("parts")
+    if isinstance(parts, list):
+        texts: list[str] = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            if isinstance(part.get("text"), str):
+                texts.append(part["text"].strip())
+            elif isinstance(part.get("data"), dict) and isinstance(part["data"].get("text"), str):
+                texts.append(part["data"]["text"].strip())
+        return "\n".join(text for text in texts if text).strip()
+    return ""
+
+
+def gateway_message_target(payload: dict[str, Any]) -> tuple[str, str, str, str]:
+    raw_to = payload.get("to")
+    target = ""
+    if isinstance(raw_to, dict):
+        target = str(raw_to.get("target") or raw_to.get("agent_id") or raw_to.get("id") or raw_to.get("uri") or "").strip()
+    if not target:
+        target = str(payload.get("target") or payload.get("agent_id") or payload.get("recipient") or "").strip()
+    target = target.removeprefix("agent://").removeprefix("agent-role://").strip()
+    if target in {"", "orchestrator", "main"}:
+        return "agent", "orchestrator.main", "main_orchestrator", ""
+    if target.startswith("role."):
+        requested_role = clean_subagent_id(target.split(".", 1)[1] or "").replace("-", "_")
+        if requested_role in ROLE_TEMPLATES:
+            role = normalized_role(requested_role)
+            return "role", f"role.{role}", role, ""
+        return "", "", "", "target must match a discovered gateway agent or role"
+    if target in ROLE_TEMPLATES:
+        role = normalized_role(target)
+        return "role", f"role.{role}", role, ""
+    for sub in gateway_visible_subagents(None):
+        if target in {sub.agent_id, sub.name}:
+            return "agent", sub.agent_id, normalized_subagent_role(sub.role), ""
+    return "", "", "", "target must match a discovered gateway agent or role"
+
+
+def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    text = gateway_message_text(payload)
+    if not text:
+        return {"schema_version": "a2a.message_send_response.v1", "accepted": False, "error": "message text is required"}, 400
+    to_type, target, role, target_error = gateway_message_target(payload)
+    if not target:
+        return {
+            "schema_version": "a2a.message_send_response.v1",
+            "accepted": False,
+            "error": target_error or "target agent is required",
+            "delivery": {"mode": "agent_mail_inbox", "auto_dispatch": False},
+        }, 404 if target_error else 400
+    task_id = str(payload.get("task_id") or payload.get("taskId") or short_uid("gwtask")).strip()
+    from_agent = str(payload.get("from_agent") or payload.get("from") or "external.agent").strip()
+    if isinstance(payload.get("from"), dict):
+        from_agent = str(payload["from"].get("agent_id") or payload["from"].get("id") or from_agent).strip()
+    intent = str(payload.get("intent") or "gateway_message").strip()
+    source_payload = {
+        "summary": text,
+        "objective": text,
+        "source": "gateway",
+        "external_message": payload,
+        "role": role,
+        "delivery_mode": "agent_mail_inbox",
+    }
+    permissions = permissions_for_role(role)
+    task_row = append_task_ledger(
+        task_id,
+        status="gateway_received",
+        assigned_agent=target,
+        title=compact_title(f"Gateway message to {target}", 80),
+        kind="gateway_message",
+        objective=text,
+        permissions=permissions,
+        context_policy=context_policy_for_task(text),
+        output_contract={"format": "agent_mail", "required_sections": ["acknowledgement", "next_action"]},
+        summary="External gateway message accepted into Agent Mail inbox.",
+    )
+    mail = append_agent_mail(
+        from_agent=from_agent,
+        to_type=to_type,
+        target=target,
+        intent=intent,
+        task_id=task_id,
+        status="received",
+        payload=source_payload,
+        permissions=permissions,
+        context_policy=context_policy_for_task(text),
+        task=task_contract_for_role(role, text),
+    )
+    trace = append_trace(
+        task_id,
+        "gateway_message_received",
+        agent_id=target,
+        status="received",
+        payload={"message_id": mail["message_id"], "from_agent": from_agent, "delivery_mode": "agent_mail_inbox"},
+    )
+    response = {
+        "schema_version": "a2a.message_send_response.v1",
+        "accepted": True,
+        "contextId": "shuheng",
+        "delivery": {
+            "mode": "agent_mail_inbox",
+            "auto_dispatch": False,
+            "policy": "Gateway accepts messages into Shuheng ledgers; Orchestrator/TUI owns execution and approvals.",
+        },
+        "task": a2a_task_object(task_row),
+        "message": a2a_message_object(mail),
+        "trace": trace,
+    }
+    deliver_gateway_push_notification({"schema_version": "agentgateway.push_event.v1", "event": "agent_mail", "created_at": now_iso(), "payload": response})
+    return response, 201
+
+
 class GatewayRequestHandler(BaseHTTPRequestHandler):
     server_version = "ShuhengGateway/1"
 
@@ -8760,6 +9202,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/gateway":
             self.send_json(registry)
             return
+        if path == "/gateway/context":
+            self.send_json(registry["context_inspector"])
+            return
+        if path == "/gateway/permissions":
+            self.send_json(registry["permission_matrix"])
+            return
         if path == "/a2a":
             self.send_json(registry["a2a_gateway"])
             return
@@ -8816,6 +9264,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/a2a/tasks/query":
             self.send_json(query_a2a_task_payload(payload))
+            return
+        if path == "/a2a/messages":
+            response, status = append_gateway_agent_message(payload)
+            self.send_json(response, status=status)
             return
         if path == "/a2a/push-subscriptions":
             try:
@@ -8919,7 +9371,7 @@ def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
         command="serve",
     )
     print(f"Shuheng gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
-    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /a2a /a2a/events /mcp /mcp/resources")
+    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /gateway/context /gateway/permissions /a2a /a2a/messages /a2a/events /mcp /mcp/resources")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -9603,6 +10055,8 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
     model_registry = model_orchestration_registry(state)
     schedule_registry = scheduled_task_registry(state)
     capability_registry = gateway_capability_registry(state)
+    context_data = context_inspector_snapshot(state)
+    permissions_data = permission_matrix(state)
     governance_registry = governance_component_registry(state)
     bridge_registry = external_bridge_registry()
     role_cards = [a2a_agent_card_for_role(role, template) for role, template in sorted(ROLE_TEMPLATES.items())]
@@ -9622,6 +10076,8 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "memory_candidates": AGENT_MEMORY_CANDIDATES_PATH,
             "traces": AGENT_TRACES_PATH,
             "evals": AGENT_EVALS_PATH,
+            "context_inspector": AGENT_CONTEXT_INSPECTOR_PATH,
+            "permission_matrix": AGENT_PERMISSION_MATRIX_PATH,
             "runtime_evidence": AGENT_RUNTIME_EVIDENCE_PATH,
             "checkpoints": AGENT_CHECKPOINT_INDEX_PATH,
             "checkpoint_store": AGENT_CHECKPOINTS_DIR,
@@ -9671,7 +10127,14 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
                 "tasks": "/a2a/tasks",
                 "task_query": "/a2a/tasks/query",
                 "messages": "/a2a/messages",
+                "message_send": "/a2a/messages",
                 "artifacts": "/a2a/artifacts",
+            },
+            "delivery": {
+                "message_endpoint": "/a2a/messages",
+                "mode": "agent_mail_inbox",
+                "auto_dispatch": False,
+                "execution_owner": "shuheng.orchestrator",
             },
             "agent_cards": [],
             "tasks": a2a_tasks,
@@ -9685,6 +10148,8 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             },
         },
         "capability_registry": capability_registry,
+        "context_inspector": context_data,
+        "permission_matrix": permissions_data,
         "runtime_registry": runtime_registry,
         "model_orchestration": model_registry,
         "scheduled_task_registry": schedule_registry,
@@ -9697,11 +10162,10 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "agent_cards": list(role_cards),
     }
     data["a2a_gateway"]["agent_cards"].extend(role_cards)
-    if state is not None:
-        for sub in sorted(state.subagents.values(), key=lambda item: item.agent_id):
-            card = a2a_agent_card_for_subagent(sub)
-            data["agent_cards"].append(card)
-            data["a2a_gateway"]["agent_cards"].append(card)
+    for sub in gateway_visible_subagents(state):
+        card = a2a_agent_card_for_subagent(sub)
+        data["agent_cards"].append(card)
+        data["a2a_gateway"]["agent_cards"].append(card)
     data["baseline_comparison"] = architecture_baseline_report(state, gateway_data=data)
     write_text_atomic(AGENT_GATEWAY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return data
@@ -21974,6 +22438,8 @@ def gateway_panel_items(state: State) -> list[PanelItem]:
         "mcp_gateway",
         "a2a_gateway",
         "capability_registry",
+        "context_inspector",
+        "permission_matrix",
         "runtime_registry",
         "model_orchestration",
         "scheduled_task_registry",
@@ -21998,6 +22464,53 @@ def gateway_panel_items(state: State) -> list[PanelItem]:
             detail=json.dumps(card, ensure_ascii=False, indent=2, sort_keys=True),
             status=str(card.get("status") or ""),
             payload=card,
+        ))
+    return items
+
+
+def context_panel_items(state: State) -> list[PanelItem]:
+    data = context_inspector_snapshot(state)
+    items: list[PanelItem] = []
+    for key in ("project", "rules", "runtime", "memory", "plugins", "workflows", "mcp", "gateway", "loading_policy"):
+        payload = data.get(key) if isinstance(data.get(key), dict) else {}
+        items.append(PanelItem(
+            key=key,
+            title=f"context · {key}",
+            subtitle=str(payload.get("schema_version") or payload.get("status") or payload.get("harness_dir") or "configured"),
+            detail=json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            status=str(payload.get("status") or "ok"),
+            payload=payload,
+        ))
+    return items
+
+
+def permission_panel_items(state: State) -> list[PanelItem]:
+    data = permission_matrix(state)
+    items: list[PanelItem] = [
+        PanelItem(
+            key="summary",
+            title="Permission Matrix Summary",
+            subtitle=json.dumps(data.get("summary") or {}, ensure_ascii=False, sort_keys=True),
+            detail=json.dumps(data.get("policy") or {}, ensure_ascii=False, indent=2, sort_keys=True),
+            status="ok",
+            payload=data.get("summary") if isinstance(data.get("summary"), dict) else {},
+        )
+    ]
+    for entry in data.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        subject_type = str(entry.get("subject_type") or "unknown")
+        subject_id = str(entry.get("subject_id") or "")
+        permissions = entry.get("permissions") if isinstance(entry.get("permissions"), dict) else {}
+        write_policy = str(permissions.get("write_policy") or permissions.get("policy_action") or "-")
+        status = str(entry.get("risk_level") or "")
+        items.append(PanelItem(
+            key=f"{subject_type}:{subject_id}",
+            title=f"{subject_type} · {entry.get('display_name') or subject_id}",
+            subtitle=f"write:{write_policy} · risk:{status}",
+            detail=json.dumps(entry, ensure_ascii=False, indent=2, sort_keys=True),
+            status=status,
+            payload=entry,
         ))
     return items
 
@@ -22590,6 +23103,10 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
             return "Eval / Trace", eval_panel_items(), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q 关闭"
         if panel == "gateway":
             return "A2A / MCP Gateway", gateway_panel_items(state), "r 重建 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+        if panel == "context":
+            return "Context Inspector", context_panel_items(state), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
+        if panel == "permissions":
+            return "Unified Permission Matrix", permission_panel_items(state), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "baseline":
             return "Architecture Baseline", baseline_panel_items(state), "r 重新生成报告  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "plugins":
@@ -24956,6 +25473,14 @@ def submit(state: State, text: str) -> None:
     if text == "/gateway":
         data = ensure_gateway_registry(state)
         add_system(state, "在 TUI 输入框执行 /gateway 会打开 A2A/MCP Gateway 面板。\n" + json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)[:4000])
+        return
+    if text == "/context":
+        data = context_inspector_snapshot(state)
+        add_system(state, "在 TUI 输入框执行 /context 会打开 Context Inspector 面板。\n" + json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)[:4000])
+        return
+    if text == "/permissions":
+        data = permission_matrix(state)
+        add_system(state, "在 TUI 输入框执行 /permissions 会打开 Unified Permission Matrix 面板。\n" + json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)[:4000])
         return
     if text == "/runtimes":
         data = runtime_registry_record()
@@ -27546,7 +28071,7 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
-        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/workflows"}:
+        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
             open_harness_panel(stdscr, state, panel)

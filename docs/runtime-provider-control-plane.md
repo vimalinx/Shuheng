@@ -137,8 +137,18 @@ Runtime and top-level control metadata are exposed through:
 - `model_orchestration`: `model_orchestration.v1`, built from the TUI model manager state.
 - `scheduled_task_registry`: `scheduledtask.registry.v1`, persisted at `schedules.jsonl`.
 - `scheduledtask.run.v1`: Scheduler run audit rows persisted at `schedule_runs.jsonl`.
+- `context_inspector`: `shuheng.context_inspector.v1`, exposed at
+  `/gateway/context` and `resource://agent-mail/context-inspector`.
+- `permission_matrix`: `shuheng.permission_matrix.v1`, exposed at
+  `/gateway/permissions` and `resource://agent-mail/permission-matrix`.
 - `shuheng-control.v2` schedule actions: `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, and `schedule.delete`.
 - `capability_registry.runtime_providers`: Provider details available to query tools.
+- A2A agent cards: discovered role templates and visible subagents advertise
+  `http+agent-mail` delivery through `/a2a/messages` with `auto_dispatch:false`.
+- A2A message intake: `POST /a2a/messages` accepts messages into Agent Mail,
+  the task ledger, and trace rows only. It records `kind:"gateway_message"` and
+  leaves execution, approvals, memory writes, and workflow continuation owned by
+  the Shuheng Orchestrator/TUI.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
@@ -146,7 +156,11 @@ Runtime and top-level control metadata are exposed through:
   `integrations/omp-shuheng-plugin` exposes compatibility tools
   `shuheng_context_get` and `shuheng_memory_candidate_submit` by calling the
   local Shuheng bridge CLI.
-- MCP resources: `resource://agent-mail/runtime-providers`, `resource://agent-mail/schedules`, and `resource://agent-mail/schedule-runs`.
+- MCP resources: `resource://agent-mail/runtime-providers`,
+  `resource://agent-mail/context-inspector`,
+  `resource://agent-mail/permission-matrix`,
+  `resource://agent-mail/schedules`, and
+  `resource://agent-mail/schedule-runs`.
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
 - Release readiness: `/gateway` exposes `release_readiness` with stable local
   surfaces, experimental surfaces, known gaps, and verification commands.
@@ -170,6 +184,13 @@ Runtime and top-level control metadata are exposed through:
 - Do not bind the Web Console/gateway to a non-loopback interface unless
   `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` is deliberately set and an external
   trusted access boundary is in place. The built-in gateway has no auth layer.
+- Do not let `/a2a/messages` become a hidden executor. External agent messages
+  are inbox entries and ledger facts until the Orchestrator/TUI decides what to
+  run.
+- Do not create phantom message targets. Gateway message targets must resolve to
+  the main orchestrator, a known role template, or a gateway-discovered subagent.
+- Do not list Secret Vault subagents from stateless plaintext metadata. Secret
+  subagents require the unlocked TUI state boundary.
 - Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`.
 - Do not make an OMP plugin a new memory owner. Plugin tools may read context and
   submit memory candidates; Shuheng validates, queues approvals, writes durable

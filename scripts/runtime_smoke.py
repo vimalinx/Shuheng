@@ -299,6 +299,16 @@ def run_gateway_http_smoke(a: Any, completed_task_id: str) -> None:
         task_ids = [str(item.get("id") or "") for item in (query.get("tasks") or []) if isinstance(item, dict)]
         if completed_task_id not in task_ids:
             raise AssertionError(query)
+        sent = post_json(
+            f"{base}/a2a/messages",
+            {
+                "from": {"agent_id": "external.runtime_smoke"},
+                "to": {"target": "role.researcher"},
+                "parts": [{"kind": "text", "text": "runtime smoke gateway delivery"}],
+            },
+        )
+        if sent.get("delivery", {}).get("mode") != "agent_mail_inbox":
+            raise AssertionError(sent)
         snapshot = get_json(f"{base}/gui/snapshot")
         if snapshot.get("mode") != "read_only":
             raise AssertionError(snapshot)
@@ -307,7 +317,7 @@ def run_gateway_http_smoke(a: Any, completed_task_id: str) -> None:
             target_items=["a2a_mcp_gateway"],
             check_id="loopback_http_a2a_mcp_gui_client_smoke",
             level="e2e",
-            summary="Loopback HTTP client read health/gateway/MCP runtime-evidence resource/A2A task query/GUI snapshot without protocol certification claims.",
+            summary="Loopback HTTP client read health/gateway/MCP runtime-evidence resource/A2A task query/message delivery/GUI snapshot without protocol certification claims.",
             evidence_refs=[f"task://{completed_task_id}", "resource://agent-mail/runtime-evidence"],
             details={"base_url": base, "gateway_status": gateway["gateway_service"]["status"]},
         )
