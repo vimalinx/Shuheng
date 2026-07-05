@@ -108,3 +108,36 @@ Completed the OMP-first runtime-core task by adding local gateway context/permis
 ### Next Steps
 
 - None - task complete
+
+
+## Session 49: Narrow gateway agent discovery
+
+**Date**: 2026-07-05
+**Task**: Narrow gateway agent discovery
+**Branch**: `main`
+
+### Summary
+
+Implemented a public gateway directory and inbox-only A2A message flow. Public /gateway, /gateway/agents, and /health now expose agent purpose and delivery metadata while omitting context, permission matrices, local path inventories, and automatic execution. Added policy/runtime smoke coverage, updated backend spec and runtime provider docs, and verified full release gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6d84a43` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

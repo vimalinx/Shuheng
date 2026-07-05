@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 48
+- **Total Sessions**: 49
 - **Last Active**: 2026-07-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~110 | Active |
+| `journal-2.md` | ~143 | Active |
 | `journal-1.md` | ~1982 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 49 | 2026-07-05 | Narrow gateway agent discovery | `6d84a43` | `main` |
 | 48 | 2026-07-05 | Make OMP core and gateway agent delivery | `1e6f27c` | `main` |
 | 47 | 2026-07-04 | Run public alpha release rehearsal | `9dc3efe`, `1043714` | `main` |
 | 46 | 2026-07-04 | Complete public alpha release readiness | `2067230`, `66caa10`, `c75c8b4`, `e223063` | `main` |
