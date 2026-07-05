@@ -181,6 +181,8 @@ Runtime and top-level control metadata are exposed through:
   `resource://agent-mail/schedules`, and
   `resource://agent-mail/schedule-runs`.
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
+- TUI runtime output view: `/runtime-output` formats the same OMP-native
+  runtime subagent query helpers as an operator-readable, read-only snapshot.
 - Release readiness: `/gateway` exposes `release_readiness` with stable local
   surfaces, experimental surfaces, known gaps, and verification commands.
 

@@ -787,6 +787,7 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/evals", "", "查看任务评估/trace", True),
     ("/gateway", "", "查看 A2A/MCP gateway 脚手架", True),
     ("/runtimes", "", "查看 agent runtime/provider 注册表", True),
+    ("/runtime-output", "", "查看 OMP-native runtime 子代理输出", True),
     ("/schedules", "", "查看顶层定时任务注册表", True),
     ("/scheduler", "[tick|run <id>]", "查看或触发定时任务调度器", False),
     ("/baseline", "", "查看架构基线对比报告", True),
@@ -7786,6 +7787,96 @@ def format_runtime_registry(data: dict[str, Any]) -> str:
         lines.append(f"  models: {(provider.get('model_routing') or {}).get('selection_contract', '-')}")
         lines.append(f"  scheduler: {(provider.get('scheduler') or {}).get('dispatch_contract', '-')}")
         lines.append(f"  capabilities: {truncate_cells(enabled, 180) if enabled else '-'}")
+    return "\n".join(lines).rstrip()
+
+
+def runtime_output_message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return clean_text(str(message or "")).strip()
+    for key in ("content", "text", "message", "delta"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return clean_text(value).strip()
+    parts = message.get("parts")
+    if isinstance(parts, list):
+        texts = [
+            str(part.get("text") or part.get("content") or "").strip()
+            for part in parts
+            if isinstance(part, dict) and (part.get("text") or part.get("content"))
+        ]
+        if texts:
+            return clean_text(" ".join(texts)).strip()
+    return ""
+
+
+def runtime_output_subagent_identity(row: Any) -> tuple[str, str]:
+    if not isinstance(row, dict):
+        return "", ""
+    subagent_id = str(row.get("id") or row.get("subagentId") or row.get("subagent_id") or "").strip()
+    session_file = str(row.get("sessionFile") or row.get("session_file") or "").strip()
+    return subagent_id, session_file
+
+
+def format_runtime_output_snapshot(state: Optional[State], *, message_limit: int = 2, subagent_limit: int = 8) -> str:
+    agent = ohmypi_tui_runtime_query_agent(state)
+    provider_id = agent_runtime_provider_id(agent) if agent is not None else ""
+    lines = [
+        "OMP Runtime Output",
+        f"provider: {provider_id or '-'}",
+        "source: live runtime query; no local Shuheng worker fallback",
+        "",
+    ]
+    query = ohmypi_tui_runtime_subagent_list(state, {}, runtime_agent=agent)
+    if query.get("status") != "ok":
+        lines.append(f"status: {query.get('status') or 'error'}")
+        lines.append(f"error: {query.get('error') or 'runtime output unavailable'}")
+        return "\n".join(lines).rstrip()
+    provider_result = query.get("result") if isinstance(query.get("result"), dict) else {}
+    provider_status = str(provider_result.get("status") or query.get("status") or "")
+    lines.append(f"status: {provider_status or '-'}")
+    if provider_status and provider_status != "ok":
+        message = str(provider_result.get("error") or provider_result.get("message") or provider_result.get("reason") or "").strip()
+        if message:
+            lines.append(f"detail: {truncate_cells(clean_text(message), 220)}")
+        return "\n".join(lines).rstrip()
+    subagents = query.get("subagents") if isinstance(query.get("subagents"), list) else []
+    lines.append(f"subagents: {len(subagents)}")
+    if not subagents:
+        lines.append("- no OMP-native runtime subagents reported")
+        return "\n".join(lines).rstrip()
+    for idx, row in enumerate(subagents[:max(0, subagent_limit)], 1):
+        if not isinstance(row, dict):
+            lines.append(f"- #{idx} {truncate_cells(str(row), 180)}")
+            continue
+        subagent_id, session_file = runtime_output_subagent_identity(row)
+        name = str(row.get("name") or row.get("agent") or row.get("role") or subagent_id or "runtime-subagent").strip()
+        status = str(row.get("status") or row.get("state") or "").strip() or "-"
+        lines.append(f"- {truncate_cells(name, 48)} · id={subagent_id or '-'} · status={status}")
+        if session_file:
+            lines.append(f"  session: {truncate_cells(session_file, 140)}")
+        if not (subagent_id or session_file):
+            lines.append("  messages: skipped; missing subagent id/session file")
+            continue
+        message_query = ohmypi_tui_runtime_subagent_messages(
+            state,
+            {"subagent_id": subagent_id, "session_file": session_file},
+            runtime_agent=agent,
+        )
+        message_result = message_query.get("result") if isinstance(message_query.get("result"), dict) else {}
+        if message_query.get("status") != "ok" or str(message_result.get("status") or "ok") != "ok":
+            detail = str(message_query.get("error") or message_result.get("error") or message_result.get("message") or "").strip()
+            lines.append(f"  messages: {message_result.get('status') or message_query.get('status') or 'error'}{(': ' + truncate_cells(clean_text(detail), 160)) if detail else ''}")
+            continue
+        messages = message_query.get("messages") if isinstance(message_query.get("messages"), list) else []
+        if not messages:
+            lines.append("  messages: none")
+            continue
+        for message in messages[-max(1, message_limit):]:
+            role = str(message.get("role") or message.get("type") or "message") if isinstance(message, dict) else "message"
+            text = runtime_output_message_text(message)
+            lines.append(f"  {truncate_cells(role, 18)}: {truncate_cells(text or '(empty)', 180)}")
+    if len(subagents) > subagent_limit:
+        lines.append(f"... {len(subagents) - subagent_limit} more runtime subagents")
     return "\n".join(lines).rstrip()
 
 
@@ -25754,6 +25845,9 @@ def submit(state: State, text: str) -> None:
     if text == "/runtimes":
         data = runtime_registry_record()
         add_system(state, "在 TUI 输入框执行 /runtimes 会打开 Runtime Provider 面板。\n" + format_runtime_registry(data))
+        return
+    if text == "/runtime-output":
+        add_system(state, "在 TUI 输入框执行 /runtime-output 会打开 OMP Runtime Output 面板。\n" + format_runtime_output_snapshot(state))
         return
     if text == "/schedules":
         data = scheduled_task_registry(state)

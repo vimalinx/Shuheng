@@ -6542,7 +6542,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng exposes OMP-native runtime output facts through existing read-only host-tool query surfaces.
-- Applies to: `OHMYPI_TUI_QUERY_ENDPOINTS`, `OHMYPI_TYPED_READONLY_TOOL_NAMES`, `ohmypi_tui_query_endpoint(...)`, `ohmypi_tui_host_tool_handler(...)`, `install_interaction_hook(...)`, and provider methods such as `get_runtime_subagents(...)` and `get_runtime_subagent_messages(...)`.
+- Applies to: `OHMYPI_TUI_QUERY_ENDPOINTS`, `OHMYPI_TYPED_READONLY_TOOL_NAMES`, `ohmypi_tui_query_endpoint(...)`, `ohmypi_tui_host_tool_handler(...)`, `install_interaction_hook(...)`, `/runtime-output`, and provider methods such as `get_runtime_subagents(...)` and `get_runtime_subagent_messages(...)`.
 - Non-goal: This does not add a public HTTP endpoint, lazily start OMP, synthesize OMP-native state from Shuheng ledgers, send messages to runtime agents, mutate approvals, write memory, execute schedules, or process gateway inboxes.
 
 ### 2. Signatures
@@ -6560,6 +6560,8 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - App helper signatures:
   - `ohmypi_tui_runtime_subagent_list(state, args, *, runtime_agent=None) -> shuheng.query.v1`
   - `ohmypi_tui_runtime_subagent_messages(state, args, *, runtime_agent=None) -> shuheng.query.v1`
+- TUI inspection command:
+  - `/runtime-output`
 
 ### 3. Contracts
 
@@ -6569,6 +6571,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - App-layer query helpers may call provider methods, but must not parse raw OMP RPC frames, inspect provider process internals, or import provider-only implementation details.
 - Provider return payloads are passed through the existing `tui_query_json_safe(...)` path and wrapped as `schema_version:"shuheng.query.v1"`.
 - Provider `unsupported` results remain provider results inside the read-only query wrapper; app code must not fabricate live subagent data from `State.subagents`.
+- `/runtime-output` is a read-only operator view over the same app-layer query helpers. It may format provider ids, provider statuses, runtime subagent ids/names/session refs, and bounded transcript previews, but it must not start OMP, dispatch messages, write ledgers, queue approvals, or use Shuheng-managed `State.subagents` as fallback data.
 
 ### 4. Validation & Error Matrix
 
@@ -6578,14 +6581,17 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Provider method raises -> `shuheng.query.v1` error with the runtime query kind and runtime provider id.
 - Provider method returns `{"status":"unsupported"}` -> `shuheng.query.v1` ok wrapper containing the provider result; no fallback data is synthesized.
 - `agent_list` called while a runtime query agent is bound -> still returns `kind:"agent.list"` from Shuheng state and must not call OMP native runtime query methods.
+- `/runtime-output` with unsupported/no-method runtime -> readable TUI text that states runtime output is unavailable; no exception and no local-worker fallback.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: A live OMP tool call invokes `runtime_subagent_messages` with `subagent_id:"sub-1"` and receives the provider's transcript payload wrapped as `kind:"runtime.subagent.messages"`.
+- Good: `/runtime-output` displays live OMP-native runtime subagent snapshots and bounded recent message previews from the active runtime agent.
 - Good: `shuheng_query` and the typed tools expose the same runtime subagent query capability names.
 - Base: A state-bound local caller without an explicit `runtime_agent` may use `state.agent` if it supports the native provider methods.
 - Base: A cold compatible provider can return `status:"unsupported"` without starting OMP.
 - Bad: `runtime_subagent_list` is implemented by iterating `State.subagents`.
+- Bad: `/runtime-output` lists Shuheng persistent workers when OMP has no native runtime subagents.
 - Bad: `agent_list` starts reporting OMP-native subagents or calls `get_runtime_subagents`.
 - Bad: Query handling lazily starts an OMP process only to satisfy a read-only runtime query.
 
@@ -6597,6 +6603,7 @@ OMP plugin calls shuheng-agent-bridge memory-candidate-submit; Shuheng builds a 
 - Tests must assert `runtime_subagent_messages` forwards `subagent_id`, `session_file`, and `from_byte` to `get_runtime_subagent_messages(...)`.
 - Tests must assert no-state and no-method paths return structured query errors.
 - Tests must assert `agent_list` continues returning `kind:"agent.list"` from Shuheng state and does not call the runtime subagent query methods.
+- Tests must assert `/runtime-output` is registered, formats live runtime subagent output through the query helpers, and omits Shuheng-managed worker names when they are not present in OMP-native results.
 
 ### 7. Wrong vs Correct
 
@@ -6610,6 +6617,8 @@ runtime_subagent_list -> read State.subagents -> return those rows as OMP runtim
 
 ```text
 runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents() -> wrap provider result as shuheng.query.v1 without mutating ledgers or starting a new process.
+
+/runtime-output -> format the same query helper results for the operator without reading local Shuheng workers as fallback.
 ```
 
 ## Scenario: Release Readiness And Evidence Posture

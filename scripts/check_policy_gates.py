@@ -5769,6 +5769,8 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     assert "artifact_list" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
     assert "runtime_subagent_list" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
     assert "runtime_subagent_messages" in tool["parameters"]["properties"]["endpoint"]["enum"], tool
+    command_names = {item[0] for item in a.COMMANDS}
+    assert "/runtime-output" in command_names, command_names
 
     handler = a.ohmypi_tui_query_host_tool_handler(None)
     runtime = handler("shuheng_query", {"endpoint": "runtime_registry"})
@@ -5850,14 +5852,28 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
     )
     assert runtime_messages_compat["status"] == "ok", runtime_messages_compat
     assert native_runtime.runtime_query_calls[-1] == ("messages", "", "session.jsonl", 9), native_runtime.runtime_query_calls
+    state.agent = native_runtime
+    formatted_runtime_output = a.format_runtime_output_snapshot(state)
+    assert "OMP Runtime Output" in formatted_runtime_output, formatted_runtime_output
+    assert "source: live runtime query; no local Shuheng worker fallback" in formatted_runtime_output, formatted_runtime_output
+    assert "Runtime Worker" in formatted_runtime_output, formatted_runtime_output
+    assert "runtime reply" in formatted_runtime_output, formatted_runtime_output
+    assert "Obsidiam管家" not in formatted_runtime_output, formatted_runtime_output
+    assert native_runtime.runtime_query_calls[-2][0] == "list", native_runtime.runtime_query_calls
+    assert native_runtime.runtime_query_calls[-1][0] == "messages", native_runtime.runtime_query_calls
     unsupported_runtime = a.ohmypi_tui_host_tool_handler(state, runtime_agent=FakeLLMAgent())("runtime_subagent_list", {})
     assert unsupported_runtime["status"] == "error", unsupported_runtime
     assert unsupported_runtime["kind"] == "runtime.subagent.list", unsupported_runtime
     assert "does not support" in unsupported_runtime["error"], unsupported_runtime
+    state.agent = FakeLLMAgent()
+    unsupported_runtime_output = a.format_runtime_output_snapshot(state)
+    assert "runtime output unavailable" in unsupported_runtime_output or "does not support" in unsupported_runtime_output, unsupported_runtime_output
+    state.agent = native_runtime
+    calls_before_agent_list = list(native_runtime.runtime_query_calls)
     typed_agents = typed_handler("agent_list", {"limit": 5})
     assert typed_agents["schema_version"] == "shuheng.query.v1", typed_agents
     assert typed_agents["kind"] == "agent.list", typed_agents
-    assert native_runtime.runtime_query_calls[-1] == ("messages", "", "session.jsonl", 9), native_runtime.runtime_query_calls
+    assert native_runtime.runtime_query_calls == calls_before_agent_list, native_runtime.runtime_query_calls
     typed_agent = next(row for row in typed_agents["agents"] if row["agent_id"] == steward.agent_id)
     assert typed_agent["runtime_loaded"] is False, typed_agent
     assert typed_agent["interaction_modes"]["same_agent_task"]["command"] == f"/agent ask {steward.agent_id} <prompt>", typed_agent
