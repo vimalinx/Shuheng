@@ -141,3 +141,36 @@ Implemented a public gateway directory and inbox-only A2A message flow. Public /
 ### Next Steps
 
 - None - task complete
+
+
+## Session 50: Expose OMP runtime output queries
+
+**Date**: 2026-07-05
+**Task**: Expose OMP runtime output queries
+**Branch**: `main`
+
+### Summary
+
+Exposed OMP-native runtime subagent list/message read-only query surfaces through Shuheng host tools, documented the boundary, and verified policy gates plus full test suite.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `df66940` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
