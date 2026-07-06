@@ -273,3 +273,36 @@ Archived the gateway naming cleanup: active runtime/docs/tests now use local pro
 ### Next Steps
 
 - None - task complete
+
+
+## Session 54: Agent Mail intake inbox TUI
+
+**Date**: 2026-07-07
+**Task**: Agent Mail intake inbox TUI
+**Branch**: `main`
+
+### Summary
+
+Added a local TUI /inbox for Agent Mail intake, explicit reviewed/ignored handling, executable policy gates, and wheel smoke guardrails against removed Web modules.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a2350c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
