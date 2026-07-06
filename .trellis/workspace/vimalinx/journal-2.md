@@ -207,3 +207,36 @@ Added the read-only /runtime-output TUI command for OMP-native runtime subagent 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 52: Remove active Web surfaces
+
+**Date**: 2026-07-06
+**Task**: Remove active Web surfaces
+**Branch**: `main`
+
+### Summary
+
+Removed active Web Console/HTTP gateway/mobile/remote surfaces, kept local TUI plus OMP as the product surface, and converted protocol exposure to local Agent Mail/registry records with policy, release, runtime smoke, and full pytest verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a0c658e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
