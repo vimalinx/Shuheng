@@ -20,7 +20,7 @@ the existing executable contracts, release gates, and local-alpha compatibility.
 - Existing successful extractions already prove the intended direction:
   - `ledger_store.py` owns JSONL append/read/cache and JSON object locked update.
   - `scheduler.py` owns schedule parsing/runtime helpers.
-  - `runtime_evidence.py`, `baseline.py`, and `gateway_registry.py` own narrow
+  - `runtime_evidence.py`, `baseline.py`, and `local_protocol_registry.py` own narrow
     local-record helper contracts.
   - `control_protocol.py` and provider modules own protocol/runtime-specific
     mechanics.
@@ -324,7 +324,7 @@ Required tests:
 
 Move:
 
-- Local protocol registry record shaping to `gateway_registry.py` or another
+- Local protocol registry record shaping to `local_protocol_registry.py` or another
   lower-level local-record module
 - dashboard/home line construction to `dashboard.py`
 

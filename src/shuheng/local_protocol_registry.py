@@ -1,10 +1,10 @@
-"""Gateway registry payload helpers for Shuheng."""
+"""Local protocol registry payload helpers for Shuheng."""
 from __future__ import annotations
 
 from typing import Any
 
 
-def gateway_base_url(host: str, port: int) -> str:
+def local_protocol_base_uri(host: str, port: int) -> str:
     return "local://shuheng"
 
 
@@ -26,17 +26,9 @@ def mcp_resource_registry(paths: dict[str, str]) -> list[dict[str, Any]]:
     ]
 
 
-def gateway_service_descriptor(
+def local_protocol_service_descriptor(
     *,
-    host: str,
-    port: int,
     bind_safety: dict[str, Any],
-    daemon_state: dict[str, Any],
-    gateway_push_subscriptions_path: str,
-    gateway_push_deliveries_path: str,
-    gateway_daemon_pid_path: str,
-    gateway_daemon_status_path: str,
-    gateway_daemon_log_path: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": "agentgateway.service.v1",

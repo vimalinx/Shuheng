@@ -1,14 +1,14 @@
-"""Tests for extracted baseline and gateway registry helpers."""
+"""Tests for extracted baseline and local protocol registry helpers."""
 from __future__ import annotations
 
 from shuheng import baseline
-from shuheng import gateway_registry
+from shuheng import local_protocol_registry
 
 
 def test_baseline_item_keeps_evidence_semantics() -> None:
     item = baseline.baseline_item(
-        "a2a_mcp_gateway",
-        "A2A/MCP Gateway",
+        "local_protocol_records",
+        "Local Protocol Records",
         "compatibility surface",
         [
             (True, "schema exists"),
@@ -35,7 +35,7 @@ def test_format_baseline_report_uses_caller_report_path() -> None:
     assert "Report path: /tmp/baseline.json" in text
 
 
-def test_gateway_resource_registry_and_descriptor_shapes() -> None:
+def test_local_protocol_resource_registry_and_descriptor_shapes() -> None:
     paths = {
         "messages": "/h/messages.jsonl",
         "tasks": "/h/tasks.jsonl",
@@ -50,24 +50,13 @@ def test_gateway_resource_registry_and_descriptor_shapes() -> None:
         "permission_matrix": "/h/permission_matrix.json",
         "schedules": "/h/schedules.jsonl",
         "schedule_runs": "/h/schedule_runs.jsonl",
-        "gateway_daemon_status": "/h/gateway_daemon.json",
-        "gateway_push_subscriptions": "/h/gateway_push_subscriptions.jsonl",
-        "gateway_push_deliveries": "/h/gateway_push_deliveries.jsonl",
         "bridges": "/h/bridge_registry.json",
         "policy": "/h/policy.json",
     }
 
-    resources = gateway_registry.mcp_resource_registry(paths)
-    descriptor = gateway_registry.gateway_service_descriptor(
-        host="0.0.0.0",
-        port=8765,
+    resources = local_protocol_registry.mcp_resource_registry(paths)
+    descriptor = local_protocol_registry.local_protocol_service_descriptor(
         bind_safety={"auth": "none", "local_only": False, "allowed": True},
-        daemon_state={"status": "stopped"},
-        gateway_push_subscriptions_path=paths["gateway_push_subscriptions"],
-        gateway_push_deliveries_path=paths["gateway_push_deliveries"],
-        gateway_daemon_pid_path="/h/gateway_daemon.pid",
-        gateway_daemon_status_path=paths["gateway_daemon_status"],
-        gateway_daemon_log_path="/h/gateway_daemon.log",
     )
 
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources)

@@ -1,8 +1,8 @@
 """Release-readiness contracts for the Shuheng control plane.
 
 This module is intentionally pure: it owns public release posture, baseline
-evidence semantics, gateway safety wording, and heuristic eval scoring without
-importing the large curses application module.
+evidence semantics, local protocol safety wording, and heuristic eval scoring
+without importing the large curses application module.
 """
 from __future__ import annotations
 
@@ -139,11 +139,12 @@ def is_loopback_host(host: str) -> bool:
     return host in {"", "127.0.0.1", "localhost", "::1"}
 
 
-def gateway_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, Any]:
+def local_protocol_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, Any]:
     host = str(host or "127.0.0.1").strip() or "127.0.0.1"
     local_only = is_loopback_host(host)
+    del allow_remote
     return {
-        "schema_version": "shuheng.gateway_bind_safety.v1",
+        "schema_version": "shuheng.local_protocol_bind_safety.v1",
         "host": host,
         "local_only": local_only,
         "auth": "none",
@@ -155,7 +156,7 @@ def gateway_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, A
 
 
 def protocol_compatibility_metadata(kind: str) -> dict[str, Any]:
-    kind = str(kind or "gateway")
+    kind = str(kind or "local protocol")
     return {
         "posture": "local_record_shape",
         "certification": "not_protocol_certified",

@@ -835,12 +835,8 @@ def governance_store_paths(
     checkpoint_store: str,
     recovery: str,
     recovery_plans: str,
-    gateway: str,
+    local_protocol_registry: str,
     governance: str,
-    gateway_push_subscriptions: str,
-    gateway_push_deliveries: str,
-    gateway_daemon_status: str,
-    gateway_daemon_pid: str,
     bridges: str,
 ) -> dict[str, str]:
     return {
@@ -860,11 +856,7 @@ def governance_store_paths(
         "checkpoint_store": checkpoint_store,
         "recovery": recovery,
         "recovery_plans": recovery_plans,
-        "gateway": gateway,
+        "local_protocol_registry": local_protocol_registry,
         "governance": governance,
-        "gateway_push_subscriptions": gateway_push_subscriptions,
-        "gateway_push_deliveries": gateway_push_deliveries,
-        "gateway_daemon_status": gateway_daemon_status,
-        "gateway_daemon_pid": gateway_daemon_pid,
         "bridges": bridges,
     }

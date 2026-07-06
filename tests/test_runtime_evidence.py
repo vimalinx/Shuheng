@@ -8,7 +8,7 @@ def test_build_record_normalizes_targets_and_level() -> None:
     row = re.build_runtime_evidence_record(
         evidence_id="rtev_1",
         timestamp="2026-06-29T00:00:00+0800",
-        target_items=["a2a_mcp_gateway", "a2a_mcp_gateway", ""],
+        target_items=["local_protocol_records", "local_protocol_records", ""],
         targets=None,
         check_id="smoke",
         level="e2e",
@@ -17,8 +17,8 @@ def test_build_record_normalizes_targets_and_level() -> None:
     )
 
     assert row["schema_version"] == re.RUNTIME_EVIDENCE_SCHEMA
-    assert row["target_items"] == ["a2a_mcp_gateway"]
-    assert row["targets"] == ["a2a_mcp_gateway"]
+    assert row["target_items"] == ["local_protocol_records"]
+    assert row["targets"] == ["local_protocol_records"]
     assert row["level"] == "e2e"
     assert row["evidence_refs"] == ["task://1"]
 

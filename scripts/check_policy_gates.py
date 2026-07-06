@@ -31,7 +31,7 @@ from shuheng import compat_legacy as compat_legacy_mod  # noqa: E402
 from shuheng import control_protocol as cp  # noqa: E402
 from shuheng import context_packs as context_pack_mod  # noqa: E402
 from shuheng import dashboard as dashboard_mod  # noqa: E402
-from shuheng import gateway_registry as gateway_registry_mod  # noqa: E402
+from shuheng import local_protocol_registry as local_protocol_registry_mod  # noqa: E402
 from shuheng import genericagent_provider as gap  # noqa: E402
 from shuheng import governance as governance_mod  # noqa: E402
 from shuheng import history_store as history_store_mod  # noqa: E402
@@ -84,7 +84,7 @@ def retarget_harness(root: str) -> None:
     a.AGENT_EVALS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "evals.jsonl")
     a.AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(a.AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
     a.AGENT_LOCKS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "locks.json")
-    a.AGENT_GATEWAY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway.json")
+    a.AGENT_LOCAL_PROTOCOL_REGISTRY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway.json")
     a.AGENT_CONTEXT_INSPECTOR_PATH = os.path.join(a.AGENT_HARNESS_DIR, "context_inspector.json")
     a.AGENT_PERMISSION_MATRIX_PATH = os.path.join(a.AGENT_HARNESS_DIR, "permission_matrix.json")
     a.AGENT_POLICY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "policy.json")
@@ -100,11 +100,6 @@ def retarget_harness(root: str) -> None:
     a.AGENT_RUNTIME_REGISTRY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "runtime_providers.json")
     a.AGENT_SCHEDULES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "schedules.jsonl")
     a.AGENT_SCHEDULE_RUNS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "schedule_runs.jsonl")
-    a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_push_subscriptions.jsonl")
-    a.AGENT_GATEWAY_PUSH_DELIVERIES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_push_deliveries.jsonl")
-    a.AGENT_GATEWAY_DAEMON_PID_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_daemon.pid")
-    a.AGENT_GATEWAY_DAEMON_STATUS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_daemon.json")
-    a.AGENT_GATEWAY_DAEMON_LOG_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_daemon.log")
     a.AGENT_BRIDGE_REGISTRY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "bridge_registry.json")
     a.LLM_RECENT_MODELS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "recent_models.json")
     a.SECRET_VAULT_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "secret_vault")
@@ -256,13 +251,13 @@ def assert_scheduler_module_boundary() -> None:
         assert forbidden not in source, forbidden
 
 
-def assert_release_gateway_module_boundaries() -> None:
+def assert_local_protocol_module_boundaries() -> None:
     assert a.RUNTIME_EVIDENCE_SCHEMA == runtime_evidence_mod.RUNTIME_EVIDENCE_SCHEMA
     assert a.baseline_item is baseline_mod.baseline_item
     assert a.baseline_status is baseline_mod.baseline_status
-    assert not hasattr(a, "gateway_base_url")
-    assert gateway_registry_mod.gateway_base_url("0.0.0.0", 8765) == "local://shuheng"
-    for module in (runtime_evidence_mod, baseline_mod, gateway_registry_mod):
+    assert not hasattr(a, "local_protocol_base_uri")
+    assert local_protocol_registry_mod.local_protocol_base_uri("0.0.0.0", 8765) == "local://shuheng"
+    for module in (runtime_evidence_mod, baseline_mod, local_protocol_registry_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "shuheng.app" not in source, module.__file__
         assert "from .app" not in source, module.__file__
@@ -2899,7 +2894,7 @@ def assert_progress_ledger_is_persistent_and_hydrated() -> None:
     assert any(item["uri"] == "resource://agent-mail/progress" for item in resources), resources
     governance_paths = a.governance_store_paths()
     assert governance_paths["progress"] == a.AGENT_PROGRESS_LEDGER_PATH, governance_paths
-    report = a.architecture_baseline_report(state, gateway_data={})
+    report = a.architecture_baseline_report(state, local_protocol_data={})
     shared_ledgers = next(item for item in report["items"] if item["id"] == "shared_ledgers")
     descriptions = " ".join(check["description"] for check in shared_ledgers["evidence_checks"])
     assert "progress ledger path is configured" in descriptions, shared_ledgers
@@ -2911,30 +2906,30 @@ def assert_runtime_evidence_store_upgrades_baseline() -> None:
     state = a.State(agent=FakeAgent())
     state.running = True
     row = a.append_runtime_evidence(
-        target_items=["a2a_mcp_gateway", "shared_ledgers"],
+        target_items=["local_protocol_records", "shared_ledgers"],
         check_id="policy_gate_runtime_evidence",
         level="e2e",
         passed=True,
-        summary="policy gate e2e smoke reached gateway and shared ledgers",
+        summary="policy gate e2e smoke reached local protocol records and shared ledgers",
         source="scripts/check_policy_gates.py",
         command="python3 scripts/check_policy_gates.py",
         evidence_refs=["task://policy_gate_runtime_evidence"],
     )
     assert row["schema_version"] == "agentruntime.evidence.v1", row
     assert row["level"] == "e2e", row
-    assert a.runtime_evidence_records("a2a_mcp_gateway", passed=True, min_level="runtime"), a.read_jsonl(a.AGENT_RUNTIME_EVIDENCE_PATH)
+    assert a.runtime_evidence_records("local_protocol_records", passed=True, min_level="runtime"), a.read_jsonl(a.AGENT_RUNTIME_EVIDENCE_PATH)
     resources = a.mcp_resource_registry()
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources), resources
     governance_paths = a.governance_store_paths()
     assert governance_paths["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, governance_paths
     report = a.architecture_baseline_report(state)
     items = {item["id"]: item for item in report["items"]}
-    assert items["a2a_mcp_gateway"]["strongest_evidence_level"] == "e2e", items["a2a_mcp_gateway"]
-    assert any("policy gate e2e smoke" in check["description"] for check in items["a2a_mcp_gateway"]["evidence_checks"]), items["a2a_mcp_gateway"]
+    assert items["local_protocol_records"]["strongest_evidence_level"] == "e2e", items["local_protocol_records"]
+    assert any("policy gate e2e smoke" in check["description"] for check in items["local_protocol_records"]["evidence_checks"]), items["local_protocol_records"]
     assert report["runtime_evidence"]["passed"] == 1, report["runtime_evidence"]
-    registry = a.ensure_gateway_registry(state)
+    registry = a.ensure_local_protocol_registry(state)
     assert registry["internal_agent_mail"]["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
-    assert registry["runtime_evidence"]["targets"]["a2a_mcp_gateway"]["strongest_level"] == "e2e", registry["runtime_evidence"]
+    assert registry["runtime_evidence"]["targets"]["local_protocol_records"]["strongest_level"] == "e2e", registry["runtime_evidence"]
 
 
 def assert_genericagent_provider_module_boundary() -> None:
@@ -6587,7 +6582,7 @@ BASELINE_ITEM_IDS = {
     "external_memory",
     "eval_trace",
     "checkpoint_recovery",
-    "a2a_mcp_gateway",
+    "local_protocol_records",
     "external_bridges",
 }
 
@@ -6747,7 +6742,7 @@ def assert_recovery_plan_schema(row: dict, *, action: str = "") -> None:
         assert row["action"] == action, row
 
 
-def assert_gateway_schema(registry: dict) -> None:
+def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.v1", registry
     assert registry["internal_agent_mail"]["governance"] == a.AGENT_GOVERNANCE_PATH, registry
     assert registry["internal_agent_mail"]["runtime_evidence"] == a.AGENT_RUNTIME_EVIDENCE_PATH, registry
@@ -6868,7 +6863,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert_baseline_report_schema(registry["baseline_comparison"])
 
 
-def assert_gateway_public_schema(registry: dict) -> None:
+def assert_local_protocol_public_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.public.v1", registry
     assert registry["status"] == "local_record_only", registry
     assert "context_inspector" not in registry, registry
@@ -6912,12 +6907,9 @@ def assert_gateway_public_schema(registry: dict) -> None:
     public_text = json.dumps(registry, ensure_ascii=False)
     for forbidden in (
         a.AGENT_HARNESS_DIR,
-        a.AGENT_GATEWAY_PATH,
+        a.AGENT_LOCAL_PROTOCOL_REGISTRY_PATH,
         a.AGENT_CONTEXT_INSPECTOR_PATH,
         a.AGENT_PERMISSION_MATRIX_PATH,
-        a.AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-        a.AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
     ):
         assert forbidden not in public_text, forbidden
 
@@ -6984,7 +6976,7 @@ def assert_governance_schema(registry: dict) -> None:
         "memory_curator",
         "eval_controller",
         "recovery_controller",
-        "protocol_gateway",
+        "local_protocol_records",
     }
     assert required <= set(registry["component_ids"]), registry
     components = {item["component_id"]: item for item in registry["components"]}
@@ -8508,7 +8500,7 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     card = a.a2a_agent_card_for_subagent(loaded_skilled)
     assert card["skill_refs"] == ["custom-sop"], card
     assert card["dedicated_skills"][0]["summary"], card
-    registry = a.gateway_capability_registry(reloaded)
+    registry = a.local_protocol_capability_registry(reloaded)
     registry_agent = next(row for row in registry["agents"] if row["agent_id"] == loaded_skilled.agent_id)
     assert registry_agent["skill_refs"] == ["custom-sop"], registry_agent
 
@@ -11364,7 +11356,7 @@ def assert_ohmypi_main_turn_persists_model_response_history() -> None:
 
 def run_checks() -> None:
     assert_scheduler_module_boundary()
-    assert_release_gateway_module_boundaries()
+    assert_local_protocol_module_boundaries()
     assert_leaf_module_boundaries()
     assert_history_store_module_boundary()
     assert_history_title_policy_module_boundary()
@@ -12547,6 +12539,31 @@ def run_checks() -> None:
         payload={"objective": "direct mail schema check", "role": "researcher"},
     )
     assert_mail_schema(direct_mail, intent="debug_loop_2")
+    intake_response, intake_status = a.append_agent_mail_intake_message({
+        "target": "role.researcher",
+        "message": "Summarize the local protocol registry contract.",
+    })
+    assert intake_status == 201, intake_response
+    assert intake_response["accepted"] is True, intake_response
+    assert intake_response["delivery"]["mode"] == "agent_mail_inbox", intake_response
+    assert intake_response["delivery"]["auto_dispatch"] is False, intake_response
+    intake_task_id = intake_response["task"]["id"]
+    intake_task = a.latest_task_records()[intake_task_id]
+    assert intake_task["kind"] == "agent_mail_intake", intake_task
+    assert intake_task["status"] == "agent_mail_received", intake_task
+    intake_mail = [row for row in a.read_jsonl(a.AGENT_MAIL_PATH) if row.get("task_id") == intake_task_id][-1]
+    assert_mail_schema(intake_mail, intent="agent_mail_intake")
+    assert (intake_mail["payload"] or {}).get("source") == "agent_mail_intake", intake_mail
+    intake_trace = [row for row in a.read_jsonl(a.AGENT_TRACES_PATH) if row.get("task_id") == intake_task_id][-1]
+    assert intake_trace["event"] == "agent_mail_intake_received", intake_trace
+    task_count_before_unknown_intake = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    rejected_intake, rejected_status = a.append_agent_mail_intake_message({
+        "target": "missing.local.agent",
+        "message": "This must not create a phantom task.",
+    })
+    assert rejected_status == 404, rejected_intake
+    assert rejected_intake["accepted"] is False, rejected_intake
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == task_count_before_unknown_intake
     direct_ref = a.write_harness_artifact(
         "debug-loop",
         "schema-artifact",
@@ -12981,7 +12998,7 @@ def run_checks() -> None:
     invalid_tick = a.scheduler_tick(state, now_epoch=1780000000.0, source="test:scheduler_invalid")
     assert invalid_tick["invalid"] >= 1, invalid_tick
     assert any(row.get("schedule_id") == "sched_invalid" and row.get("status") == "invalid" for row in a.read_jsonl(a.AGENT_SCHEDULE_RUNS_PATH))
-    registry = a.ensure_gateway_registry(state)
+    registry = a.ensure_local_protocol_registry(state)
     assert registry["internal_agent_mail"]["artifact_index"] == a.AGENT_ARTIFACT_INDEX_PATH, registry
     assert registry["internal_agent_mail"]["policy_decisions"] == a.AGENT_POLICY_DECISIONS_PATH, registry
     assert registry["internal_agent_mail"]["orchestrator_plans"] == a.AGENT_ORCHESTRATOR_PLANS_PATH, registry
@@ -12995,27 +13012,27 @@ def run_checks() -> None:
     assert registry["internal_agent_mail"]["runtime_providers"] == a.AGENT_RUNTIME_REGISTRY_PATH, registry
     assert registry["internal_agent_mail"]["schedules"] == a.AGENT_SCHEDULES_PATH, registry
     assert registry["internal_agent_mail"]["schedule_runs"] == a.AGENT_SCHEDULE_RUNS_PATH, registry
-    assert_gateway_schema(registry)
+    assert_local_protocol_registry_schema(registry)
     baseline_report = registry["baseline_comparison"]
     assert_baseline_report_schema(baseline_report)
     registry_file_signatures = {
-        "gateway": a.jsonl_file_signature(a.AGENT_GATEWAY_PATH),
+        "local_protocol": a.jsonl_file_signature(a.AGENT_LOCAL_PROTOCOL_REGISTRY_PATH),
         "governance": a.jsonl_file_signature(a.AGENT_GOVERNANCE_PATH),
         "bridges": a.jsonl_file_signature(a.AGENT_BRIDGE_REGISTRY_PATH),
     }
     direct_baseline = a.architecture_baseline_report(state)
     assert_baseline_report_schema(direct_baseline)
     direct_items = {item["id"]: item for item in direct_baseline["items"]}
-    for item_id in ("strong_orchestrator", "governance_components", "a2a_mcp_gateway", "external_bridges"):
+    for item_id in ("strong_orchestrator", "governance_components", "local_protocol_records", "external_bridges"):
         assert direct_items[item_id]["status"] == "complete", direct_items[item_id]
     assert {
-        "gateway": a.jsonl_file_signature(a.AGENT_GATEWAY_PATH),
+        "local_protocol": a.jsonl_file_signature(a.AGENT_LOCAL_PROTOCOL_REGISTRY_PATH),
         "governance": a.jsonl_file_signature(a.AGENT_GOVERNANCE_PATH),
         "bridges": a.jsonl_file_signature(a.AGENT_BRIDGE_REGISTRY_PATH),
     } == registry_file_signatures
     baseline_items = a.baseline_panel_items(state)
     assert baseline_items and baseline_items[0].key == "summary", baseline_items
-    assert any(item.key == "a2a_mcp_gateway" for item in baseline_items), baseline_items
+    assert any(item.key == "local_protocol_records" for item in baseline_items), baseline_items
     formatted_baseline = a.format_baseline_report(baseline_report)
     assert "Architecture Baseline Comparison" in formatted_baseline, formatted_baseline
     assert a.AGENT_BASELINE_REPORT_PATH in formatted_baseline, formatted_baseline
@@ -13112,8 +13129,8 @@ def run_checks() -> None:
     assert "Stable operational preference" in a.read_text_file(a.subagent_memory_path(ops.agent_id), "")
 
     reader = a.create_subagent(state, "Reader", role="researcher")
-    registry_with_agents = a.ensure_gateway_registry(state)
-    assert_gateway_schema(registry_with_agents)
+    registry_with_agents = a.ensure_local_protocol_registry(state)
+    assert_local_protocol_registry_schema(registry_with_agents)
     reader_cards = [item for item in registry_with_agents["a2a_gateway"]["agent_cards"] if item["agent_id"] == reader.agent_id]
     assert reader_cards
     assert_agent_card_schema(reader_cards[-1])
@@ -13177,7 +13194,7 @@ def run_checks() -> None:
     assert working_plans[-1]["delegation_contract"]["budget"] == delegate_mail["budget"], (working_plans[-1], delegate_mail)
     assert working_plans[-1]["delegation_contract"]["permissions"] == delegate_mail["permissions"], (working_plans[-1], delegate_mail)
     assert completed_rows[-1]["artifact_refs"] == [result_rows[-1]["uri"]], completed_rows[-1]
-    registry_after_task = a.ensure_gateway_registry(state)
+    registry_after_task = a.ensure_local_protocol_registry(state)
     assert_baseline_report_schema(registry_after_task["baseline_comparison"])
     assert registry_after_task["baseline_comparison"]["summary"]["complete"] >= baseline_report["summary"]["complete"], registry_after_task["baseline_comparison"]
     completed_a2a_task = [item for item in registry_after_task["a2a_gateway"]["tasks"] if item["id"] == completed_task_id]

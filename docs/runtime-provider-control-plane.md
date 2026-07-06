@@ -43,7 +43,7 @@ data under `~/.shuheng`:
 
 - `model_responses/`: canonical visible conversation history for main sessions and
   non-secret subagent direct chats, plus metadata, names, token usage, and trash.
-- `memory/agent_harness/`: task ledgers (`tasks.jsonl`), progress ledgers (`progress.jsonl`), agent mail, approvals, artifacts, traces, checkpoints, schedules, gateway metadata, runtime provider metadata, and memory candidates.
+- `memory/agent_harness/`: task ledgers (`tasks.jsonl`), progress ledgers (`progress.jsonl`), agent mail, approvals, artifacts, traces, checkpoints, schedules, local protocol metadata, runtime provider metadata, and memory candidates.
 - `memory/subagents/`: persistent subagent profiles, memories, events, dashboard/runtime metadata, and refs into canonical history. It must not own non-secret conversation transcripts.
 - `temp/subagents/`: temporary/session-bound subagents.
 - `memory/secret_vault/`: encrypted Secret Vault state, including encrypted Secret subagent chat history that cannot be copied into normal plaintext history.
@@ -137,7 +137,7 @@ Shuheng exposes OMP native RPC output/control surfaces such as
 `extension_ui_request` observability through the provider adapter. These surfaces
 are passthrough output facts: they do not let Shuheng synthesize OMP-native
 subagent state from its own ledgers, and they do not transfer approval, memory,
-schedule, artifact, or gateway execution ownership away from the control plane.
+schedule, artifact, or local protocol execution ownership away from the control plane.
 
 ## Registry Surfaces
 
@@ -158,7 +158,7 @@ Runtime and top-level control metadata are exposed through:
 - A2A-shaped agent cards: discovered role templates and visible subagents
   advertise local `agent-mail://inbox` delivery with `auto_dispatch:false`.
 - Local Agent Mail intake helpers can record messages into Agent Mail, the task
-  ledger, and trace rows only. They record `kind:"gateway_message"` and leave
+  ledger, and trace rows only. They record `kind:"agent_mail_intake"` and leave
   execution, approvals, memory writes, and workflow continuation owned by the
   Shuheng Orchestrator/TUI.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
@@ -212,8 +212,8 @@ Runtime and top-level control metadata are exposed through:
 - Do not include local harness paths, daemon pid/status/log paths, push-store
   JSONL paths, or local skill/plugin filesystem paths in adapter-facing
   discovery records.
-- Do not create phantom message targets. Gateway message targets must resolve to
-  the main orchestrator, a known role template, or a gateway-discovered subagent.
+- Do not create phantom message targets. Agent Mail intake targets must resolve
+  to the main orchestrator, a known role template, or a locally discovered subagent.
 - Do not list Secret Vault subagents from stateless plaintext metadata. Secret
   subagents require the unlocked TUI state boundary.
 - Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`.

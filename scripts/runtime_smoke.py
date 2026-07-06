@@ -270,7 +270,7 @@ def run_local_protocol_registry_smoke(a: Any, state: Any, completed_task_id: str
         if hasattr(a, removed):
             raise AssertionError(f"removed Web/HTTP surface still exists: {removed}")
 
-    registry = a.ensure_gateway_registry(state)
+    registry = a.ensure_local_protocol_registry(state)
     if registry.get("schema_version") != "agentgateway.v1":
         raise AssertionError(registry)
     directory = registry.get("agent_directory") or {}
@@ -290,7 +290,7 @@ def run_local_protocol_registry_smoke(a: Any, state: Any, completed_task_id: str
         raise AssertionError(mcp)
     record_evidence(
         a,
-        target_items=["a2a_mcp_gateway"],
+        target_items=["local_protocol_records"],
         check_id="local_protocol_registry_smoke",
         level="runtime",
         summary="Local protocol registry projected Agent Mail, task, runtime-evidence, and discovery records without starting any Web/HTTP server.",

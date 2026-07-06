@@ -2858,8 +2858,8 @@ def ohmypi_provider_spec(
             "artifact_transport": "provider_artifact_ref",
         },
         mcp={
-            "tool_gateway": "not_exposed",
-            "resource_gateway": "not_exposed",
+            "tool_registry": "not_exposed",
+            "resource_registry": "not_exposed",
         },
         notes=[
             "Default Shuheng runtime provider.",

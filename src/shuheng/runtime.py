@@ -258,8 +258,8 @@ def genericagent_provider_spec(
             "artifact_transport": "artifact_ref",
         },
         mcp={
-            "tool_gateway": "resource://agent-mail/gateway",
-            "resource_gateway": "resource://agent-mail",
+            "tool_registry": "resource://agent-mail/tools",
+            "resource_registry": "resource://agent-mail",
         },
         notes=[
             "This optional compatibility adapter is not the Shuheng core runtime.",

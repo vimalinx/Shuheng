@@ -191,7 +191,7 @@ First confirm the public command entrypoint is available:
 shuheng --help
 ```
 
-`shuheng --help`, TUI launch, gateway serving, and `shuheng-check` use Shuheng's own local control plane. The default runtime core is OhMyPi / OMP.
+`shuheng --help`, TUI launch, local protocol records, and `shuheng-check` use Shuheng's own local control plane. The default runtime core is OhMyPi / OMP.
 
 ### 2. Validate Integration
 
@@ -338,7 +338,7 @@ Type `/help` inside the TUI for the full command list.
 | `src/shuheng/integration.py` | Shuheng doctor checks and local integration utilities |
 | `src/shuheng/runtime.py` | Runtime provider abstractions and registry |
 | `src/shuheng/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
-| `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, gateway safety posture, and heuristic eval helpers |
+| `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, local protocol safety posture, and heuristic eval helpers |
 | `src/shuheng/control_protocol.py` | Agent task control protocol (v2) parsing |
 | `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback |
 | `src/shuheng/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |

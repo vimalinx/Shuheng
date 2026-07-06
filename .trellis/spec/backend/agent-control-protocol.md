@@ -96,7 +96,7 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   contents, release-readiness metadata, ignored local/private paths, and OMP
   plugin public wording.
 - Non-goal: This does not publish the repository, change the remote URL, certify
-  A2A/MCP protocol compliance, add production remote gateway auth, or rename
+  A2A/MCP protocol compliance, add production remote adapter auth, or rename
   internal compatibility identifiers such as `src/shuheng`, `SHUHENG_*`,
   `shuheng_query`, and `shuheng.*` schemas.
 
@@ -314,7 +314,7 @@ and README claims that A2A/MCP are certified production surfaces.
 ```text
 Publish as experimental local alpha with MIT license, security/contributing
 docs, CI, release hygiene checks, private-path exclusions, compatibility wording,
-and explicit known gaps for gateway auth, protocol certification, heuristic eval,
+and explicit known gaps for remote adapter auth, protocol certification, heuristic eval,
 and app.py monolith risk.
 ```
 
@@ -1255,7 +1255,7 @@ path_utils.is_normal_session_log_path(
 
 ### 1. Scope / Trigger
 
-- Trigger: Shuheng reads or writes task ledgers, approvals, artifacts, traces, checkpoints, recovery rows, scheduler rows, gateway rows, or other JSONL governance records.
+- Trigger: Shuheng reads or writes task ledgers, approvals, artifacts, traces, checkpoints, recovery rows, scheduler rows, local protocol rows, or other JSONL governance records.
 - Applies to: `src/shuheng/ledger_store.py`, compatibility wrappers in `src/shuheng/app.py`, scheduler runtime callbacks, dashboard home-page registry signatures, task/approval/artifact panels, and policy-gate checks.
 - Non-goal: This does not move domain-specific task, approval, artifact, dashboard, or recovery projection logic out of `app.py` in one large rewrite.
 
@@ -1333,7 +1333,7 @@ def latest_records_by_id(path, key):
 ### 1. Scope / Trigger
 
 - Trigger: A task, plan step, subagent task, scheduler run task, recovery action, or approval-blocked task changes state through `append_task_ledger(...)`.
-- Applies to: `AGENT_PROGRESS_LEDGER_PATH`, `append_progress_ledger(...)`, `progress_history(...)`, `latest_progress_records(...)`, `context_layers_for_task(...)`, dashboard home-page cache signatures, MCP resources, gateway audit metadata, governance store paths, and baseline comparison.
+- Applies to: `AGENT_PROGRESS_LEDGER_PATH`, `append_progress_ledger(...)`, `progress_history(...)`, `latest_progress_records(...)`, `context_layers_for_task(...)`, dashboard home-page cache signatures, MCP resources, local protocol audit metadata, governance store paths, and baseline comparison.
 - Non-goal: This does not replace `tasks.jsonl` as the authoritative task ledger and does not store raw runtime transcripts in progress rows.
 
 ### 2. Signatures
@@ -1361,7 +1361,7 @@ def latest_records_by_id(path, key):
 - Progress rows are compact status facts for context hydration and recovery scanning. They must not inline artifact bodies, full transcripts, Secret Vault plaintext, or unbounded raw tool output.
 - `context_layers_for_task(...)` uses `progress.jsonl` for `L5_progress_ledger`, falling back to recent task rows only when no progress rows exist.
 - Home-page cache signatures include `progress.jsonl` so independently appended progress rows can refresh dashboard views.
-- MCP resources expose `resource://agent-mail/progress`, and gateway/governance metadata includes the progress store path.
+- MCP resources expose `resource://agent-mail/progress`, and local protocol/governance metadata includes the progress store path.
 - Architecture baseline comparison treats progress ledger availability as part of the shared-ledger evidence.
 
 ### 4. Validation & Error Matrix
@@ -1901,7 +1901,7 @@ state.last_error carries the same short reason
 - Good: `agent_directory.message_endpoint == "agent-mail://inbox"` and each role/subagent delivery target uses local Agent Mail with `auto_dispatch:false`.
 - Good: `gateway_service.status == "local_record_only"`, SSE and push are disabled, and daemon commands are empty.
 - Good: A2A/MCP-shaped registry sections use `local_record_only` status and local URI schemes.
-- Base: `ensure_gateway_registry(...)` may continue writing a local `gateway.json` registry file for operator inspection and baseline comparison.
+- Base: `ensure_local_protocol_registry(...)` may continue writing a local `gateway.json` registry file for operator inspection and baseline comparison.
 - Bad: Re-adding a loopback-only HTTP server because it is "local"; the active product surface still becomes Web/HTTP again.
 - Bad: Preserving removed Web concepts as active docs, tests, compatibility aliases, or handler branches.
 
@@ -1936,7 +1936,7 @@ resource://agent-mail/* -> local resource record
 ### 1. Scope / Trigger
 
 - Trigger: The user wants one persistent subagent to have a dedicated skill without giving that skill to other subagents or the main Orchestrator.
-- Applies to: `/agent skill ...`, `agent.create`, `agent.skill.update`, persistent and Secret subagent metadata, context pack construction, subagent prompt installation, home-page status cards, A2A agent cards, gateway capability registry, and read-only host tool records.
+- Applies to: `/agent skill ...`, `agent.create`, `agent.skill.update`, persistent and Secret subagent metadata, context pack construction, subagent prompt installation, home-page status cards, A2A agent cards, local protocol capability registry, and read-only host tool records.
 - Non-goal: This does not create a global skill registry UI, does not auto-install third-party skills, and does not let one subagent read another subagent's skill pack.
 
 ### 2. Signatures
@@ -1964,7 +1964,7 @@ resource://agent-mail/* -> local resource record
 - `subagent_store.normalize_subagent_skill_refs(...)` owns only pure skill-ref value normalization and de-duplication. Skill root discovery, file resolution, skill-pack assembly, UI formatting, metadata writes, Secret storage, and prompt installation remain outside `subagent_store.py`.
 - Only the target subagent's context pack includes its resolved `skill_pack` full body text. Other subagents and the main Orchestrator must show no body text from that skill unless they independently own the same ref.
 - `format_context_pack_for_prompt(...)` must label the section as `Dedicated skills for this agent only` so runtime agents know the skill is scoped, not global.
-- `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, gateway records, and `shuheng_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
+- `subagent_prompt_block(...)`, subagent home status cards, `/agent info`, A2A cards, local protocol records, and `shuheng_query`/typed host tool agent records must expose bounded skill refs/summaries for routing and inspection.
 - `agent_match` may score a subagent by role tools plus dedicated skill refs/display names so a task requiring a target-only skill can reuse the correct existing agent.
 - Updating dedicated skills should reinstall the subagent system prompt when the subagent runtime is already loaded.
 - Skill support must not weaken existing role write policy, approval gates, Secret Vault isolation, or single-writer enforcement.
@@ -1993,7 +1993,7 @@ resource://agent-mail/* -> local resource record
 
 - `scripts/check_policy_gates.py` must assert `/agent skill` command paths update only the selected subagent and persist through reload.
 - Tests must assert target context packs and direct-chat prompts include a unique skill marker while another subagent's context packs and direct-chat prompts do not.
-- Tests must assert home pages, `/agent info`/agent records, A2A cards, gateway capability registry, and `agent_match` expose/use the target skill refs without leaking skill body text to other agents.
+- Tests must assert home pages, `/agent info`/agent records, A2A cards, local protocol capability registry, and `agent_match` expose/use the target skill refs without leaking skill body text to other agents.
 - Tests must assert `agent.create` accepts `skills`/`skill_refs`, and `agent.skill.update` removes or updates the target agent's skills.
 - Tests must assert skill-ref normalization is owned by `subagent_store.py`, app alias parity holds, and `subagent_store.py` does not resolve skill files or import runtime/UI/Secret/history owners.
 - Tests must assert dedicated skill registration is not capped at 16, all resolved skill pack entries are included, and skill body text is not truncated at 3500 characters.
@@ -4888,7 +4888,7 @@ if text.strip().lower() in {"/llm", "/models", "/model"}:
 - `task_get` returns latest row, bounded history, child tasks, recent traces, approval refs, and artifact refs.
 - `approval_list` returns approval metadata and payload keys only; it must not inline raw approval payload bodies.
 - `artifact_list` returns artifact metadata and refs only; artifact contents must be read by explicit artifact/file reads.
-- `capability_list` returns role templates, permissions, write policies, and registered agents from the gateway capability registry.
+- `capability_list` returns role templates, permissions, write policies, and registered agents from the local protocol capability registry.
 
 ### 4. Validation & Error Matrix
 
@@ -4957,7 +4957,7 @@ If the recommendation is create_new and the user asked for execution, create a b
 - `genericagent_provider.py` owns the active GenericAgent-facing control hint, query tool schemas, schedule tool schemas, tool schema injection, `agentmain.load_tool_schema()` wrapping, `GenericAgentHandler` patching, `_shuheng_state` binding, `install_tui_control_hint()`, and `GenericAgentRuntimeAdapter`.
 - `app.py` may re-export provider names for compatibility, but must not locally redefine the moved installers, handler patch functions, control-hint installer, or `GenericAgentRuntimeAdapter`.
 - The provider module must not import `shuheng.app`, curses, or mutable TUI `State`. App-layer behavior is injected through `configure_genericagent_provider_runtime()`.
-- Tool handlers remain app-layer callbacks because they read TUI state, subagent registries, ledgers, approvals, artifacts, Secret Vault state, gateway capabilities, and scheduler registries.
+- Tool handlers remain app-layer callbacks because they read TUI state, subagent registries, ledgers, approvals, artifacts, Secret Vault state, local protocol capabilities, and scheduler registries.
 - Repeated `install_tui_query_runtime()` calls must append each query/schedule schema at most once and must not add duplicate handler side effects.
 - A GenericAgent tool schema reload must re-append TUI tool schemas exactly once.
 - Handler methods must return the configured `StepOutcome` class with `next_prompt:"\n"`.
@@ -5157,7 +5157,7 @@ def put_agent_runtime_task(agent, request):
   retry, compaction, plugin execution, and native subagent lifecycle. Shuheng is
   the governed RPC output/control layer that owns UI rendering, ledgers,
   approvals, artifact refs, memory candidates, runtime event normalization, and
-  gateway discovery.
+  local protocol discovery.
 - `set_subagent_subscription(...)`, `get_runtime_subagents()`, and
   `get_runtime_subagent_messages(...)` must pass through native OMP RPC commands
   `set_subagent_subscription`, `get_subagents`, and `get_subagent_messages`
@@ -5676,7 +5676,7 @@ agent.create includes continue_after:true -> Agent 控制结果 shows success ->
 - Tests must assert the positive trigger schema and generic schema-boundary behavior without behavior-testing retired field names.
 - Tests must assert the control hint tells the main model to translate natural user intent into new `cron` / `interval` / `at` fields.
 - Tests must assert disabled schedules skip and invalid schedules write audit records without dispatching.
-- Tests must assert MCP/gateway registries include both schedule registry and schedule-run audit paths.
+- Tests must assert local protocol registries include both schedule registry and schedule-run audit paths.
 - Tests must assert `app.py` re-exports key scheduler helpers from `shuheng.scheduler` and that `src/shuheng/scheduler.py` does not import curses, GenericAgent runtime classes, `StepOutcome`, mutable TUI `State`, or `shuheng.app`.
 - Tests that retarget harness paths must reconfigure scheduler runtime paths in the same step, otherwise scheduler JSONL helpers can silently write to the previous harness directory.
 - `python3 -m py_compile src/shuheng/app.py src/shuheng/runtime.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
@@ -5748,7 +5748,7 @@ At 08:00, scheduler writes scheduledtask.run.v1 starting, converts the schedule 
 
 - Good: `interval:"1h"` plus `execution.mode:"workflow_run"` starts `plugin://schedule-pack/workflows/daily-flow` through `create_workflow_run_v0(...)` and records the workflow run id in `schedule_runs.jsonl`.
 - Good: A scheduled workflow that reaches `agent_task` dispatches only through the existing Workflow Agent Task Bridge and stores task ids in the workflow row, not in scheduler-owned synthetic task rows.
-- Base: `schedule_list`, `/schedules`, and gateway registry may still show `agenttask.v2` as the historical default dispatch contract while individual workflow schedule rows use `workflow_run.v1`.
+- Base: `schedule_list`, `/schedules`, and local protocol registry may still show `agenttask.v2` as the historical default dispatch contract while individual workflow schedule rows use `workflow_run.v1`.
 - Bad: `scheduler.py` imports `workflows.py` and calls `advance_workflow_run_v0(...)` directly.
 - Bad: Scheduler appends `workflow_runs.jsonl` itself or starts subagents directly for workflow steps.
 - Bad: A failed workflow ref silently falls back to an `agent_task` schedule.
@@ -5913,7 +5913,7 @@ schedule workflow_autopilot -> scheduler.py writes scheduledtask.run.v1 starting
 - Missing-source rows must not pretend to be normal raw sessions.
 - New main-agent sessions must bind their agent/client/backend log path to the Shuheng-owned `MODEL_RESPONSES_DIR` before runtime work starts.
 - Session naming must persist through the same Shuheng-owned `session_names.json` registry; it must not use GenericAgent's default `frontends/session_names.py` storage path.
-- Harness writes for tasks, approvals, artifacts, traces, schedules, gateway metadata, runtime provider metadata, and memory candidates must live under the Shuheng-owned `AGENT_HARNESS_DIR` by default.
+- Harness writes for tasks, approvals, artifacts, traces, schedules, local protocol metadata, runtime provider metadata, and memory candidates must live under the Shuheng-owned `AGENT_HARNESS_DIR` by default.
 - Persistent subagent memory must live under Shuheng-owned `SUBAGENTS_DIR`; temporary subagents must live under Shuheng-owned `TEMP_SUBAGENTS_DIR`.
 - Persistent subagent home helpers must keep profile, memory, event, and metadata refs under `SUBAGENTS_DIR`; ordinary non-secret conversation turns remain history-owned under `MODEL_RESPONSES_DIR`.
 - Secret Vault encrypted storage must live under Shuheng-owned `SECRET_VAULT_DIR` by default.
@@ -6449,7 +6449,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 ### 1. Scope / Trigger
 
 - Trigger: Shuheng exposes release, local protocol-record, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
-- Applies to: `src/shuheng/release_readiness.py`, `src/shuheng/runtime_evidence.py`, `src/shuheng/baseline.py`, `src/shuheng/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `context_inspector_snapshot(...)`, `permission_matrix(...)`, `append_gateway_agent_message(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and policy/runtime smoke tests.
+- Applies to: `src/shuheng/release_readiness.py`, `src/shuheng/runtime_evidence.py`, `src/shuheng/baseline.py`, `src/shuheng/local_protocol_registry.py`, app compatibility wrappers such as `ensure_local_protocol_registry(...)`, `local_protocol_baseline_evidence(...)`, `local_protocol_service_descriptor(...)`, `architecture_baseline_report(...)`, `context_inspector_snapshot(...)`, `permission_matrix(...)`, `append_agent_mail_intake_message(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and policy/runtime smoke tests.
 - Non-goal: This does not certify full A2A/MCP compliance, expose a built-in network endpoint, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
 
 ### 2. Signatures
@@ -6468,7 +6468,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Local protocol service descriptor:
   - `schema_version:"agentgateway.service.v1"`
   - `status:"local_record_only"`
-  - `security.schema_version:"shuheng.gateway_bind_safety.v1"`
+  - `security.schema_version:"shuheng.local_protocol_bind_safety.v1"`
   - `security.network_enabled:false`
   - `security.allowed:false`
   - `release_posture:"experimental_alpha"`
@@ -6476,7 +6476,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
   - `request_response.agent_directory:"agent-directory://local"`
   - `request_response.message_inbox:"agent-mail://inbox"`
 - Local baseline evidence:
-  - `gateway_baseline_evidence(state=None) -> dict`
+  - `local_protocol_baseline_evidence(state=None) -> dict`
   - `a2a_gateway.schema_version:"a2a.gateway.v1"`
   - `a2a_gateway.agent_cards[]`
   - `a2a_gateway.tasks[]`, `messages[]`, `artifacts[]`
@@ -6491,7 +6491,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
   - `context_inspector.schema_version:"shuheng.context_inspector.v1"`
   - `permission_matrix.schema_version:"shuheng.permission_matrix.v1"`
   - `governance_components`
-  - `gateway_service`
+  - `gateway_service` as a historical compatibility key for the local service descriptor
   - `bridge_registry`
 - A2A-shaped agent cards:
   - `schema_version:"a2a.agent_card.v1"`
@@ -6536,7 +6536,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - A2A/MCP-shaped metadata is local record output for inspection and adapter design. It is not a reachable protocol endpoint or certification claim.
 - Local protocol records must not expose broad project context, active spec paths, memory paths, workflow run internals, full permission matrices, Secret Vault plaintext, or internal ledger path inventories.
 - `context_inspector_snapshot(...)` and `permission_matrix(...)` remain internal TUI/control-plane inspection surfaces. They may write durable local files for operator use, but they are not adapter-facing resources by default.
-- Local Agent Mail intake helpers accept messages only into Agent Mail, the task ledger, and trace rows. They must create a `kind:"gateway_message"` task row and an `agent_mail_inbox` message, but they must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
+- Local Agent Mail intake helpers accept messages only into Agent Mail, the task ledger, and trace rows. They must create a `kind:"agent_mail_intake"` task row and an `agent_mail_inbox` message, but they must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
 - A2A-shaped agent cards must advertise `agent-mail://inbox` delivery with `auto_dispatch:false` so local adapters know how to submit messages without assuming execution.
 - Message targets must resolve to the main orchestrator, a known role template, or a locally discovered subagent. Unknown targets are rejected and must not create phantom agent tasks.
 - Stateless local discovery may load persisted non-secret subagent metadata from the Shuheng-owned subagent store. Secret Vault subagents are visible only through unlocked TUI state and must not be discovered from plaintext stateless metadata.
@@ -6547,9 +6547,9 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
   only implied by command strings: it lists wheel and sdist artifacts,
   dependency-resolving install mode, public console scripts, checked entrypoint
   behaviors, and debug-only options that are not release gates.
-- `architecture_baseline_report(...)` must be self-contained: when `gateway_data` is omitted, it must build a no-write `gateway_baseline_evidence(...)` snapshot instead of reporting local protocol evidence as missing due to caller ordering.
-- No-write evidence construction may read ledgers and local status records, but must not rewrite `gateway.json`, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
-- `ensure_gateway_registry(...)` remains the write path for refreshing the durable local registry file; direct baseline reporting is only a report/evidence path.
+- `architecture_baseline_report(...)` must be self-contained: when `local_protocol_data` is omitted, it must build a no-write `local_protocol_baseline_evidence(...)` snapshot instead of reporting local protocol evidence as missing due to caller ordering.
+- No-write evidence construction may read ledgers and local status records, but must not rewrite the historical `gateway.json` local protocol registry file, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
+- `ensure_local_protocol_registry(...)` remains the write path for refreshing the durable local registry file; direct baseline reporting is only a report/evidence path.
 - Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
 - Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or local manual ticks, not by an installed always-on service by default.
 - Release-readiness helpers should remain pure and must not import `app.py`.
@@ -6565,10 +6565,10 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Local Agent Mail intake accepts an unknown target and creates a task for a phantom agent -> discoverability regression.
 - Local service descriptor status is `network_capable` or has a non-empty `base_url` -> network-surface regression.
 - A2A/MCP status says certified/network-capable without local-record-only metadata -> protocol overclaiming regression.
-- Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP, governance, or external bridge evidence as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
-- Direct baseline report rewrites `gateway.json`, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
+- Direct `architecture_baseline_report()` call without prebuilt `local_protocol_data` marks A2A/MCP, governance, or external bridge evidence as missing while `ensure_local_protocol_registry()` would mark it complete -> caller-ordering regression.
+- Direct baseline report rewrites the historical `gateway.json` local protocol registry file, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
 - Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
-- `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `shuheng.app` -> monolith backslide regression.
+- `runtime_evidence.py`, `baseline.py`, or `local_protocol_registry.py` imports `shuheng.app` -> monolith backslide regression.
 - Eval row has no `score_method` or limitations -> heuristic eval honesty regression.
 - Scheduler registry says `always_on:true` by default -> scheduler ownership regression.
 - Release readiness omits `distribution_smoke`, lists only wheel, or marks
@@ -6579,7 +6579,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 
 - Good: release readiness says Shuheng is `experimental_alpha`, stable surfaces are local TUI/OMP/governance rows, and local protocol records are not reachable endpoints.
 - Good: local agent directory lists a researcher role and persistent non-secret subagents with purpose text plus `agent-mail://inbox` delivery targets, without exposing project context or full permission rows.
-- Good: a local adapter submits a text message to a discovered subagent through the Agent Mail helper; Shuheng writes a `gateway_message` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
+- Good: a local adapter submits a text message to a discovered subagent through the Agent Mail helper; Shuheng writes an `agent_mail_intake` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
 - Good: `architecture_baseline_report()` called directly still reports local protocol records, governance, and external bridge evidence from a no-write snapshot.
 - Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and local registry records only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
 - Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
@@ -6589,15 +6589,15 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Bad: stateless local discovery lists Secret Vault subagents by reading normal plaintext metadata.
 - Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
 - Bad: A runtime smoke result is printed to stdout but not stored in `runtime_evidence.jsonl`, so later baseline reports cannot audit it.
-- Bad: Baseline report depends on the caller remembering to call `ensure_gateway_registry(...)` first.
+- Bad: Baseline report depends on the caller remembering to call `ensure_local_protocol_registry(...)` first.
 
 ### 6. Tests Required
 
 - `scripts/check_policy_gates.py` must assert local protocol records expose `release_readiness` with stable, experimental, and known-gap lists.
-- `scripts/check_policy_gates.py` must assert internal `ensure_gateway_registry(...)` still builds `context_inspector` and `permission_matrix` for local operator use without advertising them as resources.
+- `scripts/check_policy_gates.py` must assert internal `ensure_local_protocol_registry(...)` still builds `context_inspector` and `permission_matrix` for local operator use without advertising them as resources.
 - `scripts/check_policy_gates.py` must assert service descriptors use `local_record_only`, an empty `base_url`, `agent-directory://local`, and `agent-mail://inbox`.
 - Tests must assert A2A-shaped agent cards use `endpoint.transport:"local-agent-mail"`, `endpoint.uri:"agent-mail://inbox"`, `delivery.mode:"agent_mail_inbox"`, and `delivery.auto_dispatch:false`.
-- Tests must assert local Agent Mail intake writes a `kind:"gateway_message"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
+- Tests must assert local Agent Mail intake writes a `kind:"agent_mail_intake"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
 - Tests must assert local resources omit and cannot read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` by default.
 - Tests must assert release readiness exposes structured distribution-smoke metadata for wheel+sdist, dependency-resolving install mode, public console scripts, and debug-only non-gate options.
 - Tests must assert protocol metadata carries `certification:"not_protocol_certified"` and `posture:"local_record_shape"`.
@@ -6606,7 +6606,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Tests must assert a passed runtime/e2e evidence row upgrades a matching baseline item's `strongest_evidence_level` without changing the protocol-certification wording.
 - Tests must assert extracted release/baseline/local protocol helper modules stay independent from `shuheng.app` and preserve the app compatibility wrapper behavior.
 - CI must run `scripts/runtime_smoke.py` as an isolated local smoke path in addition to function-level policy gates.
-- Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating gateway/governance/bridge registry file signatures.
+- Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating local-protocol/governance/bridge registry file signatures.
 - Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.
 - Tests must assert scheduler registry has `runtime_ownership.always_on:false`.
 
@@ -6626,14 +6626,14 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 ```
 
 ```python
-def append_gateway_agent_message(payload):
+def append_agent_mail_intake_message(payload):
     task = start_subagent_task(payload["to"], payload["parts"][0]["text"])
     return {"accepted": True, "task": task}
 
-def architecture_baseline_report(state=None, gateway_data=None):
-    gateway = gateway_data or {}
+def architecture_baseline_report(state=None, local_protocol_data=None):
+    local_protocol = local_protocol_data or {}
     # Existing local protocol evidence is now invisible unless caller remembered
-    # to call ensure_gateway_registry(...) first.
+    # to call ensure_local_protocol_registry(...) first.
 ```
 
 #### Correct
@@ -6667,11 +6667,11 @@ def architecture_baseline_report(state=None, gateway_data=None):
 ```
 
 ```python
-def append_gateway_agent_message(payload):
-    task = append_task_ledger(kind="gateway_message", status="gateway_received", ...)
+def append_agent_mail_intake_message(payload):
+    task = append_task_ledger(kind="agent_mail_intake", status="agent_mail_received", ...)
     mail = append_agent_mail(status="received", payload={...})
     return {"accepted": True, "delivery": {"mode": "agent_mail_inbox", "auto_dispatch": False}, "task": task, "message": mail}
 
-def architecture_baseline_report(state=None, gateway_data=None):
-    gateway = gateway_data or gateway_baseline_evidence(state)
+def architecture_baseline_report(state=None, local_protocol_data=None):
+    local_protocol = local_protocol_data or local_protocol_baseline_evidence(state)
 ```

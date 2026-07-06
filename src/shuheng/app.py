@@ -105,7 +105,7 @@ try:
     from . import ledger_store
     from . import runtime_evidence as runtime_evidence_store
     from . import baseline as baseline_report
-    from . import gateway_registry as gateway_registry_helpers
+    from . import local_protocol_registry as local_protocol_registry_helpers
     from . import history_store
     from . import history_titles as history_title_policy
     from . import secret_vault as secret_vault_store
@@ -157,7 +157,7 @@ try:
     from .runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec
     from .release_readiness import (
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        gateway_bind_safety,
+        local_protocol_bind_safety,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -254,7 +254,7 @@ except Exception:
     import ledger_store  # type: ignore
     import runtime_evidence as runtime_evidence_store  # type: ignore
     import baseline as baseline_report  # type: ignore
-    import gateway_registry as gateway_registry_helpers  # type: ignore
+    import local_protocol_registry as local_protocol_registry_helpers  # type: ignore
     import history_store  # type: ignore
     import history_titles as history_title_policy  # type: ignore
     import secret_vault as secret_vault_store  # type: ignore
@@ -306,7 +306,7 @@ except Exception:
     from runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec  # type: ignore
     from release_readiness import (  # type: ignore
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        gateway_bind_safety,
+        local_protocol_bind_safety,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -456,7 +456,7 @@ AGENT_TRACES_PATH = os.path.join(AGENT_HARNESS_DIR, "traces.jsonl")
 AGENT_EVALS_PATH = os.path.join(AGENT_HARNESS_DIR, "evals.jsonl")
 AGENT_RUNTIME_EVIDENCE_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_evidence.jsonl")
 AGENT_LOCKS_PATH = os.path.join(AGENT_HARNESS_DIR, "locks.json")
-AGENT_GATEWAY_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway.json")
+AGENT_LOCAL_PROTOCOL_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway.json")
 AGENT_CONTEXT_INSPECTOR_PATH = os.path.join(AGENT_HARNESS_DIR, "context_inspector.json")
 AGENT_PERMISSION_MATRIX_PATH = os.path.join(AGENT_HARNESS_DIR, "permission_matrix.json")
 AGENT_POLICY_PATH = os.path.join(AGENT_HARNESS_DIR, "policy.json")
@@ -472,23 +472,6 @@ AGENT_GOVERNANCE_PATH = os.path.join(AGENT_HARNESS_DIR, "governance_components.j
 AGENT_RUNTIME_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_providers.json")
 AGENT_SCHEDULES_PATH = os.path.join(AGENT_HARNESS_DIR, "schedules.jsonl")
 AGENT_SCHEDULE_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "schedule_runs.jsonl")
-AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_push_subscriptions.jsonl")
-AGENT_GATEWAY_PUSH_DELIVERIES_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_push_deliveries.jsonl")
-AGENT_GATEWAY_DAEMON_PID_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.pid")
-AGENT_GATEWAY_DAEMON_STATUS_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.json")
-AGENT_GATEWAY_DAEMON_LOG_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_daemon.log")
-try:
-    GATEWAY_SSE_MAX_SECONDS = max(5.0, float(os.environ.get("SHUHENG_GATEWAY_SSE_MAX_SECONDS", "300") or "300"))
-except ValueError:
-    GATEWAY_SSE_MAX_SECONDS = 300.0
-try:
-    GATEWAY_SSE_WRITE_TIMEOUT_SECONDS = max(0.5, float(os.environ.get("SHUHENG_GATEWAY_SSE_WRITE_TIMEOUT_SECONDS", "5") or "5"))
-except ValueError:
-    GATEWAY_SSE_WRITE_TIMEOUT_SECONDS = 5.0
-try:
-    GATEWAY_SSE_SENT_ID_LIMIT = max(20, int(os.environ.get("SHUHENG_GATEWAY_SSE_SENT_ID_LIMIT", "2000") or "2000"))
-except ValueError:
-    GATEWAY_SSE_SENT_ID_LIMIT = 2000
 AGENT_BRIDGE_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "bridge_registry.json")
 LLM_RECENT_MODELS_PATH = os.path.join(AGENT_HARNESS_DIR, "recent_models.json")
 SECRET_VAULT_DIR = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_SECRET_VAULT_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "secret_vault")))
@@ -7255,7 +7238,7 @@ def a2a_artifact_object(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_artifacts: bool = True) -> dict[str, Any]:
+def local_protocol_capability_registry(state: Optional[State] = None, *, write_runtime_artifacts: bool = True) -> dict[str, Any]:
     runtime_registry = agent_runtime_registry(write_memory_prompt_file=write_runtime_artifacts).to_record()
     role_capabilities = {
         role: {
@@ -7279,7 +7262,7 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
             "active_task_id": sub.active_bus_task_id,
             "source": "state" if state is not None and sub.agent_id in state.subagents else "subagent_meta",
         }
-        for sub in gateway_visible_subagents(state)
+        for sub in local_protocol_visible_subagents(state)
     ]
     return {
         "schema_version": "agentcapabilities.v1",
@@ -7296,7 +7279,7 @@ def gateway_capability_registry(state: Optional[State] = None, *, write_runtime_
     }
 
 
-def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
+def local_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
     """External-facing, low-context directory for agent discovery."""
     roles: list[dict[str, Any]] = []
     for role, template in sorted(ROLE_TEMPLATES.items()):
@@ -7316,7 +7299,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
             }
         )
     agents: list[dict[str, Any]] = []
-    for sub in gateway_visible_subagents(state):
+    for sub in local_protocol_visible_subagents(state):
         role = normalized_subagent_role(sub.role)
         agents.append(
             {
@@ -7331,7 +7314,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
                 "input_modes": ["text/plain"],
                 "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
                 "write_policy": role_write_policy(role),
-                "skill_refs": gateway_public_skill_refs(sub.skill_refs),
+                "skill_refs": local_protocol_public_skill_refs(sub.skill_refs),
                 "safety": "Messages enter Shuheng Agent Mail; execution remains Orchestrator-owned.",
             }
         )
@@ -7353,7 +7336,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
     }
 
 
-def gateway_public_skill_refs(refs: Any, *, limit: int = 8) -> list[str]:
+def local_protocol_public_skill_refs(refs: Any, *, limit: int = 8) -> list[str]:
     """Return short skill/plugin labels without local filesystem paths."""
     public_refs: list[str] = []
     seen: set[str] = set()
@@ -7444,8 +7427,8 @@ def model_orchestration_registry(state: Optional[State] = None) -> dict[str, Any
     }
 
 
-def persistent_subagents_for_gateway() -> list[SubAgentRuntime]:
-    """Load persisted non-secret subagent metadata for stateless gateway discovery."""
+def persistent_subagents_for_local_protocol() -> list[SubAgentRuntime]:
+    """Load persisted non-secret subagent metadata for stateless local discovery."""
     records: list[SubAgentRuntime] = []
     if not os.path.isdir(SUBAGENTS_DIR):
         return records
@@ -7481,10 +7464,10 @@ def persistent_subagents_for_gateway() -> list[SubAgentRuntime]:
     return records
 
 
-def gateway_visible_subagents(state: Optional[State] = None) -> list[SubAgentRuntime]:
+def local_protocol_visible_subagents(state: Optional[State] = None) -> list[SubAgentRuntime]:
     if state is not None:
         return sorted(state.subagents.values(), key=lambda item: item.agent_id)
-    return persistent_subagents_for_gateway()
+    return persistent_subagents_for_local_protocol()
 
 
 def plugin_registry_snapshot(registry: Optional[PluginRegistry] = None) -> dict[str, Any]:
@@ -7561,7 +7544,7 @@ def permission_matrix(state: Optional[State] = None, *, registry: Optional[Plugi
             }
         )
 
-    for sub in gateway_visible_subagents(state):
+    for sub in local_protocol_visible_subagents(state):
         role = normalized_subagent_role(sub.role)
         entries.append(
             {
@@ -7687,7 +7670,7 @@ def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
     if os.path.isdir(AGENT_CONTEXT_PACKS_DIR):
         for _base, _dirs, files in os.walk(AGENT_CONTEXT_PACKS_DIR):
             context_pack_count += len([name for name in files if not name.startswith(".")])
-    subagents = gateway_visible_subagents(state)
+    subagents = local_protocol_visible_subagents(state)
     snapshot = {
         "schema_version": "shuheng.context_inspector.v1",
         "updated_at": now_iso(),
@@ -7708,7 +7691,7 @@ def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
             "providers": runtime_registry_record().get("provider_ids", []),
             "models": model_orchestration_registry(state).get("model_count", 0),
             "selected_session": getattr(state, "selected_session", "") if state is not None else "",
-            "status": getattr(state, "status", "stateless_gateway") if state is not None else "stateless_gateway",
+            "status": getattr(state, "status", "stateless_local_protocol") if state is not None else "stateless_local_protocol",
         },
         "memory": {
             "subagents_dir": SUBAGENTS_DIR,
@@ -7733,8 +7716,8 @@ def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
             "resource_count": len(mcp_resource_registry()),
             "resources": [item.get("uri") for item in mcp_resource_registry()],
         },
-        "gateway": {
-            "registry_path": AGENT_GATEWAY_PATH,
+        "local_protocol": {
+            "registry_path": AGENT_LOCAL_PROTOCOL_REGISTRY_PATH,
             "context_inspector_path": AGENT_CONTEXT_INSPECTOR_PATH,
             "permission_matrix_path": AGENT_PERMISSION_MATRIX_PATH,
             "network_surface": "removed",
@@ -8049,7 +8032,7 @@ def mcp_tool_registry() -> list[dict[str, Any]]:
 
 
 def mcp_resource_registry() -> list[dict[str, Any]]:
-    return gateway_registry_helpers.mcp_resource_registry({
+    return local_protocol_registry_helpers.mcp_resource_registry({
         "messages": AGENT_MAIL_PATH,
         "tasks": AGENT_TASK_LEDGER_PATH,
         "progress": AGENT_PROGRESS_LEDGER_PATH,
@@ -8063,9 +8046,6 @@ def mcp_resource_registry() -> list[dict[str, Any]]:
         "permission_matrix": AGENT_PERMISSION_MATRIX_PATH,
         "schedules": AGENT_SCHEDULES_PATH,
         "schedule_runs": AGENT_SCHEDULE_RUNS_PATH,
-        "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        "gateway_push_subscriptions": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-        "gateway_push_deliveries": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
         "bridges": AGENT_BRIDGE_REGISTRY_PATH,
         "policy": AGENT_POLICY_PATH,
     })
@@ -8088,22 +8068,15 @@ def current_release_readiness_report() -> dict[str, Any]:
     )
 
 
-def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
-    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
-    return gateway_registry_helpers.gateway_service_descriptor(
-        host=host,
-        port=port,
+def local_protocol_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
+    del port
+    bind_safety = local_protocol_bind_safety(host)
+    return local_protocol_registry_helpers.local_protocol_service_descriptor(
         bind_safety=bind_safety,
-        daemon_state={},
-        gateway_push_subscriptions_path=AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-        gateway_push_deliveries_path=AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
-        gateway_daemon_pid_path=AGENT_GATEWAY_DAEMON_PID_PATH,
-        gateway_daemon_status_path=AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        gateway_daemon_log_path=AGENT_GATEWAY_DAEMON_LOG_PATH,
     )
 
 
-def gateway_public_service_descriptor(service: dict[str, Any]) -> dict[str, Any]:
+def local_protocol_public_service_descriptor(service: dict[str, Any]) -> dict[str, Any]:
     """External service descriptor stripped of local storage paths."""
     request_response = service.get("request_response") if isinstance(service.get("request_response"), dict) else {}
     public_request_response = {
@@ -8177,7 +8150,7 @@ def mcp_resource_contents(uri: str) -> dict[str, Any]:
 
 
 def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    registry = ensure_gateway_registry(None)
+    registry = ensure_local_protocol_registry(None)
     task_id = str(payload.get("task_id") or "")
     tasks = registry["a2a_gateway"].get("tasks") or []
     if task_id:
@@ -8192,7 +8165,7 @@ def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def gateway_message_text(payload: dict[str, Any]) -> str:
+def agent_mail_intake_message_text(payload: dict[str, Any]) -> str:
     for key in ("message", "text", "content", "objective"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
@@ -8211,7 +8184,7 @@ def gateway_message_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-def gateway_message_target(payload: dict[str, Any]) -> tuple[str, str, str, str]:
+def agent_mail_intake_message_target(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     raw_to = payload.get("to")
     target = ""
     if isinstance(raw_to, dict):
@@ -8226,21 +8199,21 @@ def gateway_message_target(payload: dict[str, Any]) -> tuple[str, str, str, str]
         if requested_role in ROLE_TEMPLATES:
             role = normalized_role(requested_role)
             return "role", f"role.{role}", role, ""
-        return "", "", "", "target must match a discovered gateway agent or role"
+        return "", "", "", "target must match a known local protocol agent or role"
     if target in ROLE_TEMPLATES:
         role = normalized_role(target)
         return "role", f"role.{role}", role, ""
-    for sub in gateway_visible_subagents(None):
+    for sub in local_protocol_visible_subagents(None):
         if target in {sub.agent_id, sub.name}:
             return "agent", sub.agent_id, normalized_subagent_role(sub.role), ""
-    return "", "", "", "target must match a discovered gateway agent or role"
+    return "", "", "", "target must match a known local protocol agent or role"
 
 
-def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    text = gateway_message_text(payload)
+def append_agent_mail_intake_message(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    text = agent_mail_intake_message_text(payload)
     if not text:
         return {"schema_version": "a2a.message_send_response.v1", "accepted": False, "error": "message text is required"}, 400
-    to_type, target, role, target_error = gateway_message_target(payload)
+    to_type, target, role, target_error = agent_mail_intake_message_target(payload)
     if not target:
         return {
             "schema_version": "a2a.message_send_response.v1",
@@ -8248,15 +8221,15 @@ def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any
             "error": target_error or "target agent is required",
             "delivery": {"mode": "agent_mail_inbox", "auto_dispatch": False},
         }, 404 if target_error else 400
-    task_id = str(payload.get("task_id") or payload.get("taskId") or short_uid("gwtask")).strip()
+    task_id = str(payload.get("task_id") or payload.get("taskId") or short_uid("mailtask")).strip()
     from_agent = str(payload.get("from_agent") or payload.get("from") or "external.agent").strip()
     if isinstance(payload.get("from"), dict):
         from_agent = str(payload["from"].get("agent_id") or payload["from"].get("id") or from_agent).strip()
-    intent = str(payload.get("intent") or "gateway_message").strip()
+    intent = str(payload.get("intent") or "agent_mail_intake").strip()
     source_payload = {
         "summary": text,
         "objective": text,
-        "source": "gateway",
+        "source": "agent_mail_intake",
         "external_message": payload,
         "role": role,
         "delivery_mode": "agent_mail_inbox",
@@ -8264,15 +8237,15 @@ def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any
     permissions = permissions_for_role(role)
     task_row = append_task_ledger(
         task_id,
-        status="gateway_received",
+        status="agent_mail_received",
         assigned_agent=target,
-        title=compact_title(f"Gateway message to {target}", 80),
-        kind="gateway_message",
+        title=compact_title(f"Agent Mail intake to {target}", 80),
+        kind="agent_mail_intake",
         objective=text,
         permissions=permissions,
         context_policy=context_policy_for_task(text),
         output_contract={"format": "agent_mail", "required_sections": ["acknowledgement", "next_action"]},
-        summary="External gateway message accepted into Agent Mail inbox.",
+        summary="External Agent Mail intake accepted into the local inbox.",
     )
     mail = append_agent_mail(
         from_agent=from_agent,
@@ -8288,7 +8261,7 @@ def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any
     )
     trace = append_trace(
         task_id,
-        "gateway_message_received",
+        "agent_mail_intake_received",
         agent_id=target,
         status="received",
         payload={"message_id": mail["message_id"], "from_agent": from_agent, "delivery_mode": "agent_mail_inbox"},
@@ -8300,7 +8273,7 @@ def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any
         "delivery": {
             "mode": "agent_mail_inbox",
             "auto_dispatch": False,
-            "policy": "Gateway accepts messages into Shuheng ledgers; Orchestrator/TUI owns execution and approvals.",
+            "policy": "Agent Mail intake records messages in Shuheng ledgers; Orchestrator/TUI owns execution and approvals.",
         },
         "task": a2a_task_object(task_row),
         "message": a2a_message_object(mail),
@@ -8393,11 +8366,11 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
         "memory_write_policy": "candidate_only",
     },
     {
-        "id": "protocol_gateway",
+        "id": "local_protocol_records",
         "layer": "protocol",
         "responsibility": "Project internal Agent Mail, local protocol-shaped records, local resource registries, and external bridge descriptors without a built-in Web/HTTP gateway.",
-        "functions": ["ensure_gateway_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry"],
-        "stores": ["gateway", "messages", "tasks", "progress", "artifacts", "runtime_evidence", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
+        "functions": ["ensure_local_protocol_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry"],
+        "stores": ["local_protocol_registry", "messages", "tasks", "progress", "artifacts", "runtime_evidence", "bridges"],
         "write_policy": "registry_only",
         "memory_write_policy": "candidate_only",
     },
@@ -8422,12 +8395,8 @@ def governance_store_paths() -> dict[str, str]:
         checkpoint_store=AGENT_CHECKPOINTS_DIR,
         recovery=AGENT_RECOVERY_PATH,
         recovery_plans=AGENT_RECOVERY_PLANS_PATH,
-        gateway=AGENT_GATEWAY_PATH,
+        local_protocol_registry=AGENT_LOCAL_PROTOCOL_REGISTRY_PATH,
         governance=AGENT_GOVERNANCE_PATH,
-        gateway_push_subscriptions=AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-        gateway_push_deliveries=AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
-        gateway_daemon_status=AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        gateway_daemon_pid=AGENT_GATEWAY_DAEMON_PID_PATH,
         bridges=AGENT_BRIDGE_REGISTRY_PATH,
     )
 
@@ -8489,8 +8458,8 @@ baseline_status = baseline_report.baseline_status
 baseline_item = baseline_report.baseline_item
 
 
-def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
-    """Build protocol/governance evidence without rewriting gateway registry files."""
+def local_protocol_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
+    """Build protocol/governance evidence without rewriting local registry files."""
 
     task_rows = list(latest_task_records().values())[-20:]
     mail_rows = read_jsonl(AGENT_MAIL_PATH, limit=30)
@@ -8552,15 +8521,15 @@ def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
                 {"uriTemplate": "artifact://{path}", "description": "Harness artifact by relative path"},
             ],
         },
-        "capability_registry": gateway_capability_registry(state, write_runtime_artifacts=False),
+        "capability_registry": local_protocol_capability_registry(state, write_runtime_artifacts=False),
         "governance_components": governance_component_registry(state, write_registry=False),
-        "gateway_service": gateway_service_descriptor(),
+        "gateway_service": local_protocol_service_descriptor(),
         "bridge_registry": external_bridge_registry(write_registry=False),
         "runtime_evidence": runtime_evidence_summary(),
     }
 
 
-def architecture_baseline_report(state: Optional[State] = None, gateway_data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def architecture_baseline_report(state: Optional[State] = None, local_protocol_data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     tasks = read_jsonl(AGENT_TASK_LEDGER_PATH)
     progress = read_jsonl(AGENT_PROGRESS_LEDGER_PATH)
     mail = read_jsonl(AGENT_MAIL_PATH)
@@ -8575,13 +8544,13 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
     checkpoints = read_jsonl(AGENT_CHECKPOINT_INDEX_PATH)
     recovery = read_jsonl(AGENT_RECOVERY_PATH)
     recovery_plans = read_jsonl(AGENT_RECOVERY_PLANS_PATH)
-    gateway = gateway_data or gateway_baseline_evidence(state)
-    a2a = gateway.get("a2a_gateway") if isinstance(gateway.get("a2a_gateway"), dict) else {}
-    mcp = gateway.get("mcp_gateway") if isinstance(gateway.get("mcp_gateway"), dict) else {}
-    capabilities = gateway.get("capability_registry") if isinstance(gateway.get("capability_registry"), dict) else {}
-    governance = gateway.get("governance_components") if isinstance(gateway.get("governance_components"), dict) else {}
-    service = gateway.get("gateway_service") if isinstance(gateway.get("gateway_service"), dict) else {}
-    bridge_registry = gateway.get("bridge_registry") if isinstance(gateway.get("bridge_registry"), dict) else {}
+    local_protocol = local_protocol_data or local_protocol_baseline_evidence(state)
+    a2a = local_protocol.get("a2a_gateway") if isinstance(local_protocol.get("a2a_gateway"), dict) else {}
+    mcp = local_protocol.get("mcp_gateway") if isinstance(local_protocol.get("mcp_gateway"), dict) else {}
+    capabilities = local_protocol.get("capability_registry") if isinstance(local_protocol.get("capability_registry"), dict) else {}
+    governance = local_protocol.get("governance_components") if isinstance(local_protocol.get("governance_components"), dict) else {}
+    service = local_protocol.get("gateway_service") if isinstance(local_protocol.get("gateway_service"), dict) else {}
+    bridge_registry = local_protocol.get("bridge_registry") if isinstance(local_protocol.get("bridge_registry"), dict) else {}
     bridge_ids = set(bridge_registry.get("bridge_ids") or [])
     governance_ids = set(governance.get("component_ids") or [])
     artifact_with_hash = any(str(row.get("hash") or "").startswith("sha256:") and row.get("provenance") for row in artifacts)
@@ -8613,7 +8582,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 (governance.get("schema_version") == "agentgovernance.components.v1", "governance component registry is present"),
                 ({"meta_orchestrator", "planner", "router", "context_engineer"} <= governance_ids, "control components are registered"),
                 ({"approval_controller", "risk_guard", "memory_curator", "eval_controller", "recovery_controller"} <= governance_ids, "governance components are registered"),
-                ("protocol_gateway" in governance_ids, "protocol gateway component is registered"),
+                ("local_protocol_records" in governance_ids, "local protocol records component is registered"),
                 (all(item.get("status") == "complete" for item in governance.get("components") or []), "registered components have function/store evidence"),
                 *runtime_evidence_checks_for("governance_components"),
             ],
@@ -8732,9 +8701,9 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
             ],
         ),
         baseline_item(
-            "a2a_mcp_gateway",
+            "local_protocol_records",
             "Local Protocol Records",
-            "A2A/MCP-shaped records are local metadata over Agent Mail and resource registries; Shuheng no longer exposes a built-in Web/HTTP protocol gateway.",
+            "A2A/MCP-shaped records are local metadata over Agent Mail and resource registries; Shuheng no longer exposes a built-in Web/HTTP protocol surface.",
             [
                 (a2a.get("schema_version") == "a2a.gateway.v1", "A2A-shaped local record schema is present"),
                 (a2a.get("status") == "local_record_only", "A2A-shaped data is local-record-only"),
@@ -8749,7 +8718,7 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
                 ((service.get("sse") or {}).get("enabled") is False, "SSE is not active"),
                 ((service.get("push_notifications") or {}).get("enabled") is False, "push notifications are not active"),
                 (not ((service.get("daemon") or {}).get("commands") or []), "daemon lifecycle commands are not registered"),
-                *runtime_evidence_checks_for("a2a_mcp_gateway"),
+                *runtime_evidence_checks_for("local_protocol_records"),
             ],
         ),
         baseline_item(
@@ -8813,8 +8782,8 @@ def format_baseline_report(report: dict[str, Any], *, max_items: int = 20) -> st
 
 
 def baseline_panel_items(state: Optional[State] = None) -> list[PanelItem]:
-    gateway = ensure_gateway_registry(state)
-    report = gateway.get("baseline_comparison") or architecture_baseline_report(state, gateway_data=gateway)
+    local_protocol = ensure_local_protocol_registry(state)
+    report = local_protocol.get("baseline_comparison") or architecture_baseline_report(state, local_protocol_data=local_protocol)
     items: list[PanelItem] = []
     summary = report.get("summary") or {}
     items.append(PanelItem(
@@ -8857,7 +8826,7 @@ def baseline_panel_items(state: Optional[State] = None) -> list[PanelItem]:
     return items
 
 
-def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
+def ensure_local_protocol_registry(state: Optional[State] = None) -> dict[str, Any]:
     task_rows = list(latest_task_records().values())[-20:]
     mail_rows = read_jsonl(AGENT_MAIL_PATH, limit=30)
     artifact_rows = read_jsonl(AGENT_ARTIFACT_INDEX_PATH, limit=30)
@@ -8867,8 +8836,8 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
     runtime_registry = runtime_registry_record()
     model_registry = model_orchestration_registry(state)
     schedule_registry = scheduled_task_registry(state)
-    capability_registry = gateway_capability_registry(state)
-    agent_directory = gateway_agent_directory(state)
+    capability_registry = local_protocol_capability_registry(state)
+    agent_directory = local_agent_directory(state)
     context_data = context_inspector_snapshot(state)
     permissions_data = permission_matrix(state)
     governance_registry = governance_component_registry(state)
@@ -8901,8 +8870,6 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "runtime_providers": AGENT_RUNTIME_REGISTRY_PATH,
             "schedules": AGENT_SCHEDULES_PATH,
             "schedule_runs": AGENT_SCHEDULE_RUNS_PATH,
-            "gateway_daemon_status": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-            "gateway_daemon_pid": AGENT_GATEWAY_DAEMON_PID_PATH,
         },
         "policy_gate": {
             "status": "local_runtime",
@@ -8969,7 +8936,7 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "model_orchestration": model_registry,
         "scheduled_task_registry": schedule_registry,
         "governance_components": governance_registry,
-        "gateway_service": gateway_service_descriptor(),
+        "gateway_service": local_protocol_service_descriptor(),
         "bridge_registry": bridge_registry,
         "runtime_evidence": runtime_evidence_summary(),
         "release_readiness": current_release_readiness_report(),
@@ -8977,21 +8944,21 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         "agent_cards": list(role_cards),
     }
     data["a2a_gateway"]["agent_cards"].extend(role_cards)
-    for sub in gateway_visible_subagents(state):
+    for sub in local_protocol_visible_subagents(state):
         card = a2a_agent_card_for_subagent(sub)
         data["agent_cards"].append(card)
         data["a2a_gateway"]["agent_cards"].append(card)
-    data["baseline_comparison"] = architecture_baseline_report(state, gateway_data=data)
-    write_text_atomic(AGENT_GATEWAY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    data["baseline_comparison"] = architecture_baseline_report(state, local_protocol_data=data)
+    write_text_atomic(AGENT_LOCAL_PROTOCOL_REGISTRY_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return data
 
 
-def gateway_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
-    """Return the external gateway view without context or permission internals."""
+def local_protocol_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
+    """Return the public local protocol view without context or permission internals."""
     a2a = registry.get("a2a_gateway") if isinstance(registry.get("a2a_gateway"), dict) else {}
-    full_service = registry.get("gateway_service") if isinstance(registry.get("gateway_service"), dict) else gateway_service_descriptor()
-    service = gateway_public_service_descriptor(full_service)
-    directory = registry.get("agent_directory") if isinstance(registry.get("agent_directory"), dict) else gateway_agent_directory(None)
+    full_service = registry.get("gateway_service") if isinstance(registry.get("gateway_service"), dict) else local_protocol_service_descriptor()
+    service = local_protocol_public_service_descriptor(full_service)
+    directory = registry.get("agent_directory") if isinstance(registry.get("agent_directory"), dict) else local_agent_directory(None)
     release_readiness = registry.get("release_readiness") if isinstance(registry.get("release_readiness"), dict) else current_release_readiness_report()
     return {
         "schema_version": "agentgateway.public.v1",
@@ -12322,7 +12289,7 @@ def tui_tool_capability_list(state: Optional[State], args: dict[str, Any]) -> di
     del args
     if state is not None:
         tui_query_refresh_subagents(state)
-    return tui_query_ok("capability.list", capabilities=tui_query_json_safe(gateway_capability_registry(state)))
+    return tui_query_ok("capability.list", capabilities=tui_query_json_safe(local_protocol_capability_registry(state)))
 
 
 def tui_tool_schedule_create(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
@@ -13747,7 +13714,7 @@ def ohmypi_typed_readonly_host_tool_definitions() -> list[RpcHostToolDefinition]
         "task_get": "Read one task plus related approvals, artifacts, and traces.",
         "approval_list": "Read approval metadata without granting approval.",
         "artifact_list": "Read artifact references and metadata.",
-        "capability_list": "Read roles, tools, runtime providers, and gateway capabilities.",
+        "capability_list": "Read roles, tools, runtime providers, and local protocol capabilities.",
         "schedule_list": "Read scheduled task registry and run audit metadata.",
         "memory_context_get": "Generate and return a Shuheng memory/context pack artifact reference for OMP execution.",
         "runtime_subagent_list": "Read live OMP-native runtime subagent snapshots from the active RPC process; does not create Shuheng agents.",
@@ -14138,7 +14105,7 @@ def ohmypi_tui_query_endpoint(
     if endpoint == "capability_registry" or endpoint == "capability_list":
         return tui_query_ok(
             "capability.registry",
-            capabilities=tui_query_json_safe(gateway_capability_registry(state, write_runtime_artifacts=False)),
+            capabilities=tui_query_json_safe(local_protocol_capability_registry(state, write_runtime_artifacts=False)),
         )
     if endpoint == "agent_list":
         return tui_tool_agent_list(state, endpoint_args)
@@ -21395,7 +21362,7 @@ def eval_panel_items() -> list[PanelItem]:
 def context_panel_items(state: State) -> list[PanelItem]:
     data = context_inspector_snapshot(state)
     items: list[PanelItem] = []
-    for key in ("project", "rules", "runtime", "memory", "plugins", "workflows", "mcp", "gateway", "loading_policy"):
+    for key in ("project", "rules", "runtime", "memory", "plugins", "workflows", "mcp", "local_protocol", "loading_policy"):
         payload = data.get(key) if isinstance(data.get(key), dict) else {}
         items.append(PanelItem(
             key=key,
@@ -24431,7 +24398,7 @@ def submit(state: State, text: str) -> None:
         add_system(state, "Usage: /scheduler [status|tick|run <schedule_id>]")
         return
     if text == "/baseline":
-        report = architecture_baseline_report(state, gateway_data=ensure_gateway_registry(state))
+        report = architecture_baseline_report(state, local_protocol_data=ensure_local_protocol_registry(state))
         add_system(state, "在 TUI 输入框执行 /baseline 会打开 Architecture Baseline 面板。\n" + format_baseline_report(report))
         return
     m_approve = re.match(r"/(approve|reject)\s+(\S+)\s*$", text, re.I)

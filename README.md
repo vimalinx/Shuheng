@@ -191,7 +191,7 @@ PYTHONPATH=src python -m shuheng
 shuheng --help
 ```
 
-`shuheng --help`、启动 TUI、gateway 和 `shuheng-check` 都走 Shuheng 自己的本地控制面。默认 runtime core 是 OhMyPi / OMP。
+`shuheng --help`、启动 TUI、本地协议记录和 `shuheng-check` 都走 Shuheng 自己的本地控制面。默认 runtime core 是 OhMyPi / OMP。
 
 ### 2. 检查接入状态
 
@@ -338,7 +338,7 @@ shuheng
 | `src/shuheng/integration.py` | Shuheng doctor 检查和本地集成工具 |
 | `src/shuheng/runtime.py` | runtime provider 抽象层与注册表 |
 | `src/shuheng/scheduler.py` | 定时任务注册表与触发判定(cron / interval / at) |
-| `src/shuheng/release_readiness.py` | 发布成熟度、baseline 证据等级、gateway 安全姿态和启发式 eval 纯函数 |
+| `src/shuheng/release_readiness.py` | 发布成熟度、baseline 证据等级、本地协议安全姿态和启发式 eval 纯函数 |
 | `src/shuheng/control_protocol.py` | agent task 控制协议(v2)解析 |
 | `src/shuheng/frontend_history_compat.py` | Shuheng 本地历史/命名 fallback |
 | `src/shuheng/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
