@@ -758,6 +758,7 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/workspaces", "", "列出项目工作区 provenance", True),
     ("/tasks", "", "查看共享任务账本", True),
     ("/bus", "", "查看 agent mail", True),
+    ("/inbox", "[review|ignore <task>]", "查看/处理 Agent Mail intake inbox", False),
     ("/approvals", "", "查看待审批事项", True),
     ("/approve", "<id>", "批准待审批事项", False),
     ("/reject", "<id>", "拒绝待审批事项", False),
@@ -4519,7 +4520,7 @@ def secret_status_text(state: State) -> str:
 
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
-    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
+    "/memory", "/mem", "/tasks", "/bus", "/inbox", "/artifacts", "/recover", "/evals", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
     "/workspace", "/workspaces",
     "/temp",
 }
@@ -21010,6 +21011,181 @@ def task_panel_items() -> list[PanelItem]:
     return items
 
 
+AGENT_MAIL_INTAKE_STATUSES = frozenset({"agent_mail_received", "agent_mail_reviewed", "agent_mail_ignored"})
+AGENT_MAIL_INTAKE_ACTIONS = {
+    "review": ("agent_mail_reviewed", "agent_mail_intake_reviewed", "reviewed"),
+    "reviewed": ("agent_mail_reviewed", "agent_mail_intake_reviewed", "reviewed"),
+    "ignore": ("agent_mail_ignored", "agent_mail_intake_ignored", "ignored"),
+    "ignored": ("agent_mail_ignored", "agent_mail_intake_ignored", "ignored"),
+}
+
+
+def is_agent_mail_intake_task(row: dict[str, Any]) -> bool:
+    kind = str(row.get("kind") or "")
+    status = str(row.get("status") or "")
+    return kind == "agent_mail_intake" or status in AGENT_MAIL_INTAKE_STATUSES
+
+
+def is_agent_mail_intake_message(row: dict[str, Any]) -> bool:
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    return str(row.get("intent") or "") == "agent_mail_intake" or str(payload.get("source") or "") == "agent_mail_intake"
+
+
+def agent_mail_intake_summary(task_row: dict[str, Any], mail_row: dict[str, Any]) -> str:
+    payload = mail_row.get("payload") if isinstance(mail_row.get("payload"), dict) else {}
+    summary = str(
+        task_row.get("objective")
+        or task_row.get("summary")
+        or payload.get("summary")
+        or payload.get("objective")
+        or ""
+    ).strip()
+    return redact_memory_text(summary)
+
+
+def agent_mail_intake_panel_items(limit: int = 80) -> list[PanelItem]:
+    tasks = latest_task_records()
+    mail_by_task: dict[str, list[dict[str, Any]]] = {}
+    for row in read_jsonl(AGENT_MAIL_PATH):
+        if not is_agent_mail_intake_message(row):
+            continue
+        task_id = str(row.get("task_id") or row.get("thread_id") or "").strip()
+        if task_id:
+            mail_by_task.setdefault(task_id, []).append(row)
+    trace_by_task: dict[str, list[dict[str, Any]]] = {}
+    for row in read_jsonl(AGENT_TRACES_PATH):
+        event = str(row.get("event") or "")
+        if not event.startswith("agent_mail_intake_"):
+            continue
+        task_id = str(row.get("task_id") or "").strip()
+        if task_id:
+            trace_by_task.setdefault(task_id, []).append(row)
+
+    task_ids = {task_id for task_id, row in tasks.items() if is_agent_mail_intake_task(row)}
+    task_ids.update(mail_by_task)
+    rows: list[tuple[float, PanelItem]] = []
+    for task_id in task_ids:
+        task_row = tasks.get(task_id, {})
+        if task_row and not is_agent_mail_intake_task(task_row):
+            continue
+        mail_rows = mail_by_task.get(task_id) or []
+        mail_row = mail_rows[-1] if mail_rows else {}
+        trace_rows = trace_by_task.get(task_id) or []
+        status = str(task_row.get("status") or mail_row.get("status") or "agent_mail_received")
+        to = mail_row.get("to") if isinstance(mail_row.get("to"), dict) else {}
+        from_ = mail_row.get("from") if isinstance(mail_row.get("from"), dict) else {}
+        target = str(task_row.get("assigned_agent") or to.get("target") or "-")
+        from_agent = str(from_.get("agent_id") or "-")
+        summary = agent_mail_intake_summary(task_row, mail_row)
+        message_id = str(mail_row.get("message_id") or "-")
+        latest_ts = max(
+            [row_timestamp(row) for row in [task_row, mail_row, *trace_rows] if row],
+            default=0.0,
+        )
+        trace_events = [
+            f"- {row.get('timestamp', '')} · {row.get('event') or '-'} · {row.get('status') or '-'}"
+            for row in trace_rows[-8:]
+        ]
+        detail_lines = [
+            f"Inbox task: {task_id}",
+            f"Status: {status}",
+            f"From: {from_agent}",
+            f"Target: {target}",
+            f"Agent Mail: {message_id}",
+            "Delivery: agent_mail_inbox · auto_dispatch:false",
+            "Execution owner: Orchestrator/TUI only",
+            "",
+            "Message summary:",
+            truncate_cells(summary or "-", 1200),
+            "",
+            "Actions:",
+            "- Enter/v: mark reviewed",
+            "- i: mark ignored",
+            f"- /inbox review {task_id} [note]",
+            f"- /inbox ignore {task_id} [note]",
+            "",
+            "Trace:",
+        ]
+        detail_lines.extend(trace_events or ["- -"])
+        rows.append((latest_ts, PanelItem(
+            key=task_id,
+            title=f"Agent Mail intake · {target} · {status}",
+            subtitle=f"{from_agent} -> {target} · task:{task_id} · auto_dispatch:false",
+            detail="\n".join(detail_lines),
+            status=status,
+            payload={
+                "item_type": "agent_mail_intake",
+                "task_id": task_id,
+                "message_id": message_id,
+                "from_agent": from_agent,
+                "target": target,
+                "auto_dispatch": False,
+            },
+        )))
+    rows.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _ts, item in rows[:limit]]
+
+
+def resolve_agent_mail_intake_task_id(task_id: str) -> tuple[str, dict[str, Any], str]:
+    requested = (task_id or "").strip()
+    if not requested:
+        return "", {}, "缺少 Agent Mail intake task id。"
+    intake_tasks = {key: row for key, row in latest_task_records().items() if is_agent_mail_intake_task(row)}
+    if requested in intake_tasks:
+        return requested, intake_tasks[requested], ""
+    matches = [(key, row) for key, row in intake_tasks.items() if key.startswith(requested)]
+    if len(matches) == 1:
+        return matches[0][0], matches[0][1], ""
+    if len(matches) > 1:
+        return "", {}, f"Agent Mail intake task id 前缀不唯一：{requested}"
+    return "", {}, f"找不到 Agent Mail intake：{requested}"
+
+
+def record_agent_mail_intake_action(task_id: str, action: str, note: str = "") -> str:
+    normalized_action = (action or "").strip().lower()
+    status_event = AGENT_MAIL_INTAKE_ACTIONS.get(normalized_action)
+    if status_event is None:
+        return "未知 Agent Mail intake 操作；可用：review、ignore。"
+    status, event, mail_status = status_event
+    resolved_id, row, error = resolve_agent_mail_intake_task_id(task_id)
+    if error:
+        return error
+    previous_status = str(row.get("status") or "")
+    if previous_status in {"agent_mail_reviewed", "agent_mail_ignored"}:
+        return f"Agent Mail intake 已处理：{resolved_id} -> {previous_status}"
+    target = str(row.get("assigned_agent") or "orchestrator.main")
+    summary = truncate_cells((note or f"Agent Mail intake marked {mail_status} by Orchestrator/TUI.").strip(), 500)
+    append_task_update(resolved_id, status=status, summary=summary)
+    append_agent_mail(
+        from_agent="orchestrator.main",
+        to_type="agent",
+        target=target,
+        intent=event,
+        task_id=resolved_id,
+        status=mail_status,
+        payload={
+            "source": "agent_mail_intake_handling",
+            "action": normalized_action,
+            "summary": summary,
+            "delivery_mode": "agent_mail_inbox",
+            "auto_dispatch": False,
+        },
+    )
+    append_trace(
+        resolved_id,
+        event,
+        agent_id=target,
+        status=status,
+        payload={
+            "action": normalized_action,
+            "note": summary,
+            "delivery_mode": "agent_mail_inbox",
+            "auto_dispatch": False,
+        },
+    )
+    return f"已标记 Agent Mail intake：{resolved_id} -> {status}"
+
+
 def approval_panel_items(show_all: bool = False, state: Optional[State] = None) -> list[PanelItem]:
     if state is not None and state.secret_vault.unlocked:
         rows = secret_memory_candidate_approval_rows(state, show_all=show_all)
@@ -21982,6 +22158,8 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
     def load_items() -> tuple[str, list[PanelItem], str]:
         if panel == "tasks":
             return "Task Ledger", task_panel_items(), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q 关闭"
+        if panel == "inbox":
+            return "Agent Mail Intake Inbox", agent_mail_intake_panel_items(), "Enter/v 标记 reviewed  i 标记 ignored  r 刷新  ↑/↓ 选择  PgUp/PgDn  Esc/q"
         if panel == "approvals":
             scope = "all" if show_all_approvals else "pending"
             title = "Secret Approval Inbox" if state.secret_vault.unlocked else "Approval Inbox"
@@ -22066,6 +22244,14 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
                 continue
             if panel == "workflows" and key in ("x", "X"):
                 message = workflow_panel_run_action(state, current, "cancel")
+                detail_scroll = 0
+                continue
+            if panel == "inbox" and key in ("\n", "\r", curses.KEY_ENTER, "v", "V"):
+                message = record_agent_mail_intake_action(current.key, "review")
+                detail_scroll = 0
+                continue
+            if panel == "inbox" and key in ("i", "I"):
+                message = record_agent_mail_intake_action(current.key, "ignore")
                 detail_scroll = 0
                 continue
             if panel == "approvals" and key in ("\n", "\r", curses.KEY_ENTER):
@@ -23738,6 +23924,46 @@ def format_agent_mail(limit: int = 20) -> str:
     return "\n".join(lines)
 
 
+def format_agent_mail_intake_inbox(limit: int = 20) -> str:
+    items = agent_mail_intake_panel_items(limit=limit)
+    if not items:
+        return "Agent Mail intake inbox 为空。"
+    lines = ["Agent Mail Intake Inbox："]
+    for item in items:
+        payload = item.payload if isinstance(item.payload, dict) else {}
+        lines.append(
+            f"- {item.key} · {item.status} · "
+            f"{payload.get('from_agent') or '-'} -> {payload.get('target') or '-'} · "
+            f"{truncate_cells(item.title, 100)}"
+        )
+    lines += [
+        "",
+        "处理：/inbox review <task_id> [note]；/inbox ignore <task_id> [note]",
+    ]
+    return "\n".join(lines)
+
+
+def handle_agent_mail_intake_command(state: State, text: str) -> bool:
+    match = re.match(r"^/inbox(?:\s+([\s\S]*))?$", (text or "").strip(), re.I)
+    if not match:
+        return False
+    args = (match.group(1) or "").strip()
+    if not args or args.lower() in {"list", "ls", "show"}:
+        add_system(state, "在 TUI 输入框执行 /inbox 会打开 Agent Mail Intake Inbox 面板。\n" + format_agent_mail_intake_inbox())
+        return True
+    action_match = re.match(r"^(review|reviewed|ignore|ignored)\s+(\S+)(?:\s+([\s\S]*))?$", args, re.I)
+    if action_match:
+        result = record_agent_mail_intake_action(
+            action_match.group(2),
+            action_match.group(1),
+            action_match.group(3) or "",
+        )
+        add_system(state, result)
+        return True
+    add_system(state, "未知 /inbox 命令。\n用法：/inbox；/inbox review <task_id> [note]；/inbox ignore <task_id> [note]")
+    return True
+
+
 def format_approvals(state: State) -> str:
     rows = pending_approvals(state)
     if not rows:
@@ -24253,6 +24479,8 @@ def submit(state: State, text: str) -> None:
         add_system(state, switch_home_to_chat(state))
         return
     if handle_workspace_command(state, text):
+        return
+    if handle_agent_mail_intake_command(state, text):
         return
     if handle_plugin_command(state, text):
         return
@@ -26956,7 +27184,7 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
-        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
+        if text.strip() in {"/tasks", "/inbox", "/approvals", "/artifacts", "/recover", "/evals", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
             open_harness_panel(stdscr, state, panel)

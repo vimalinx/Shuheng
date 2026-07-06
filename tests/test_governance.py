@@ -306,6 +306,59 @@ def test_progress_approval_artifact_and_trace_round_trip(tmp_path: Path) -> None
     assert trace["trace_id"] in refs["traces"]
 
 
+def test_agent_mail_intake_inbox_panel_and_actions(tmp_path: Path, monkeypatch) -> None:
+    harness = tmp_path / "agent_harness"
+    monkeypatch.setattr(app_module, "AGENT_TASK_LEDGER_PATH", str(harness / "tasks.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_PROGRESS_LEDGER_PATH", str(harness / "progress.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_MAIL_PATH", str(harness / "messages.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_TRACES_PATH", str(harness / "traces.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_APPROVALS_PATH", str(harness / "approvals.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_MEMORY_CANDIDATES_PATH", str(harness / "memory_candidates.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness / "workflow_runs.jsonl"))
+    monkeypatch.setattr(app_module, "AGENT_WORKFLOW_EVENTS_PATH", str(harness / "workflow_events.jsonl"))
+
+    response, status = app_module.append_agent_mail_intake_message({
+        "target": "role.researcher",
+        "message": "Read the local agent card and report whether work is needed.",
+        "requestId": "req_inbox_test",
+    })
+
+    assert status == 201
+    task_id = response["task"]["id"]
+    items = app_module.agent_mail_intake_panel_items()
+    assert any(item.key == task_id for item in items)
+    item = next(item for item in items if item.key == task_id)
+    assert item.payload["auto_dispatch"] is False
+    assert "auto_dispatch:false" in item.detail
+    assert "Execution owner: Orchestrator/TUI only" in item.detail
+    assert "external_message" not in item.detail
+    assert "/inbox review" in app_module.format_agent_mail_intake_inbox()
+    assert "/inbox" in {command for command, _args, _desc, _sendable in app_module.COMMANDS}
+    assert "/inbox" in app_module.SECRET_BLOCKED_NORMAL_COMMANDS
+
+    before_task_rows = len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH))
+    unknown = app_module.record_agent_mail_intake_action("missing-task", "review")
+    assert "找不到 Agent Mail intake" in unknown
+    assert len(app_module.read_jsonl(app_module.AGENT_TASK_LEDGER_PATH)) == before_task_rows
+
+    result = app_module.record_agent_mail_intake_action(task_id, "review", "read by operator")
+    assert result.endswith("agent_mail_reviewed")
+    latest = app_module.latest_task_records()[task_id]
+    assert latest["status"] == "agent_mail_reviewed"
+    assert app_module.read_jsonl(app_module.AGENT_PROGRESS_LEDGER_PATH)[-1]["status"] == "agent_mail_reviewed"
+    trace = app_module.read_jsonl(app_module.AGENT_TRACES_PATH)[-1]
+    assert trace["event"] == "agent_mail_intake_reviewed"
+    assert trace["payload"]["auto_dispatch"] is False
+    mail = app_module.read_jsonl(app_module.AGENT_MAIL_PATH)[-1]
+    assert mail["intent"] == "agent_mail_intake_reviewed"
+    assert mail["payload"]["source"] == "agent_mail_intake_handling"
+    assert mail["payload"]["auto_dispatch"] is False
+    assert app_module.read_jsonl(app_module.AGENT_APPROVALS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_MEMORY_CANDIDATES_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_WORKFLOW_RUNS_PATH) == []
+    assert app_module.read_jsonl(app_module.AGENT_WORKFLOW_EVENTS_PATH) == []
+
+
 def test_single_writer_lock_round_trip(tmp_path: Path) -> None:
     locks_path = str(tmp_path / "locks.json")
 

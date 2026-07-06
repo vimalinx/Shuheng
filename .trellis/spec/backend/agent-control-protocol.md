@@ -1861,7 +1861,7 @@ state.last_error carries the same short reason
 - Active user surfaces:
   - `shuheng` / `python -m shuheng.app` local curses TUI.
   - `/runtime-output` for OMP-native runtime output/control visibility.
-  - Local commands such as `/tasks`, `/bus`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/baseline`, `/runtimes`, `/schedules`, `/plugins`, and `/workflows`.
+  - Local commands such as `/tasks`, `/bus`, `/inbox`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/baseline`, `/runtimes`, `/schedules`, `/plugins`, and `/workflows`.
 - Removed active surfaces:
   - CLI flags `--serve-gateway` and `--gateway-daemon`.
   - TUI command `/gateway`.
@@ -1882,6 +1882,7 @@ state.last_error carries the same short reason
 - A2A/MCP-shaped objects may remain only as local record shapes for registry, baseline, and adapter inspection. They must not claim to be reachable protocol endpoints or certified implementations.
 - Agent discovery records must describe role/subagent purpose and local inbox delivery only. They must not expose broad project context, active spec paths, memory paths, permission matrices, Secret Vault plaintext, or workflow internals.
 - Local Agent Mail intake helpers may write Agent Mail, task ledger, and trace rows. They must not dispatch runtimes, approve policy actions, write long-term memory, execute workflows, call providers, send network requests, or auto-deliver push notifications.
+- `/inbox` is a local TUI command/panel for inspecting Agent Mail intake rows and marking them reviewed or ignored. Review/ignore handling may append task/progress/mail/trace audit rows, but it must not start subagent work, create approvals, execute workflows, call providers, write memory, or expose Web/HTTP/mobile/remote surfaces.
 - Release readiness must say the stable surface is local TUI + OMP runtime output/control, and that Web/HTTP/mobile/remote endpoints are not active product surfaces.
 - Runtime smoke must exercise local ledgers, runtime evidence, and local protocol registry records without opening a socket or HTTP client.
 
@@ -1908,9 +1909,10 @@ state.last_error carries the same short reason
 ### 6. Tests Required
 
 - `tests/test_cli.py` must assert gateway/Web flags are absent from help output.
-- `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
+- `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, `/inbox` stays a local TUI-only Agent Mail intake panel, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
 - `scripts/runtime_smoke.py` must run without starting an HTTP server and must record local runtime evidence.
 - `scripts/check_release_hygiene.py` must require public README wording that states no built-in Web/HTTP surface.
+- `scripts/wheel_smoke.py` must reject built wheels that contain removed Web/local service modules such as `shuheng/web_console.py`, `shuheng/web_console_static.py`, or `shuheng/gateway_registry.py`, including when stale `build/` contents would otherwise leak into the archive.
 - `python3 -m compileall -q src scripts`, `python3 -m ruff check src tests scripts`, `python3 scripts/check_policy_gates.py`, `python3 scripts/check_release_hygiene.py`, `python3 scripts/runtime_smoke.py`, and `git diff --check` must pass.
 
 ### 7. Wrong vs Correct
@@ -6537,6 +6539,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Local protocol records must not expose broad project context, active spec paths, memory paths, workflow run internals, full permission matrices, Secret Vault plaintext, or internal ledger path inventories.
 - `context_inspector_snapshot(...)` and `permission_matrix(...)` remain internal TUI/control-plane inspection surfaces. They may write durable local files for operator use, but they are not adapter-facing resources by default.
 - Local Agent Mail intake helpers accept messages only into Agent Mail, the task ledger, and trace rows. They must create a `kind:"agent_mail_intake"` task row and an `agent_mail_inbox` message, but they must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
+- The local `/inbox` TUI surface is the Orchestrator-owned review queue for those intake rows. It reads local task/mail/trace ledgers, renders bounded source/target/status/summary/delivery metadata with `auto_dispatch:false`, and records explicit `agent_mail_reviewed` or `agent_mail_ignored` outcomes through local audit rows only.
 - A2A-shaped agent cards must advertise `agent-mail://inbox` delivery with `auto_dispatch:false` so local adapters know how to submit messages without assuming execution.
 - Message targets must resolve to the main orchestrator, a known role template, or a locally discovered subagent. Unknown targets are rejected and must not create phantom agent tasks.
 - Stateless local discovery may load persisted non-secret subagent metadata from the Shuheng-owned subagent store. Secret Vault subagents are visible only through unlocked TUI state and must not be discovered from plaintext stateless metadata.
@@ -6562,6 +6565,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Local resource records include context-inspector or permission-matrix resources by default -> context exposure regression.
 - A2A-shaped agent cards do not advertise `endpoint.transport:"local-agent-mail"`, `endpoint.uri:"agent-mail://inbox"`, or `delivery.auto_dispatch:false` -> local adapter delivery contract regression.
 - Local Agent Mail intake dispatches a runtime, approves a policy action, writes long-term memory, or executes a workflow directly -> Orchestrator ownership regression.
+- `/inbox` handling creates a phantom task for an unknown id, exposes raw hidden context/permission/Secret data, or mutates anything beyond local task/progress/mail/trace audit rows -> inbox governance regression.
 - Local Agent Mail intake accepts an unknown target and creates a task for a phantom agent -> discoverability regression.
 - Local service descriptor status is `network_capable` or has a non-empty `base_url` -> network-surface regression.
 - A2A/MCP status says certified/network-capable without local-record-only metadata -> protocol overclaiming regression.
@@ -6580,6 +6584,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - Good: release readiness says Shuheng is `experimental_alpha`, stable surfaces are local TUI/OMP/governance rows, and local protocol records are not reachable endpoints.
 - Good: local agent directory lists a researcher role and persistent non-secret subagents with purpose text plus `agent-mail://inbox` delivery targets, without exposing project context or full permission rows.
 - Good: a local adapter submits a text message to a discovered subagent through the Agent Mail helper; Shuheng writes an `agent_mail_intake` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
+- Good: the operator opens `/inbox`, sees the intake task with source, target, status, summary, and `auto_dispatch:false`, then marks it reviewed or ignored, producing auditable task/progress/mail/trace rows without runtime dispatch.
 - Good: `architecture_baseline_report()` called directly still reports local protocol records, governance, and external bridge evidence from a no-write snapshot.
 - Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and local registry records only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
 - Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
@@ -6598,6 +6603,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 - `scripts/check_policy_gates.py` must assert service descriptors use `local_record_only`, an empty `base_url`, `agent-directory://local`, and `agent-mail://inbox`.
 - Tests must assert A2A-shaped agent cards use `endpoint.transport:"local-agent-mail"`, `endpoint.uri:"agent-mail://inbox"`, `delivery.mode:"agent_mail_inbox"`, and `delivery.auto_dispatch:false`.
 - Tests must assert local Agent Mail intake writes a `kind:"agent_mail_intake"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
+- Tests must assert `/inbox` is present in the local command table and Secret isolation list, renders intake entries without raw external payload dumps, marks review/ignore through `agent_mail_reviewed` or `agent_mail_ignored`, rejects unknown ids without phantom rows, and does not call runtime dispatch, workflow execution, approval execution, provider APIs, or memory writes.
 - Tests must assert local resources omit and cannot read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` by default.
 - Tests must assert release readiness exposes structured distribution-smoke metadata for wheel+sdist, dependency-resolving install mode, public console scripts, and debug-only non-gate options.
 - Tests must assert protocol metadata carries `certification:"not_protocol_certified"` and `posture:"local_record_shape"`.

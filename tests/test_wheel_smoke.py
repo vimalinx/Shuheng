@@ -364,6 +364,18 @@ def test_wheel_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         raise AssertionError("private wheel member should fail")
 
 
+def test_wheel_archive_contract_rejects_removed_web_member(tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
+    write_wheel_fixture(wheel, [*expected_wheel_members(), "shuheng/web_console.py"])
+
+    try:
+        wheel_smoke.wheel_archive_contract_check(wheel)
+    except ValueError as exc:
+        assert "forbidden members present: shuheng/web_console.py" in str(exc)
+    else:
+        raise AssertionError("removed wheel member should fail")
+
+
 def test_wheel_archive_contract_rejects_missing_console_script_metadata(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
     write_wheel_fixture(wheel, expected_wheel_members(), missing_script="shuheng-check")

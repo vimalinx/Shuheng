@@ -17,6 +17,7 @@ import curses
 import zipfile
 import contextlib
 import io
+import inspect
 from pathlib import Path
 
 
@@ -12556,6 +12557,38 @@ def run_checks() -> None:
     assert (intake_mail["payload"] or {}).get("source") == "agent_mail_intake", intake_mail
     intake_trace = [row for row in a.read_jsonl(a.AGENT_TRACES_PATH) if row.get("task_id") == intake_task_id][-1]
     assert intake_trace["event"] == "agent_mail_intake_received", intake_trace
+    command_names = {cmd for cmd, _args, _desc, _sendable in a.COMMANDS}
+    assert "/inbox" in command_names, command_names
+    assert "/inbox" in a.SECRET_BLOCKED_NORMAL_COMMANDS
+    inbox_items = a.agent_mail_intake_panel_items()
+    inbox_item = next((item for item in inbox_items if item.key == intake_task_id), None)
+    assert inbox_item is not None, inbox_items
+    assert inbox_item.payload["auto_dispatch"] is False, inbox_item
+    assert "auto_dispatch:false" in inbox_item.detail, inbox_item.detail
+    assert "Execution owner: Orchestrator/TUI only" in inbox_item.detail, inbox_item.detail
+    assert "external_message" not in inbox_item.detail, inbox_item.detail
+    inbox_text = a.format_agent_mail_intake_inbox()
+    assert "/inbox review" in inbox_text and intake_task_id in inbox_text, inbox_text
+    rows_before_unknown_action = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
+    missing_action = a.record_agent_mail_intake_action("missing-intake-task", "review")
+    assert "找不到 Agent Mail intake" in missing_action, missing_action
+    assert len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH)) == rows_before_unknown_action
+    action_result = a.record_agent_mail_intake_action(intake_task_id, "review", "operator reviewed")
+    assert action_result.endswith("agent_mail_reviewed"), action_result
+    reviewed_task = a.latest_task_records()[intake_task_id]
+    assert reviewed_task["status"] == "agent_mail_reviewed", reviewed_task
+    reviewed_progress = a.read_jsonl(a.AGENT_PROGRESS_LEDGER_PATH)[-1]
+    assert reviewed_progress["status"] == "agent_mail_reviewed", reviewed_progress
+    reviewed_mail = a.read_jsonl(a.AGENT_MAIL_PATH)[-1]
+    assert reviewed_mail["intent"] == "agent_mail_intake_reviewed", reviewed_mail
+    assert reviewed_mail["payload"]["source"] == "agent_mail_intake_handling", reviewed_mail
+    assert reviewed_mail["payload"]["auto_dispatch"] is False, reviewed_mail
+    reviewed_trace = a.read_jsonl(a.AGENT_TRACES_PATH)[-1]
+    assert reviewed_trace["event"] == "agent_mail_intake_reviewed", reviewed_trace
+    assert reviewed_trace["payload"]["auto_dispatch"] is False, reviewed_trace
+    assert "start_subagent_task(" not in inspect.getsource(a.record_agent_mail_intake_action)
+    assert "raw_ask(" not in inspect.getsource(a.record_agent_mail_intake_action)
+    assert "workflow" not in inspect.getsource(a.record_agent_mail_intake_action).lower()
     task_count_before_unknown_intake = len(a.read_jsonl(a.AGENT_TASK_LEDGER_PATH))
     rejected_intake, rejected_status = a.append_agent_mail_intake_message({
         "target": "missing.local.agent",

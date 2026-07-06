@@ -118,6 +118,12 @@ WHEEL_REQUIRED_PACKAGE_MEMBERS = (
     "shuheng/release_readiness.py",
 )
 
+WHEEL_FORBIDDEN_PACKAGE_MEMBERS = (
+    "shuheng/gateway_registry.py",
+    "shuheng/web_console.py",
+    "shuheng/web_console_static.py",
+)
+
 WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
     "METADATA",
     "WHEEL",
@@ -554,7 +560,11 @@ def wheel_archive_contract_check(wheel: Path) -> dict[str, object]:
     forbidden = sorted(
         member
         for member in members
-        if member in SDIST_FORBIDDEN_MEMBERS or member.startswith(SDIST_FORBIDDEN_PREFIXES)
+        if (
+            member in SDIST_FORBIDDEN_MEMBERS
+            or member in WHEEL_FORBIDDEN_PACKAGE_MEMBERS
+            or member.startswith(SDIST_FORBIDDEN_PREFIXES)
+        )
     )
     with zipfile.ZipFile(wheel) as archive:
         metadata_text = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8", errors="replace") if f"{dist_info_dir}/METADATA" in members else ""
