@@ -240,3 +240,36 @@ Removed active Web Console/HTTP gateway/mobile/remote surfaces, kept local TUI p
 ### Next Steps
 
 - None - task complete
+
+
+## Session 53: Rename local protocol surface
+
+**Date**: 2026-07-06
+**Task**: Rename local protocol surface
+**Branch**: `main`
+
+### Summary
+
+Archived the gateway naming cleanup: active runtime/docs/tests now use local protocol and Agent Mail intake terminology while preserving historical local registry record keys for compatibility.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `21b24d2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
