@@ -24,7 +24,6 @@ import queue
 import re
 import shutil
 import shlex
-import signal
 import socket
 import subprocess
 import sys
@@ -36,7 +35,6 @@ import urllib.parse
 import urllib.request
 import unicodedata
 import zipfile
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
 
@@ -114,7 +112,6 @@ try:
     from . import governance as governance_store
     from . import context_packs as context_pack_store
     from . import runtime_dispatch as runtime_dispatch_store
-    from . import web_console as web_console_helpers
     from . import dashboard as dashboard_helpers
     from . import rendering as rendering_helpers
     from . import commands as command_helpers
@@ -264,7 +261,6 @@ except Exception:
     import governance as governance_store  # type: ignore
     import context_packs as context_pack_store  # type: ignore
     import runtime_dispatch as runtime_dispatch_store  # type: ignore
-    import web_console as web_console_helpers  # type: ignore
     import dashboard as dashboard_helpers  # type: ignore
     import rendering as rendering_helpers  # type: ignore
     import commands as command_helpers  # type: ignore
@@ -785,7 +781,6 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/artifacts", "", "打开 artifact store", True),
     ("/recover", "", "查看/处理可恢复任务", True),
     ("/evals", "", "查看任务评估/trace", True),
-    ("/gateway", "", "查看 A2A/MCP gateway 脚手架", True),
     ("/runtimes", "", "查看 agent runtime/provider 注册表", True),
     ("/runtime-output", "", "查看 OMP-native runtime 子代理输出", True),
     ("/schedules", "", "查看顶层定时任务注册表", True),
@@ -2620,7 +2615,7 @@ def record_shared_user_profile_interaction(
     if state is not None and (state.temporary_session or state.secret_vault.unlocked):
         return read_shared_user_profile_state()
     source = str(source or "user").strip() or "user"
-    if not (source.startswith("user") or source in {"subagent_chat", "agent_home_input", "main_home_input", "web_console"}):
+    if not (source.startswith("user") or source in {"subagent_chat", "agent_home_input", "main_home_input"}):
         return read_shared_user_profile_state()
     summary = shared_profile_sanitized_text(text, limit=180)
     if not summary:
@@ -4541,7 +4536,7 @@ def secret_status_text(state: State) -> str:
 
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
-    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/gateway", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
+    "/memory", "/mem", "/tasks", "/bus", "/artifacts", "/recover", "/evals", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
     "/workspace", "/workspaces",
     "/temp",
 }
@@ -7084,7 +7079,7 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
         "agent_id": sub.agent_id,
         "name": sub.name,
         "provider": {"organization": "local.Shuheng", "url": "local://shuheng"},
-        "endpoint": {"transport": "http+agent-mail", "uri": "/a2a/messages", "target": sub.agent_id},
+        "endpoint": {"transport": "local-agent-mail", "uri": "agent-mail://inbox", "target": sub.agent_id},
         "capabilities": {
             "streaming": True,
             "push_notifications": False,
@@ -7120,7 +7115,7 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
             }
         ],
         "delivery": {
-            "message_endpoint": "/a2a/messages",
+            "message_endpoint": "agent-mail://inbox",
             "mode": "agent_mail_inbox",
             "auto_dispatch": False,
         },
@@ -7136,7 +7131,7 @@ def a2a_agent_card_for_role(role: str, template: Optional[dict[str, Any]] = None
         "agent_id": f"role.{role}",
         "name": f"{role} role template",
         "provider": {"organization": "local.Shuheng", "url": "local://shuheng"},
-        "endpoint": {"transport": "http+agent-mail", "uri": "/a2a/messages", "target": f"role.{role}"},
+        "endpoint": {"transport": "local-agent-mail", "uri": "agent-mail://inbox", "target": f"role.{role}"},
         "capabilities": {
             "streaming": True,
             "push_notifications": True,
@@ -7160,7 +7155,7 @@ def a2a_agent_card_for_role(role: str, template: Optional[dict[str, Any]] = None
             }
         ],
         "delivery": {
-            "message_endpoint": "/a2a/messages",
+            "message_endpoint": "agent-mail://inbox",
             "mode": "agent_mail_inbox",
             "auto_dispatch": False,
         },
@@ -7313,7 +7308,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
                 "role": role,
                 "purpose": str(template.get("description") or ""),
                 "status": "template",
-                "delivery": {"endpoint": "/a2a/messages", "target": f"role.{role}", "auto_dispatch": False},
+                "delivery": {"endpoint": "agent-mail://inbox", "target": f"role.{role}", "auto_dispatch": False},
                 "input_modes": ["text/plain"],
                 "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
                 "write_policy": str(template.get("write_policy") or "none"),
@@ -7332,7 +7327,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
                 "purpose": role_template(role).get("description", ""),
                 "status": sub.status,
                 "security_context": sub.security_context,
-                "delivery": {"endpoint": "/a2a/messages", "target": sub.agent_id, "auto_dispatch": False},
+                "delivery": {"endpoint": "agent-mail://inbox", "target": sub.agent_id, "auto_dispatch": False},
                 "input_modes": ["text/plain"],
                 "output_modes": ["text/plain", "artifact_refs", "memory_candidates", "approval_requests"],
                 "write_policy": role_write_policy(role),
@@ -7351,7 +7346,7 @@ def gateway_agent_directory(state: Optional[State] = None) -> dict[str, Any]:
             "auto_dispatch": False,
             "secret_subagents": "only visible through unlocked TUI state",
         },
-        "message_endpoint": "/a2a/messages",
+        "message_endpoint": "agent-mail://inbox",
         "roles": roles,
         "agents": agents,
         "counts": {"roles": len(roles), "agents": len(agents), "total": len(roles) + len(agents)},
@@ -7742,8 +7737,8 @@ def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
             "registry_path": AGENT_GATEWAY_PATH,
             "context_inspector_path": AGENT_CONTEXT_INSPECTOR_PATH,
             "permission_matrix_path": AGENT_PERMISSION_MATRIX_PATH,
-            "daemon": read_gateway_daemon_status(),
-            "message_send_endpoint": "/a2a/messages",
+            "network_surface": "removed",
+            "message_inbox": "agent-mail://inbox",
         },
         "loading_policy": {
             "artifact_reference_only": True,
@@ -7904,7 +7899,7 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "name": "CLI",
             "status": "active",
             "transport": "local_process",
-            "entrypoints": ["shuheng", "python -m shuheng.app", "--gateway-daemon"],
+            "entrypoints": ["shuheng", "python -m shuheng.app"],
             "policy_action": "read_only",
             "approval_required": False,
         },
@@ -7913,8 +7908,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "type": "human_interface",
             "name": "Dashboard",
             "status": "active",
-            "transport": "http",
-            "entrypoints": ["/gateway", "/baseline", "/tasks", "/approvals", "/artifacts", "/evals"],
+            "transport": "tui_panel",
+            "entrypoints": ["/baseline", "/tasks", "/approvals", "/artifacts", "/evals"],
             "policy_action": "read_only",
             "approval_required": False,
         },
@@ -7932,9 +7927,9 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "feishu",
             "type": "external_ui_bridge",
             "name": "Feishu",
-            "status": "registered_adapter",
-            "transport": "webhook_or_bot",
-            "entrypoints": ["/a2a/push-subscriptions", "/a2a/events", "/a2a/tasks/query"],
+            "status": "inactive_no_builtin_web_surface",
+            "transport": "adapter_contract",
+            "entrypoints": ["agent-mail://inbox"],
             "policy_action": "external_send",
             "approval_required": True,
         },
@@ -7942,9 +7937,9 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "openclaw",
             "type": "external_ui_bridge",
             "name": "OpenClaw",
-            "status": "registered_adapter",
-            "transport": "http_a2a_bridge",
-            "entrypoints": ["/gateway", "/a2a", "/mcp"],
+            "status": "inactive_no_builtin_web_surface",
+            "transport": "adapter_contract",
+            "entrypoints": ["agent-mail://inbox"],
             "policy_action": "external_send",
             "approval_required": True,
         },
@@ -7953,8 +7948,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "type": "agent_runtime_bridge",
             "name": "Codex",
             "status": "registered_adapter",
-            "transport": "a2a_agent_card",
-            "entrypoints": ["/a2a/agent-cards", "/a2a/tasks/query", "artifact://"],
+            "transport": "local_artifact_contract",
+            "entrypoints": ["agent-card://local/codex", "artifact://"],
             "policy_action": "repo_write",
             "approval_required": True,
         },
@@ -7963,8 +7958,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "type": "agent_runtime_bridge",
             "name": "Claude Code",
             "status": "registered_adapter",
-            "transport": "a2a_agent_card",
-            "entrypoints": ["/a2a/agent-cards", "/a2a/tasks/query", "artifact://"],
+            "transport": "local_artifact_contract",
+            "entrypoints": ["agent-card://local/claude-code", "artifact://"],
             "policy_action": "repo_write",
             "approval_required": True,
         },
@@ -7972,9 +7967,9 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "deer_flow",
             "type": "agent_runtime_bridge",
             "name": "Deer Flow",
-            "status": "registered_adapter",
-            "transport": "a2a_team_bridge",
-            "entrypoints": ["/a2a", "/a2a/events", "/a2a/push-subscriptions"],
+            "status": "inactive_no_builtin_web_surface",
+            "transport": "local_agent_mail_contract",
+            "entrypoints": ["agent-mail://inbox"],
             "policy_action": "read_only",
             "approval_required": False,
         },
@@ -7983,8 +7978,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "type": "mcp_tool_bridge",
             "name": "Local Tools",
             "status": "active",
-            "transport": "mcp_resource_registry",
-            "entrypoints": ["/mcp/tools", "/mcp/resources", "/mcp/resource"],
+            "transport": "local_resource_registry",
+            "entrypoints": ["resource://agent-mail/tasks", "resource://agent-mail/artifacts"],
             "policy_action": "read_only",
             "approval_required": False,
         },
@@ -8016,9 +8011,10 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
         "updated_at": now_iso(),
         "principles": {
             "external_send_requires_approval": True,
-            "remote_agent_access_uses_a2a": True,
-            "tool_access_uses_mcp": True,
+            "remote_agent_access_uses_a2a": False,
+            "tool_access_uses_local_resources": True,
             "artifact_refs_required": True,
+            "no_builtin_web_http_surface": True,
         },
         "bridges": bridges,
         "bridge_ids": [item["id"] for item in bridges],
@@ -8092,111 +8088,13 @@ def current_release_readiness_report() -> dict[str, Any]:
     )
 
 
-def gateway_base_url(host: str, port: int) -> str:
-    return gateway_registry_helpers.gateway_base_url(host, port)
-
-
-def process_is_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    stat_path = f"/proc/{pid}/stat"
-    if os.path.exists(stat_path):
-        try:
-            parts = read_text_file(stat_path, "").split()
-            if len(parts) > 2 and parts[2] == "Z":
-                return False
-        except Exception:
-            pass
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def write_gateway_daemon_status(
-    status: str,
-    *,
-    pid: int = 0,
-    host: str = "127.0.0.1",
-    port: int = 8765,
-    message: str = "",
-    command: str = "",
-) -> dict[str, Any]:
-    row = {
-        "schema_version": "agentgateway.daemon.v1",
-        "updated_at": now_iso(),
-        "status": status,
-        "pid": int(pid or 0),
-        "alive": process_is_alive(int(pid or 0)),
-        "host": host,
-        "port": int(port or 0),
-        "base_url": gateway_base_url(host, int(port or 0)) if int(port or 0) else "",
-        "pid_path": AGENT_GATEWAY_DAEMON_PID_PATH,
-        "status_path": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-        "log_path": AGENT_GATEWAY_DAEMON_LOG_PATH,
-        "command": command,
-        "message": message,
-    }
-    write_text_atomic(AGENT_GATEWAY_DAEMON_STATUS_PATH, json.dumps(row, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-    if row["pid"]:
-        write_text_atomic(AGENT_GATEWAY_DAEMON_PID_PATH, str(row["pid"]) + "\n")
-    return row
-
-
-def read_gateway_daemon_status() -> dict[str, Any]:
-    try:
-        data = json.loads(read_text_file(AGENT_GATEWAY_DAEMON_STATUS_PATH, "{}") or "{}")
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    if not data:
-        pid_text = read_text_file(AGENT_GATEWAY_DAEMON_PID_PATH, "").strip()
-        pid = int(pid_text) if pid_text.isdigit() else 0
-        data = {
-            "schema_version": "agentgateway.daemon.v1",
-            "updated_at": "",
-            "status": "unknown" if pid else "stopped",
-            "pid": pid,
-            "host": "127.0.0.1",
-            "port": 0,
-            "base_url": "",
-            "pid_path": AGENT_GATEWAY_DAEMON_PID_PATH,
-            "status_path": AGENT_GATEWAY_DAEMON_STATUS_PATH,
-            "log_path": AGENT_GATEWAY_DAEMON_LOG_PATH,
-            "command": "",
-            "message": "",
-        }
-    pid = int(data.get("pid") or 0)
-    alive = process_is_alive(pid)
-    data["alive"] = alive
-    if data.get("status") == "running" and not alive:
-        data["status"] = "stale"
-    if data.get("status") in {"starting", "running"} and int(data.get("port") or 0):
-        data["base_url"] = gateway_base_url(str(data.get("host") or "127.0.0.1"), int(data.get("port") or 0))
-    data["pid_path"] = AGENT_GATEWAY_DAEMON_PID_PATH
-    data["status_path"] = AGENT_GATEWAY_DAEMON_STATUS_PATH
-    data["log_path"] = AGENT_GATEWAY_DAEMON_LOG_PATH
-    return data
-
-
-def gateway_daemon_alive() -> bool:
-    status = read_gateway_daemon_status()
-    return bool(status.get("alive") and status.get("status") == "running")
-
-
 def gateway_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
     bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
     return gateway_registry_helpers.gateway_service_descriptor(
         host=host,
         port=port,
         bind_safety=bind_safety,
-        daemon_state=read_gateway_daemon_status(),
+        daemon_state={},
         gateway_push_subscriptions_path=AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
         gateway_push_deliveries_path=AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
         gateway_daemon_pid_path=AGENT_GATEWAY_DAEMON_PID_PATH,
@@ -8225,7 +8123,7 @@ def gateway_public_service_descriptor(service: dict[str, Any]) -> dict[str, Any]
     }
     return {
         "schema_version": service.get("schema_version") or "agentgateway.service.v1",
-        "status": service.get("status") or "local_no_auth_compatibility_surface",
+        "status": service.get("status") or "local_record_only",
         "bind": service.get("bind") or {},
         "base_url": service.get("base_url") or "",
         "security": service.get("security") or {},
@@ -8276,946 +8174,6 @@ def mcp_resource_contents(uri: str) -> dict[str, Any]:
             }
         ],
     }
-
-
-def gateway_sse_events(*, limit: int = 20) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for row in read_jsonl(AGENT_MAIL_PATH, limit=limit):
-        event_id = str(row.get("message_id") or "")
-        if not event_id:
-            continue
-        events.append({
-            "id": event_id,
-            "event": "agent_mail",
-            "timestamp": row.get("timestamp", ""),
-            "data": a2a_message_object(row),
-        })
-    for row in read_jsonl(AGENT_TRACES_PATH, limit=limit):
-        event_id = str(row.get("trace_id") or "")
-        if not event_id:
-            continue
-        events.append({
-            "id": event_id,
-            "event": "trace",
-            "timestamp": row.get("timestamp", ""),
-            "data": row,
-        })
-    events.sort(key=lambda item: str(item.get("timestamp") or ""))
-    return events[-limit:]
-
-
-class WebConsoleReadOnlyAgent:
-    log_path = ""
-
-    def get_llm_name(self, model: bool = True) -> str:
-        return "-"
-
-
-WEB_CONSOLE_ACTION_REQUEST_SCHEMA = web_console_helpers.WEB_CONSOLE_ACTION_REQUEST_SCHEMA
-WEB_CONSOLE_ACTION_RESPONSE_SCHEMA = web_console_helpers.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA
-WEB_CONSOLE_REF_KINDS = web_console_helpers.WEB_CONSOLE_REF_KINDS
-WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS = 60 * 60 * 6
-web_console_ref = web_console_helpers.web_console_ref
-web_console_timestamp = web_console_helpers.web_console_timestamp
-web_console_clean_visible = web_console_helpers.web_console_clean_visible
-web_console_status_label = web_console_helpers.web_console_status_label
-web_console_metric = web_console_helpers.web_console_metric
-web_console_resolve_ref = web_console_helpers.web_console_resolve_ref
-web_console_action_payload = web_console_helpers.web_console_action_payload
-web_console_action_message = web_console_helpers.web_console_action_message
-web_console_model_name_from_payload = web_console_helpers.web_console_model_name_from_payload
-web_console_schedule_control_from_payload = web_console_helpers.web_console_schedule_control_from_payload
-
-
-def web_console_state(*, runtime_agent: bool = False) -> State:
-    agent = new_agent() if runtime_agent else WebConsoleReadOnlyAgent()
-    state = State(agent=agent)
-    if runtime_agent:
-        install_interaction_hook(state, state.agent)
-        bind_agent_token_session(state, state.agent)
-    state.status = "idle"
-    state.current_title = "main"
-    load_subagents(state)
-    return state
-
-
-def web_console_model_rows() -> list[dict[str, str]]:
-    try:
-        entries, mixin, _preserved, _error = load_llm_config_entries()
-    except Exception:
-        return []
-    default_idx = default_entry_index(entries, mixin) if entries else -1
-    rows: list[dict[str, str]] = []
-    for idx, entry in enumerate(entries):
-        name = config_display_name(entry)
-        rows.append({
-            "ui_ref": web_console_ref("model", name),
-            "name": web_console_clean_visible(name, 100),
-            "provider": web_console_clean_visible(entry.cfg.get("name") or entry.cfg_type, 80),
-            "model": web_console_clean_visible(entry.cfg.get("model") or name, 100),
-            "base": web_console_clean_visible(provider_host_label(str(entry.cfg.get("apibase") or "")), 80),
-            "default": "true" if idx == default_idx else "false",
-        })
-    return rows
-
-
-def web_console_ref_map(state: Optional[State] = None) -> dict[str, tuple[str, str]]:
-    state = state or web_console_state()
-    refs: dict[str, tuple[str, str]] = {}
-
-    def add(kind: str, raw_id: Any) -> None:
-        raw = str(raw_id or "").strip()
-        ref = web_console_ref(kind, raw)
-        if ref:
-            refs[ref] = (kind, raw)
-
-    for task_id in latest_task_records():
-        add("task", task_id)
-    for approval_id in approval_latest_records():
-        add("approval", approval_id)
-    for schedule_id in latest_schedule_records():
-        add("schedule", schedule_id)
-    for artifact_id, row in artifact_index_latest().items():
-        add("artifact", row.get("uri") or artifact_id)
-    for sub in state.subagents.values():
-        add("agent", sub.agent_id)
-    state.session_meta = load_session_meta_registry()
-    session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
-    for path, _last_user_at, _preview, _rounds, _desc in session_rows:
-        if path_is_within(path, MODEL_RESPONSES_DIR):
-            add("session", normalized_path(path))
-    try:
-        entries, _mixin, _preserved, _error = load_llm_config_entries()
-    except Exception:
-        entries = []
-    for entry in entries:
-        add("model", config_display_name(entry))
-    return refs
-
-
-def web_console_background_work_exists(state: State) -> bool:
-    if state.status in {"running", "aborting", "restoring"} or state.active_task_id is not None:
-        return True
-    for sub in state.subagents.values():
-        if sub.status in {"running", "aborting"} or sub.active_task_id is not None:
-            return True
-        if sub.task_queue or sub.chat_queue:
-            return True
-    return False
-
-
-def web_console_pump_runtime_state(state: State) -> None:
-    deadline = time.monotonic() + WEB_CONSOLE_RUNTIME_PUMP_MAX_SECONDS
-    idle_since = 0.0
-    try:
-        while time.monotonic() < deadline:
-            process_ui_queue(state)
-            active = web_console_background_work_exists(state)
-            if not active and state.ui_queue.empty():
-                if not idle_since:
-                    idle_since = time.monotonic()
-                if time.monotonic() - idle_since >= 0.5:
-                    return
-            else:
-                idle_since = 0.0
-            time.sleep(0.08)
-    finally:
-        state.running = False
-
-
-def web_console_start_runtime_pump_if_needed(state: State) -> None:
-    if not web_console_background_work_exists(state) and state.ui_queue.empty():
-        return
-    threading.Thread(
-        target=web_console_pump_runtime_state,
-        args=(state,),
-        daemon=True,
-        name="shuheng-web-console-runtime-pump",
-    ).start()
-
-
-def web_console_agent_name(state: State, agent_id: str, fallback: str = "") -> str:
-    agent_id = str(agent_id or "")
-    if agent_id in state.subagents:
-        return state.subagents[agent_id].name
-    if agent_id in {"", "orchestrator.main", "main"}:
-        return fallback or "主 agent"
-    meta = load_subagent_meta(agent_id)
-    return str(meta.get("name") or fallback or "子代理")
-
-
-def web_console_main_summary(
-    state: State,
-    *,
-    tasks: list[dict[str, Any]],
-    open_tasks: list[dict[str, Any]],
-    approvals: list[dict[str, Any]],
-    schedule_registry: dict[str, Any],
-    artifacts: list[dict[str, Any]],
-) -> dict[str, Any]:
-    try:
-        model_name = str(state.agent.get_llm_name(model=True))
-    except Exception:
-        model_name = agent_current_backend_name(state.agent) or "-"
-    return {
-        "title": "主控运行概览",
-        "summary": dashboard_status_for_main(
-            state,
-            open_tasks=open_tasks,
-            approvals=approvals,
-            schedule_registry=schedule_registry,
-        ),
-        "metrics": [
-            web_console_metric("状态", state.status, "calm"),
-            web_console_metric("活跃任务", len(open_tasks), "hot" if open_tasks else "calm"),
-            web_console_metric("待审批", len(approvals), "warn" if approvals else "calm"),
-            web_console_metric("定时任务", f"{schedule_registry.get('active_job_count', 0)}/{schedule_registry.get('job_count', 0)}", "calm"),
-            web_console_metric("Artifact", len(artifacts), "calm"),
-            web_console_metric("子代理", len([sub for sub in state.subagents.values() if sub.persistent]), "calm"),
-        ],
-        "details": [
-            {"label": "当前会话", "value": state.current_title or "main"},
-            {"label": "运行模型", "value": model_name or "-"},
-            {"label": "调度来源", "value": "shared governance ledgers"},
-            {"label": "页面模式", "value": "local console + governed actions"},
-        ],
-        "recent_workload": len(tasks),
-    }
-
-
-def web_console_task_rows(state: State, rows: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
-    sorted_rows = sorted(rows, key=web_console_timestamp, reverse=True)
-    result: list[dict[str, str]] = []
-    for row in sorted_rows[:limit]:
-        owner_id = str(row.get("assigned_agent") or "")
-        raw_status = str(row.get("status") or "-")
-        raw_summary = row.get("summary") or row.get("objective") or ""
-        if raw_status.lower() == "approval_required":
-            raw_summary = row.get("objective") or "等待人工审批"
-        summary = web_console_clean_visible(raw_summary, 180) or ("等待人工审批" if raw_status.lower() == "approval_required" else "")
-        result.append({
-            "ui_ref": web_console_ref("task", row.get("task_id")),
-            "title": web_console_clean_visible(task_display_title(row, state), 120) or "未命名任务",
-            "status": web_console_status_label(raw_status),
-            "owner": web_console_agent_name(state, owner_id, "主 agent"),
-            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
-            "summary": summary,
-        })
-    return result
-
-
-def web_console_schedule_rows(state: State, schedule_registry: dict[str, Any], limit: int = 10) -> list[dict[str, str]]:
-    jobs = list(schedule_registry.get("jobs") or [])
-    jobs.sort(key=web_console_timestamp, reverse=True)
-    rows: list[dict[str, str]] = []
-    for row in jobs[:limit]:
-        target = str(row.get("target") or "")
-        execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
-        if not target:
-            target = schedule_execution_target(execution)
-        rows.append({
-            "ui_ref": web_console_ref("schedule", row.get("schedule_id") or row.get("id")),
-            "name": web_console_clean_visible(row.get("name") or row.get("schedule_id") or "定时任务", 100),
-            "status": web_console_status_label(row.get("status") or "enabled"),
-            "trigger": web_console_clean_visible(row.get("trigger") or row.get("cron") or row.get("interval") or row.get("at") or "-", 100),
-            "target": web_console_agent_name(state, target, "主 agent"),
-        })
-    return rows
-
-
-def web_console_approval_rows(state: State, approvals: list[dict[str, Any]], limit: int = 8) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for row in sorted(approvals, key=web_console_timestamp, reverse=True)[:limit]:
-        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-        target = str(row.get("target") or payload.get("subagent_id") or payload.get("target_subagent") or "")
-        summary = web_console_clean_visible(row.get("summary") or row.get("approval_required_for") or "待审批", 180)
-        rows.append({
-            "ui_ref": web_console_ref("approval", row.get("approval_id")),
-            "type": web_console_clean_visible(row.get("type") or "approval", 80),
-            "summary": summary or "等待人工审批",
-            "target": web_console_agent_name(state, target, "主 agent"),
-            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
-        })
-    return rows
-
-
-def web_console_artifact_rows(state: State, artifacts: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], limit: int = 8) -> list[dict[str, str]]:
-    del state
-    rows: list[dict[str, str]] = []
-    for row in sorted(artifacts, key=web_console_timestamp, reverse=True)[:limit]:
-        source_task_id = str(row.get("source_task_id") or "")
-        source_task = tasks.get(source_task_id, {})
-        rows.append({
-            "ui_ref": web_console_ref("artifact", row.get("uri") or row.get("artifact_id")),
-            "type": web_console_clean_visible(row.get("type") or "artifact", 80),
-            "source": web_console_clean_visible(task_display_title(source_task, None) if source_task else "治理产物", 120),
-            "size": str(row.get("size_bytes") or row.get("size") or "-"),
-            "time": str(row.get("timestamp") or row.get("updated_at") or ""),
-        })
-    return rows
-
-
-def web_console_report_rows(state: State, limit: int = 12) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for row in scheduled_report_rows(state, limit=limit):
-        rows.append({
-            "schedule": web_console_clean_visible(row.get("schedule_name") or "定时任务", 100),
-            "agent": web_console_clean_visible(row.get("agent_name") or "子代理", 100),
-            "status": web_console_status_label(row.get("status") or "-"),
-            "time": str(row.get("timestamp") or ""),
-            "summary": web_console_clean_visible(row.get("summary") or row.get("body") or "", 220),
-            "body": web_console_clean_visible(row.get("body") or row.get("summary") or "", 6000),
-        })
-    return rows
-
-
-def web_console_main_conversation(limit: int = 40) -> dict[str, Any]:
-    """Read the latest main-orchestrator chat pairs for the live conversation view."""
-    try:
-        paths = sorted(
-            glob.glob(os.path.join(MODEL_RESPONSES_DIR, "model_responses*.txt")),
-            key=os.path.getmtime,
-            reverse=True,
-        )
-    except OSError:
-        paths = []
-    messages: list[dict[str, str]] = []
-    title = ""
-    for path in paths[:1]:
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                pairs = _pairs(fh.read())
-        except Exception:
-            pairs = []
-        if not pairs:
-            continue
-        title = session_description_from_pairs(pairs) or os.path.basename(path)
-        for prompt, response in pairs[-limit:]:
-            user = _user_text(prompt)
-            if user:
-                messages.append({"role": "user", "content": web_console_clean_visible(user, 8000)})
-            assistant = assistant_text_from_response_body(response)
-            assistant = latest_visible_reply_text(assistant)
-            assistant = web_console_clean_visible(assistant, 16000)
-            if assistant:
-                messages.append({"role": "assistant", "content": assistant})
-    return {
-        "title": web_console_clean_visible(title, 120) or "主控会话",
-        "messages": messages,
-        "rounds": sum(1 for m in messages if m["role"] == "user"),
-    }
-
-
-def web_console_agent_conversation(state: State, agent_id: str, limit: int = 40) -> dict[str, Any]:
-    """Read a persistent subagent's latest chat-session messages for the conversation view."""
-    sub = resolve_subagent(state, agent_id)
-    if sub is None:
-        return {"title": "", "messages": [], "rounds": 0}
-    if sub.persistent and sub.status not in {"running", "aborting"} and sub.active_task_id is None:
-        load_subagent_chat_session(state, sub, sub.chat_session_id)
-    messages: list[dict[str, str]] = []
-    for msg in sub.messages[-limit:]:
-        role = msg.role
-        if role not in {"user", "assistant", "system"}:
-            continue
-        content = web_console_clean_visible(msg.content or "", 8000)
-        if content:
-            messages.append({"role": role, "content": content})
-    return {
-        "title": web_console_clean_visible(subagent_chat_title_for_messages(sub), 120) or sub.name,
-        "messages": messages,
-        "rounds": sum(1 for m in messages if m["role"] == "user"),
-    }
-
-def web_console_session_payload(state: State, path: str) -> dict[str, Any]:
-    normalized = normalized_path(path)
-    key = session_key(normalized)
-    meta = dict(load_session_meta_registry().get(key, {}))
-    title_seed = history_name(state, normalized)
-    row_description = ""
-    row_rounds = 0
-    if not title_seed or is_process_only_session_title(title_seed):
-        state.session_meta = load_session_meta_registry()
-        session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
-        for row_path, _last_user_at, preview, rounds, desc in session_rows:
-            if normalized_path(row_path) != normalized:
-                continue
-            title_seed = preview or title_seed
-            row_description = desc
-            row_rounds = int(rounds or 0)
-            break
-    title = web_console_clean_visible(title_seed or session_title_for_path(state, normalized), 120) or "历史会话"
-    description = web_console_clean_visible(meta.get("description") or row_description or meta.get("preview") or "", 220)
-    raw_messages = meta.get("ui_preview_messages")
-    preview_messages = raw_messages if isinstance(raw_messages, list) else []
-    if not preview_messages and os.path.exists(normalized):
-        try:
-            with open(normalized, encoding="utf-8", errors="replace") as fh:
-                pairs = _pairs(fh.read())
-        except Exception:
-            pairs = []
-        preview_messages, _loaded, _total, _count = compact_ui_preview_messages_from_pairs(pairs)
-        if not description and pairs:
-            description = web_console_clean_visible(session_description_from_pairs(pairs), 220)
-    messages: list[dict[str, str]] = []
-    for item in preview_messages[-10:]:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").strip()
-        if role not in {"user", "assistant", "system"}:
-            continue
-        content = web_console_clean_visible(item.get("content") or "", 700)
-        if content:
-            messages.append({"role": role, "content": content})
-    if not messages and description:
-        messages.append({"role": "assistant", "content": description})
-    return {
-        "ui_ref": web_console_ref("session", normalized),
-        "title": title,
-        "category": web_console_clean_visible(session_category_label(meta), 40) or "未分类",
-        "description": description,
-        "rounds": int(meta.get("ui_preview_total_rounds") or meta.get("rounds") or row_rounds or len(messages) or 0),
-        "age": rel_age(float(meta.get("last_user_at") or meta.get("last_opened_at") or 0.0)) if (meta.get("last_user_at") or meta.get("last_opened_at")) else "",
-        "messages": messages,
-    }
-
-
-def web_console_agent_rows(state: State) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    reports_by_agent: dict[str, dict[str, str]] = {}
-    for report in scheduled_report_rows(state, limit=80):
-        agent_id = str(report.get("agent_id") or "")
-        if agent_id and agent_id not in reports_by_agent:
-            reports_by_agent[agent_id] = {
-                "schedule": web_console_clean_visible(report.get("schedule_name") or "定时任务", 100),
-                "summary": web_console_clean_visible(report.get("summary") or report.get("body") or "", 180),
-                "time": str(report.get("timestamp") or ""),
-            }
-    for sub in sorted(state.subagents.values(), key=lambda item: (not item.persistent, item.name.lower())):
-        active_tasks = agent_task_rows(sub.agent_id, include_terminal=False, limit=50)
-        schedule_rows = agent_schedule_rows(sub.agent_id, limit=20)
-        approval_rows = agent_approval_rows(state, sub.agent_id, limit=20)
-        rows.append({
-            "ui_ref": web_console_ref("agent", sub.agent_id),
-            "name": sub.name,
-            "role": normalized_subagent_role(sub.role),
-            "status": web_console_status_label(sub.status),
-            "lifecycle": "persistent" if sub.persistent else "temporary",
-            "model": sub.default_model or "继承主控默认模型",
-            "skills": [web_console_clean_visible(ref, 80) for ref in normalize_subagent_skill_refs(sub.skill_refs)[:8]],
-            "profile": web_console_clean_visible(profile_summary_for_subagent(sub, limit=400), 360),
-            "status_narrative": web_console_clean_visible(dashboard_status_for_subagent(sub), 240),
-            "metrics": [
-                web_console_metric("未终态任务", len(active_tasks), "hot" if active_tasks else "calm"),
-                web_console_metric("待审批", len(approval_rows), "warn" if approval_rows else "calm"),
-                web_console_metric("定时任务", len(schedule_rows), "calm"),
-                web_console_metric("聊天队列", len(sub.chat_queue), "calm"),
-            ],
-            "latest_report": reports_by_agent.get(sub.agent_id) or {},
-            "updated": rel_age(sub.updated_at),
-        })
-    return rows
-
-
-def web_console_history_rows(state: State, limit: int = 36) -> list[dict[str, Any]]:
-    state.session_meta = load_session_meta_registry()
-    session_rows, _meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
-    names: dict[str, str] = {}
-    if session_names is not None:
-        try:
-            raw_names = session_names._load()
-        except Exception:
-            raw_names = {}
-        if isinstance(raw_names, dict):
-            names = {str(key): str(value) for key, value in raw_names.items()}
-    result: list[dict[str, Any]] = []
-    for path, last_user_at, preview, rounds, desc in session_rows:
-        key = session_key(path)
-        meta = session_meta_for(state, path)
-        if bool(meta.get("deleted")) or bool(meta.get("archived")):
-            continue
-        name = names.get(key, "")
-        if is_process_only_session_title(name):
-            name = ""
-        title = web_console_clean_visible(name or preview or os.path.basename(path) or "历史会话", 80)
-        category = session_category_label(meta)
-        result.append({
-            "ui_ref": web_console_ref("session", normalized_path(path)),
-            "title": title or "历史会话",
-            "category": web_console_clean_visible(category or "未分类", 24),
-            "age": rel_age(float(last_user_at or 0.0)) if last_user_at else "",
-            "rounds": int(rounds or 0),
-            "description": web_console_clean_visible(desc or str(meta.get("description") or ""), 120),
-            "pinned": bool(meta.get("pinned")),
-        })
-        if len(result) >= limit:
-            break
-    return result
-
-
-def web_console_history_groups(rows: list[dict[str, Any]], limit_groups: int = 3, limit_per_group: int = 4) -> list[dict[str, Any]]:
-    groups: list[dict[str, Any]] = []
-    used: set[int] = set()
-
-    pinned = [(idx, row) for idx, row in enumerate(rows) if row.get("pinned")]
-    if pinned:
-        groups.append({"label": PINNED_SESSION_LABEL, "count": len(pinned), "items": [row for _idx, row in pinned[:limit_per_group]]})
-        used.update(idx for idx, _row in pinned)
-
-    recent = [(idx, row) for idx, row in enumerate(rows) if idx not in used][:RECENT_SESSION_LIMIT]
-    if recent:
-        groups.append({"label": RECENT_SESSION_LABEL, "count": len(recent), "items": [row for _idx, row in recent[:limit_per_group]]})
-        used.update(idx for idx, _row in recent)
-
-    by_category: dict[str, list[dict[str, Any]]] = {}
-    for idx, row in enumerate(rows):
-        if idx in used:
-            continue
-        label = str(row.get("category") or "未分类")
-        by_category.setdefault(label, []).append(row)
-    for label in sorted(by_category, key=category_sort_key):
-        items = by_category[label]
-        groups.append({"label": label, "count": len(items), "items": items[:limit_per_group]})
-        if len(groups) >= limit_groups:
-            break
-    return groups
-
-
-def web_console_model_sidebar(model_registry: dict[str, Any]) -> dict[str, str]:
-    current = model_registry.get("current") if isinstance(model_registry.get("current"), dict) else {}
-    provider = web_console_clean_visible(current.get("provider") or "", 80)
-    model = web_console_clean_visible(current.get("model") or "", 80)
-    base = ""
-    source = "current session"
-    if not model or model == "-":
-        try:
-            entries, mixin, _preserved, _error = load_llm_config_entries()
-        except Exception:
-            entries, mixin = [], {}
-        default_name = str((mixin.get("llm_nos") or [""])[0] or "").strip() if isinstance(mixin, dict) else ""
-        entry = next((item for item in entries if config_display_name(item) == default_name), None)
-        if entry is None and entries:
-            entry = entries[0]
-        if entry is not None:
-            provider = web_console_clean_visible(str(entry.cfg.get("name") or config_display_name(entry)), 80)
-            model = web_console_clean_visible(str(entry.cfg.get("model") or config_display_name(entry)), 80)
-            base = web_console_clean_visible(provider_host_label(str(entry.cfg.get("apibase") or "")), 80)
-            source = "default config"
-    return {
-        "provider": provider or "-",
-        "model": model or "-",
-        "base": base or "-",
-        "scope": web_console_clean_visible(current.get("scope") or source, 40) or source,
-        "count": str(model_registry.get("model_count") or 0),
-    }
-
-
-def web_console_token_sidebar() -> dict[str, str]:
-    registry = load_token_usage_registry()
-    total = empty_token_stats_dict()
-    for stats in registry.values():
-        total = token_stats_add(total, normalize_runtime_token_usage(stats))
-    total_tokens = total.get("input", 0) + total.get("output", 0) + total.get("cache_create", 0) + total.get("cache_read", 0)
-    cache_tokens = total.get("cache_create", 0) + total.get("cache_read", 0)
-    return {
-        "sessions": str(len(registry)),
-        "requests": str(total.get("requests", 0)),
-        "total": human_tokens(total_tokens),
-        "input": human_tokens(total.get("input", 0) + total.get("cache_create", 0) + total.get("cache_read", 0)),
-        "output": human_tokens(total.get("output", 0)),
-        "cache": human_tokens(cache_tokens),
-    }
-
-
-def web_console_sidebar_snapshot(state: State, model_registry: dict[str, Any]) -> dict[str, Any]:
-    history_rows = web_console_history_rows(state)
-    return {
-        "current_sessions": [
-            {"key": "home", "title": "主 agent 主页", "status": "home", "target": "overview", "active": True},
-            {"key": "reports", "title": "定时汇报", "status": "reports", "target": "reports", "active": False},
-            {"key": "main", "title": state.current_title or "main", "status": state.status or "idle", "target": "overview", "active": False},
-        ],
-        "history": {
-            "count": len(history_rows),
-            "groups": web_console_history_groups(history_rows),
-        },
-        "model": web_console_model_sidebar(model_registry),
-        "tokens": web_console_token_sidebar(),
-    }
-
-
-def web_console_snapshot() -> dict[str, Any]:
-    state = web_console_state()
-    task_map = latest_task_records()
-    tasks = list(task_map.values())
-    tasks.sort(key=web_console_timestamp, reverse=True)
-    open_tasks = [row for row in tasks if not terminal_task_status(str(row.get("status") or ""))]
-    approvals = pending_approvals(state)
-    schedule_registry = scheduled_task_registry(state)
-    artifacts = list(artifact_index_latest().values())
-    reports = web_console_report_rows(state, limit=16)
-    model_registry = model_orchestration_registry(state)
-    sidebar = web_console_sidebar_snapshot(state, model_registry)
-    return {
-        "schema_version": "shuheng.web_console.snapshot.v1",
-        "updated_at": now_iso(),
-        "mode": "read_only",
-        "source": {
-            "tasks": "shared task ledger",
-            "schedules": "scheduled task registry",
-            "reports": "schedule runs + task ledger + subagent result artifacts",
-            "approvals": "approval registry",
-            "artifacts": "artifact index",
-            "actions": "POST /gui/action governed dispatcher",
-        },
-        "overview": web_console_main_summary(
-            state,
-            tasks=tasks,
-            open_tasks=open_tasks,
-            approvals=approvals,
-            schedule_registry=schedule_registry,
-            artifacts=artifacts,
-        ),
-        "agents": web_console_agent_rows(state),
-        "conversation": web_console_main_conversation(),
-        "scheduled_reports": reports,
-        "tasks": {
-            "open": web_console_task_rows(state, open_tasks, limit=10),
-            "recent": web_console_task_rows(state, tasks, limit=10),
-        },
-        "schedules": web_console_schedule_rows(state, schedule_registry, limit=12),
-        "approvals": web_console_approval_rows(state, approvals, limit=10),
-        "artifacts": web_console_artifact_rows(state, artifacts, task_map, limit=10),
-        "model": {
-            "current": model_registry.get("current") if isinstance(model_registry.get("current"), dict) else {},
-            "model_count": int(model_registry.get("model_count") or 0),
-            "capabilities": model_registry.get("capabilities") if isinstance(model_registry.get("capabilities"), dict) else {},
-            "entries": web_console_model_rows(),
-        },
-        "actions": {
-            "schema_version": WEB_CONSOLE_ACTION_REQUEST_SCHEMA,
-            "endpoint": "/gui/action",
-            "supported": [
-                "refresh_snapshot",
-                "main.prompt",
-                "agent.create",
-                "agent.task",
-                "agent.chat",
-                "agent.set_model",
-                "agent.set_skills",
-                "agent.stop",
-                "agent.delete",
-                "approval.approve",
-                "approval.reject",
-                "schedule.create",
-                "schedule.update",
-                "schedule.enable",
-                "schedule.disable",
-                "schedule.delete",
-                "schedule.run",
-                "session.open",
-                "scheduler.tick",
-                "task.cancel",
-                "task.fail",
-                "task.retry",
-                "task.release_lock",
-                "model.set_default",
-            ],
-        },
-        "sidebar": sidebar,
-        "totals": {
-            "open_tasks": len(open_tasks),
-            "approvals": len(approvals),
-            "schedules": int(schedule_registry.get("job_count") or 0),
-            "active_schedules": int(schedule_registry.get("active_job_count") or 0),
-            "artifacts": len(artifacts),
-            "reports": len(reports),
-            "agents": len([sub for sub in state.subagents.values() if sub.persistent]),
-        },
-        "navigation": [
-            {"key": "overview", "label": "主控台"},
-            {"key": "agents", "label": "子代理"},
-            {"key": "reports", "label": "定时汇报"},
-            {"key": "governance", "label": "治理队列"},
-        ],
-    }
-
-
-def web_console_action_response(
-    *,
-    action: str,
-    ok: bool,
-    message: str,
-    status: int = 200,
-    state: Optional[State] = None,
-    include_snapshot: bool = True,
-) -> tuple[dict[str, Any], int]:
-    if state is not None:
-        web_console_start_runtime_pump_if_needed(state)
-    response: dict[str, Any] = {
-        "schema_version": WEB_CONSOLE_ACTION_RESPONSE_SCHEMA,
-        "ok": bool(ok),
-        "action": str(action or ""),
-        "message": web_console_action_message(message),
-    }
-    if include_snapshot:
-        response["snapshot"] = web_console_snapshot()
-    return response, status
-
-
-def web_console_action_error(action: str, message: str, status: int = 400) -> tuple[dict[str, Any], int]:
-    return web_console_action_response(action=action, ok=False, message=message, status=status, include_snapshot=False)
-
-
-def web_console_apply_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    action = str(payload.get("action") or "").strip().lower().replace("_", ".")
-    if payload.get("schema_version") != WEB_CONSOLE_ACTION_REQUEST_SCHEMA:
-        return web_console_action_error(action, "无效的 Web Console action schema。")
-    if not action:
-        return web_console_action_error(action, "缺少 action。")
-
-    action_data = web_console_action_payload(payload)
-    state = web_console_state()
-    refs = web_console_ref_map(state)
-    ui_ref = str(payload.get("ui_ref") or payload.get("target") or action_data.get("ui_ref") or action_data.get("target") or "").strip()
-
-    if action == "refresh.snapshot":
-        action = "refresh_snapshot"
-    if action == "refresh_snapshot":
-        return web_console_action_response(action=action, ok=True, message="已刷新快照。", state=state)
-
-    if action == "session.open":
-        ok_ref, session_path, error = web_console_resolve_ref(refs, ui_ref, "session")
-        if not ok_ref:
-            return web_console_action_error(action, error)
-        session_path = normalized_path(session_path)
-        if not path_is_within(session_path, MODEL_RESPONSES_DIR):
-            return web_console_action_error(action, "会话引用不在 Shuheng 历史目录。")
-        if os.path.exists(session_path):
-            mark_session_opened(state, session_path)
-        response, status = web_console_action_response(
-            action=action,
-            ok=True,
-            message="已打开会话预览。",
-            state=state,
-        )
-        response["session"] = web_console_session_payload(state, session_path)
-        return response, status
-
-    if action == "main.prompt":
-        prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
-        if not prompt:
-            return web_console_action_error(action, "缺少主 agent 任务内容。")
-        state = web_console_state(runtime_agent=True)
-        ok = start_main_agent_task(
-            state,
-            prompt,
-            source="web_console",
-            visible_user_text=prompt,
-            remember_user=True,
-            clear_history=False,
-        )
-        return web_console_action_response(
-            action=action,
-            ok=ok,
-            message="已启动主 agent 任务。" if ok else (state.last_error or "主 agent 任务启动失败。"),
-            state=state,
-        )
-
-    if action == "agent.create":
-        control = dict(action_data)
-        ok_model, model_name, model_error = web_console_model_name_from_payload(control, refs)
-        if not ok_model:
-            return web_console_action_error(action, model_error)
-        if model_name:
-            control["default_model"] = model_name
-        result = apply_subagent_control(state, "agent_create", "", "", control, source="web_console")
-        return web_console_action_response(action=action, ok=bool(result and "缺少" not in result), message=result or "agent.create 未执行。", state=state)
-
-    if action in {"agent.task", "agent.chat", "agent.set.model", "agent.set.skills", "agent.stop", "agent.delete"}:
-        ok_ref, agent_id, error = web_console_resolve_ref(refs, ui_ref, "agent")
-        if not ok_ref:
-            return web_console_action_error(action, error)
-        sub = resolve_subagent(state, agent_id)
-        if sub is None:
-            return web_console_action_error(action, "找不到子 agent。", status=404)
-        if action == "agent.task":
-            prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
-            if not prompt:
-                return web_console_action_error(action, "缺少子 agent 任务内容。")
-            result = start_subagent_task(state, sub, prompt, source="web_console", task_title=str(action_data.get("title") or ""))
-            return web_console_action_response(action=action, ok=not result.startswith("子 agent 输入为空"), message=result, state=state)
-        if action == "agent.chat":
-            prompt = str(action_data.get("prompt") or action_data.get("message") or action_data.get("text") or "").strip()
-            if not prompt:
-                return web_console_action_error(action, "缺少子 agent 聊天内容。")
-            result = start_subagent_chat(state, sub, prompt, source="web_console")
-            return web_console_action_response(action=action, ok=not result.endswith("输入为空。"), message=result, state=state)
-        if action == "agent.set.model":
-            ok_model, model_name, model_error = web_console_model_name_from_payload(action_data, refs)
-            if not ok_model:
-                return web_console_action_error(action, model_error)
-            ok, result = set_subagent_default_model(state, sub, model_name or "inherit")
-            return web_console_action_response(action=action, ok=ok, message=result, state=state)
-        if action == "agent.set.skills":
-            op = str(action_data.get("operation") or action_data.get("mode") or "add").strip().lower().replace("-", "_")
-            refs_value = action_data.get("skill_refs", action_data.get("skills", action_data.get("skill", "")))
-            if op in {"clear", "reset"}:
-                ok, result = set_subagent_skill_refs(state, sub, [], mode="clear")
-                return web_console_action_response(action=action, ok=ok, message=result, state=state)
-            if not normalize_subagent_skill_refs(refs_value):
-                return web_console_action_error(action, "缺少 skill ref。")
-            mode = "remove" if op in {"remove", "rm", "delete", "del"} else ("replace" if op in {"set", "replace"} else "add")
-            ok, result = set_subagent_skill_refs(state, sub, refs_value, mode=mode)
-            return web_console_action_response(action=action, ok=ok, message=result, state=state)
-        control_action = "subagent_stop" if action == "agent.stop" else "subagent_delete"
-        result = apply_subagent_control(state, control_action, agent_id, "", {}, source="web_console")
-        return web_console_action_response(action=action, ok=bool(result and not result.startswith("找不到")), message=result or "agent action 未执行。", state=state)
-
-    if action in {"approval.approve", "approval.reject"}:
-        ok_ref, approval_id, error = web_console_resolve_ref(refs, ui_ref, "approval")
-        if not ok_ref:
-            return web_console_action_error(action, error)
-        result = decide_approval(state, approval_id, action == "approval.approve")
-        return web_console_action_response(action=action, ok=not result.startswith("找不到"), message=result, state=state)
-
-    if action in {"schedule.create", "schedule.update", "schedule.enable", "schedule.disable", "schedule.delete", "schedule.run"}:
-        ok_control, control, control_error = web_console_schedule_control_from_payload(action_data, refs)
-        if not ok_control:
-            return web_console_action_error(action, control_error)
-        schedule_id = ""
-        if action != "schedule.create":
-            ok_ref, schedule_id, error = web_console_resolve_ref(refs, ui_ref, "schedule")
-            if not ok_ref:
-                return web_console_action_error(action, error)
-        if action == "schedule.run":
-            result = scheduler_tick(state, source="manual:web_console", target_schedule_id=schedule_id, force=True, record_skips=True)
-            return web_console_action_response(action=action, ok=True, message=format_scheduler_tick_result(result), state=state)
-        mapped_action = action.replace(".", "_")
-        if schedule_id:
-            control.setdefault("schedule_id", schedule_id)
-        result = apply_schedule_control(state, mapped_action, schedule_id, "", control, source="web_console")
-        ok = bool(result and not str(result).startswith(("找不到", "缺少")))
-        return web_console_action_response(action=action, ok=ok, message=result or "schedule action 未执行。", state=state)
-
-    if action == "scheduler.tick":
-        result = scheduler_tick(state, source="manual:web_console_tick", record_skips=True)
-        return web_console_action_response(action=action, ok=True, message=format_scheduler_tick_result(result), state=state)
-
-    if action in {"task.cancel", "task.fail", "task.retry", "task.release.lock"}:
-        ok_ref, task_id, error = web_console_resolve_ref(refs, ui_ref, "task")
-        if not ok_ref:
-            return web_console_action_error(action, error)
-        recovery_action = {
-            "task.cancel": "cancelled",
-            "task.fail": "failed",
-            "task.retry": "retry",
-            "task.release.lock": "release_lock",
-        }[action]
-        result = recover_task_action(state, task_id, recovery_action)
-        return web_console_action_response(action=action, ok=not result.startswith("找不到"), message=result, state=state)
-
-    if action == "model.set.default":
-        ok_model, model_name, model_error = web_console_model_name_from_payload(action_data, refs)
-        if not ok_model:
-            return web_console_action_error(action, model_error)
-        entries, mixin, preserved, error = load_llm_config_entries()
-        if error:
-            return web_console_action_error(action, error)
-        idx = entry_index_by_name(entries, model_name)
-        if idx < 0:
-            return web_console_action_error(action, f"找不到模型配置：{model_name}")
-        ok, result = save_default_model(entries, mixin, preserved, idx)
-        if ok:
-            remember_recent_model_name(model_name, entries)
-            result = f"已设置全局默认模型：{model_name}"
-        return web_console_action_response(action=action, ok=ok, message=result, state=state)
-
-    return web_console_action_error(action, f"不支持的 Web Console 动作：{action}", status=404)
-
-
-def web_console_html() -> str:
-    from shuheng.web_console_static import web_console_html as load_web_console_html
-
-    return load_web_console_html()
-
-
-def gateway_push_endpoint_allowed(endpoint: str) -> tuple[bool, str]:
-    parsed = urllib.parse.urlparse(str(endpoint or ""))
-    if parsed.scheme not in {"http", "https"}:
-        return False, "unsupported_scheme"
-    host = (parsed.hostname or "").lower()
-    if os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_PUSH") == "1":
-        return True, "remote_allowed_by_env"
-    if parsed.scheme == "http" and host in {"127.0.0.1", "localhost", "::1"}:
-        return True, "loopback_allowed"
-    return False, "remote_push_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_PUSH"
-
-
-def append_gateway_push_subscription(endpoint: str, event_types: Optional[list[str]] = None) -> dict[str, Any]:
-    endpoint = str(endpoint or "").strip()
-    allowed, reason = gateway_push_endpoint_allowed(endpoint)
-    if not allowed:
-        raise ValueError(reason)
-    normalized_event_types = [str(item) for item in (event_types or ["agent_mail", "trace", "gateway"]) if str(item).strip()]
-    row = {
-        "schema_version": "agentgateway.push_subscription.v1",
-        "subscription_id": short_uid("pushsub"),
-        "created_at": now_iso(),
-        "endpoint": endpoint,
-        "event_types": normalized_event_types or ["agent_mail", "trace", "gateway"],
-        "enabled": True,
-        "endpoint_policy": reason,
-        "auth": {"type": "none", "secret_stored": False},
-    }
-    append_jsonl(AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, row)
-    return row
-
-
-def gateway_push_subscriptions() -> list[dict[str, Any]]:
-    return [row for row in read_jsonl(AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH) if row.get("enabled", True)]
-
-
-def deliver_gateway_push_notification(event: dict[str, Any]) -> list[dict[str, Any]]:
-    event_type = str(event.get("event") or "gateway")
-    deliveries: list[dict[str, Any]] = []
-    for sub in gateway_push_subscriptions():
-        event_types = [str(item) for item in (sub.get("event_types") or [])]
-        if event_types and "*" not in event_types and event_type not in event_types:
-            continue
-        endpoint = str(sub.get("endpoint") or "")
-        allowed, reason = gateway_push_endpoint_allowed(endpoint)
-        delivery = {
-            "schema_version": "agentgateway.push_delivery.v1",
-            "delivery_id": short_uid("pushdelivery"),
-            "subscription_id": sub.get("subscription_id", ""),
-            "created_at": now_iso(),
-            "endpoint": endpoint,
-            "event": event_type,
-            "allowed": allowed,
-            "policy_reason": reason,
-            "status": "blocked",
-            "response_status": 0,
-            "error": "",
-        }
-        if allowed:
-            body = json.dumps(event, ensure_ascii=False).encode("utf-8")
-            request = urllib.request.Request(
-                endpoint,
-                data=body,
-                headers={"Content-Type": "application/json", "User-Agent": "shuheng-gateway/1"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=2) as response:
-                    delivery["status"] = "delivered"
-                    delivery["response_status"] = int(response.status)
-            except Exception as exc:
-                delivery["status"] = "failed"
-                delivery["error"] = str(exc)
-        append_jsonl(AGENT_GATEWAY_PUSH_DELIVERIES_PATH, delivery)
-        deliveries.append(delivery)
-    return deliveries
 
 
 def query_a2a_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -9348,402 +8306,7 @@ def append_gateway_agent_message(payload: dict[str, Any]) -> tuple[dict[str, Any
         "message": a2a_message_object(mail),
         "trace": trace,
     }
-    deliver_gateway_push_notification({"schema_version": "agentgateway.push_event.v1", "event": "agent_mail", "created_at": now_iso(), "payload": response})
     return response, 201
-
-
-class GatewayRequestHandler(BaseHTTPRequestHandler):
-    server_version = "ShuhengGateway/1"
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def read_json_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or "0")
-        if length <= 0:
-            return {}
-        raw = self.rfile.read(length)
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except Exception:
-            return {}
-        return data if isinstance(data, dict) else {}
-
-    def send_json(self, payload: dict[str, Any], status: int = 200) -> None:
-        body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except OSError as exc:
-            log_diagnostic("gateway.http.disconnect", exc, detail=str(getattr(self, "client_address", "")))
-
-    def send_html(self, html: str, status: int = 200) -> None:
-        body = html.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except OSError as exc:
-            log_diagnostic("gateway.http.disconnect", exc, detail=str(getattr(self, "client_address", "")))
-
-    def send_error_json(self, status: int, message: str) -> None:
-        self.send_json({"schema_version": "agentgateway.error.v1", "error": message, "status": status}, status=status)
-
-    def do_GET(self) -> None:
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        query = urllib.parse.parse_qs(parsed.query)
-        if path in {"/gui", "/dashboard", "/console"}:
-            self.send_html(web_console_html())
-            return
-        if path == "/gui/snapshot":
-            self.send_json(web_console_snapshot())
-            return
-        if path in {"/", "/health"}:
-            actual_host, actual_port = self.server.server_address[:2]
-            service = gateway_public_service_descriptor(gateway_service_descriptor(str(actual_host), int(actual_port)))
-            self.send_json({"ok": True, "service": service})
-            return
-        registry = ensure_gateway_registry(None)
-        if path == "/gateway":
-            self.send_json(gateway_public_registry(registry))
-            return
-        if path == "/gateway/agents":
-            self.send_json(registry["agent_directory"])
-            return
-        if path == "/a2a":
-            self.send_json(gateway_public_registry(registry)["a2a_gateway"])
-            return
-        if path == "/a2a/agent-cards":
-            self.send_json({"schema_version": "a2a.agent_cards.v1", "agent_cards": registry["a2a_gateway"].get("agent_cards") or []})
-            return
-        if path == "/a2a/tasks":
-            self.send_json({"schema_version": "a2a.tasks.v1", "tasks": registry["a2a_gateway"].get("tasks") or []})
-            return
-        if path.startswith("/a2a/tasks/"):
-            task_id = urllib.parse.unquote(path.rsplit("/", 1)[-1])
-            tasks = [row for row in registry["a2a_gateway"].get("tasks") or [] if str(row.get("id") or "") == task_id]
-            self.send_json({"schema_version": "a2a.task_response.v1", "task": tasks[-1] if tasks else None}, status=200 if tasks else 404)
-            return
-        if path == "/a2a/messages":
-            self.send_json({"schema_version": "a2a.messages.v1", "messages": registry["a2a_gateway"].get("messages") or []})
-            return
-        if path == "/a2a/artifacts":
-            self.send_json({"schema_version": "a2a.artifacts.v1", "artifacts": registry["a2a_gateway"].get("artifacts") or []})
-            return
-        if path == "/a2a/events":
-            self.send_sse(once=(query.get("once") or ["0"])[0] == "1")
-            return
-        if path == "/mcp":
-            self.send_json(registry["mcp_gateway"])
-            return
-        if path == "/mcp/tools":
-            self.send_json({"schema_version": "mcp.tools.v1", "tools": registry["mcp_gateway"].get("tools") or []})
-            return
-        if path == "/mcp/resources":
-            self.send_json({"schema_version": "mcp.resources.v1", "resources": registry["mcp_gateway"].get("resources") or []})
-            return
-        if path == "/mcp/resource":
-            uri = (query.get("uri") or [""])[0]
-            resource = mcp_resource_contents(uri)
-            if not resource:
-                self.send_error_json(404, "unknown resource uri")
-                return
-            self.send_json(resource)
-            return
-        self.send_error_json(404, "not found")
-
-    def do_POST(self) -> None:
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        payload = self.read_json_body()
-        if path == "/health":
-            actual_host, actual_port = self.server.server_address[:2]
-            service = gateway_public_service_descriptor(gateway_service_descriptor(str(actual_host), int(actual_port)))
-            self.send_json({"ok": True, "service": service, "received": payload})
-            return
-        if path == "/gui/action":
-            response, status = web_console_apply_action(payload)
-            self.send_json(response, status=status)
-            return
-        if path == "/a2a/tasks/query":
-            self.send_json(query_a2a_task_payload(payload))
-            return
-        if path == "/a2a/messages":
-            response, status = append_gateway_agent_message(payload)
-            self.send_json(response, status=status)
-            return
-        if path == "/a2a/push-subscriptions":
-            try:
-                raw_event_types = payload.get("event_types")
-                event_types = raw_event_types if isinstance(raw_event_types, list) else None
-                row = append_gateway_push_subscription(str(payload.get("endpoint") or ""), event_types)
-            except ValueError as exc:
-                self.send_error_json(400, str(exc))
-                return
-            self.send_json({"schema_version": "agentgateway.push_subscription_response.v1", "subscription": row}, status=201)
-            return
-        if path == "/a2a/push-test":
-            event = {
-                "schema_version": "agentgateway.push_event.v1",
-                "event": str(payload.get("event") or "gateway"),
-                "created_at": now_iso(),
-                "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else {"message": "test"},
-            }
-            deliveries = deliver_gateway_push_notification(event)
-            self.send_json({"schema_version": "agentgateway.push_delivery_response.v1", "event": event, "deliveries": deliveries})
-            return
-        self.send_error_json(404, "not found")
-
-    def send_sse(self, *, once: bool = False) -> None:
-        old_timeout: Optional[float] = None
-        try:
-            old_timeout = self.connection.gettimeout()
-            self.connection.settimeout(GATEWAY_SSE_WRITE_TIMEOUT_SECONDS)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close" if once else "keep-alive")
-            self.end_headers()
-        except OSError as exc:
-            log_diagnostic("gateway.sse.open", exc, detail=str(getattr(self, "client_address", "")))
-            return
-        sent: set[str] = set()
-        sent_order: list[str] = []
-        started_at = time.monotonic()
-        try:
-            while True:
-                if not once and time.monotonic() - started_at >= GATEWAY_SSE_MAX_SECONDS:
-                    return
-                events = gateway_sse_events(limit=20)
-                if not events:
-                    events = [{"id": short_uid("event"), "event": "gateway", "data": {"status": "idle", "created_at": now_iso()}}]
-                for event in events:
-                    event_id = str(event.get("id") or short_uid("event"))
-                    if event_id in sent:
-                        continue
-                    sent.add(event_id)
-                    sent_order.append(event_id)
-                    if len(sent_order) > GATEWAY_SSE_SENT_ID_LIMIT:
-                        old_event_id = sent_order.pop(0)
-                        sent.discard(old_event_id)
-                    data = json.dumps(event.get("data") or {}, ensure_ascii=False, sort_keys=True)
-                    frame = f"id: {event_id}\nevent: {event.get('event') or 'message'}\ndata: {data}\n\n"
-                    try:
-                        self.wfile.write(frame.encode("utf-8"))
-                        self.wfile.flush()
-                    except OSError as exc:
-                        log_diagnostic("gateway.sse.disconnect", exc, detail=str(getattr(self, "client_address", "")))
-                        return
-                    if once:
-                        return
-                if once:
-                    return
-                time.sleep(1)
-        finally:
-            try:
-                self.connection.settimeout(old_timeout)
-            except OSError:
-                pass
-
-
-def make_gateway_http_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer((host, int(port)), GatewayRequestHandler)
-
-
-def serve_gateway(host: str = "127.0.0.1", port: int = 8765) -> int:
-    bind_safety = gateway_bind_safety(host, allow_remote=os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
-    if not bind_safety.get("allowed"):
-        write_gateway_daemon_status(
-            "failed",
-            pid=os.getpid(),
-            host=str(host),
-            port=int(port),
-            message=str(bind_safety.get("reason") or "remote bind is not allowed"),
-            command="serve",
-        )
-        print(str(bind_safety.get("operator_note") or "Gateway bind denied."), file=sys.stderr)
-        return 2
-    server = make_gateway_http_server(host, port)
-    actual_host, actual_port = server.server_address[:2]
-    write_gateway_daemon_status(
-        "running",
-        pid=os.getpid(),
-        host=str(actual_host),
-        port=int(actual_port),
-        message="gateway server is accepting requests",
-        command="serve",
-    )
-    print(f"Shuheng gateway serving at {gateway_base_url(str(actual_host), int(actual_port))}")
-    print("Endpoints: /gui /gui/snapshot /gui/action /gateway /gateway/agents /a2a /a2a/messages /a2a/events /mcp /mcp/resources")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("Shuheng gateway stopped.")
-    finally:
-        server.server_close()
-        write_gateway_daemon_status(
-            "stopped",
-            pid=os.getpid(),
-            host=str(actual_host),
-            port=int(actual_port),
-            message="gateway server stopped",
-            command="serve",
-        )
-    return 0
-
-
-def gateway_daemon_env(extra_env: Optional[dict[str, str]] = None) -> dict[str, str]:
-    env = os.environ.copy()
-    src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env["PYTHONPATH"] = src_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    env["SHUHENG_HARNESS_DIR"] = AGENT_HARNESS_DIR
-    if extra_env:
-        env.update({str(key): str(value) for key, value in extra_env.items()})
-    return env
-
-
-def wait_for_gateway_daemon(pid: int, *, timeout: float = 5.0) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
-    last_status: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        status = read_gateway_daemon_status()
-        last_status = status
-        if int(status.get("pid") or 0) == int(pid) and status.get("status") == "running" and int(status.get("port") or 0):
-            return status
-        if not process_is_alive(pid):
-            break
-        time.sleep(0.1)
-    return last_status or read_gateway_daemon_status()
-
-
-def start_gateway_daemon(host: str = "127.0.0.1", port: int = 8765, *, extra_env: Optional[dict[str, str]] = None) -> dict[str, Any]:
-    allow_remote = os.environ.get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1" or bool((extra_env or {}).get("SHUHENG_GATEWAY_ALLOW_REMOTE_BIND") == "1")
-    bind_safety = gateway_bind_safety(host, allow_remote=allow_remote)
-    if not bind_safety.get("allowed"):
-        return write_gateway_daemon_status(
-            "failed",
-            pid=0,
-            host=str(host),
-            port=int(port),
-            message=str(bind_safety.get("reason") or "remote bind is not allowed"),
-            command="start",
-        )
-    current = read_gateway_daemon_status()
-    if current.get("alive") and current.get("status") == "running":
-        current["message"] = "gateway daemon already running"
-        return current
-    os.makedirs(AGENT_HARNESS_DIR, exist_ok=True)
-    log_fh = open(AGENT_GATEWAY_DAEMON_LOG_PATH, "a", encoding="utf-8", buffering=1)
-    cmd = [
-        sys.executable,
-        "-m",
-        "shuheng.app",
-        "--serve-gateway",
-        "--gateway-host",
-        str(host),
-        "--gateway-port",
-        str(int(port)),
-    ]
-    proc = subprocess.Popen(
-        cmd,
-        cwd=APP_ROOT_DIR,
-        env=gateway_daemon_env(extra_env),
-        stdin=subprocess.DEVNULL,
-        stdout=log_fh,
-        stderr=log_fh,
-        start_new_session=True,
-    )
-    log_fh.close()
-    write_gateway_daemon_status(
-        "starting",
-        pid=proc.pid,
-        host=str(host),
-        port=int(port),
-        message="gateway daemon process spawned",
-        command="start",
-    )
-    status = wait_for_gateway_daemon(proc.pid)
-    if status.get("status") != "running":
-        status = write_gateway_daemon_status(
-            "failed" if not process_is_alive(proc.pid) else "starting",
-            pid=proc.pid,
-            host=str(host),
-            port=int(port),
-            message="gateway daemon did not report ready before timeout",
-            command="start",
-        )
-    return status
-
-
-def stop_gateway_daemon(*, timeout: float = 5.0) -> dict[str, Any]:
-    status = read_gateway_daemon_status()
-    pid = int(status.get("pid") or 0)
-    host = str(status.get("host") or "127.0.0.1")
-    port = int(status.get("port") or 0)
-    if not process_is_alive(pid):
-        return write_gateway_daemon_status("stopped", pid=pid, host=host, port=port, message="gateway daemon is not running", command="stop")
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError as exc:
-        return write_gateway_daemon_status("stop_failed", pid=pid, host=host, port=port, message=str(exc), command="stop")
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not process_is_alive(pid):
-            try:
-                os.waitpid(pid, os.WNOHANG)
-            except Exception:
-                pass
-            return write_gateway_daemon_status("stopped", pid=pid, host=host, port=port, message="gateway daemon stopped", command="stop")
-        time.sleep(0.1)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
-        pass
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except Exception:
-        pass
-    return write_gateway_daemon_status("stopped", pid=pid, host=host, port=port, message="gateway daemon force-stopped", command="stop")
-
-
-def restart_gateway_daemon(host: str = "127.0.0.1", port: int = 8765, *, extra_env: Optional[dict[str, str]] = None) -> dict[str, Any]:
-    stop_gateway_daemon()
-    return start_gateway_daemon(host, port, extra_env=extra_env)
-
-
-def format_gateway_daemon_status(status: dict[str, Any]) -> str:
-    return "\n".join([
-        f"status: {status.get('status', '-')}",
-        f"alive: {bool(status.get('alive'))}",
-        f"pid: {status.get('pid', 0)}",
-        f"base_url: {status.get('base_url') or '-'}",
-        f"log: {status.get('log_path') or AGENT_GATEWAY_DAEMON_LOG_PATH}",
-        f"message: {status.get('message') or '-'}",
-    ])
-
-
-def gateway_daemon_command(command: str, host: str = "127.0.0.1", port: int = 8765) -> int:
-    command = str(command or "status")
-    if command == "start":
-        status = start_gateway_daemon(host, port)
-    elif command == "stop":
-        status = stop_gateway_daemon()
-    elif command == "restart":
-        status = restart_gateway_daemon(host, port)
-    elif command == "status":
-        status = read_gateway_daemon_status()
-    else:
-        print(f"Unknown gateway daemon command: {command}", file=sys.stderr)
-        return 2
-    print(format_gateway_daemon_status(status))
-    return 0 if status.get("status") not in {"failed", "stop_failed"} else 1
 
 
 GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
@@ -9832,8 +8395,8 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
     {
         "id": "protocol_gateway",
         "layer": "protocol",
-        "responsibility": "Expose internal Agent Mail as A2A-compatible objects, MCP tool/resource registries, external bridge descriptors, and an optional network gateway.",
-        "functions": ["ensure_gateway_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry", "serve_gateway", "start_gateway_daemon", "stop_gateway_daemon", "GatewayRequestHandler"],
+        "responsibility": "Project internal Agent Mail, local protocol-shaped records, local resource registries, and external bridge descriptors without a built-in Web/HTTP gateway.",
+        "functions": ["ensure_gateway_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry"],
         "stores": ["gateway", "messages", "tasks", "progress", "artifacts", "runtime_evidence", "gateway_push_subscriptions", "gateway_push_deliveries", "gateway_daemon_status", "gateway_daemon_pid", "bridges"],
         "write_policy": "registry_only",
         "memory_write_policy": "candidate_only",
@@ -9940,15 +8503,54 @@ def gateway_baseline_evidence(state: Optional[State] = None) -> dict[str, Any]:
     return {
         "a2a_gateway": {
             "schema_version": "a2a.gateway.v1",
+            "status": "local_record_only",
+            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery; no built-in HTTP A2A endpoint",
+            "compatibility": protocol_compatibility_metadata("A2A"),
+            "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
+            "contextId": "shuheng",
+            "request_response": {
+                "registry": "resource://agent-mail/local-protocol-registry",
+                "agent_directory": "agent-directory://local",
+                "agent_cards": "agent-card://local/*",
+                "tasks": "resource://agent-mail/tasks",
+                "task_query": "local-task-query://{task_id}",
+                "messages": "resource://agent-mail/messages",
+                "message_send": "agent-mail://inbox",
+                "artifacts": "resource://agent-mail/artifacts",
+            },
+            "delivery": {
+                "message_endpoint": "agent-mail://inbox",
+                "mode": "agent_mail_inbox",
+                "auto_dispatch": False,
+                "execution_owner": "shuheng.orchestrator",
+            },
             "agent_cards": agent_cards,
             "tasks": [a2a_task_object(row) for row in task_rows],
             "messages": [a2a_message_object(row) for row in mail_rows],
             "artifacts": [a2a_artifact_object(row) for row in artifact_rows],
+            "subscriptions": {
+                "streaming": "",
+                "push_notifications": "",
+                "enabled": False,
+            },
         },
         "mcp_gateway": {
             "schema_version": "mcp.gateway.v1",
+            "status": "local_record_only",
+            "purpose": "local agent-to-tool/resource record shapes; no built-in HTTP MCP endpoint",
+            "compatibility": protocol_compatibility_metadata("MCP"),
+            "policy": "least-privilege, approval-required for risky tools",
+            "request_response": {
+                "tools": "resource://agent-mail/tools",
+                "resources": "resource://agent-mail/*",
+                "resource_read": "local-resource-read://{uri}",
+            },
             "tools": mcp_tool_registry(),
             "resources": mcp_resource_registry(),
+            "resource_templates": [
+                {"uriTemplate": "resource://agent/{agent_id}/memory", "description": "Subagent memory file by agent id"},
+                {"uriTemplate": "artifact://{path}", "description": "Harness artifact by relative path"},
+            ],
         },
         "capability_registry": gateway_capability_registry(state, write_runtime_artifacts=False),
         "governance_components": governance_component_registry(state, write_registry=False),
@@ -10131,21 +8733,22 @@ def architecture_baseline_report(state: Optional[State] = None, gateway_data: Op
         ),
         baseline_item(
             "a2a_mcp_gateway",
-            "A2A/MCP Gateway",
-            "A2A 用于 Agent-to-Agent，MCP 用于 Agent-to-tool/resource；当前发布口径是 Shuheng 兼容面，完整协议认证需要真实客户端 E2E 证据。",
+            "Local Protocol Records",
+            "A2A/MCP-shaped records are local metadata over Agent Mail and resource registries; Shuheng no longer exposes a built-in Web/HTTP protocol gateway.",
             [
-                (a2a.get("schema_version") == "a2a.gateway.v1", "A2A gateway schema is present"),
+                (a2a.get("schema_version") == "a2a.gateway.v1", "A2A-shaped local record schema is present"),
+                (a2a.get("status") == "local_record_only", "A2A-shaped data is local-record-only"),
                 (bool(a2a.get("agent_cards")), "A2A AgentCard objects are present"),
                 (all(isinstance(a2a.get(key), list) for key in ("tasks", "messages", "artifacts")), "A2A Task/Message/Artifact lists are exposed"),
-                (mcp.get("schema_version") == "mcp.gateway.v1", "MCP gateway schema is present"),
-                (bool(mcp.get("tools")) and bool(mcp.get("resources")), "MCP tools/resources are registered"),
+                (mcp.get("schema_version") == "mcp.gateway.v1", "MCP-shaped local record schema is present"),
+                (mcp.get("status") == "local_record_only", "MCP-shaped data is local-record-only"),
+                (bool(mcp.get("tools")) and bool(mcp.get("resources")), "local tools/resources are registered"),
                 (bool((capabilities or {}).get("roles")), "capability registry has role capabilities"),
-                (service.get("schema_version") == "agentgateway.service.v1", "network gateway service descriptor is present"),
-                (bool((service.get("request_response") or {}).get("registry")), "request/response endpoints are registered"),
-                (bool((service.get("sse") or {}).get("endpoint")), "SSE endpoint is registered"),
-                (bool((service.get("push_notifications") or {}).get("subscribe_endpoint")), "push notification subscription endpoint is registered"),
-                ({"start", "stop", "restart", "status"} <= set(((service.get("daemon") or {}).get("commands") or [])), "managed daemon lifecycle commands are registered"),
-                (bool(((service.get("daemon") or {}).get("status_path"))), "gateway daemon status path is registered"),
+                (service.get("schema_version") == "agentgateway.service.v1", "local service descriptor is present"),
+                (service.get("status") == "local_record_only", "service descriptor does not advertise an active network surface"),
+                ((service.get("sse") or {}).get("enabled") is False, "SSE is not active"),
+                ((service.get("push_notifications") or {}).get("enabled") is False, "push notifications are not active"),
+                (not ((service.get("daemon") or {}).get("commands") or []), "daemon lifecycle commands are not registered"),
                 *runtime_evidence_checks_for("a2a_mcp_gateway"),
             ],
         ),
@@ -10309,14 +8912,14 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         },
         "mcp_gateway": {
             "schema_version": "mcp.gateway.v1",
-            "status": "compatibility_surface",
-            "purpose": "agent-to-tool/resource compatibility surface",
+            "status": "local_record_only",
+            "purpose": "local agent-to-tool/resource record shapes; no built-in HTTP MCP endpoint",
             "compatibility": protocol_compatibility_metadata("MCP"),
             "policy": "least-privilege, approval-required for risky tools",
             "request_response": {
-                "tools": "/mcp/tools",
-                "resources": "/mcp/resources",
-                "resource_read": "/mcp/resource?uri={uri}",
+                "tools": "resource://agent-mail/tools",
+                "resources": "resource://agent-mail/*",
+                "resource_read": "local-resource-read://{uri}",
             },
             "tools": mcp_tool_registry(),
             "resources": mcp_resource_registry(),
@@ -10327,23 +8930,23 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
         },
         "a2a_gateway": {
             "schema_version": "a2a.gateway.v1",
-            "status": "compatibility_surface",
-            "purpose": "agent-to-agent compatibility surface",
+            "status": "local_record_only",
+            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery; no built-in HTTP A2A endpoint",
             "compatibility": protocol_compatibility_metadata("A2A"),
             "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
             "contextId": "shuheng",
             "request_response": {
-                "registry": "/a2a",
-                "agent_directory": "/gateway/agents",
-                "agent_cards": "/a2a/agent-cards",
-                "tasks": "/a2a/tasks",
-                "task_query": "/a2a/tasks/query",
-                "messages": "/a2a/messages",
-                "message_send": "/a2a/messages",
-                "artifacts": "/a2a/artifacts",
+                "registry": "resource://agent-mail/local-protocol-registry",
+                "agent_directory": "agent-directory://local",
+                "agent_cards": "agent-card://local/*",
+                "tasks": "resource://agent-mail/tasks",
+                "task_query": "local-task-query://{task_id}",
+                "messages": "resource://agent-mail/messages",
+                "message_send": "agent-mail://inbox",
+                "artifacts": "resource://agent-mail/artifacts",
             },
             "delivery": {
-                "message_endpoint": "/a2a/messages",
+                "message_endpoint": "agent-mail://inbox",
                 "mode": "agent_mail_inbox",
                 "auto_dispatch": False,
                 "execution_owner": "shuheng.orchestrator",
@@ -10353,10 +8956,9 @@ def ensure_gateway_registry(state: Optional[State] = None) -> dict[str, Any]:
             "messages": a2a_messages,
             "artifacts": a2a_artifacts,
             "subscriptions": {
-                "streaming": "/a2a/events",
-                "push_notifications": "/a2a/push-subscriptions",
-                "push_subscription_store": AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH,
-                "push_delivery_store": AGENT_GATEWAY_PUSH_DELIVERIES_PATH,
+                "streaming": "",
+                "push_notifications": "",
+                "enabled": False,
             },
         },
         "agent_directory": agent_directory,
@@ -10394,7 +8996,7 @@ def gateway_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "agentgateway.public.v1",
         "updated_at": registry.get("updated_at") or now_iso(),
-        "status": "local_no_auth_compatibility_surface",
+        "status": "local_record_only",
         "release_posture": "experimental_alpha",
         "security": service.get("security") or {},
         "gateway_service": service,
@@ -10402,19 +9004,19 @@ def gateway_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
         "agent_directory": directory,
         "a2a_gateway": {
             "schema_version": a2a.get("schema_version") or "a2a.gateway.v1",
-            "status": a2a.get("status") or "compatibility_surface",
-            "purpose": "agent-to-agent discovery and inbox delivery compatibility surface",
+            "status": a2a.get("status") or "local_record_only",
+            "purpose": "local agent-to-agent discovery and inbox delivery records",
             "compatibility": a2a.get("compatibility") or protocol_compatibility_metadata("A2A"),
             "contextId": a2a.get("contextId") or "shuheng",
             "request_response": {
-                "registry": "/a2a",
-                "agent_directory": "/gateway/agents",
-                "agent_cards": "/a2a/agent-cards",
-                "message_send": "/a2a/messages",
-                "task_query": "/a2a/tasks/query",
+                "registry": "resource://agent-mail/local-protocol-registry",
+                "agent_directory": "agent-directory://local",
+                "agent_cards": "agent-card://local/*",
+                "message_send": "agent-mail://inbox",
+                "task_query": "local-task-query://{task_id}",
             },
             "delivery": a2a.get("delivery") or {
-                "message_endpoint": "/a2a/messages",
+                "message_endpoint": "agent-mail://inbox",
                 "mode": "agent_mail_inbox",
                 "auto_dispatch": False,
                 "execution_owner": "shuheng.orchestrator",
@@ -22790,44 +21392,6 @@ def eval_panel_items() -> list[PanelItem]:
     return items
 
 
-def gateway_panel_items(state: State) -> list[PanelItem]:
-    data = ensure_gateway_registry(state)
-    items: list[PanelItem] = []
-    for key in (
-        "internal_agent_mail",
-        "mcp_gateway",
-        "a2a_gateway",
-        "capability_registry",
-        "context_inspector",
-        "permission_matrix",
-        "runtime_registry",
-        "model_orchestration",
-        "scheduled_task_registry",
-        "governance_components",
-        "bridge_registry",
-        "baseline_comparison",
-    ):
-        payload = data.get(key) or {}
-        items.append(PanelItem(
-            key=key,
-            title=key,
-            subtitle=str(payload.get("status") or payload.get("purpose") or payload.get("schema_version") or "configured"),
-            detail=json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-            status=str(payload.get("status") or "ok"),
-            payload=payload,
-        ))
-    for card in data.get("agent_cards") or []:
-        items.append(PanelItem(
-            key=str(card.get("agent_id") or ""),
-            title=f"agent card · {card.get('name') or card.get('agent_id')}",
-            subtitle=f"role:{card.get('role')} · status:{card.get('status')} · write:{card.get('write_policy')}",
-            detail=json.dumps(card, ensure_ascii=False, indent=2, sort_keys=True),
-            status=str(card.get("status") or ""),
-            payload=card,
-        ))
-    return items
-
-
 def context_panel_items(state: State) -> list[PanelItem]:
     data = context_inspector_snapshot(state)
     items: list[PanelItem] = []
@@ -23461,8 +22025,6 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
             return "Recovery", recovery_panel_items(state), "f 标失败  c 取消  r 重试  x 解锁  R 刷新  PgUp/PgDn  Esc/q"
         if panel == "evals":
             return "Eval / Trace", eval_panel_items(), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q 关闭"
-        if panel == "gateway":
-            return "A2A / MCP Gateway", gateway_panel_items(state), "r 重建 registry  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "context":
             return "Context Inspector", context_panel_items(state), "r 刷新  ↑/↓ 选择  PgUp/PgDn 预览  Esc/q"
         if panel == "permissions":
@@ -23518,10 +22080,7 @@ def open_harness_panel(stdscr, state: State, panel: str) -> None:
                 detail_scroll = 0
                 continue
             if key == "R" or (key == "r" and panel not in {"approvals", "recover"}):
-                if panel == "gateway":
-                    ensure_gateway_registry(state)
-                    message = "Gateway registry 已重建。"
-                elif panel == "plugins":
+                if panel == "plugins":
                     clear_plugin_registry_cache()
                     message = "Plugin registry 已刷新。"
                 elif panel == "workflows":
@@ -25829,10 +24388,6 @@ def submit(state: State, text: str) -> None:
         lines = ["在 TUI 输入框执行 /evals 会打开 Eval / Trace 面板。", f"Items: {len(items)}"]
         lines.extend(f"- {item.key} · {item.subtitle}" for item in items[:20])
         add_system(state, "\n".join(lines))
-        return
-    if text == "/gateway":
-        data = ensure_gateway_registry(state)
-        add_system(state, "在 TUI 输入框执行 /gateway 会打开 A2A/MCP Gateway 面板。\n" + json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)[:4000])
         return
     if text == "/context":
         data = context_inspector_snapshot(state)
@@ -28434,7 +26989,7 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
-        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/gateway", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
+        if text.strip() in {"/tasks", "/approvals", "/artifacts", "/recover", "/evals", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
             open_harness_panel(stdscr, state, panel)
@@ -28740,15 +27295,7 @@ def wait_for_unfinished_tasks_after_tui(state: Optional[State]) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Shuheng governed local-agent TUI")
-    parser.add_argument("--serve-gateway", action="store_true", help="serve the A2A/MCP gateway over HTTP instead of starting curses")
-    parser.add_argument("--gateway-daemon", choices=["start", "stop", "restart", "status"], help="manage the A2A/MCP gateway as a background service")
-    parser.add_argument("--gateway-host", default=os.environ.get("SHUHENG_GATEWAY_HOST", "127.0.0.1"), help="gateway bind host")
-    parser.add_argument("--gateway-port", type=int, default=int(os.environ.get("SHUHENG_GATEWAY_PORT", "8765")), help="gateway bind port")
-    args = parser.parse_args(argv)
-    if args.gateway_daemon:
-        return gateway_daemon_command(args.gateway_daemon, args.gateway_host, args.gateway_port)
-    if args.serve_gateway:
-        return serve_gateway(args.gateway_host, args.gateway_port)
+    parser.parse_args(argv)
     result = curses.wrapper(run)
     if isinstance(result, dict):
         reason = str(result.get("exit_reason") or "")

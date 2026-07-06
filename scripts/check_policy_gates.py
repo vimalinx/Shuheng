@@ -13,13 +13,10 @@ import json
 import hashlib
 import subprocess
 import threading
-import urllib.error
-import urllib.request
 import curses
 import zipfile
 import contextlib
 import io
-import re
 from pathlib import Path
 
 
@@ -54,7 +51,6 @@ from shuheng import secret_vault as secret_vault_mod  # noqa: E402
 from shuheng import subagent_store as subagent_store_mod  # noqa: E402
 from shuheng import text_utils as text_utils_mod  # noqa: E402
 from shuheng import ui_types as ui_types_mod  # noqa: E402
-from shuheng import web_console as web_console_mod  # noqa: E402
 
 
 def retarget_harness(root: str) -> None:
@@ -264,7 +260,8 @@ def assert_release_gateway_module_boundaries() -> None:
     assert a.RUNTIME_EVIDENCE_SCHEMA == runtime_evidence_mod.RUNTIME_EVIDENCE_SCHEMA
     assert a.baseline_item is baseline_mod.baseline_item
     assert a.baseline_status is baseline_mod.baseline_status
-    assert a.gateway_base_url("0.0.0.0", 8765) == gateway_registry_mod.gateway_base_url("0.0.0.0", 8765)
+    assert not hasattr(a, "gateway_base_url")
+    assert gateway_registry_mod.gateway_base_url("0.0.0.0", 8765) == "local://shuheng"
     for module in (runtime_evidence_mod, baseline_mod, gateway_registry_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "shuheng.app" not in source, module.__file__
@@ -417,8 +414,6 @@ def assert_input_controller_module_boundary() -> None:
         "SubAgentRuntime",
         "RenderLine",
         "PanelItem",
-        "GatewayRequestHandler",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
         "draw_",
@@ -584,8 +579,6 @@ def assert_commands_module_boundary() -> None:
         "SubAgentRuntime",
         "RenderLine",
         "PanelItem",
-        "GatewayRequestHandler",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
         "input_controller",
@@ -1686,8 +1679,6 @@ def assert_rendering_module_boundary() -> None:
         "State",
         "SubAgentRuntime",
         "PanelItem",
-        "GatewayRequestHandler",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
         "input_controller",
@@ -1790,7 +1781,6 @@ def assert_history_store_module_boundary() -> None:
         "State",
         "SubAgentRuntime",
         "RenderLine",
-        "web_console",
         "dashboard",
     ):
         assert forbidden not in source, f"{history_store_mod.__file__}: {forbidden}"
@@ -1879,7 +1869,6 @@ def assert_history_title_policy_module_boundary() -> None:
         "State",
         "SubAgentRuntime",
         "RenderLine",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
     ):
@@ -1917,7 +1906,6 @@ def assert_path_utils_module_boundary() -> None:
         "RenderLine",
         "history_store",
         "secret_vault",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
     ):
@@ -2128,7 +2116,6 @@ def assert_subagent_store_module_boundary() -> None:
         "RenderLine",
         "history_store",
         "secret_vault",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
     ):
@@ -2165,7 +2152,6 @@ def assert_plugins_module_boundary() -> None:
         "SubAgentRuntime",
         "RenderLine",
         "secret_vault",
-        "web_console",
         "dashboard",
         "runtime_dispatch",
         "GenericAgent",
@@ -2707,102 +2693,39 @@ def assert_runtime_dispatch_module_boundary() -> None:
         assert forbidden not in source, f"{runtime_dispatch_mod.__file__}: {forbidden}"
 
 
-def assert_web_console_module_boundary() -> None:
-    assert a.WEB_CONSOLE_ACTION_REQUEST_SCHEMA == web_console_mod.WEB_CONSOLE_ACTION_REQUEST_SCHEMA
-    assert a.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA == web_console_mod.WEB_CONSOLE_ACTION_RESPONSE_SCHEMA
-    assert a.WEB_CONSOLE_REF_KINDS is web_console_mod.WEB_CONSOLE_REF_KINDS
-    for name in (
-        "web_console_ref",
-        "web_console_timestamp",
-        "web_console_clean_visible",
-        "web_console_status_label",
-        "web_console_metric",
-        "web_console_resolve_ref",
-        "web_console_action_payload",
-        "web_console_action_message",
-        "web_console_model_name_from_payload",
-        "web_console_schedule_control_from_payload",
-    ):
-        assert getattr(a, name) is getattr(web_console_mod, name), name
-
-    task_ref = web_console_mod.web_console_ref("task", "task_web_console_boundary")
-    agent_ref = web_console_mod.web_console_ref("agent", "agent-web-boundary")
-    model_ref = web_console_mod.web_console_ref("model", "boundary-model")
-    assert task_ref.startswith("task:"), task_ref
-    assert "task_web_console_boundary" not in task_ref, task_ref
-    assert web_console_mod.web_console_ref("missing", "task_web_console_boundary") == ""
-    refs = {
-        task_ref: ("task", "task_web_console_boundary"),
-        agent_ref: ("agent", "agent-web-boundary"),
-        model_ref: ("model", "boundary-model"),
-    }
-    assert web_console_mod.web_console_resolve_ref(refs, task_ref, "task") == (
-        True,
-        "task_web_console_boundary",
-        "",
-    )
-    assert web_console_mod.web_console_resolve_ref(refs, task_ref, "agent") == (
-        False,
-        "",
-        "界面引用类型不匹配：需要 agent。",
-    )
-    assert web_console_mod.web_console_action_payload({"payload": {"prompt": "hello"}}) == {"prompt": "hello"}
-    assert web_console_mod.web_console_action_message("artifact://raw task_123") == "[artifact] [task]"
-    assert web_console_mod.web_console_model_name_from_payload({"model_ref": model_ref}, refs) == (
-        True,
-        "boundary-model",
-        "",
-    )
-    ok_schedule, schedule_control, schedule_error = web_console_mod.web_console_schedule_control_from_payload(
-        {"target_agent_ref": agent_ref, "execution": {"mode": "main_prompt"}},
-        refs,
-    )
-    assert ok_schedule is True
-    assert schedule_error == ""
-    assert schedule_control["execution"]["mode"] == "agent_task"
-    assert schedule_control["execution"]["routing"]["selected_agent"] == "agent-web-boundary"
-    cleaned = web_console_mod.web_console_clean_visible(
-        "APPROVAL_REQUIRED hidden\n"
-        "artifact://raw appr_123 approval=appr_secret task_123 schedrun_456 sched_789 agent-123 tmp-agent-demo",
-        500,
-    )
-    for raw in (
-        "APPROVAL_REQUIRED",
-        "artifact://",
-        "appr_123",
-        "approval=appr_secret",
-        "task_123",
-        "schedrun_456",
-        "sched_789",
-        "agent-123",
-        "tmp-agent-demo",
-    ):
-        assert raw not in cleaned, cleaned
-    assert web_console_mod.web_console_status_label("approval_required") == "待审批"
-    assert web_console_mod.web_console_metric("待审批", 2, "warn") == {
-        "label": "待审批",
-        "value": "2",
-        "tone": "warn",
-    }
-
-    source = Path(web_console_mod.__file__).read_text(encoding="utf-8")
-    for forbidden in (
-        "shuheng.app",
-        "from .app",
-        "import app",
-        "import curses",
-        "from curses",
-        "State",
-        "SubAgentRuntime",
-        "PanelItem",
-        "RenderLine",
-        "draw_",
+def assert_no_removed_web_http_surface() -> None:
+    """Removed Web/HTTP files and callables stay absent from the active runtime."""
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    cli_source = Path(ROOT, "src/shuheng/cli.py").read_text(encoding="utf-8")
+    test_cli_source = Path(ROOT, "tests/test_cli.py").read_text(encoding="utf-8")
+    for removed_name in (
         "GatewayRequestHandler",
-        "process_ui_queue",
-        "start_subagent_task",
-        "decide_approval",
+        "make_gateway_http_server",
+        "serve_gateway",
+        "start_gateway_daemon",
+        "stop_gateway_daemon",
+        "restart_gateway_daemon",
+        "gateway_daemon_command",
+        "web_console_snapshot",
+        "web_console_apply_action",
+        "web_console_html",
+        "WEB_CONSOLE_ACTION_REQUEST_SCHEMA",
+        "WEB_CONSOLE_ACTION_RESPONSE_SCHEMA",
     ):
-        assert forbidden not in source, f"{web_console_mod.__file__}: {forbidden}"
+        assert not hasattr(a, removed_name), removed_name
+        assert f"def {removed_name}" not in app_source, removed_name
+        assert f"class {removed_name}" not in app_source, removed_name
+    for removed_path in (
+        ROOT / "src/shuheng/web_console.py",
+        ROOT / "src/shuheng/web_console_static.py",
+        ROOT / "tests/test_web_console.py",
+        ROOT / "tests/test_web_console_static.py",
+    ):
+        assert not removed_path.exists(), removed_path
+    assert all(command != "/gateway" for command, *_rest in a.COMMANDS), a.COMMANDS
+    for removed_flag in ("--serve-gateway", "--gateway-daemon"):
+        assert removed_flag not in cli_source, removed_flag
+        assert removed_flag in test_cli_source, "test_cli.py must lock removed CLI flags"
 
 
 def assert_dashboard_module_boundary() -> None:
@@ -2876,7 +2799,6 @@ def assert_dashboard_module_boundary() -> None:
         "PanelItem",
         "RenderLine",
         "draw_",
-        "GatewayRequestHandler",
         "process_ui_queue",
         "start_subagent_task",
         "decide_approval",
@@ -3440,7 +3362,6 @@ def assert_shuheng_brand_entrypoints() -> None:
         f"{legacy_genericagent_title} curses TUI",
     ):
         assert forbidden not in app_source, forbidden
-    assert a.GatewayRequestHandler.server_version == "ShuhengGateway/1", a.GatewayRequestHandler.server_version
     assert "已退出枢衡" in app_source, app_source
     assert "确认退出枢衡" in app_source, app_source
     issue_template = Path(ROOT, ".github/ISSUE_TEMPLATE/bug_report.md").read_text(encoding="utf-8")
@@ -6843,43 +6764,43 @@ def assert_gateway_schema(registry: dict) -> None:
     assert_release_readiness_schema(registry["release_readiness"])
     service = registry["gateway_service"]
     assert service["schema_version"] == "agentgateway.service.v1", service
-    assert service["status"] == "local_no_auth_compatibility_surface", service
+    assert service["status"] == "local_record_only", service
     assert service["security"]["auth"] == "none", service
-    assert service["security"]["local_only"] is True, service
+    assert service["security"]["network_enabled"] is False, service
     assert service["release_posture"] == "experimental_alpha", service
-    assert service["request_response"]["registry"].endswith("/gateway"), service
-    assert service["request_response"]["a2a_message_send"].endswith("/a2a/messages"), service
-    assert service["request_response"]["agent_directory"].endswith("/gateway/agents"), service
+    assert service["request_response"]["registry"] == "resource://agent-mail/local-protocol-registry", service
+    assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
+    assert service["request_response"]["agent_directory"] == "agent-directory://local", service
     assert "context_inspector" not in service["request_response"], service
     assert "permission_matrix" not in service["request_response"], service
-    assert service["sse"]["endpoint"].endswith("/a2a/events"), service
-    assert service["push_notifications"]["subscriptions_path"] == a.AGENT_GATEWAY_PUSH_SUBSCRIPTIONS_PATH, service
+    assert service["sse"]["enabled"] is False, service
+    assert service["push_notifications"]["enabled"] is False, service
     assert service["push_notifications"]["auth"] == "none", service
-    assert {"start", "stop", "restart", "status"} <= set(service["daemon"]["commands"]), service
-    assert service["daemon"]["status_path"] == a.AGENT_GATEWAY_DAEMON_STATUS_PATH, service
+    assert service["daemon"]["commands"] == [], service
+    assert service["daemon"]["state"]["status"] == "removed", service
     a2a = registry["a2a_gateway"]
     assert a2a["schema_version"] == "a2a.gateway.v1", a2a
-    assert a2a["status"] == "compatibility_surface", a2a
+    assert a2a["status"] == "local_record_only", a2a
     assert a2a["compatibility"]["certification"] == "not_protocol_certified", a2a
     assert a2a["contextId"] == "shuheng", a2a
-    assert a2a["request_response"]["agent_directory"] == "/gateway/agents", a2a
+    assert a2a["request_response"]["agent_directory"] == "agent-directory://local", a2a
     for key in ("AgentCard", "Task", "Message", "Part", "Artifact", "contextId"):
         assert key in a2a["objects"], a2a
     for key in ("agent_cards", "tasks", "messages", "artifacts"):
         assert isinstance(a2a[key], list), a2a
-    assert a2a["request_response"]["task_query"] == "/a2a/tasks/query", a2a
-    assert a2a["request_response"]["message_send"] == "/a2a/messages", a2a
+    assert a2a["request_response"]["task_query"] == "local-task-query://{task_id}", a2a
+    assert a2a["request_response"]["message_send"] == "agent-mail://inbox", a2a
+    assert a2a["delivery"]["message_endpoint"] == "agent-mail://inbox", a2a
     assert a2a["delivery"]["mode"] == "agent_mail_inbox", a2a
     assert a2a["delivery"]["auto_dispatch"] is False, a2a
-    assert a2a["subscriptions"]["streaming"] == "/a2a/events", a2a
-    assert a2a["subscriptions"]["push_notifications"] == "/a2a/push-subscriptions", a2a
+    assert a2a["subscriptions"]["enabled"] is False, a2a
     mcp = registry["mcp_gateway"]
     assert mcp["schema_version"] == "mcp.gateway.v1", mcp
-    assert mcp["status"] == "compatibility_surface", mcp
+    assert mcp["status"] == "local_record_only", mcp
     assert mcp["compatibility"]["certification"] == "not_protocol_certified", mcp
     assert mcp["tools"], mcp
     assert mcp["resources"], mcp
-    assert mcp["request_response"]["resource_read"] == "/mcp/resource?uri={uri}", mcp
+    assert mcp["request_response"]["resource_read"] == "local-resource-read://{uri}", mcp
     assert any(item["uri"] == "resource://agent-mail/checkpoints" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/recovery-plans" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/runtime-providers" for item in mcp["resources"]), mcp
@@ -6888,7 +6809,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedules" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedule-runs" for item in mcp["resources"]), mcp
-    assert any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in mcp["resources"]), mcp
+    assert not any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/bridges" for item in mcp["resources"]), mcp
     assert any(item["name"] == "repo.read" for item in mcp["tools"]), mcp
     capabilities = registry["capability_registry"]
@@ -6937,7 +6858,7 @@ def assert_gateway_schema(registry: dict) -> None:
     assert scheduled["owner"] == "shuheng.control_plane", scheduled
     assert scheduled["dispatch"]["contract"] == "agenttask.v2", scheduled
     assert scheduled["runtime_ownership"]["always_on"] is False, scheduled
-    assert scheduled["runtime_ownership"]["tick_owner"] == "tui_loop_or_gateway_manual_action", scheduled
+    assert scheduled["runtime_ownership"]["tick_owner"] == "tui_loop_or_local_manual_action", scheduled
     assert scheduled["job_count"] >= 1, scheduled
     bridges = registry["bridge_registry"]
     assert bridges["schema_version"] == "agentbridge.registry.v1", bridges
@@ -6949,7 +6870,7 @@ def assert_gateway_schema(registry: dict) -> None:
 
 def assert_gateway_public_schema(registry: dict) -> None:
     assert registry["schema_version"] == "agentgateway.public.v1", registry
-    assert registry["status"] == "local_no_auth_compatibility_surface", registry
+    assert registry["status"] == "local_record_only", registry
     assert "context_inspector" not in registry, registry
     assert "permission_matrix" not in registry, registry
     assert "internal_agent_mail" not in registry, registry
@@ -6958,18 +6879,19 @@ def assert_gateway_public_schema(registry: dict) -> None:
     assert registry["public_contract"]["permission_matrix_exposed"] is False, registry
     directory = registry["agent_directory"]
     assert directory["schema_version"] == "shuheng.agent_directory.v1", directory
-    assert directory["message_endpoint"] == "/a2a/messages", directory
+    assert directory["message_endpoint"] == "agent-mail://inbox", directory
     assert directory["discovery_policy"]["external_scope"] == "agent_purpose_and_delivery_only", directory
     assert directory["discovery_policy"]["context_exposed"] is False, directory
     assert directory["discovery_policy"]["permission_matrix_exposed"] is False, directory
     assert directory["roles"], directory
     for entry in directory["roles"] + directory["agents"]:
         assert entry["purpose"], entry
-        assert entry["delivery"]["endpoint"] == "/a2a/messages", entry
+        assert entry["delivery"]["endpoint"] == "agent-mail://inbox", entry
         assert entry["delivery"]["auto_dispatch"] is False, entry
         assert "permissions" not in entry, entry
     service = registry["gateway_service"]
-    assert service["request_response"]["agent_directory"].endswith("/gateway/agents"), service
+    assert service["request_response"]["agent_directory"] == "agent-directory://local", service
+    assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
     assert "mcp_resource_read" not in service["request_response"], service
     assert "context_inspector" not in service["request_response"], service
     assert "permission_matrix" not in service["request_response"], service
@@ -6982,8 +6904,8 @@ def assert_gateway_public_schema(registry: dict) -> None:
     assert "status_path" not in service["daemon"].get("state", {}), service
     assert "log_path" not in service["daemon"].get("state", {}), service
     a2a = registry["a2a_gateway"]
-    assert a2a["request_response"]["agent_directory"] == "/gateway/agents", a2a
-    assert a2a["request_response"]["message_send"] == "/a2a/messages", a2a
+    assert a2a["request_response"]["agent_directory"] == "agent-directory://local", a2a
+    assert a2a["request_response"]["message_send"] == "agent-mail://inbox", a2a
     assert a2a["delivery"]["mode"] == "agent_mail_inbox", a2a
     assert a2a["delivery"]["auto_dispatch"] is False, a2a
     assert a2a["agent_cards"], a2a
@@ -7003,12 +6925,16 @@ def assert_gateway_public_schema(registry: dict) -> None:
 def assert_release_readiness_schema(report: dict) -> None:
     assert report["schema_version"] == "shuheng.release_readiness.v1", report
     assert report["status"] == "experimental_alpha", report
-    assert "experimental gateway/protocol surfaces" in report["public_position"], report
+    assert "no built-in Web/HTTP surface" in report["public_position"], report
     support = report["support_level"]
     assert support["stable_local_surfaces"], report
-    assert "A2A compatibility surface" in support["experimental_surfaces"], report
-    assert "MCP compatibility surface" in support["experimental_surfaces"], report
+    assert "OMP runtime output/control" in support["stable_local_surfaces"], report
+    assert "Web Console and HTTP gateway" not in support["experimental_surfaces"], report
+    assert "A2A compatibility surface" not in support["experimental_surfaces"], report
+    assert "MCP compatibility surface" not in support["experimental_surfaces"], report
+    assert "local protocol-shaped registry records" in support["experimental_surfaces"], report
     assert any("app.py remains" in gap for gap in support["known_gaps"]), report
+    assert any("Web Console" in gap and "not active" in gap for gap in support["known_gaps"]), report
     assert report["monolith_risk"]["status"] in {"known_gap", "bounded"}, report
     hygiene = report["repository_hygiene"]
     assert hygiene["license"] is True, report
@@ -7111,8 +7037,8 @@ def assert_baseline_report_schema(report: dict) -> None:
 def assert_agent_card_schema(card: dict) -> None:
     assert card["schema_version"] == "a2a.agent_card.v1", card
     assert card["agent_id"], card
-    assert card["endpoint"]["transport"] == "http+agent-mail", card
-    assert card["endpoint"]["uri"] == "/a2a/messages", card
+    assert card["endpoint"]["transport"] == "local-agent-mail", card
+    assert card["endpoint"]["uri"] == "agent-mail://inbox", card
     assert card["delivery"]["mode"] == "agent_mail_inbox", card
     assert card["delivery"]["auto_dispatch"] is False, card
     assert card["capabilities"]["artifact_refs"] is True, card
@@ -7147,368 +7073,32 @@ def assert_a2a_artifact_schema(artifact: dict) -> None:
     assert artifact["parts"][0]["file"]["uri"].startswith("artifact://"), artifact
 
 
-def get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=5) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    assert isinstance(data, dict), data
-    return data
-
-
-def get_json_any_status(url: str) -> dict:
-    try:
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            data["_http_status"] = response.status
-    except urllib.error.HTTPError as exc:
-        data = json.loads(exc.read().decode("utf-8"))
-        data["_http_status"] = exc.code
-    assert isinstance(data, dict), data
-    return data
-
-
-def post_json(url: str, payload: dict) -> dict:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=5) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    assert isinstance(data, dict), data
-    return data
-
-
-def post_json_any_status(url: str, payload: dict) -> dict:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        data = json.loads(exc.read().decode("utf-8"))
-        data["_http_status"] = exc.code
-    assert isinstance(data, dict), data
-    return data
-
-
-def run_gateway_server_checks() -> None:
-    state = a.web_console_state()
-    sample_subagent = a.create_subagent(state, "Web Console Worker", role="researcher")
-    os.makedirs(a.MODEL_RESPONSES_DIR, exist_ok=True)
-    sample_session_path = os.path.join(a.MODEL_RESPONSES_DIR, "model_responses_web_console_click.txt")
-    a.write_text_atomic(
-        sample_session_path,
-        "=== Prompt === 2026-06-27 09:00:00\n"
-        + json.dumps({"role": "user", "content": [{"type": "text", "text": "打开 Slack 式控制台会话"}]}, ensure_ascii=False)
-        + "\n\n=== Response === 2026-06-27 09:00:01\n"
-        + repr([{"type": "text", "text": "会话预览应该在中间频道打开，并且不泄露真实文件路径。"}])
-        + "\n",
-    )
-    sample_approval_id = a.queue_approval(
-        approval_type="policy_approval_request",
-        summary="Web console approval sample",
-        payload={},
-        source="test:web_console",
-        target="orchestrator.main",
-        approval_required_for="web_console_sample",
-    )
-    sample_schedule_id = "sched_web_console_toggle"
-    schedule_create = a.apply_schedule_control(
-        state,
-        "schedule_create",
-        "",
-        "",
-        {
-            "schedule_id": sample_schedule_id,
-            "name": "Web Console Toggle",
-            "interval": "1h",
-            "execution": {"mode": "tui_action", "action": "beep"},
-        },
-        source="test:web_console",
-    )
-    assert "已登记定时任务" in str(schedule_create), schedule_create
-    server = a.make_gateway_http_server("127.0.0.1", 0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    host, port = server.server_address[:2]
-    base = f"http://{host}:{port}"
-    try:
-        gateway_sig_before = a.jsonl_file_signature(a.AGENT_GATEWAY_PATH)
-        task_sig_before = a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH)
-        approval_sig_before = a.jsonl_file_signature(a.AGENT_APPROVALS_PATH)
-        artifact_sig_before = a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH)
-        schedule_sig_before = a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH)
-        with urllib.request.urlopen(f"{base}/gui", timeout=5) as response:
-            server_header = response.headers.get("Server", "")
-            html = response.read().decode("utf-8")
-        assert "ShuhengGateway/1" in server_header, server_header
-        assert ("GA" + "TUI") not in server_header, server_header
-        assert "Shuheng Console" in html and "枢衡工作区" in html, html[:500]
-        assert "/gui/snapshot" in html, html[:1000]
-        assert "/gui/action" in html, html[:1000]
-        assert "window.prompt" not in html, html[:2000]
-        assert "action-composer" in html and "composer-mode" in html, html[:2000]
-        assert "channel-header" in html and "message-row" in html and "thread-section" in html, html[:4000]
-        assert "global-rail" in html and "left-agents" in html and "view-session" in html, html[:4000]
-        assert "agent-list" in html and "workspace-split" in html and "rightbar" in html, html[:4000]
-        assert "openSession" in html and "setActiveAgent" in html and "session.open" in html, html[:5000]
-        assert 'id="workspace-home"' in html and 'class="workspace-mark"' in html, html[:4000]
-        assert 'workspace-mark" type="button" data-view' not in html, html[:4000]
-        assert '.global-rail .rail-btn[data-view]' in html, html[:5000]
-        assert "activeChannelKey" in html and "data-channel-key" in html, html[:5000]
-        assert "syncComposerForNavigation" in html, html[:5000]
-        assert 'syncComposerForNavigation("session", "session")' in html, html[:5000]
-        assert "if (app.view !== \"agents\") app.activeAgentRef = \"\";" in html, html[:5000]
-        for removed_shell in ("hero-card", "agent-card", "agent-matrix", "term-panel", "two-col"):
-            assert removed_shell not in html, removed_shell
-        assert "agent.task" in html and "schedule.create" in html and "target_agent_ref" in html, html[:3000]
-        assert "artifact://" not in html and "appr_" not in html and "task_" not in html, html[:2000]
-        snapshot = get_json(f"{base}/gui/snapshot")
-        assert snapshot["schema_version"] == "shuheng.web_console.snapshot.v1", snapshot
-        assert snapshot["mode"] == "read_only", snapshot
-        assert {"overview", "agents", "scheduled_reports", "tasks", "schedules", "approvals", "artifacts", "model", "actions", "sidebar"} <= set(snapshot), snapshot
-        assert snapshot["overview"]["metrics"], snapshot
-        sidebar = snapshot["sidebar"]
-        assert isinstance(sidebar, dict), snapshot
-        assert {"current_sessions", "history", "model", "tokens"} <= set(sidebar), sidebar
-        assert snapshot["actions"]["endpoint"] == "/gui/action", snapshot["actions"]
-        assert "session.open" in snapshot["actions"]["supported"], snapshot["actions"]
-        snapshot_text = json.dumps(snapshot, ensure_ascii=False)
-        assert "artifact://" not in snapshot_text and "appr_" not in snapshot_text, snapshot_text
-        assert "APPROVAL_REQUIRED" not in snapshot_text and "approval=" not in snapshot_text, snapshot_text
-        assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", snapshot_text) is None, snapshot_text
-        assert re.search(r"model_responses_[^\"\\s]+\\.txt", snapshot_text) is None, snapshot_text
-        assert "task_dashboard_agent_run_record" not in snapshot_text, snapshot_text
-        assert a.jsonl_file_signature(a.AGENT_GATEWAY_PATH) == gateway_sig_before
-        assert a.jsonl_file_signature(a.AGENT_TASK_LEDGER_PATH) == task_sig_before
-        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
-        assert a.jsonl_file_signature(a.AGENT_ARTIFACT_INDEX_PATH) == artifact_sig_before
-        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
-        invalid_action = post_json_any_status(f"{base}/gui/action", {"action": "approval.approve"})
-        assert invalid_action["ok"] is False, invalid_action
-        assert invalid_action["_http_status"] == 400, invalid_action
-        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
-        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
-        unknown_ref = post_json_any_status(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "approval.approve",
-                "ui_ref": "approval:0000000000000000",
-            },
-        )
-        assert unknown_ref["ok"] is False, unknown_ref
-        assert unknown_ref["_http_status"] == 400, unknown_ref
-        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
-        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
-        unknown_session = post_json_any_status(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "session.open",
-                "ui_ref": "session:0000000000000000",
-            },
-        )
-        assert unknown_session["ok"] is False, unknown_session
-        assert unknown_session["_http_status"] == 400, unknown_session
-        assert a.jsonl_file_signature(a.AGENT_APPROVALS_PATH) == approval_sig_before
-        assert a.jsonl_file_signature(a.AGENT_SCHEDULES_PATH) == schedule_sig_before
-        approval_ref = next((row.get("ui_ref") for row in snapshot["approvals"] if "Web console approval sample" in row.get("summary", "")), "")
-        schedule_ref = next((row.get("ui_ref") for row in snapshot["schedules"] if row.get("name") == "Web Console Toggle"), "")
-        agent_ref = next((row.get("ui_ref") for row in snapshot["agents"] if row.get("name") == "Web Console Worker"), "")
-        assert approval_ref and schedule_ref and agent_ref, snapshot
-        history_items = [
-            item
-            for group in snapshot["sidebar"]["history"]["groups"]
-            for item in group.get("items", [])
-        ]
-        session_ref = next((row.get("ui_ref") for row in history_items if row.get("title") == "打开 Slack 式控制台会话"), "")
-        assert session_ref and session_ref.startswith("session:"), snapshot["sidebar"]["history"]
-        opened_session = post_json(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "session.open",
-                "ui_ref": session_ref,
-            },
-        )
-        assert opened_session["ok"] is True, opened_session
-        assert opened_session["session"]["ui_ref"] == session_ref, opened_session
-        assert opened_session["session"]["title"] == "打开 Slack 式控制台会话", opened_session
-        opened_messages = opened_session["session"]["messages"]
-        assert any("打开 Slack 式控制台会话" in row.get("content", "") for row in opened_messages), opened_messages
-        assert any("会话预览应该在中间频道打开" in row.get("content", "") for row in opened_messages), opened_messages
-        opened_text = json.dumps(opened_session, ensure_ascii=False)
-        assert "model_responses_" not in opened_text and sample_session_path not in opened_text, opened_text
-        assert "artifact://" not in opened_text and "appr_" not in opened_text and "task_" not in opened_text, opened_text
-        schedule_action = post_json(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "schedule.disable",
-                "ui_ref": schedule_ref,
-            },
-        )
-        assert schedule_action["ok"] is True, schedule_action
-        assert a.latest_schedule_records()[sample_schedule_id]["status"] == "disabled", a.latest_schedule_records()[sample_schedule_id]
-        approval_action = post_json(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "approval.reject",
-                "ui_ref": approval_ref,
-            },
-        )
-        assert approval_action["ok"] is True, approval_action
-        assert a.approval_latest_records()[sample_approval_id]["status"] == "rejected", a.approval_latest_records()[sample_approval_id]
-        created_schedule = post_json(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "schedule.create",
-                "payload": {
-                    "schedule_id": "sched_web_console_agent_task",
-                    "name": "Web Console Agent Task",
-                    "interval": "2h",
-                    "target_agent_ref": agent_ref,
-                    "execution": {
-                        "mode": "agent_task",
-                        "routing": {},
-                        "work_order": {"objective": "Write a short web-console report."},
-                        "capability_contract": {"tools_allowed": ["read"], "write_policy": "none"},
-                        "context_contract": {"history_mode": "summary", "artifact_reference_only": True},
-                        "output_contract": {"format": "structured_markdown", "required_sections": ["summary"]},
-                    },
-                },
-            },
-        )
-        assert created_schedule["ok"] is True, created_schedule
-        agent_schedule = a.latest_schedule_records()["sched_web_console_agent_task"]
-        assert agent_schedule["target"] == sample_subagent.agent_id, agent_schedule
-        assert agent_schedule["execution"]["routing"]["selected_agent"] == sample_subagent.agent_id, agent_schedule
-
-        profile_state_before_chat = a.read_json_dict_file(a.shared_user_profile_state_path())
-        profile_count_before_chat = int(profile_state_before_chat.get("interaction_count") or 0)
-        web_chat_marker = "web-console-shared-profile-marker"
-        web_chat = post_json(
-            f"{base}/gui/action",
-            {
-                "schema_version": "shuheng.web_console.action_request.v1",
-                "action": "agent.chat",
-                "ui_ref": agent_ref,
-                "payload": {"message": f"请记录 Web Console 用户意图 {web_chat_marker}"},
-            },
-        )
-        assert web_chat["ok"] is True, web_chat
-        profile_state_after_chat = a.read_json_dict_file(a.shared_user_profile_state_path())
-        assert int(profile_state_after_chat.get("interaction_count") or 0) == profile_count_before_chat + 1, profile_state_after_chat
-        assert any(web_chat_marker in str(item.get("summary") or "") for item in profile_state_after_chat.get("recent_intents") or []), profile_state_after_chat
-
-        action_text = json.dumps({"schedule": schedule_action, "approval": approval_action, "created": created_schedule, "chat": web_chat}, ensure_ascii=False)
-        assert "artifact://" not in action_text and "appr_" not in action_text and "task_" not in action_text, action_text
-        assert re.search(r"\bappr[_0-9][A-Za-z0-9_:-]+", action_text) is None, action_text
-        health = get_json(f"{base}/health")
-        assert health["ok"] is True, health
-        assert health["service"]["schema_version"] == "agentgateway.service.v1", health
-        assert "registry_path" not in health, health
-        assert "mcp_resource_read" not in health["service"]["request_response"], health
-        assert "subscriptions_path" not in health["service"]["push_notifications"], health
-        assert "pid_path" not in health["service"]["daemon"].get("state", {}), health
-        gateway = get_json(f"{base}/gateway")
-        assert_gateway_public_schema(gateway)
-        agent_directory = get_json(f"{base}/gateway/agents")
-        assert agent_directory["schema_version"] == "shuheng.agent_directory.v1", agent_directory
-        assert any(row.get("agent_id") == sample_subagent.agent_id for row in agent_directory["agents"]), agent_directory
-        context_snapshot = get_json_any_status(f"{base}/gateway/context")
-        assert context_snapshot["_http_status"] == 404, context_snapshot
-        permission_snapshot = get_json_any_status(f"{base}/gateway/permissions")
-        assert permission_snapshot["_http_status"] == 404, permission_snapshot
-        a2a = get_json(f"{base}/a2a")
-        assert a2a["schema_version"] == "a2a.gateway.v1", a2a
-        assert "tasks" not in a2a and "messages" not in a2a and "artifacts" not in a2a, a2a
-        cards = get_json(f"{base}/a2a/agent-cards")
-        assert any(card.get("agent_id") == sample_subagent.agent_id for card in cards["agent_cards"]), cards
-        mcp = get_json(f"{base}/mcp")
-        assert mcp["schema_version"] == "mcp.gateway.v1", mcp
-        resource = get_json(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Ftasks")
-        assert resource["schema_version"] == "mcp.resource.contents.v1", resource
-        context_resource = get_json_any_status(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Fcontext-inspector")
-        assert context_resource["_http_status"] == 404, context_resource
-        permission_resource = get_json_any_status(f"{base}/mcp/resource?uri=resource%3A%2F%2Fagent-mail%2Fpermission-matrix")
-        assert permission_resource["_http_status"] == 404, permission_resource
-        sent_message = post_json(
-            f"{base}/a2a/messages",
-            {
-                "from": {"agent_id": "external.researcher"},
-                "to": {"target": sample_subagent.agent_id},
-                "intent": "delegate",
-                "parts": [{"kind": "text", "text": "Summarize gateway message delivery semantics."}],
-            },
-        )
-        assert sent_message["schema_version"] == "a2a.message_send_response.v1", sent_message
-        assert sent_message["accepted"] is True, sent_message
-        assert sent_message["delivery"]["mode"] == "agent_mail_inbox", sent_message
-        assert sent_message["delivery"]["auto_dispatch"] is False, sent_message
-        gateway_task_id = sent_message["task"]["id"]
-        assert gateway_task_id in a.latest_task_records(), a.latest_task_records()
-        assert a.latest_task_records()[gateway_task_id]["kind"] == "gateway_message", a.latest_task_records()[gateway_task_id]
-        unknown_target = post_json_any_status(
-            f"{base}/a2a/messages",
-            {
-                "from": {"agent_id": "external.researcher"},
-                "to": {"target": "agent://unknown-gateway-target"},
-                "parts": [{"kind": "text", "text": "This should not create a phantom gateway task."}],
-            },
-        )
-        assert unknown_target["accepted"] is False, unknown_target
-        assert unknown_target["_http_status"] == 404, unknown_target
-        assert unknown_target["delivery"]["auto_dispatch"] is False, unknown_target
-        query = post_json(f"{base}/a2a/tasks/query", {"task_id": "task_direct_schema"})
-        assert query["schema_version"] == "a2a.query_response.v1", query
-        sent_query = post_json(f"{base}/a2a/tasks/query", {"task_id": gateway_task_id})
-        assert sent_query["tasks"] and sent_query["tasks"][-1]["id"] == gateway_task_id, sent_query
-        with urllib.request.urlopen(f"{base}/a2a/events?once=1", timeout=5) as response:
-            frame = response.read().decode("utf-8")
-        assert "event:" in frame and "data:" in frame, frame
-        subscription = post_json(
-            f"{base}/a2a/push-subscriptions",
-            {"endpoint": f"{base}/health", "event_types": ["gateway"]},
-        )
-        assert subscription["subscription"]["schema_version"] == "agentgateway.push_subscription.v1", subscription
-        delivery = post_json(f"{base}/a2a/push-test", {"event": "gateway", "payload": {"check": True}})
-        assert delivery["schema_version"] == "agentgateway.push_delivery_response.v1", delivery
-        assert delivery["deliveries"], delivery
-        assert delivery["deliveries"][-1]["status"] == "delivered", delivery
-        assert a.read_jsonl(a.AGENT_GATEWAY_PUSH_DELIVERIES_PATH), a.AGENT_GATEWAY_PUSH_DELIVERIES_PATH
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def run_gateway_daemon_checks() -> None:
-    remote_default = a.start_gateway_daemon("0.0.0.0", 0, extra_env={"SHUHENG_HARNESS_DIR": a.AGENT_HARNESS_DIR})
-    assert remote_default["status"] == "failed", remote_default
-    assert remote_default["message"] == "remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND", remote_default
-    status = a.start_gateway_daemon("127.0.0.1", 0, extra_env={"SHUHENG_HARNESS_DIR": a.AGENT_HARNESS_DIR})
-    try:
-        assert status["schema_version"] == "agentgateway.daemon.v1", status
-        assert status["status"] == "running", status
-        assert status["alive"] is True, status
-        assert int(status["port"]) > 0, status
-        health = get_json(f"{status['base_url']}/health")
-        assert health["ok"] is True, health
-        assert os.path.exists(a.AGENT_GATEWAY_DAEMON_STATUS_PATH), a.AGENT_GATEWAY_DAEMON_STATUS_PATH
-        assert os.path.exists(a.AGENT_GATEWAY_DAEMON_PID_PATH), a.AGENT_GATEWAY_DAEMON_PID_PATH
-    finally:
-        stopped = a.stop_gateway_daemon()
-    assert stopped["status"] == "stopped", stopped
-    assert stopped["alive"] is False, stopped
+def assert_no_active_http_gateway_runtime() -> None:
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    cli_source = Path(ROOT, "src/shuheng/cli.py").read_text(encoding="utf-8")
+    runtime_smoke_source = Path(ROOT, "scripts/runtime_smoke.py").read_text(encoding="utf-8")
+    for removed in (
+        "GatewayRequestHandler",
+        "make_gateway_http_server",
+        "serve_gateway",
+        "start_gateway_daemon",
+        "stop_gateway_daemon",
+        "restart_gateway_daemon",
+        "BaseHTTPRequestHandler",
+        "ThreadingHTTPServer",
+        "web_console_snapshot",
+        "web_console_apply_action",
+        "web_console_html",
+    ):
+        assert not hasattr(a, removed), removed
+        assert f"def {removed}" not in app_source, removed
+        assert f"class {removed}" not in app_source, removed
+        assert f"def {removed}" not in cli_source, removed
+    assert "from http.server import" not in app_source, app_source
+    assert "urllib.request.urlopen" not in runtime_smoke_source, runtime_smoke_source
+    assert "a.make_gateway_http_server(" not in runtime_smoke_source, runtime_smoke_source
+    for removed_flag in ("--serve-gateway", "--gateway-daemon"):
+        assert removed_flag not in cli_source, removed_flag
 
 
 def assert_context_pack_schema(path: str) -> dict:
@@ -8214,16 +7804,6 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
     a.show_subagent_home(reloaded_empty, reloaded_empty_sub)
     a.submit(reloaded_empty, "/chat")
-    web_state = a.State(agent=ContextFakeAgent())
-    web_state.running = True
-    assert a.load_subagents(web_state) is True
-    web_sub = web_state.subagents.get(sub.agent_id)
-    assert web_sub is not None
-    web_sub.messages = []
-    web_conversation = a.web_console_agent_conversation(web_state, web_sub.agent_id)
-    assert any(row["role"] == "user" and row["content"] == "hello direct" for row in web_conversation["messages"]), web_conversation
-    assert any(row["role"] == "assistant" and row["content"] == "direct reply" for row in web_conversation["messages"]), web_conversation
-
     legacy_sub = a.create_subagent(state, "Legacy Chat Agent", role="researcher")
     legacy_session_id = "legacy-chat-session"
     os.makedirs(a.subagent_sessions_dir(legacy_sub), exist_ok=True)
@@ -11798,7 +11378,7 @@ def run_checks() -> None:
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()
     assert_runtime_dispatch_module_boundary()
-    assert_web_console_module_boundary()
+    assert_no_removed_web_http_surface()
     assert_dashboard_module_boundary()
     assert_ledger_store_module_boundary()
     assert_genericagent_provider_module_boundary()
@@ -13447,8 +13027,8 @@ def run_checks() -> None:
     assert "workflow_autopilot.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
     model_text = a.format_model_orchestration_registry(registry["model_orchestration"])
     assert "Model Orchestration" in model_text, model_text
-    gateway_panel_keys = {item.key for item in a.gateway_panel_items(state)}
-    assert {"runtime_registry", "model_orchestration", "scheduled_task_registry"} <= gateway_panel_keys, gateway_panel_keys
+    assert not hasattr(a, "gateway_panel_items")
+    assert all(command != "/gateway" for command, *_rest in a.COMMANDS), a.COMMANDS
     direct_a2a_task = [item for item in registry["a2a_gateway"]["tasks"] if item["id"] == "task_direct_schema"]
     assert direct_a2a_task
     assert_a2a_task_schema(direct_a2a_task[-1])
@@ -13458,8 +13038,7 @@ def run_checks() -> None:
     direct_a2a_artifact = [item for item in registry["a2a_gateway"]["artifacts"] if item["artifactId"] == direct_artifact["artifact_id"]]
     assert direct_a2a_artifact
     assert_a2a_artifact_schema(direct_a2a_artifact[-1])
-    run_gateway_server_checks()
-    run_gateway_daemon_checks()
+    assert_no_active_http_gateway_runtime()
 
     ops = a.create_subagent(state, "Ops Agent", role="ops")
     blocked = a.start_subagent_task(state, ops, "deploy production with sudo", source="user")

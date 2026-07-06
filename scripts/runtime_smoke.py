@@ -8,10 +8,7 @@ import os
 import queue
 import sys
 import tempfile
-import threading
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -55,22 +52,6 @@ def drain_ui(a: Any, state: Any) -> None:
         if not changed:
             break
         time.sleep(0.02)
-
-
-def get_json(url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=5) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=5) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def latest_approval(a: Any, *, approval_type: str) -> dict[str, Any]:
@@ -276,80 +257,46 @@ def run_scheduler_smoke(a: Any, state: Any) -> None:
     )
 
 
-def run_gateway_http_smoke(a: Any, completed_task_id: str) -> None:
-    server = a.make_gateway_http_server("127.0.0.1", 0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    host, port = server.server_address[:2]
-    base = f"http://{host}:{port}"
-    try:
-        health = get_json(f"{base}/health")
-        if not health.get("ok"):
-            raise AssertionError(health)
-        if "registry_path" in health or "mcp_resource_read" in health["service"]["request_response"]:
-            raise AssertionError(health)
-        if "subscriptions_path" in health["service"]["push_notifications"]:
-            raise AssertionError(health)
-        if "pid_path" in health["service"]["daemon"].get("state", {}):
-            raise AssertionError(health)
-        gateway = get_json(f"{base}/gateway")
-        if gateway.get("schema_version") != "agentgateway.public.v1":
-            raise AssertionError(gateway)
-        if "context_inspector" in gateway or "permission_matrix" in gateway:
-            raise AssertionError(gateway)
-        if gateway.get("release_readiness", {}).get("status") != "experimental_alpha":
-            raise AssertionError(gateway)
-        if "mcp_resource_read" in gateway["gateway_service"]["request_response"]:
-            raise AssertionError(gateway["gateway_service"])
-        if "subscriptions_path" in gateway["gateway_service"]["push_notifications"]:
-            raise AssertionError(gateway["gateway_service"])
-        if "pid_path" in gateway["gateway_service"]["daemon"].get("state", {}):
-            raise AssertionError(gateway["gateway_service"])
-        if gateway["a2a_gateway"]["compatibility"]["certification"] != "not_protocol_certified":
-            raise AssertionError(gateway["a2a_gateway"]["compatibility"])
-        directory = get_json(f"{base}/gateway/agents")
-        if directory.get("schema_version") != "shuheng.agent_directory.v1" or not directory.get("roles"):
-            raise AssertionError(directory)
-        a2a = get_json(f"{base}/a2a")
-        if "tasks" in a2a or "messages" in a2a or "artifacts" in a2a:
-            raise AssertionError(a2a)
-        mcp = get_json(f"{base}/mcp")
-        if mcp["compatibility"]["certification"] != "not_protocol_certified":
-            raise AssertionError(mcp["compatibility"])
-        resource_uri = urllib.parse.quote("resource://agent-mail/runtime-evidence", safe="")
-        evidence_resource = get_json(f"{base}/mcp/resource?uri={resource_uri}")
-        if "subagent_task_artifact_eval_trace" not in json.dumps(evidence_resource, ensure_ascii=False):
-            raise AssertionError(evidence_resource)
-        query = post_json(f"{base}/a2a/tasks/query", {"task_id": completed_task_id})
-        task_ids = [str(item.get("id") or "") for item in (query.get("tasks") or []) if isinstance(item, dict)]
-        if completed_task_id not in task_ids:
-            raise AssertionError(query)
-        sent = post_json(
-            f"{base}/a2a/messages",
-            {
-                "from": {"agent_id": "external.runtime_smoke"},
-                "to": {"target": "role.researcher"},
-                "parts": [{"kind": "text", "text": "runtime smoke gateway delivery"}],
-            },
-        )
-        if sent.get("delivery", {}).get("mode") != "agent_mail_inbox":
-            raise AssertionError(sent)
-        snapshot = get_json(f"{base}/gui/snapshot")
-        if snapshot.get("mode") != "read_only":
-            raise AssertionError(snapshot)
-        record_evidence(
-            a,
-            target_items=["a2a_mcp_gateway"],
-            check_id="loopback_http_a2a_mcp_gui_client_smoke",
-            level="e2e",
-            summary="Loopback HTTP client read health/gateway/MCP runtime-evidence resource/A2A task query/message delivery/GUI snapshot without protocol certification claims.",
-            evidence_refs=[f"task://{completed_task_id}", "resource://agent-mail/runtime-evidence"],
-            details={"base_url": base, "gateway_status": gateway["gateway_service"]["status"]},
-        )
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+def run_local_protocol_registry_smoke(a: Any, state: Any, completed_task_id: str) -> None:
+    for removed in (
+        "GatewayRequestHandler",
+        "make_gateway_http_server",
+        "serve_gateway",
+        "start_gateway_daemon",
+        "stop_gateway_daemon",
+        "web_console_snapshot",
+        "web_console_apply_action",
+    ):
+        if hasattr(a, removed):
+            raise AssertionError(f"removed Web/HTTP surface still exists: {removed}")
+
+    registry = a.ensure_gateway_registry(state)
+    if registry.get("schema_version") != "agentgateway.v1":
+        raise AssertionError(registry)
+    directory = registry.get("agent_directory") or {}
+    if directory.get("schema_version") != "shuheng.agent_directory.v1" or not directory.get("roles"):
+        raise AssertionError(directory)
+    a2a = registry.get("a2a_gateway") or {}
+    if a2a.get("delivery", {}).get("mode") != "agent_mail_inbox":
+        raise AssertionError(a2a)
+    task_ids = {str(item.get("id") or "") for item in (a2a.get("tasks") or []) if isinstance(item, dict)}
+    if completed_task_id not in task_ids:
+        raise AssertionError(a2a)
+    mcp = registry.get("mcp_gateway") or {}
+    resources = mcp.get("resources") or []
+    if not any(item.get("uri") == "resource://agent-mail/runtime-evidence" for item in resources):
+        raise AssertionError(mcp)
+    if any(item.get("uri") in {"resource://agent-mail/context-inspector", "resource://agent-mail/permission-matrix"} for item in resources):
+        raise AssertionError(mcp)
+    record_evidence(
+        a,
+        target_items=["a2a_mcp_gateway"],
+        check_id="local_protocol_registry_smoke",
+        level="runtime",
+        summary="Local protocol registry projected Agent Mail, task, runtime-evidence, and discovery records without starting any Web/HTTP server.",
+        evidence_refs=[f"task://{completed_task_id}", "resource://agent-mail/runtime-evidence"],
+        details={"registry_schema": registry["schema_version"], "directory_roles": len(directory.get("roles") or [])},
+    )
 
 
 def run_smoke(shuheng_home: str) -> dict[str, Any]:
@@ -361,7 +308,7 @@ def run_smoke(shuheng_home: str) -> dict[str, Any]:
     run_approval_smoke(a, state)
     completed_task_id = run_subagent_task_smoke(a, state)
     run_scheduler_smoke(a, state)
-    run_gateway_http_smoke(a, completed_task_id)
+    run_local_protocol_registry_smoke(a, state, completed_task_id)
     report = a.architecture_baseline_report(state)
     summary = report["summary"]["strongest_evidence_levels"]
     if summary.get("runtime", 0) + summary.get("e2e", 0) <= 0:

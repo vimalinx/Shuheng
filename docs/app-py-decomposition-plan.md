@@ -7,7 +7,7 @@ Date: 2026-06-30
 `src/shuheng/app.py` is still the central Shuheng TUI/control-plane module. It is
 also the highest remaining maintainability risk: current size is about 28.7k
 lines and the module owns UI state, history, Secret Vault, subagents, governance
-stores, runtime dispatch, Web Console payloads, rendering, input handling, and
+stores, runtime dispatch, local protocol records, rendering, input handling, and
 the process loop.
 
 This plan defines a low-risk split path. The goal is not to make a prettier file
@@ -21,7 +21,7 @@ the existing executable contracts, release gates, and local-alpha compatibility.
   - `ledger_store.py` owns JSONL append/read/cache and JSON object locked update.
   - `scheduler.py` owns schedule parsing/runtime helpers.
   - `runtime_evidence.py`, `baseline.py`, and `gateway_registry.py` own narrow
-    helper contracts.
+    local-record helper contracts.
   - `control_protocol.py` and provider modules own protocol/runtime-specific
     mechanics.
 - The architecture baseline says the target is a governed system: strong
@@ -46,7 +46,7 @@ config/path constants
   -> domain types and pure text helpers
   -> storage adapters and stores
   -> domain services
-  -> renderers / command handlers / web payload adapters
+  -> renderers / command handlers / local protocol record adapters
   -> app.py orchestration facade and process loop
 ```
 
@@ -168,17 +168,6 @@ Keep the final `submit(...)` dispatcher in `app.py` until command parsing is
 separated, because it currently binds UI selection, command grammar, and runtime
 start behavior.
 
-### `web_console.py`
-
-Own Web Console payload builders and HTTP action handlers:
-
-- `web_console_*` summary/row/conversation payloads
-- sanitized `ui_ref` maps
-- Web action routing that calls app-provided command callbacks
-
-Reason: Web payloads are already a fairly contiguous block. Extracting them
-reduces app size without touching curses rendering.
-
 ### `dashboard.py`
 
 Own home/dashboard data shaping:
@@ -275,7 +264,7 @@ Required tests:
 
 Risk:
 
-- High, because history touches sidebar, restore, Web Console, and subagent chat.
+- High, because history touches sidebar, restore, local protocol records, and subagent chat.
   Keep phase scope narrow and commit immediately after green gates.
 
 ### Phase 3: Secret Vault Boundary
@@ -331,17 +320,18 @@ Required tests:
 - runtime smoke
 - scheduler dispatch smoke
 
-### Phase 6: Web Console And Dashboard
+### Phase 6: Local Protocol Records And Dashboard
 
 Move:
 
-- Web Console payload shaping to `web_console.py`
+- Local protocol registry record shaping to `gateway_registry.py` or another
+  lower-level local-record module
 - dashboard/home line construction to `dashboard.py`
 
 Required tests:
 
-- Web Console static/payload tests
-- policy gate Web subagent conversation hydration check
+- local protocol registry smoke tests
+- policy gate subagent conversation hydration check
 
 ### Phase 7: Rendering, Commands, Input, Process Loop
 
@@ -372,7 +362,6 @@ src/shuheng/subagent_store.py      subagent profile/memory/session refs
 src/shuheng/governance.py          task/policy/approval/artifact semantics
 src/shuheng/context_packs.py       context and memory hydration
 src/shuheng/runtime_dispatch.py    provider-neutral dispatch
-src/shuheng/web_console.py         Web Console adapters
 src/shuheng/dashboard.py           home/dashboard lines
 src/shuheng/rendering.py           render transforms and draw helpers
 src/shuheng/input_controller.py    keyboard/mouse/input behavior

@@ -22,7 +22,8 @@ def test_cli_help_does_not_import_app(monkeypatch, capsys) -> None:
 
     assert result == 0
     assert "Shuheng governed local-agent TUI" in output
-    assert "--serve-gateway" in output
+    assert "--serve-gateway" not in output
+    assert "--gateway-daemon" not in output
     assert "shuheng.app" not in sys.modules
 
 

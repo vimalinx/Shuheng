@@ -73,10 +73,14 @@ def test_gateway_resource_registry_and_descriptor_shapes() -> None:
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources)
     assert not any(item["uri"] == "resource://agent-mail/context-inspector" for item in resources)
     assert not any(item["uri"] == "resource://agent-mail/permission-matrix" for item in resources)
-    assert descriptor["base_url"] == "http://127.0.0.1:8765"
-    assert descriptor["status"] == "local_no_auth_compatibility_surface"
-    assert descriptor["request_response"]["a2a_message_send"].endswith("/a2a/messages")
-    assert descriptor["request_response"]["agent_directory"].endswith("/gateway/agents")
+    assert not any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in resources)
+    assert descriptor["base_url"] == ""
+    assert descriptor["status"] == "local_record_only"
+    assert descriptor["request_response"]["message_inbox"] == "agent-mail://inbox"
+    assert descriptor["request_response"]["agent_directory"] == "agent-directory://local"
     assert "context_inspector" not in descriptor["request_response"]
     assert "permission_matrix" not in descriptor["request_response"]
+    assert descriptor["sse"]["enabled"] is False
+    assert descriptor["push_notifications"]["enabled"] is False
     assert descriptor["push_notifications"]["auth"] == "none"
+    assert descriptor["daemon"]["commands"] == []

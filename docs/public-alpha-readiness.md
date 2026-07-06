@@ -9,12 +9,13 @@ Shuheng is a public alpha for local-first agent control-plane work. The supporte
 claim is:
 
 > experimental local alpha: stable local TUI/control-plane surfaces with
-> experimental gateway, protocol, scheduler, workflow, baseline, and eval
-> surfaces.
+> stable OMP runtime output/control, no built-in Web/HTTP/mobile/remote
+> endpoint, and experimental local scheduler, workflow, baseline, eval, and
+> protocol-shaped registry records.
 
 Do not describe the project as production-ready, remotely secured, or fully
-A2A/MCP certified unless the repository later adds the required external
-conformance evidence.
+A2A/MCP certified. Current A2A/MCP-shaped data is local metadata only, not a
+reachable protocol service.
 
 ## Verified Release Gate
 
@@ -60,10 +61,10 @@ or release promises.
 
 - `src/shuheng/app.py` remains a large composition module and should continue to
   shrink through small helper extractions with compatibility aliases.
-- Gateway/Web Console has no built-in authentication and should bind to loopback
-  unless protected by an external trusted boundary.
-- A2A/MCP surfaces are compatibility surfaces, not certified protocol
-  implementations.
+- Built-in Web Console, HTTP gateway, mobile endpoints, and remote endpoints are
+  not active product surfaces.
+- A2A/MCP-shaped records are local metadata only, not certified protocol
+  implementations or reachable endpoints.
 - Heuristic eval and trace scoring do not prove factual or citation correctness.
 - Scheduler/workflow automation is runtime-owned, not an installed always-on
   service by default.

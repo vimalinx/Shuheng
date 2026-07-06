@@ -41,7 +41,7 @@ Bring session management, multi-agent orchestration, task planning, memory gover
 
 `Shuheng` is a terminal control plane for local multi-agent work. It does not reimplement agent runtimes; it separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
 
-Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, and Secret Vault are the primary stable surfaces. The Web Console, HTTP gateway, A2A/MCP surfaces, baseline report, eval/trace quality scoring, and scheduler automation are still experimental compatibility surfaces. They are useful for local integration and verification, but should not be read as full protocol certification or production-grade remote services.
+Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, Secret Vault, and OMP runtime output/control are the primary stable surfaces. Shuheng no longer ships a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint. A2A/MCP-shaped data remains only as local registry/record shapes, not as reachable protocol services or certification claims.
 
 Think of it as:
 
@@ -279,13 +279,10 @@ Type `/help` inside the TUI for the full command list.
 /artifacts           Open artifact store
 /recover             View or handle recoverable tasks
 /evals               View heuristic eval and trace records
-/gateway             View A2A/MCP compatibility surface and local gateway metadata
 /baseline            View architecture baseline report and evidence levels
 /memory              Inspect memory system
 /mem                 Alias for /memory
 ```
-
-The local Web GUI now lives in a standalone project. This gateway still provides `/gui`, `/gui/snapshot`, and `/gui/action`; the static page is loaded from `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, or `Shuheng-Web-GUI/public/index.html` under Projects. You can also run `python3 -m shuheng_web_gui.server` inside the standalone Web GUI project and let it proxy the current Shuheng gateway.
 
 ### Secret Vault
 
@@ -369,17 +366,17 @@ docs/agent-harness-architecture.md
 | Single-writer discipline | Read work can be parallel; writes stay controlled |
 | Auditability | task ledger, progress ledger, mail, artifacts, approvals, evals, and traces remain inspectable |
 | Human approval gates | Long-term memory, Secret operations, deletion, deployment, and external side effects require approval |
-| Protocol compatibility | A2A/MCP gateway surfaces are local compatibility surfaces; full protocol certification requires real third-party client E2E evidence |
+| Protocol records | A2A/MCP-shaped objects exist only as local registry/record shapes; there is no built-in HTTP endpoint or protocol certification |
 
 Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery, eval/trace, A2A/MCP, or orchestration should be checked against the architecture baseline before completion.
 
 ### Release Readiness
 
-Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py` and is exposed through the `/gateway` `release_readiness` field. Current default posture:
+Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py`. Current default posture:
 
-- Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault.
-- Experimental surfaces: Web Console, HTTP gateway, A2A/MCP compatibility surfaces, baseline report, heuristic eval, scheduler runtime dispatch.
-- Known gaps: `app.py` remains a large composition module; the gateway has no built-in authentication and should stay loopback by default; eval does not prove factual/citation correctness; A2A/MCP still need real client interoperability tests.
+- Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault, OMP runtime output/control.
+- Experimental surfaces: baseline report, runtime/evidence smoke, heuristic eval, scheduler runtime dispatch, local protocol-shaped registry records.
+- Known gaps: `app.py` remains a large composition module; eval does not prove factual/citation correctness; A2A/MCP-shaped records are not reachable protocol endpoints; Web Console, HTTP gateway, mobile, and remote endpoints are not current product surfaces.
 
 ## Development
 
@@ -416,7 +413,7 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 ### Open-Source Release Boundaries
 
 - License: MIT, see `LICENSE`.
-- Security reporting and boundaries: see `SECURITY.md`. Gateway/Web Console has no built-in auth and should bind to loopback by default.
+- Security reporting and boundaries: see `SECURITY.md`. Shuheng does not ship a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; external sending, deployment, deletion, Secret access, and long-term memory writes still go through local approval gates.
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
 - CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, wheel smoke, and `git diff --check`.

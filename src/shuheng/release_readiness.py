@@ -142,38 +142,38 @@ def is_loopback_host(host: str) -> bool:
 def gateway_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, Any]:
     host = str(host or "127.0.0.1").strip() or "127.0.0.1"
     local_only = is_loopback_host(host)
-    allowed = local_only or bool(allow_remote)
     return {
         "schema_version": "shuheng.gateway_bind_safety.v1",
         "host": host,
         "local_only": local_only,
         "auth": "none",
-        "allowed": allowed,
-        "reason": "loopback_default" if local_only else ("remote_allowed_by_env" if allow_remote else "remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND"),
-        "operator_note": "Gateway/Web Console has no built-in authentication; bind to loopback unless protected by a trusted external boundary.",
+        "allowed": False,
+        "network_enabled": False,
+        "reason": "builtin_http_surface_removed",
+        "operator_note": "Shuheng no longer ships a built-in Web Console or HTTP gateway; protocol metadata is local record output only.",
     }
 
 
 def protocol_compatibility_metadata(kind: str) -> dict[str, Any]:
     kind = str(kind or "gateway")
     return {
-        "posture": "compatibility_surface",
+        "posture": "local_record_shape",
         "certification": "not_protocol_certified",
         "evidence_required_for_certified": [
             "real third-party client interoperability test",
             "request/response conformance fixture",
             "streaming/push behavior fixture",
         ],
-        "wording": f"{kind} exposes Shuheng-compatible registry and HTTP surfaces; do not treat it as certified full protocol compliance.",
+        "wording": f"{kind} is represented as local Shuheng protocol-shaped records only; no built-in HTTP surface or certified protocol endpoint is active.",
     }
 
 
 def scheduler_runtime_ownership() -> dict[str, Any]:
     return {
         "owner": "shuheng.control_plane",
-        "tick_owner": "tui_loop_or_gateway_manual_action",
+        "tick_owner": "tui_loop_or_local_manual_action",
         "always_on": False,
-        "daemon_note": "Recurring jobs are evaluated while the TUI loop runs or when a gateway/manual scheduler action invokes a tick; no external system service is installed by default.",
+        "daemon_note": "Recurring jobs are evaluated while the TUI loop runs or when a local manual scheduler action invokes a tick; no external system service is installed by default.",
     }
 
 
@@ -219,9 +219,9 @@ def release_readiness_report(
 ) -> dict[str, Any]:
     known_gaps = [
         "app.py remains a large composition module and is not fully decomposed",
-        "A2A/MCP surfaces need real third-party client conformance tests before certification language",
+        "A2A/MCP-shaped records are local metadata only and not certified protocol endpoints",
         "heuristic eval does not prove factual or citation correctness",
-        "gateway has no built-in authentication and should stay loopback by default",
+        "built-in Web Console, HTTP gateway, mobile, and remote endpoints are not active product surfaces",
         "scheduler is runtime-owned rather than an installed always-on service",
     ]
     missing_hygiene = []
@@ -236,7 +236,7 @@ def release_readiness_report(
     return {
         "schema_version": "shuheng.release_readiness.v1",
         "status": "experimental_alpha",
-        "public_position": "local-first governed agent TUI with experimental gateway/protocol surfaces",
+        "public_position": "local-first governed agent TUI with OMP runtime output/control and no built-in Web/HTTP surface",
         "support_level": {
             "stable_local_surfaces": [
                 "curses TUI session workspace",
@@ -244,14 +244,13 @@ def release_readiness_report(
                 "local artifact/index inspection",
                 "Secret Vault local encryption flow",
                 "runtime provider registry metadata",
+                "OMP runtime output/control",
             ],
             "experimental_surfaces": [
-                "Web Console and HTTP gateway",
-                "A2A compatibility surface",
-                "MCP compatibility surface",
                 "architecture baseline comparison",
                 "heuristic eval and trace quality scoring",
                 "scheduler runtime dispatch",
+                "local protocol-shaped registry records",
             ],
             "known_gaps": known_gaps,
         },

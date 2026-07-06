@@ -41,7 +41,7 @@
 
 `枢衡 Shuheng` 是面向本地多 Agent 的终端控制面。它不重写底层 agent runtime，而是把用户每天真正接触的执行、调度、审批、记忆和会话工作台单独维护起来。
 
-当前发布定位是 **experimental local alpha**：本地 curses TUI、会话、任务账本、artifact、审批和 Secret Vault 是主要稳定面；Web Console、HTTP gateway、A2A/MCP、baseline report、eval/trace 质量评分和 scheduler 自动执行仍按实验性兼容面维护。它们可以用于本地集成和验证，但不应被理解为完整协议认证或生产级远程服务。
+当前发布定位是 **experimental local alpha**：本地 curses TUI、会话、任务账本、artifact、审批、Secret Vault 和 OMP runtime 输出/控制是主要稳定面。Shuheng 不再内置 Web Console、HTTP gateway、mobile 或 remote endpoint；A2A/MCP-shaped 数据只作为本地 registry/record 形状保留，不代表可访问的协议服务或完整认证。
 
 你可以把它理解成：
 
@@ -279,13 +279,10 @@ shuheng
 /artifacts           打开 artifact store
 /recover             查看或处理可恢复任务
 /evals               查看启发式任务评估和 trace
-/gateway             查看 A2A/MCP 兼容面和本地 gateway 元数据
 /baseline            查看架构基线对比报告和证据等级
 /memory              打开记忆系统可视化检查
 /mem                 /memory 的别名
 ```
-
-本地 Web GUI 已拆到独立项目。当前 gateway 仍提供 `/gui`、`/gui/snapshot` 和 `/gui/action`；静态页面优先从 `SHUHENG_WEB_GUI_INDEX`、`SHUHENG_WEB_GUI_DIR` 或 Projects 下的 `Shuheng-Web-GUI/public/index.html` 加载。也可以在独立 Web GUI 项目中运行 `python3 -m shuheng_web_gui.server`，让它代理当前 Shuheng gateway。
 
 ### Secret Vault
 
@@ -369,17 +366,17 @@ docs/agent-harness-architecture.md
 | 单写者原则 | 读任务可并行，写操作保持受控 |
 | 可审计 | task ledger、progress ledger、mail、artifact、approval、eval、trace 可追踪 |
 | 人类审批门 | 长期记忆、Secret、删除、部署和外部副作用需要审批 |
-| 协议兼容 | A2A/MCP gateway 是本地兼容面；完整协议认证需要真实第三方客户端 E2E 证据 |
+| 协议记录 | A2A/MCP-shaped 对象只作为本地 registry/record 形状存在；没有内建 HTTP endpoint 或协议认证 |
 
 如果改动触及 TUI、子 Agent、审批、记忆、artifact、recovery、eval/trace、A2A/MCP 或 orchestration 行为，完成前都应对照架构基线检查。
 
 ### Release Readiness
 
-Shuheng 的发布成熟度元数据由 `src/shuheng/release_readiness.py` 维护，并通过 `/gateway` 的 `release_readiness` 字段暴露。当前默认结论：
+Shuheng 的发布成熟度元数据由 `src/shuheng/release_readiness.py` 维护。当前默认结论：
 
-- 稳定本地面：curses TUI、会话工作区、任务账本、artifact、审批、Secret Vault。
-- 实验面：Web Console、HTTP gateway、A2A/MCP 兼容面、baseline report、runtime/e2e evidence smoke、heuristic eval、scheduler runtime dispatch。
-- 已知缺口：`app.py` 仍是大型 composition module；gateway 无内建认证且默认应仅绑定 loopback；eval 不证明事实/引用正确；A2A/MCP 还需要真实客户端互操作测试。
+- 稳定本地面：curses TUI、会话工作区、任务账本、artifact、审批、Secret Vault、OMP runtime 输出/控制。
+- 实验面：baseline report、runtime/evidence smoke、heuristic eval、scheduler runtime dispatch、本地 protocol-shaped registry records。
+- 已知缺口：`app.py` 仍是大型 composition module；eval 不证明事实/引用正确；A2A/MCP-shaped records 不是可访问协议 endpoint；Web Console、HTTP gateway、mobile、remote endpoint 不是当前产品面。
 
 ## 开发
 
@@ -416,7 +413,7 @@ git diff --check
 ### 开源发布边界
 
 - License: MIT，见 `LICENSE`。
-- 安全报告与边界：见 `SECURITY.md`。Gateway/Web Console 无内建认证，默认只应绑定 loopback。
+- 安全报告与边界：见 `SECURITY.md`。Shuheng 不内置 Web Console、HTTP gateway、mobile 或 remote endpoint；涉及外部发送、部署、删除、Secret、长期记忆的操作仍走本地审批门。
 - 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
 - 发布记录：见 `CHANGELOG.md`。
 - CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build、wheel smoke 和 `git diff --check`。

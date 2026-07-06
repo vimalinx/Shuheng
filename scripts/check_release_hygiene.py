@@ -273,8 +273,12 @@ def check_public_positioning(errors: list[str]) -> None:
     for path, text in (("README.md", readme), ("README.en.md", readme_en)):
         if "experimental local alpha" not in text:
             errors.append(f"{path} must state experimental local alpha")
-        if "A2A/MCP" not in text:
-            errors.append(f"{path} must mention A2A/MCP compatibility boundaries")
+        if (
+            "no built-in Web/HTTP" not in text
+            and "no longer ships a built-in Web Console" not in text
+            and "不再内置 Web Console" not in text
+        ):
+            errors.append(f"{path} must state no built-in Web/HTTP surface")
         if "Secret Vault" not in text:
             errors.append(f"{path} must mention Secret Vault release boundary")
         if "scripts/runtime_smoke.py" not in text:

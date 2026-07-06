@@ -8,10 +8,6 @@ from typing import Optional
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Shuheng governed local-agent TUI")
-    parser.add_argument("--serve-gateway", action="store_true", help="serve the A2A/MCP gateway over HTTP instead of starting curses")
-    parser.add_argument("--gateway-daemon", choices=["start", "stop", "restart", "status"], help="manage the A2A/MCP gateway as a background service")
-    parser.add_argument("--gateway-host", default="127.0.0.1", help="gateway bind host")
-    parser.add_argument("--gateway-port", type=int, default=8765, help="gateway bind port")
     return parser
 
 

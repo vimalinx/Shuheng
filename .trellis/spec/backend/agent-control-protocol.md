@@ -7,7 +7,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: The active product, package, protocol, runtime prompt, tool, docs, and release naming surface is `Shuheng` / `枢衡`.
-- Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, HTTP gateway server/header identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, active non-archive Trellis task guidance, release checks, wheel/sdist smoke checks, and source distribution metadata.
+- Applies to: `pyproject.toml` console scripts, installed console-script wrappers, package import paths, README command examples, integration doctor output, launcher-shim help text, local protocol record identifiers, runtime prompts, control protocol schemas, OMP/tool descriptions, active non-archive Trellis task guidance, release checks, wheel/sdist smoke checks, and source distribution metadata.
 - Non-goal: This does not remove internal compatibility adapters or quarantined historical prompt cleanup. Those internals must not appear in public release docs, default health-check output, bridge metadata path values, or release-readiness wording.
 
 ### 2. Signatures
@@ -46,7 +46,7 @@
 - OMP host-tool proposal enum still exposes a retired control proposal type -> tool API naming regression.
 - Doctor output requires an optional external checkout for ordinary Shuheng checks -> runtime ownership regression.
 - Runtime strings identify the main orchestrator as a retired TUI alias or as an external core runtime -> product identity regression.
-- HTTP gateway `Server` headers or handler `server_version` identify the service with a retired TUI alias -> product identity regression.
+- Local protocol records identify the service with a retired TUI alias -> product identity regression.
 - Active non-archive Trellis task guidance points future work at retired package paths, module commands, control schemas, bridge metadata keys, or external-runtime-as-root language -> development guidance regression.
 - Public release wording files mention retired runtime branding -> release hygiene regression.
 - Bridge metadata exposes a local external runtime checkout path instead of a boolean configured flag -> metadata privacy regression.
@@ -55,11 +55,11 @@
 
 - Good: `shuheng-check` reports `Shuheng root`, `Core runtime: OhMyPi / OMP`, `Launch without legacy patches: shuheng`, and `Status: OK`.
 - Good: `python -m shuheng --help`, `python -m shuheng.integration doctor`, and package smoke checks run without requiring any optional external checkout.
-- Good: the local gateway response header contains `ShuhengGateway/1` and installed `shuheng*` wrappers import from `shuheng.*`.
+- Good: local Shuheng protocol records and installed `shuheng*` wrappers import from `shuheng.*`.
 - Base: explicit compatibility checks can be run with `--root <checkout>` when a local adapter validation task needs it.
 - Bad: Re-adding retired pre-Shuheng commands, module docs, env aliases, or proposal types as active behavior.
 - Bad: Describing an optional external adapter as the Shuheng root/core runtime.
-- Bad: `shuheng-check` or gateway wrappers are exported with Shuheng command names but still import from retired module names.
+- Bad: `shuheng-check` or local protocol wrappers are exported with Shuheng command names but still import from retired module names.
 
 ### 6. Tests Required
 
@@ -73,7 +73,7 @@
 - Tests must assert active non-archive Trellis task guidance uses current Shuheng package paths, module commands, control schemas, and legacy-provider checkout wording.
 - `scripts/wheel_smoke.py` must scan built wheel and sdist text members for retired pre-Shuheng public naming fragments.
 - Tests must assert exit prompts, exit reasons, and terminal shutdown text use Shuheng/枢衡 instead of retired product aliases.
-- `scripts/check_policy_gates.py` must assert `GatewayRequestHandler.server_version` and a live gateway HTTP response header use `ShuhengGateway/1`, not a retired TUI alias.
+- `scripts/check_policy_gates.py` must assert local protocol records use Shuheng naming and do not expose retired TUI aliases.
 - `python3 -m compileall -q src scripts`, `python3 scripts/check_policy_gates.py`, `git diff --check`, and `shuheng-check` must pass.
 
 ### 7. Wrong vs Correct
@@ -361,15 +361,15 @@ and app.py monolith risk.
 - Standalone progress-dot deltas from OMP (`.` on its own line) are process noise and must not render in the transcript.
 - Current OMP thinking process summaries should use a compact excerpt of the thinking text, not the fixed label `OMP 思考`.
 - Legacy process blocks with `<summary>OMP 思考</summary>` should render a compact excerpt from the `<thinking>` body.
-- `assistant_text_from_response_body(...)` belongs to `history_store.py` because it parses stored model response block bodies into assistant text without reading `State`, session metadata, Web Console payloads, or rendering state.
+- `assistant_text_from_response_body(...)` belongs to `history_store.py` because it parses stored model response block bodies into assistant text without reading `State`, session metadata, or rendering state.
 - `assistant_text_from_response_body(...)` must preserve the stored-transcript parser contract: Python literal response lists join text dicts and string blocks, response dicts read `content` text lists or fallback `content`/`text` fields, malformed bodies fall back to cleaned raw text, and non-text literal values fall back to cleaned strings.
 - `recent_history_items(...)` belongs to `history_store.py` because it is a pure history row selector. It may depend on `path_utils.normalized_path(...)` but must not import the app facade to learn storage roots or UI state.
 - `compact_ui_preview_messages_from_pairs(...)` belongs to `history_store.py` because it is pure restore-preview message shaping over already-parsed transcript pairs. It accepts prompt-text and assistant-preview callables from the app facade and must not parse/write transcript files, inspect `State`, or own process-summary title policy.
 - `history_round_count(...)`, `extract_recent_ui_messages_from_pairs(...)`, and `history_messages_from_pairs(...)` belong to `history_store.py` because they shape already-parsed transcript pairs into recent restore message records. They accept app-provided prompt/tool/response-format callables and must not parse transcript files, switch providers, reset runtime backends, inspect UI state, write metadata, or own process-summary title policy.
 - `latest_user_message_text(...)` belongs to `history_store.py` because it is a pure transcript helper. The higher-level `persist_transcript_bridge_turn(...)` stays in `app.py` because it owns provider/runtime checks, temporary-session policy, and normal-session path validation.
 - `clamp_session_title_chars(...)`, `short_session_title(...)`, `compact_description(...)`, `text_has_process_markers(...)`, `session_summary_titles_from_text(...)`, `session_response_preview_text(...)`, `session_preview_from_pairs(...)`, `is_process_only_session_title(...)`, `history_cache_has_process_only_preview(...)`, `is_internal_task_session_title(...)`, `history_cache_has_internal_task_preview(...)`, `message_text_for_metadata_context(...)`, `session_description_from_pairs(...)`, and `suggested_session_title(...)` belong to `history_titles.py` because they are process-summary-safe title/preview/description policy over already-parsed text, response bodies, message rows, or transcript pairs. App wrappers inject `_user_text(...)`, `latest_visible_reply_text(...)`, and current display limits where those dependencies remain app/rendering-owned.
-- `history_store.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
-- `history_titles.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `history_store.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `history_titles.py` must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, dashboard, runtime dispatch, command handlers, or renderer functions.
 
 ### 4. Validation & Error Matrix
 
@@ -610,7 +610,7 @@ def recent_history_items(history_entries, used_paths, limit):
 - Home-page redraw must not reread and reformat all shared ledgers on every cursor, mouse, or input repaint. It should cache rendered home lines behind a short TTL and file-signature/state key, and shared latest-record helpers should reuse parsed JSONL rows while the backing file signature is unchanged.
 - Plain text input on the main home starts the main Orchestrator task and switches to the main task/chat interface (`selected_session == "main"`). Plain text input on a persistent-agent home restores that agent's last entered chat session, auto-switches to that agent's chat interface, and sends the input as direct subagent chat, matching the main-home interaction model. Main home drill-downs stay command-driven through `/tasks`, `/schedules`, `/approvals`, and `/artifacts`.
 - Entering a persistent subagent chat through `/chat`, a sidebar subagent-session row, or home plain text input must persist the selected subagent chat session id/ref to subagent metadata so a later restart restores the last entered subagent conversation from canonical history instead of the newest empty session. Subagent metadata must not own the transcript.
-- `subagent_store.py` may own pure subagent identity/id, home-key, and sidebar-key shaping, but it must not own dashboard rendering, `State`, `SubAgentRuntime`, history transcript persistence, Secret Vault payload storage, runtime providers, Web Console payloads, or curses rendering.
+- `subagent_store.py` may own pure subagent identity/id, home-key, and sidebar-key shaping, but it must not own dashboard rendering, `State`, `SubAgentRuntime`, history transcript persistence, Secret Vault payload storage, runtime providers, or curses rendering.
 
 ### 4. Validation & Error Matrix
 
@@ -696,7 +696,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 - Trigger: Dashboard section constants, bounded dashboard text cleanup, dashboard section normalization, dashboard spec payload shaping, dashboard cache-signature helpers, or pure status-card string layout helpers are moved out of `src/shuheng/app.py`.
 - Applies to: `src/shuheng/dashboard.py`, compatibility aliases in `src/shuheng/app.py`, `dashboard.update` normalization, main/persistent-agent home rendering inputs, policy gates, and dashboard helper unit tests.
-- Non-goal: This does not move `State` or `SubAgentRuntime` projections, curses `RenderLine` home rendering, status-card drawing, session/history restore, ledger reads, scheduler reads, approval/action dispatch, or Web Console payloads.
+- Non-goal: This does not move `State` or `SubAgentRuntime` projections, curses `RenderLine` home rendering, status-card drawing, session/history restore, ledger reads, scheduler reads, or approval/action dispatch.
 
 ### 2. Signatures
 
@@ -719,7 +719,7 @@ def recent_history_items(history_entries, used_paths, limit):
 
 ### 3. Contracts
 
-- `dashboard.py` must not import `shuheng.app`, `.app`, `app`, `curses`, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, runtime dispatch, or draw/home rendering functions.
+- `dashboard.py` must not import `shuheng.app`, `.app`, `app`, `curses`, `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, runtime dispatch, or draw/home rendering functions.
 - `app.py` remains the compatibility facade and exposes the moved names as direct aliases or behavior-identical wrappers.
 - Supported section types remain `function`, `status_narrative`, `todos`, `sessions`, `schedules`, `scheduled_reports`, `tasks`, `artifacts`, `approvals`, `memory`, and `markdown`.
 - `normalize_dashboard_sections(...)` accepts string or dict section entries, drops unsupported/non-dict entries, bounds titles to 80 characters, bounds markdown/body to 3000 characters, and keeps at most 12 sections.
@@ -753,7 +753,7 @@ def recent_history_items(history_entries, used_paths, limit):
 ### 6. Tests Required
 
 - Unit tests must assert section normalization, payload normalization, cache signature behavior, status-card line/layout helpers, and `app.py` wrapper parity.
-- `scripts/check_policy_gates.py` must assert `dashboard.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway, runtime-dispatch, or home-rendering dependencies.
+- `scripts/check_policy_gates.py` must assert `dashboard.py` has no reverse import into `app.py` and no curses, TUI state, rendering, runtime-dispatch, or home-rendering dependencies.
 - `python3 -m py_compile src/shuheng/app.py src/shuheng/dashboard.py scripts/check_policy_gates.py tests/test_dashboard.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_dashboard.py -p no:cacheprovider` must pass.
 
@@ -779,8 +779,8 @@ def normalize_dashboard_sections(raw_sections):
 ### 1. Scope / Trigger
 
 - Trigger: Pure terminal-cell or compact text helpers are moved out of `src/shuheng/app.py`.
-- Applies to: `src/shuheng/text_utils.py`, compatibility aliases in `src/shuheng/app.py`, title/category cleaning, sidebar/history title consumers, dashboard helpers, Web Console helpers, policy gates, and text utility unit tests.
-- Non-goal: This does not move history metadata, transcript parsing, Web Console history payloads, dashboard/home rendering, command handlers, runtime providers, ledgers, Secret Vault, or storage roots.
+- Applies to: `src/shuheng/text_utils.py`, compatibility aliases in `src/shuheng/app.py`, title/category cleaning, sidebar/history title consumers, dashboard helpers, policy gates, and text utility unit tests.
+- Non-goal: This does not move history metadata, transcript parsing, dashboard/home rendering, command handlers, runtime providers, ledgers, Secret Vault, or storage roots.
 
 ### 2. Signatures
 
@@ -799,11 +799,11 @@ def normalize_dashboard_sections(raw_sections):
 
 ### 3. Contracts
 
-- `text_utils.py` must remain a pure leaf module and must not import `shuheng.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, Web Console, dashboard, or command handlers.
+- `text_utils.py` must remain a pure leaf module and must not import `shuheng.app`, `.app`, `app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, providers, history stores, ledgers, dashboard, or command handlers.
 - `compact_title(...)` strips ANSI/control display noise through `clean_text`, removes fenced code, HTML-like tags, lightweight markdown markers, leading user/request boilerplate, and leading completion/summary boilerplate before terminal-cell truncation.
 - `compact_category(...)` uses `compact_title(..., 18)` and returns an empty category for sentinel values `-`, `clear`, `none`, `null`, and `未分类`.
-- `rel_age(...)` formats elapsed time for sidebar, Web Console, artifact, subagent, and memory display without depending on TUI state.
-- `human_tokens(...)` formats token counts for Web Console and status rows without depending on token registries.
+- `rel_age(...)` formats elapsed time for sidebar, artifact, subagent, and memory display without depending on TUI state.
+- `human_tokens(...)` formats token counts for status rows without depending on token registries.
 - `app.py` remains the compatibility facade and exposes moved helpers as direct aliases or behavior-identical wrappers.
 
 ### 4. Validation & Error Matrix
@@ -816,7 +816,7 @@ def normalize_dashboard_sections(raw_sections):
 ### 5. Good/Base/Bad Cases
 
 - Good: `session_title_for_path(...)` continues calling `app.compact_title(...)`, while the implementation lives in `shuheng.text_utils`.
-- Good: `dashboard.py` and `web_console.py` import lower-level text helpers without depending on `app.py`.
+- Good: `dashboard.py` imports lower-level text helpers without depending on `app.py`.
 - Base: `app.compact_description(...)` remains the compatibility wrapper; the process-summary-safe implementation lives in `history_titles.py` alongside the process marker regexes it needs.
 - Bad: `text_utils.py` imports `TUI_CONTROL_RE` from `app.py`.
 - Bad: Moving sidebar row rendering into `text_utils.py` because it would couple text helpers to `State` and curses rendering.
@@ -851,7 +851,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 - Trigger: Pure terminal input cursor/display conversion, prompt-layout, pasted-text cleanup, input-history browse target calculation, text edit transition calculation, mouse-mask classification, and vertical cursor target helpers are moved out of `src/shuheng/app.py`.
 - Applies to: `src/shuheng/input_controller.py`, compatibility aliases in `src/shuheng/app.py`, text input display conversion, wrapped input segment geometry, prompt/input line layout, vertical cursor movement callers, input-history browsing callers, input text edit callers, policy gates, and input-controller unit tests.
-- Non-goal: This does not move the app-owned `move_input_cursor_vertical(...)` state mutation wrapper, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, Web Console payloads, dashboard helpers, or runtime dispatch.
+- Non-goal: This does not move the app-owned `move_input_cursor_vertical(...)` state mutation wrapper, `draw_main(...)`, key handlers, mouse handlers, command completion, rendering, mutable `State`, storage roots, dashboard helpers, or runtime dispatch.
 
 ### 2. Signatures
 
@@ -886,7 +886,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 
 ### 3. Contracts
 
-- `input_controller.py` must not import `shuheng.app`, `.app`, `app`, curses, mutable TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers, Web Console, dashboard, runtime dispatch, command handlers, key/mouse handlers, or draw functions.
+- `input_controller.py` must not import `shuheng.app`, `.app`, `app`, curses, mutable TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, dashboard, runtime dispatch, command handlers, key/mouse handlers, or draw functions.
 - `input_controller.py` may import lower-level terminal-cell helpers from `text_utils.py`.
 - Raw newlines display as the two-character sequence `\n`.
 - Raw cursor positions clamp into the valid source text range.
@@ -939,7 +939,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Base: Future slices may move more input handling only after command and rendering boundaries are stable.
 - Bad: `input_controller.py` imports `State` so it can mutate `state.input_cursor`.
 - Bad: `input_controller.py` imports curses so it can read `BUTTON1_CLICKED` directly.
-- Bad: `input_controller.py` calls command completion, Web Console, dashboard, or curses draw helpers.
+- Bad: `input_controller.py` calls command completion, dashboard, or curses draw helpers.
 
 ### 6. Tests Required
 
@@ -947,7 +947,7 @@ def compact_title(text: str, max_width: int = 24) -> str:
 - Unit tests must assert paste normalization preserves collapsed newline and tab-replacement behavior plus app alias parity.
 - Unit tests must assert text insertion, backspace-style deletion, delete-style deletion, horizontal cursor movement, edit/no-edit flags, clamping behavior, app alias parity, and `insert_input_text(...)` wrapper state mutation/reset behavior.
 - Unit tests must assert direct mouse mask helper behavior over fake constants and `app.py` wrapper parity over curses constants.
-- `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, Web Console, dashboard, or runtime-dispatch dependencies.
+- `scripts/check_policy_gates.py` must assert `input_controller.py` has no reverse dependency into `app.py` and no curses, mutable TUI state, rendering, command-handler, dashboard, or runtime-dispatch dependencies.
 - `python3 -m py_compile src/shuheng/app.py src/shuheng/input_controller.py scripts/check_policy_gates.py tests/test_input_controller.py` must pass.
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_input_controller.py -p no:cacheprovider` must pass.
 
@@ -985,7 +985,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
   `subagent_completion_rows(...)`, `agent_command_matches(...)`,
   `category_command_matches(...)`, `approval_command_matches(...)`, mutable
   `State`, role-template lookup, pending approvals, history categories, input
-  event handling, Web Console, dashboard, rendering, runtime dispatch, storage
+  event handling, dashboard, rendering, runtime dispatch, storage
   roots, Secret Vault behavior, ledgers, or artifacts.
 
 ### 2. Signatures
@@ -1010,7 +1010,7 @@ def raw_cursor_to_display(text: str, cursor: int) -> int:
 
 - `commands.py` must not import `shuheng.app`, `.app`, `app`, curses, mutable
   TUI `State`, `SubAgentRuntime`, `RenderLine`, `PanelItem`, gateway handlers,
-  Web Console, dashboard, runtime dispatch, input controller, Secret Vault,
+  dashboard, runtime dispatch, input controller, Secret Vault,
   governance stores, history stores, key/mouse handlers, or draw functions.
 - `commands.py` owns deterministic command-completion metadata and matching
   over explicit text values.
@@ -1193,9 +1193,9 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 
 ### 1. Scope / Trigger
 
-- Trigger: `app.py` decomposition needs a shared lower-level home for filesystem path normalization and containment checks used by history, Secret Vault import validation, workspace checks, Web Console session refs, and policy gates.
+- Trigger: `app.py` decomposition needs a shared lower-level home for filesystem path normalization and containment checks used by history, Secret Vault import validation, workspace checks, and policy gates.
 - Applies to: `src/shuheng/path_utils.py`, compatibility aliases in `src/shuheng/app.py`, normal session-log path checks, Shuheng-owned storage-root assertions, and path-safety unit tests.
-- Non-goal: This does not move Shuheng storage-root constants, frontend history storage configuration, legacy bootstrap, history metadata, Secret Vault storage behavior, Web Console payloads, commands, rendering, or input handling.
+- Non-goal: This does not move Shuheng storage-root constants, frontend history storage configuration, legacy bootstrap, history metadata, Secret Vault storage behavior, commands, rendering, or input handling.
 
 ### 2. Signatures
 
@@ -1208,7 +1208,7 @@ def archived_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
 - `normalized_path(...)` expands `~` and returns an absolute path.
 - `path_is_within(...)` resolves real paths and returns `False` instead of raising on invalid input.
 - Normal session logs must be under `MODEL_RESPONSES_DIR`, outside `SESSION_TRASH_DIR`, and named `model_responses*.txt`.
-- `path_utils.py` must remain a pure leaf module and must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, history store, Secret Vault, Web Console, dashboard, runtime dispatch, command handlers, or renderer functions.
+- `path_utils.py` must remain a pure leaf module and must not import `shuheng.app`, curses, `State`, `SubAgentRuntime`, `RenderLine`, history store, Secret Vault, dashboard, runtime dispatch, command handlers, or renderer functions.
 - Storage-root ownership remains app-configured and test-retargetable; extracted helpers accept roots as parameters rather than reading app globals.
 
 ### 4. Validation & Error Matrix
@@ -1405,7 +1405,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 - Trigger: `app.py` decomposition moves subagent-result task-ledger row interpretation into `governance.py`.
 - Applies to: subagent-result artifact-ref selection, generated artifact body prelude stripping, subagent result display-name derivation, first task timestamp lookup, and completed subagent-result row detection.
-- Non-goal: This does not move durable UI system-message backfill, session metadata writes, history restore, scheduled report row construction, Web Console payloads, rendering, command handlers, runtime dispatch, artifact path resolution, or storage-root behavior.
+- Non-goal: This does not move durable UI system-message backfill, session metadata writes, history restore, scheduled report row construction, rendering, command handlers, runtime dispatch, artifact path resolution, or storage-root behavior.
 
 ### 2. Signatures
 
@@ -1418,7 +1418,7 @@ progress_items = [format_progress(row) for row in read_jsonl("progress.jsonl")]
 
 ### 3. Contracts
 
-- `governance.py` may interpret already-loaded task ledger rows and artifact text, but must not import `shuheng.app`, curses, mutable TUI `State`, render types, Web Console, dashboard, command handlers, or draw functions.
+- `governance.py` may interpret already-loaded task ledger rows and artifact text, but must not import `shuheng.app`, curses, mutable TUI `State`, render types, dashboard, command handlers, or draw functions.
 - `subagent_result_artifact_ref(...)` returns the first non-empty artifact ref containing `/subagent-results/` from a list; non-list inputs return `""`.
 - `subagent_result_body_from_text(...)` strips the generated leading Markdown heading and optional `Task:` prelude from an already-loaded artifact body, returning the remaining body or the original stripped text.
 - `subagent_name_from_task_row(...)` strips the existing `子 agent 执行:` / `子 agent 执行：` title prefixes, falls back to title, then uses an injected `agent_name_lookup(agent_id)` before returning the assigned agent id.
@@ -1473,7 +1473,7 @@ governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
 
 - Trigger: `app.py` decomposition moves checkpoint/recovery read-model helpers into `governance.py`.
 - Applies to: checkpoint-history lookup, recovery-history lookup, recovery-plan-history lookup, checkpoint id lookup, latest-checkpoint selection, checkpoint snapshot reads, and replay-step shaping.
-- Non-goal: This does not move checkpoint writes, recovery-plan writes, recovery records, recovery action execution, policy approval queuing, subagent runtime mutation, panel rendering, command handlers, Web Console payloads, or storage-root behavior.
+- Non-goal: This does not move checkpoint writes, recovery-plan writes, recovery records, recovery action execution, policy approval queuing, subagent runtime mutation, panel rendering, command handlers, or storage-root behavior.
 
 ### 2. Signatures
 
@@ -1488,7 +1488,7 @@ governance.subagent_name_from_task_row(row, agent_name_lookup=lookup_name)
 
 ### 3. Contracts
 
-- `governance.py` may read already-selected JSONL store paths and checkpoint snapshot files, but must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, or draw functions.
+- `governance.py` may read already-selected JSONL store paths and checkpoint snapshot files, but must not import `shuheng.app`, curses, mutable TUI state, render types, dashboard, command handlers, or draw functions.
 - Checkpoint/recovery history helpers filter rows by exact `task_id` and preserve row order from the source ledger.
 - `checkpoint_index_by_id(...)` returns the latest matching row by reverse ledger scan, or `{}` when no row exists.
 - `latest_checkpoint_for_task(...)` uses existing row timestamp ordering and returns `{}` when a task has no checkpoint.
@@ -1542,7 +1542,7 @@ def latest_checkpoint_for_task(task_id):
 
 - Trigger: `app.py` decomposition moves pure task-ledger display row interpretation into `governance.py`.
 - Applies to: task status markers, subagent-task row detection, and task display title fallback over already-loaded rows.
-- Non-goal: This does not move owner display-name lookup, subagent meta file IO, mutable TUI state reads, rightbar rows, panel rendering, Web Console payloads, dashboard home lines, command handlers, or storage-root behavior.
+- Non-goal: This does not move owner display-name lookup, subagent meta file IO, mutable TUI state reads, rightbar rows, panel rendering, dashboard home lines, command handlers, or storage-root behavior.
 
 ### 2. Signatures
 
@@ -1554,7 +1554,7 @@ def latest_checkpoint_for_task(task_id):
 ### 3. Contracts
 
 - `governance.py` may interpret task ledger row values, status strings, approval status, and an already-resolved owner display name.
-- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or subagent meta file IO.
+- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, dashboard, command handlers, draw functions, or subagent meta file IO.
 - `task_status_marker(...)` preserves the existing marker mapping: completed -> `✓`, failed/cancelled/rejected/aborted -> `✕`, pending approval/input -> `?`, running/working/accepted/pending -> `●`, and default -> `○`.
 - `row_looks_like_subagent_task(...)` preserves the existing predicate: explicit `subagent_task` / `subagent` kind or owner id starting with `agent-` / `tmp-`.
 - `task_display_title(...)` preserves existing title precedence: `title`, `display_title`, `task_title`, subagent owner-name fallback, objective/summary/error/task id, then `任务`.
@@ -1604,7 +1604,7 @@ def task_display_title(row, state=None):
 
 - Trigger: `app.py` decomposition moves pure active-plan selection over already-loaded task rows into `governance.py`.
 - Applies to: selecting a plan id from `(task_id, row)` pairs using row kind, preferred id, terminal status, active-only requirements, and timestamp ordering.
-- Non-goal: This does not move rightbar selected-plan state, active plan hydration, plan-step resolution, task-plan creation, task ledger writes, command handlers, panel rendering, Web Console payloads, or storage-root behavior.
+- Non-goal: This does not move rightbar selected-plan state, active plan hydration, plan-step resolution, task-plan creation, task ledger writes, command handlers, panel rendering, or storage-root behavior.
 
 ### 2. Signatures
 
@@ -1614,7 +1614,7 @@ def task_display_title(row, state=None):
 ### 3. Contracts
 
 - `governance.py` may interpret already-loaded task ledger row values, row kind, status strings, and timestamps.
-- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, Web Console, dashboard, command handlers, draw functions, or ledger write helpers for plan selection.
+- `governance.py` must not import `shuheng.app`, curses, mutable TUI state, render types, dashboard, command handlers, draw functions, or ledger write helpers for plan selection.
 - Only rows with `kind == "plan"` are plan candidates.
 - A non-empty preferred plan id wins when it exists among plan candidates, even before active filtering.
 - Active plans are plan rows whose status is not terminal according to the existing terminal task status predicate.
@@ -1667,7 +1667,7 @@ def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False)
 
 - Trigger: `app.py` decomposition moves Secret Vault value shaping into `secret_vault.py`.
 - Applies to: Secret session title fallback, Secret session-state payload titles, Secret import argument parsing, Secret proxy-chain parsing, proxy endpoint string normalization, imported/native Secret entry matching, imported/native link checks, imported native-match lookup, and imported-session raw-log message shaping.
-- Non-goal: This does not move Secret unlock/setup state, password-entry UI, Secret prompt rendering, import validation/execution, ordinary-source deletion/archive, encrypted file IO, network health checks, proxy environment mutation, native/imported restore orchestration, backend reset, history parsing, Web Console payloads, commands, rendering, or transcript storage.
+- Non-goal: This does not move Secret unlock/setup state, password-entry UI, Secret prompt rendering, import validation/execution, ordinary-source deletion/archive, encrypted file IO, network health checks, proxy environment mutation, native/imported restore orchestration, backend reset, history parsing, commands, rendering, or transcript storage.
 
 ### 2. Signatures
 
@@ -1685,7 +1685,7 @@ def selected_plan_id_from_rows(rows, preferred_plan_id="", require_active=False)
 
 ### 3. Contracts
 
-- Secret value helpers may depend on `Message`, text helpers, and existing history-title fallback policy, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime providers, Web Console, dashboard, command handlers, or rendering owners.
+- Secret value helpers may depend on `Message`, text helpers, and existing history-title fallback policy, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime providers, dashboard, command handlers, or rendering owners.
 - `secret_session_title_for_messages(...)` strips a `Secret: ` prefix, rejects placeholder titles such as `main` / `Secret Vault` / running or idle labels, and falls back to a message-derived title or `Secret 会话`.
 - `secret_session_state_payload(...)` must normalize the persisted payload title through `secret_session_title_for_messages(...)`.
 - `parse_secret_import_args(...)` maps delete/archive aliases while preserving unknown text as the target.
@@ -1755,7 +1755,7 @@ normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endp
 ### 1. Scope / Trigger
 
 - Trigger: A user sends direct chat text to a selected persistent or temporary subagent through TUI plain text, persistent-subagent home input, `/chat`, or Web-console `agent.chat`.
-- Applies to: `start_subagent_chat(...)`, `queue_subagent_chat_input(...)`, `consume_stream_queue_to_ui(...)`, `process_ui_queue(...)`, history-backed subagent chat persistence, subagent event logs, and Web-console runtime pump behavior.
+- Applies to: `start_subagent_chat(...)`, `queue_subagent_chat_input(...)`, `consume_stream_queue_to_ui(...)`, `process_ui_queue(...)`, history-backed subagent chat persistence, and subagent event logs.
 - Non-goal: This does not convert direct chat into a task-ledger `subagent_task`, bypass approval policy, or add free-form peer-to-peer agent chat outside the governed Orchestrator-owned runtime.
 
 ### 2. Signatures
@@ -1764,7 +1764,6 @@ normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endp
 - Dispatcher: `start_subagent_chat(state, sub, prompt, source="subagent_chat") -> str`.
 - Queue path: `queue_subagent_chat_input(state, sub, text, interrupt_requested=False) -> str`.
 - Stream path: `consume_subagent_chat_queue(...)` emits `("sub_chat_stream", subagent_id, task_id, text, done)`.
-- Web action: `POST /gui/action` with `action:"agent.chat"` resolves a sanitized agent `ui_ref` and calls the same dispatcher.
 - Subagent store helpers: `subagent_store.clean_subagent_id(...)`, `subagent_store.normalize_subagent_identity_text(...)`, `subagent_store.compact_identity_text(...)`, `subagent_store.normalize_subagent_skill_refs(...)`, `subagent_store.parse_subagent_new_body(...)`, `subagent_store.unique_*_subagent_id(...)`, `subagent_store.subagent_home(...)`, `subagent_store.subagent_*_path(...)`, `subagent_store.subagent_session_sidebar_key(...)`, `subagent_store.subagent_session_from_sidebar_key(...)`, `subagent_store.subagent_chat_history_meta_matches(...)`, and pure subagent chat title/preview/description/count helpers, with `app.py` wrappers injecting app-owned roots such as `SUBAGENTS_DIR`, supported role keys, role normalization, explicit existing-id sets, or runtime objects such as `SubAgentRuntime`.
 
 ### 3. Contracts
@@ -1849,263 +1848,87 @@ runtime prompt is not sent
 state.last_error carries the same short reason
 ```
 
-## Scenario: Local Web Console Gateway
+## Scenario: No Active Web Or HTTP Surfaces
 
 ### 1. Scope / Trigger
 
-- Trigger: The gateway exposes a local Web GUI that visualizes Shuheng governance data as a restrained collaboration workspace and sends bounded user actions back through the governed Python harness.
-- Applies to: `GatewayRequestHandler`, `/gui`, `/dashboard`, `/console`, `/gui/snapshot`, `/gui/action`, dashboard/home derived data, scheduled reports, task ledger summaries, approval summaries, artifact summaries, model summaries, persistent-subagent status cards, and Web-console action dispatch.
-- Non-goal: This does not replace the TUI runtime, does not create a new scheduler, task ledger, approval inbox, artifact store, memory writer, model store, or browser-owned mutation system.
+- Trigger: The active Shuheng product surface is local curses TUI plus OMP runtime output/control.
+- Applies to: CLI flags, TUI command table, Web Console modules, HTTP handler/server code, runtime smoke, policy gates, release-readiness metadata, README wording, and local protocol registry records.
+- Non-goal: This does not remove local task/progress ledgers, Agent Mail, approvals, artifacts, traces, scheduler, workflows, plugins, runtime provider metadata, or local protocol-shaped records used for inspection.
 
 ### 2. Signatures
 
-- HTTP routes:
-  - `GET /gui`, `GET /dashboard`, and `GET /console` return static HTML/CSS/JS for the local console.
-  - `GET /gui/snapshot` returns JSON with `schema_version:"shuheng.web_console.snapshot.v1"`.
-  - `POST /gui/action` accepts JSON with `schema_version:"shuheng.web_console.action_request.v1"` and returns `schema_version:"shuheng.web_console.action_response.v1"`.
-- External GUI loader:
+- Active user surfaces:
+  - `shuheng` / `python -m shuheng.app` local curses TUI.
+  - `/runtime-output` for OMP-native runtime output/control visibility.
+  - Local commands such as `/tasks`, `/bus`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/baseline`, `/runtimes`, `/schedules`, `/plugins`, and `/workflows`.
+- Removed active surfaces:
+  - CLI flags `--serve-gateway` and `--gateway-daemon`.
+  - TUI command `/gateway`.
+  - `src/shuheng/web_console.py`.
   - `src/shuheng/web_console_static.py`.
-  - `web_console_html()` in `app.py` delegates to `shuheng.web_console_static.web_console_html`.
-  - `SHUHENG_WEB_GUI_INDEX` points directly at a standalone `index.html`.
-  - `SHUHENG_WEB_GUI_DIR` points at a standalone GUI project directory and resolves `public/index.html` or `index.html`.
-  - Default local project path: `<home-or-workspace>/Projects/Shuheng-Web-GUI/public/index.html`, with the old sibling `<repo-parent>/Shuheng-Web-GUI/public/index.html` kept only as a compatibility fallback.
-- Snapshot top-level fields:
-  - `updated_at`
-  - `mode:"read_only"`
-  - `source`
-  - `overview`
-  - `agents`
-  - `scheduled_reports`
-  - `tasks`
-  - `schedules`
-  - `approvals`
-  - `artifacts`
-  - `model`
-  - `actions`
-  - `sidebar`
-  - `totals`
-  - `navigation`
-- Action request fields:
-  - `schema_version`
-  - `action`
-  - `ui_ref` or `target`
-  - `payload`
-- Action response fields:
-  - `schema_version`
-  - `ok`
-  - `action`
-  - `message`
-  - optional `snapshot`
+  - `GatewayRequestHandler`, `make_gateway_http_server(...)`, `serve_gateway(...)`, gateway daemon start/stop/restart helpers, Web Console snapshot/action/html helpers, SSE helpers, and push-delivery helpers.
+- Local protocol record URIs:
+  - `agent-mail://inbox`.
+  - `agent-directory://local`.
+  - `agent-card://local/*`.
+  - `resource://agent-mail/*`.
+  - `local-task-query://{task_id}`.
+  - `local-resource-read://{uri}`.
 
 ### 3. Contracts
 
-- `/gui` serves the standalone local Web GUI HTML through the external loader. The GUI source of truth is outside `src/shuheng/app.py`, normally in `/home/vimalinx/Projects/Shuheng-Web-GUI`.
-- The standalone GUI page stays self-contained HTML/CSS/JS and must not require a frontend build step for the local gateway path.
-- `app.py` must not reintroduce a large embedded Web Console HTML/JS/CSS string. Backend code owns snapshot/action/state functions; the standalone GUI owns browser source.
-- If no standalone GUI file is found, `/gui` returns a clear fallback page explaining `SHUHENG_WEB_GUI_INDEX`, `SHUHENG_WEB_GUI_DIR`, and checked paths; it must not silently write files or mutate gateway state.
-- The standalone GUI dev server may proxy `/gui/*` to an existing Shuheng gateway, but browser mutations still go through the same `POST /gui/action` backend route.
-- `/gui` default chrome uses a restrained workspace layout: persistent left channel/session/model navigation, a central channel header plus action composer plus open message/list rows, and a right context rail for agents/tasks. It must not default to a card grid, dramatic command-center shell, or raw admin dashboard visual model.
-- `/gui` Slack-like navigation is functional, not decorative. Channel entries switch the central view, history/session rows open a sanitized session preview through `session.open`, and agent rows in the left direct-agent list, central agent list, and right context rail select that agent and prefill agent-scoped composer actions.
-- `/gui` browser navigation state is keyed by both the active center view and an explicit channel key. The workspace brand mark may navigate home, but only real rail channel buttons participate in active highlighting; main home, `# main`, reports, governance, agents, session preview, and selected-agent states must not double-highlight unrelated channels.
-- Leaving an agent-selected surface for main home, `# main`, reports, governance, or session preview must clear the active subagent selection and reset stale `agent.*` composer modes back to the main prompt. Changing the composer target select alone must not navigate or change the active agent.
-- `/gui` must collect mutable user input through native in-page controls and forms, not browser prompt/alert dialogs. Row buttons may prefill the governed action composer, while one-click actions still post directly to `/gui/action`.
-- `/gui/snapshot` builds a read-only `State` with a non-runtime placeholder agent, loads persisted subagent metadata, and derives display data from the existing shared task ledger, schedule registry, schedule-run records, approval registry, artifact index, and model config.
-- `/gui` and `/gui/snapshot` must not call `ensure_gateway_registry(...)`, write `gateway.json`, append JSONL rows, queue approvals, dispatch tasks, mutate schedules, switch models, or write memory.
-- `/gui/action` is the only Web-console mutation route. It must validate the request schema, allowlist known actions, resolve sanitized `ui_ref` handles server-side, and call existing governed functions such as `decide_approval(...)`, `apply_schedule_control(...)`, `scheduler_tick(...)`, `recover_task_action(...)`, `start_main_agent_task(...)`, `start_subagent_task(...)`, `start_subagent_chat(...)`, `set_subagent_default_model(...)`, `set_subagent_skill_refs(...)`, and `save_default_model(...)`.
-- `/gui/action` must not accept raw task ids, approval ids, artifact URIs, filesystem session paths, or internal agent ids as the normal browser contract. Snapshot rows may carry opaque `ui_ref` values that map back to current server-side ledgers.
-- Schedule create/update actions from the browser may submit a sanitized `target_agent_ref`; `/gui/action` resolves it server-side into the existing `agent_task.execution.routing.selected_agent` field before calling the shared scheduler registry.
-- Browser-triggered runtime work must still drain the normal runtime queues so task completion, artifacts, token usage, memory candidates, TUI controls, traces, and ledger updates are persisted through the same paths used by the TUI.
-- The Web console translates raw governance records into user-readable names, summaries, counts, and report bodies. Default visible HTML/JS-rendered content must not dump raw artifact URIs, approval ids, task ids, or internal agent ids as primary text.
-- `session.open` resolves only a sanitized session `ui_ref` against current server-side history rows under `MODEL_RESPONSES_DIR`, marks the session opened when present, and returns a bounded preview payload with title, category, description, rounds, age, and cleaned recent messages. The response must not expose filesystem paths, `model_responses_*.txt` basenames, raw task ids, approval ids, artifact URIs, or internal agent ids.
-- Scheduled-report rows must use the same cleaned scheduled-report body path as TUI home pages: completed child subagent replies from subagent result artifacts first, then task summary fallback, with OMP/LLM process markers and approval-only audit rows excluded.
-- Artifact rows in the default Web console show type, source title, and size-style metadata only. Raw artifact refs remain available through existing gateway/MCP/resource drill-down routes, not the default GUI.
-- Approval rows in the default Web console show approval type, target name, and human-readable summary only. Actual approval decisions must go through `/gui/action` and reuse `decide_approval(...)`.
-- `sidebar` is display-only shell data for the Web console's TUI-like layout. It may include current-page entries, sanitized history titles/groups, current/default model summary, and aggregated token usage, but it must not expose normal-session paths, raw task ids, approval ids, or artifact URIs.
+- Shuheng must not advertise or start a built-in Web Console, HTTP gateway, mobile endpoint, remote endpoint, SSE stream, push subscription route, or daemon lifecycle.
+- A2A/MCP-shaped objects may remain only as local record shapes for registry, baseline, and adapter inspection. They must not claim to be reachable protocol endpoints or certified implementations.
+- Agent discovery records must describe role/subagent purpose and local inbox delivery only. They must not expose broad project context, active spec paths, memory paths, permission matrices, Secret Vault plaintext, or workflow internals.
+- Local Agent Mail intake helpers may write Agent Mail, task ledger, and trace rows. They must not dispatch runtimes, approve policy actions, write long-term memory, execute workflows, call providers, send network requests, or auto-deliver push notifications.
+- Release readiness must say the stable surface is local TUI + OMP runtime output/control, and that Web/HTTP/mobile/remote endpoints are not active product surfaces.
+- Runtime smoke must exercise local ledgers, runtime evidence, and local protocol registry records without opening a socket or HTTP client.
 
 ### 4. Validation & Error Matrix
 
-- `GET /gui` -> HTML with console shell and client fetch for `/gui/snapshot`.
-- `GET /gui` with a valid `SHUHENG_WEB_GUI_INDEX` -> returns that file exactly.
-- `GET /gui` with only `SHUHENG_WEB_GUI_DIR` -> tries `<dir>/public/index.html`, then `<dir>/index.html`.
-- `GET /gui` with no available standalone GUI file -> returns the fallback page and does not call `ensure_gateway_registry(...)` or mutate ledgers.
-- Standalone GUI dev server `GET /` -> returns the same static console shell, while `GET /gui/snapshot` and `POST /gui/action` are proxied to the configured `SHUHENG_API_BASE`.
-- `POST /gui/action` with a missing or wrong schema -> rejected without mutating ledgers.
-- `POST /gui/action` with an unknown `ui_ref` -> rejected without mutating ledgers.
-- `POST /gui/action` with `action:"session.open"` and a valid session `ui_ref` -> returns a sanitized preview payload and a refreshed snapshot; unknown or non-session refs are rejected without mutating ledgers.
-- `POST /gui/action` approval approve/reject -> appends through the existing approval decision path and returns a sanitized message plus a fresh snapshot.
-- `POST /gui/action` schedule enable/disable/delete/run -> uses the existing schedule registry or scheduler tick path and returns a sanitized message plus a fresh snapshot.
-- `POST /gui/action` agent task/chat -> starts real governed runtime work or queues/blocks through existing policy gates, then a Web-console runtime pump drains the same UI queue path used by the TUI.
-- `GET /dashboard` or `GET /console` -> same HTML alias as `/gui`.
-- `GET /gui/snapshot` with empty ledgers -> valid snapshot with empty arrays and zero counts.
-- `GET /gui/snapshot` -> `sidebar` contains `current_sessions`, `history`, `model`, and `tokens` objects derived from read-only state.
-- Persistent subagents exist -> snapshot `agents` contains readable name, role, status, default model or inherited-model text, scoped skill refs, status narrative, and compact metrics.
-- Scheduled report exists with process/thinking text in the artifact -> snapshot report body excludes process/thinking text and includes final reply text.
-- Approval-required or cancelled schedule audit rows exist -> they do not appear in `scheduled_reports`; they may appear only as normal task or approval summaries when applicable.
-- Opening `/gui` or `/gui/snapshot` -> task ledger, approval registry, artifact index, and gateway registry file signatures stay unchanged.
+- `shuheng --help` contains `--serve-gateway` or `--gateway-daemon` -> CLI surface regression.
+- `COMMANDS` contains `/gateway` -> TUI surface regression.
+- `src/shuheng/web_console.py` or `src/shuheng/web_console_static.py` exists -> Web Console resurrection regression.
+- Runtime exposes `GatewayRequestHandler`, `make_gateway_http_server`, `serve_gateway`, gateway daemon start/stop/restart helpers, Web Console snapshot/action/html helpers, SSE helpers, or push-delivery helpers -> active Web/HTTP regression.
+- Runtime smoke imports `urllib.request` for a Shuheng HTTP client or calls a gateway HTTP server -> verification regression.
+- Release readiness lists Web Console, HTTP gateway, A2A compatibility surface, or MCP compatibility surface as active experimental surfaces -> release posture regression.
+- Local protocol records use `/gateway`, `/a2a`, `/mcp`, `http+agent-mail`, active SSE, active push notifications, or daemon commands -> registry wording regression.
+- Agent Mail intake sends network push notifications -> remote side-effect regression.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `GET /gui/snapshot` shows `overview.metrics`, subagent rows, schedule definitions, full cleaned report bodies, and compact governance queues without writing any files.
-- Good: `app.py` delegates `/gui` HTML loading to `web_console_static.py`, and the current browser UI source lives in `/home/vimalinx/Projects/Shuheng-Web-GUI/public/index.html`.
-- Good: Running the standalone GUI dev server serves `/` locally and proxies `/gui/snapshot` plus `/gui/action` to a running Shuheng gateway without introducing a Node/Vite dependency.
-- Good: `GET /gui` renders a Slack-like shell with channel navigation, a central channel header, open message rows, and a right context rail instead of `hero-card`, `agent-card`, or card-grid defaults.
-- Good: Clicking a session row posts `session.open` with `session:<digest>` and opens a center-channel preview; clicking a persistent agent row selects that agent and sets the composer target without exposing its raw `agent-...` id.
-- Good: The default GUI says `待审批 3` and shows readable summaries, while approval ids stay out of the visible page.
-- Good: The default GUI says an artifact came from `主页巡检` with type `subagent-results`, while the raw `artifact://...` ref stays behind MCP/resource drill-down.
-- Good: Clicking approve sends `POST /gui/action` with an approval `ui_ref`; the server resolves it, calls `decide_approval(...)`, and the browser receives only a sanitized result message.
-- Good: Clicking a subagent task button starts `start_subagent_task(...)` and later task completion/artifact rows appear because the Web-console runtime pump processed the normal queue.
-- Base: A user can still open `/gateway`, `/a2a`, or `/mcp/resources` for raw protocol inspection.
-- Bad: The GUI fetch path calls `ensure_gateway_registry(...)` and rewrites `gateway.json` just because a browser opened the console.
-- Bad: Re-embedding the full Web Console HTML/JS/CSS in `src/shuheng/app.py`, because that makes the backend module the browser source of truth again.
-- Bad: The default GUI becomes a raw ledger viewer that prints `artifact://...`, `appr_...`, `task_...`, or schedule run ids as body text.
-- Bad: Browser buttons directly approve, dispatch, delete, switch models, or write memory without reusing existing policy gates and ledgers.
+- Good: `agent_directory.message_endpoint == "agent-mail://inbox"` and each role/subagent delivery target uses local Agent Mail with `auto_dispatch:false`.
+- Good: `gateway_service.status == "local_record_only"`, SSE and push are disabled, and daemon commands are empty.
+- Good: A2A/MCP-shaped registry sections use `local_record_only` status and local URI schemes.
+- Base: `ensure_gateway_registry(...)` may continue writing a local `gateway.json` registry file for operator inspection and baseline comparison.
+- Bad: Re-adding a loopback-only HTTP server because it is "local"; the active product surface still becomes Web/HTTP again.
+- Bad: Preserving removed Web concepts as active docs, tests, compatibility aliases, or handler branches.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `/gui` serves HTML, references `/gui/snapshot`, and does not include raw artifact URIs, approval ids, or task-id vocabulary in static HTML.
-- Tests must assert `SHUHENG_WEB_GUI_INDEX` overrides the default standalone GUI lookup and `app.web_console_html()` returns the external file content.
-- Tests must assert the fallback page names `SHUHENG_WEB_GUI_INDEX` and `SHUHENG_WEB_GUI_DIR` when no standalone file is available.
-- Standalone GUI tests must assert `public/index.html` contains `/gui/snapshot`, `/gui/action`, and the current action schema; HTTP smoke should start both the Shuheng gateway and standalone GUI proxy and verify root HTML plus proxied snapshot/action error behavior.
-- Tests must assert `/gui` contains real in-page action controls, does not use browser prompt dialogs for core actions, and advertises the supported governed action modes.
-- Tests must assert `/gui` keeps the restrained collaboration shell structure and does not reintroduce card-grid classes such as `hero-card`, `agent-card`, or `agent-matrix`.
-- Tests must assert `/gui` includes the Slack-like global rail, direct-agent section, session preview view, and client handlers for selecting agents and opening session refs.
-- Tests must assert `/gui` keeps global rail activation scoped to real rail channel buttons, distinguishes same-view channels such as main home and `# main`, clears stale active subagent state when leaving agent views, and does not treat composer target selection as navigation.
-- Tests must assert `/gui/snapshot` returns `shuheng.web_console.snapshot.v1`, `mode:"read_only"`, expected top-level sections, and populated overview metrics.
-- Tests must assert `/gui/snapshot.sidebar` has the expected read-only shell sections and still excludes raw session paths or internal ids.
-- Tests must assert `/gui` and `/gui/snapshot` do not change signatures for `gateway.json`, task ledger, approval registry, or artifact index.
-- Tests must assert `/gui/action` rejects invalid schemas and unknown `ui_ref` values without mutating ledgers.
-- Tests must assert `/gui/action` `session.open` accepts a valid sanitized session ref, returns cleaned title/messages, and rejects unknown session refs without mutating ledgers or exposing `model_responses_*.txt`.
-- Tests must assert `/gui/action` schedule and approval actions mutate only through the governed registry/approval paths and return sanitized messages/snapshots.
-- Tests must assert `/gui/action` schedule create/update can resolve a browser `target_agent_ref` into the server-side subagent routing field without exposing or accepting raw agent ids in the browser contract.
-- Tests must assert `/gui/action` and `/gui/snapshot` do not expose raw task ids, approval ids, artifact URIs, filesystem session paths, or internal agent ids in default browser payloads.
-- Tests must assert snapshot/default text does not leak raw artifact URIs or approval ids and does not include known schedule-run audit task ids.
-- `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
+- `tests/test_cli.py` must assert gateway/Web flags are absent from help output.
+- `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
+- `scripts/runtime_smoke.py` must run without starting an HTTP server and must record local runtime evidence.
+- `scripts/check_release_hygiene.py` must require public README wording that states no built-in Web/HTTP surface.
+- `python3 -m compileall -q src scripts`, `python3 -m ruff check src tests scripts`, `python3 scripts/check_policy_gates.py`, `python3 scripts/check_release_hygiene.py`, `python3 scripts/runtime_smoke.py`, and `git diff --check` must pass.
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
 ```text
-GET /gui -> ensure_gateway_registry() -> rewrite gateway.json -> render raw task/artifact/approval ids
+GET /gateway -> public registry
+POST /a2a/messages -> HTTP inbox
+GET /gui/snapshot -> browser console state
 ```
 
 #### Correct
 
 ```text
-GET /gui -> static local console
-GET /gui/snapshot -> read ledgers -> sanitize display rows -> no writes, no approvals, no dispatch
-POST /gui/action -> validate schema -> resolve ui_ref -> call existing governed backend function -> sanitized response + refreshed snapshot
-```
-
-#### Wrong
-
-```python
-def web_console_html() -> str:
-    return """<!doctype html>
-    <html>...thousands of lines of browser UI...</html>"""
-```
-
-#### Correct
-
-```python
-def web_console_html() -> str:
-    from shuheng.web_console_static import web_console_html as load_web_console_html
-
-    return load_web_console_html()
-```
-
-## Scenario: Web Console Helper Module Boundary
-
-### 1. Scope / Trigger
-
-- Trigger: Browser-facing Web Console helper constants, opaque refs, timestamp sorting, visible-text sanitization, status labels, metric row shaping, action payload shaping, or sanitized action-ref resolution are moved out of `src/shuheng/app.py`.
-- Applies to: `src/shuheng/web_console.py`, compatibility aliases in `src/shuheng/app.py`, `/gui/snapshot` row builders, `/gui/action` schema checks, action payload/ref helpers, policy gates, and Web Console helper unit tests.
-- Non-goal: This does not move `GatewayRequestHandler`, `/gui/action` mutation routing, snapshot construction, runtime pumping, state construction, scheduler/model/subagent mutation, standalone GUI loading, or storage-root ownership.
-
-### 2. Signatures
-
-- Lower-level helper module: `src/shuheng/web_console.py`.
-- Compatibility aliases in `app.py`:
-  - `WEB_CONSOLE_ACTION_REQUEST_SCHEMA`.
-  - `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA`.
-  - `WEB_CONSOLE_REF_KINDS`.
-  - `web_console_ref(kind, raw_id)`.
-  - `web_console_timestamp(row)`.
-  - `web_console_clean_visible(value, limit=320)`.
-  - `web_console_status_label(status)`.
-  - `web_console_metric(label, value, tone="")`.
-  - `web_console_resolve_ref(refs, ui_ref, expected_kind)`.
-  - `web_console_action_payload(payload)`.
-  - `web_console_action_message(text)`.
-  - `web_console_model_name_from_payload(action_data, refs)`.
-  - `web_console_schedule_control_from_payload(action_data, refs)`.
-
-### 3. Contracts
-
-- `web_console.py` must not import `shuheng.app`, `.app`, `app`, `curses`, UI renderers, command handlers, `State`, `SubAgentRuntime`, `PanelItem`, `RenderLine`, `GatewayRequestHandler`, or runtime mutation helpers.
-- `app.py` remains the compatibility facade and exposes the helper names as direct aliases or behavior-identical wrappers.
-- `WEB_CONSOLE_ACTION_REQUEST_SCHEMA` remains `shuheng.web_console.action_request.v1`.
-- `WEB_CONSOLE_ACTION_RESPONSE_SCHEMA` remains `shuheng.web_console.action_response.v1`.
-- `WEB_CONSOLE_REF_KINDS` remains limited to `agent`, `approval`, `artifact`, `model`, `schedule`, `session`, and `task`.
-- `web_console_ref(...)` returns an opaque stable `<kind>:<digest>` value for valid non-empty kinds/ids and `""` for unknown kinds or blank ids. It must not expose raw task ids, approval ids, artifact URIs, filesystem paths, model names, or agent ids.
-- `web_console_clean_visible(...)` strips approval-only process markers and masks raw artifact refs, approval ids, approval query values, task ids, schedule run ids, schedule ids, internal agent ids, and temporary agent ids.
-- Internal-ref masking must happen before and after inline-markdown stripping, because markdown emphasis rules can otherwise remove underscores from values such as `task_abc` or `schedrun_123` before the masks run.
-- `web_console_timestamp(...)` prefers ISO `timestamp`, `updated_at`, `created_at`, then `finished_at`, with `mtime` as fallback.
-- `web_console_metric(...)` returns a string-only display dict with `label`, `value`, and `tone`.
-- `web_console_resolve_ref(...)` resolves only current server-side opaque refs and returns `(False, "", <Chinese user-facing error>)` for missing refs, unknown refs, or kind mismatch.
-- `web_console_action_payload(...)` returns a shallow copy of the nested payload dict or `{}` for non-dict payloads.
-- `web_console_action_message(...)` applies Web Console visible-text sanitization and falls back to `动作已执行。` for empty messages.
-- `web_console_model_name_from_payload(...)` prefers explicit `model_name` / `model`, then resolves `model_ref` / `model_ui_ref` through `web_console_resolve_ref(...)`.
-- `web_console_schedule_control_from_payload(...)` may resolve a browser `target_agent_ref`, `agent_ref`, or `agent_ui_ref` into `execution.routing.selected_agent` and `execution.routing.target_selector.agent_id`, but it must not persist schedules or dispatch work.
-
-### 4. Validation & Error Matrix
-
-- `web_console.py` imports `shuheng.app`, curses, TUI state, gateway handler, or runtime mutation helpers -> policy gate fails.
-- App alias differs from module helper for the same input -> unit test or policy gate fails.
-- Unknown `ui_ref` kind or blank raw id -> helper returns `""`.
-- Sanitized visible text still contains `artifact://`, `appr_`, `approval=appr_`, `task_`, `schedrun_`, `sched_`, `agent-N`, or `tmp-agent-*` -> unit test or policy gate fails.
-- Unknown status contains raw internal id vocabulary after label conversion -> unit test fails.
-- Timestamp fields are absent or invalid -> helper returns numeric `mtime` fallback or `0.0`.
-- Schedule action payload contains an agent `ui_ref` -> helper returns an `agent_task` execution control with server-resolved `selected_agent`.
-- Schedule action payload contains a model/task/session ref where an agent ref is required -> helper returns a kind-mismatch error and no control payload.
-
-### 5. Good/Base/Bad Cases
-
-- Good: `/gui/snapshot` rows keep using `app.web_console_clean_visible(...)`, while the implementation is owned by `shuheng.web_console`.
-- Good: `/gui/action` keeps schema validation in `app.py` but uses the schema constants from the helper module.
-- Base: `web_console_ref_map(...)` stays in `app.py` because it reads ledgers, model config, current history rows, and loaded subagents.
-- Base: `web_console_action_response(...)` stays in `app.py` because it may start the Web-console runtime pump and refresh snapshots.
-- Base: `web_console_apply_action(...)` stays in `app.py` because it calls governed mutation functions for approvals, schedules, models, tasks, and subagents.
-- Bad: `web_console.py` imports `State` so it can build snapshots.
-- Bad: `web_console.py` calls `decide_approval(...)`, `start_subagent_task(...)`, or `process_ui_queue(...)`.
-
-### 6. Tests Required
-
-- Unit tests must assert helper behavior for stable opaque refs, invalid kinds, timestamp fallback, sanitization, status labels, metric shape, action payload/message shaping, model ref resolution, schedule target-agent ref mapping, and `app.py` wrapper parity.
-- `scripts/check_policy_gates.py` must assert `web_console.py` has no reverse import into `app.py` and no curses, TUI state, rendering, gateway handler, or mutation-dispatch dependencies.
-- `python3 -m py_compile src/shuheng/app.py src/shuheng/web_console.py scripts/check_policy_gates.py tests/test_web_console.py` must pass.
-- `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_policy_gates.py` and `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tests/test_web_console.py -p no:cacheprovider` must pass.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```python
-# web_console.py
-from shuheng.app import State, decide_approval, process_ui_queue
-
-def web_console_snapshot() -> dict:
-    ...
-```
-
-#### Correct
-
-```python
-# web_console.py
-WEB_CONSOLE_ACTION_REQUEST_SCHEMA = "shuheng.web_console.action_request.v1"
-
-def web_console_ref(kind: str, raw_id: object) -> str:
-    ...
+agent-mail://inbox -> local Agent Mail row
+agent-directory://local -> local discovery record
+resource://agent-mail/* -> local resource record
 ```
 
 ## Scenario: Per-Agent Dedicated Skills
@@ -2221,7 +2044,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 3. Contracts
 
 - MVP plugins are declarative local packages only. Reading `plugin.json` and manifest-declared local files is allowed; executing plugin code or registering plugin tools is forbidden in this scenario.
-- `plugins.py` owns pure manifest discovery, validation, stable ref parsing, plugin formatting, and manifest-declared path resolution. It must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, Web Console, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, or provider adapters.
+- `plugins.py` owns pure manifest discovery, validation, stable ref parsing, plugin formatting, and manifest-declared path resolution. It must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, or provider adapters.
 - Plugin skills are stored as ordinary subagent `skill_refs` using `plugin://<plugin-id>/skills/<skill-id>`. There is no separate `plugin_refs` persistence field in this MVP.
 - Plugin skill file resolution must go through the manifest. A `plugin://...` ref must not map directly to arbitrary filesystem paths or raw plugin directory guesses.
 - Manifest-declared skill and workflow paths must be relative paths that remain inside the plugin root. Absolute paths, `~` paths, and `..` escapes are validation issues and must not resolve.
@@ -2316,7 +2139,7 @@ Load every plugin file globally -> main Orchestrator and every subagent see all 
 
 - Workflow definitions are declarative data only. They must not execute Python, JavaScript, shell commands, plugin-native code, tools, model calls, or subagent tasks during registry load, info rendering, panel rendering, or dry-run.
 - Workflow files must be loaded only through manifest-declared `PluginWorkflow` records. App-level code must not guess filesystem paths from a workflow ref.
-- `workflows.py` must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, Web Console, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, provider adapters, or subprocess.
+- `workflows.py` must not import `app.py`, curses, `State`, `SubAgentRuntime`, Secret Vault, dashboard, runtime dispatch, GenericAgent handlers, approval queues, ledgers, provider adapters, or subprocess.
 - Dry-run output is an execution plan preview. It may show inputs, permissions metadata, ordered steps, dependencies, target agent refs, prompt strings, and validation issues, but must explicitly state that no execution occurred.
 - `/workflows` uses the existing harness panel browser and read-only `PanelItem` rows.
 - `/workflow info` and `/workflow dry-run` may return text through normal command handling, but must not mutate runtime state beyond adding a system message.
@@ -4258,7 +4081,7 @@ failed task -> continue_workflow_run_v0(...) -> prepare_workflow_agent_task_retr
 - `message_render_cache_key(...)` accepts the existing `run_frame` argument for call-site compatibility, but the returned key must ignore it so animation ticks do not invalidate cached message blocks.
 - `scoped_subagent_meta_keys(...)` is pure over explicit scope strings and expanded metadata ids. It returns all expanded keys when no process scope is active, otherwise only keys under `"<scope>:submeta:"` with that prefix stripped.
 - `message_cache_signature(...)` is pure over explicit message-like objects and returns tuples of `(id(message), role, content_length, done)`. It must not inspect `State`, mutate caches, read message cache storage, allocate `RenderLine`, call curses, or include `run_frame`; app-owned `message_lines_cached(...)` remains responsible for combining this signature with `State.message_version` and mutable UI cache fields.
-- `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, Web Console, dashboard, input handlers, or draw functions.
+- `rendering.py` may depend on lower-level terminal-cell helpers and `RenderLine`, but must not import `shuheng.app`, curses, mutable TUI `State`, runtime dispatch, command handlers, dashboard, input handlers, or draw functions.
 - Process preview/summary helpers in `rendering.py` are deterministic text transforms. They may reuse process-safe history-title regex and description helpers, but must not parse JSON-ish tool payloads, inspect interaction state, read history stores, mutate message caches, allocate `RenderLine`, or call curses.
 - `process_preview(...)` prefers the last explicit `<summary>` title, otherwise strips fenced detail blocks, meta blocks, and simple tool markers before choosing the first compact visible line, falling back to `执行中`.
 - `process_summary_text(...)` returns the last compact summary, and when that summary is a legacy process-only label such as `OMP 思考`, it falls back to the latest `<thinking>` / `<think>` body excerpt.
@@ -4273,12 +4096,12 @@ failed task -> continue_workflow_run_v0(...) -> prepare_workflow_agent_task_retr
 - `visible_reply_text(...)` may reuse process-safe history-title regexes but must not call `process_tools(...)`, parse JSON-ish tool payloads, inspect interaction state, read history stores, mutate caches, allocate `RenderLine`, or call curses.
 - `strip_inline_markdown(...)` is a deterministic inline markdown cleanup helper over already-loaded text. It converts image markdown to `[alt]`, converts links to `text (url)`, removes inline-code backticks, and removes bold/italic emphasis markers. It must not own table rendering, markdown block rendering, `RenderLine` allocation, curses attrs, process/tool parsing, subagent metadata parsing, mutable `State`, caches, history stores, or runtime side effects. App-owned table, markdown block, and metadata helpers may call the compatibility alias but remain app-owned until later explicit slices.
 - `sanitize_interaction_candidates(...)`, `render_interaction_card(...)`, `visible_ask_user_card_text(...)`, `interaction_answer_from_text(...)`, `compose_request_user_input_answer(...)`, `interaction_input_prompt_text(...)`, `interaction_footer_text(...)`, and `interaction_hint_layout_lines(...)` are deterministic interaction-display/input-text helpers over explicit raw candidate values, already-extracted interaction payload dictionaries, explicit selected indexes, explicit answer lists, explicit prompt-state flags, explicit footer-state flags, or explicit hint-row facts. They may trim numbered/quoted/list-like candidate labels, format the visible Chinese ask-user/request-user-input card, format the default visible ask-user waiting card when no extracted payload exists, resolve numeric/free-text/blank-candidate answers, format multi-question `request_user_input` answer text, return prompt labels such as `"> "`, `"approval> "`, `"qN> "`, and `"? "`, choose the existing footer strings from explicit payload/candidate/approval/question booleans, and return neutral `(kind, text)` hint layout rows for headers, body text, candidate rows, muted overflow rows, and footer rows. They must not parse tool payloads, call `process_tools(...)`, call `extract_interaction_request(...)`, inspect `State.pending_interaction`, read approval ledgers, mutate interaction selection, allocate `RenderLine`, choose curses attrs, or handle keyboard/input submission. App-owned `extract_interaction_request(...)`, approval interaction payloads, `normalize_interaction_payload(...)`, `interaction_current_candidates(...)`, `interaction_selection(...)`, `visible_ask_user_text(...)`, `interaction_answer_from_input(...)`, `interaction_input_prompt(...)`, `interaction_footer(...)`, `interaction_hint_lines(...)`, and input handlers remain responsible for parsing, state, approval, current-question traversal, selection mutation, curses attr conversion, and submission behavior.
-- Subagent result notice/metadata helpers are deterministic text transforms over already-loaded system notice text or already-rendered subagent result bodies. They parse the `子 agent 回复 · <name> (<agent_id>)` header, optional `Task:` / `Artifact:` lines, visible body text, metadata footers, labels, values, grouped entries, list-like counts, summary chips, and stable `Sxxxxxxxx` metadata ids. They may use lower-level `clean_text(...)`, `strip_inline_markdown(...)`, `truncate_cells(...)`, and hashing, but must not allocate `RenderLine`, choose curses attrs, inspect `State`, read ledgers or artifact files, mutate message caches, call Web Console/dashboard/runtime/input/command owners, or perform storage/runtime side effects. App-owned `subagent_result_metadata_detail_blocks(...)`, `subagent_result_card_blocks(...)`, `message_block_lines(...)`, and subagent context-update wrappers remain responsible for `RenderLine` allocation, color attrs, task-ledger/artifact/meta lookups, current-session context injection, and message rendering.
+- Subagent result notice/metadata helpers are deterministic text transforms over already-loaded system notice text or already-rendered subagent result bodies. They parse the `子 agent 回复 · <name> (<agent_id>)` header, optional `Task:` / `Artifact:` lines, visible body text, metadata footers, labels, values, grouped entries, list-like counts, summary chips, and stable `Sxxxxxxxx` metadata ids. They may use lower-level `clean_text(...)`, `strip_inline_markdown(...)`, `truncate_cells(...)`, and hashing, but must not allocate `RenderLine`, choose curses attrs, inspect `State`, read ledgers or artifact files, mutate message caches, call dashboard/runtime/input/command owners, or perform storage/runtime side effects. App-owned `subagent_result_metadata_detail_blocks(...)`, `subagent_result_card_blocks(...)`, `message_block_lines(...)`, and subagent context-update wrappers remain responsible for `RenderLine` allocation, color attrs, task-ledger/artifact/meta lookups, current-session context injection, and message rendering.
 - `subagent_result_notice_body_text(raw, rendered, final_reply, has_tool_noise, limit)`, `format_subagent_result_notice_text(name, agent_id, bus_task_id, artifact_ref, body)`, and `subagent_result_metadata_detail_lines(notice, metadata_lines, width)` are deterministic subagent-result notice format helpers over explicit inputs. The app wrapper must inject `render_assistant_text(...)`, `latest_visible_reply_text(...)`, `process_has_tool_noise(...)`, `SubAgentRuntime` fields, and `RenderLine(..., cp(9))` conversion; `rendering.py` must not import those app-owned dependencies or allocate `RenderLine` for the notice/card path.
 - `subagent_result_reply_excerpt_text(rendered, limit)`, `subagent_result_context_confidence(metadata_lines)`, `format_subagent_result_context_update_text(...)`, and `bounded_subagent_context_updates(updates, update_limit, total_limit)` are deterministic subagent-result context-update helpers over explicit inputs. The app wrapper must inject `render_subagent_result_body(...)`, `latest_task_records(...)`, `session_key(...)`, notice parsing, and `Message` traversal; `rendering.py` must not read task ledgers, resolve session paths, inspect `State`, read artifacts, mutate history, allocate `RenderLine`, call curses, or perform runtime/storage side effects for context updates.
 - `subagent_result_card_layout_lines(...)` is a deterministic subagent-result card chrome helper over explicit notice dictionaries, metadata lines, expanded metadata ids, and body width. It may call subagent metadata label/summary helpers and terminal-cell truncation, but must not parse notice text, render subagent bodies, call markdown/plain block renderers, allocate `RenderLine`, choose curses attrs beyond neutral record kinds, inspect `State`, read ledgers or artifacts, traverse messages, mutate caches/history, or perform runtime/storage side effects. `app.subagent_result_card_blocks(...)` remains responsible for invalid-notice fallback, `render_subagent_result_body(...)`, `split_subagent_result_reply_and_metadata(...)`, `subagent_result_metadata_detail_blocks(...)`, `markdown_blocks(...)`, `plain_blocks(...)`, reply-body prefixing, and all `RenderLine` attr conversion.
 - `is_table_separator(...)` and `split_table_row(...)` are deterministic markdown table parser helpers over already-loaded table row strings or already-split cell strings. `split_table_row(...)` trims outer pipes/cell whitespace and applies `strip_inline_markdown(...)`; `is_table_separator(...)` recognizes markdown alignment separator cells. They must not render tables, allocate `RenderLine`, choose curses attrs, parse markdown blocks, inspect message caches, inspect `State`, read stores, or perform runtime side effects. App-owned `render_table(...)` and `markdown_blocks(...)` may call the compatibility aliases but remain app-owned until later explicit slices.
-- `table_layout_lines(...)`, `markdown_layout_blocks(...)`, and `plain_layout_lines(...)` return neutral layout records over already-loaded text. `table_layout_lines(...)` owns column sizing and table row records, `markdown_layout_blocks(...)` owns deterministic block parsing for code fences, tables, blank lines, rules, headings, quotes, task items, bullets, numbered items, and body text, and `plain_layout_lines(...)` owns plain text wrapping via the lower-level terminal-cell wrapper. They may use lower-level text wrapping/inline cleanup helpers, but must not allocate `RenderLine`, choose curses attrs, inspect `State`, read or mutate message caches, parse process/tool payloads, call Web Console/dashboard/runtime/input/command owners, or perform storage/runtime side effects. App-owned `render_table(...)`, `markdown_blocks(...)`, and `plain_blocks(...)` remain compatibility wrappers that convert neutral records or strings into existing `RenderLine` values with `cp(...)` and curses attrs.
+- `table_layout_lines(...)`, `markdown_layout_blocks(...)`, and `plain_layout_lines(...)` return neutral layout records over already-loaded text. `table_layout_lines(...)` owns column sizing and table row records, `markdown_layout_blocks(...)` owns deterministic block parsing for code fences, tables, blank lines, rules, headings, quotes, task items, bullets, numbered items, and body text, and `plain_layout_lines(...)` owns plain text wrapping via the lower-level terminal-cell wrapper. They may use lower-level text wrapping/inline cleanup helpers, but must not allocate `RenderLine`, choose curses attrs, inspect `State`, read or mutate message caches, parse process/tool payloads, call dashboard/runtime/input/command owners, or perform storage/runtime side effects. App-owned `render_table(...)`, `markdown_blocks(...)`, and `plain_blocks(...)` remain compatibility wrappers that convert neutral records or strings into existing `RenderLine` values with `cp(...)` and curses attrs.
 - `latest_visible_reply_text(...)` is a deterministic selector over already-loaded assistant text. It may use `split_top_level_turn_markers(...)` and `visible_reply_text(...)`, but any tool-noise decision must be injected by the app wrapper or caller; it must not call `process_tools(...)`, parse JSON-ish tool payloads, inspect `State`, read history stores, mutate caches, allocate `RenderLine`, or call curses.
 - Visible reply policy helpers are deterministic text predicates over already-cleaned assistant prose. They may use lower-level text cleanup and local regexes, but must not call `process_tools(...)`, parse JSON-ish tool payloads, inspect `State`, read history stores, mutate caches, allocate `RenderLine`, or call curses.
 - `preferred_group_visible_reply_text(...)` is deterministic selection over already-cleaned visible reply strings and already-extracted IRC reply lines. It chooses the latest visible reply by default, may prefer a richer earlier substantive reply over a short/housekeeping latest reply using the visible-reply policy helpers, and appends unique IRC reply lines under `### IRC 回复` when they are not already present in the chosen text. It must not traverse process turns, call `visible_reply_text(...)`, call `process_has_tool_noise(...)`, call `process_tools(...)`, parse JSON-ish tool payloads, extract IRC snippets, inspect interaction state, inspect `State`, mutate caches, allocate `RenderLine`, or call curses. App wrappers remain responsible for process-turn traversal, tool-noise cleanup, and IRC result parsing.
@@ -5195,7 +5018,7 @@ configure_genericagent_provider_runtime(
 
 - Trigger: Provider-neutral runtime identity, metadata, request-construction, or task-submit helper logic is moved out of `src/shuheng/app.py`.
 - Applies to: `src/shuheng/runtime_dispatch.py`, compatibility wrappers in `src/shuheng/app.py`, `RuntimeTaskRequest` construction, OMP native session/context usage readers, runtime task submission fallback, policy gates, and unit tests.
-- Non-goal: This does not move runtime stream queue consumption, TUI message mutation, subagent task/chat state transitions, scheduler dispatch, Web Console runtime pumping, or runtime context-pack full/ref prompt selection.
+- Non-goal: This does not move runtime stream queue consumption, TUI message mutation, subagent task/chat state transitions, scheduler dispatch, or runtime context-pack full/ref prompt selection.
 
 ### 2. Signatures
 
@@ -6273,7 +6096,7 @@ pack["workspace_context"] = workspace_context
 
 - All main and persistent-subagent context packs must include the same shared user profile refs and a bounded redacted summary.
 - The shared profile is an operational interaction-state summary, not an approved L2 long-term fact store.
-- Normal user-originated main prompts, direct subagent chats, user-originated subagent tasks, and Web Console `main.prompt` / `agent.chat` / `agent.task` actions update interaction count, last interaction time, bounded recent intents, focus terms, project hints, source counts, and estimated work time.
+- Normal user-originated main prompts, direct subagent chats, and user-originated subagent tasks update interaction count, last interaction time, bounded recent intents, focus terms, project hints, source counts, and estimated work time.
 - Secret Vault sessions and temporary sessions must not write into the normal shared profile.
 - OMP append-system-prompt generation must read the same `user_profile.md` path without importing `app.py` or mutating TUI state.
 - If the shared profile conflicts with an explicit current user instruction, agents must treat the profile as stale context and obey the current instruction.
@@ -6286,7 +6109,7 @@ pack["workspace_context"] = workspace_context
 - OMP memory prompt generation -> includes `Shared User Profile` and the same file path.
 - Temporary session input -> does not increase shared profile interaction count.
 - Secret Vault input -> does not write normal shared profile state.
-- Web Console `agent.chat` -> dispatches through the shared direct-chat path and updates the normal shared profile once.
+- Direct subagent chat -> dispatches through the shared direct-chat path and updates the normal shared profile once.
 
 ### 5. Good/Base/Bad Cases
 
@@ -6298,7 +6121,7 @@ pack["workspace_context"] = workspace_context
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal interactions and Web Console user actions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
+- `scripts/check_policy_gates.py` must assert shared user profile files are created, normal user interactions update the machine state, main and subagent context packs hydrate the same profile refs, OMP memory prompt includes the profile, and temporary or Secret Vault sessions do not mutate the normal shared profile.
 - `python3 -m py_compile src/shuheng/app.py src/shuheng/ohmypi_provider.py scripts/check_policy_gates.py`, `python3 scripts/check_policy_gates.py`, `python3 -m compileall -q src scripts`, `git diff --check`, and `shuheng-check --root /home/vimalinx/Programs/GenericAgent` must pass.
 
 ### 7. Wrong vs Correct
@@ -6321,7 +6144,7 @@ normal user input -> ~/.shuheng/memory/user_profile_state.json -> ~/.shuheng/mem
 
 - Trigger: Shuheng context-pack, memory-hydration, context-layer, prompt-formatting, or context-ref-formatting helper logic is moved out of `src/shuheng/app.py`.
 - Applies to: `src/shuheng/context_packs.py`, compatibility wrappers in `src/shuheng/app.py`, `build_context_pack()`, `memory_context_get`, OMP runtime context/ref prompts, policy gates, and unit tests.
-- Non-goal: This does not move runtime dispatch, Web Console action routing, dashboard rendering, command handlers, storage-root selection, or context-pack artifact writing out of `app.py` unless a later task defines those boundaries explicitly.
+- Non-goal: This does not move runtime dispatch, dashboard rendering, command handlers, storage-root selection, or context-pack artifact writing out of `app.py` unless a later task defines those boundaries explicitly.
 
 ### 2. Signatures
 
@@ -6625,9 +6448,9 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 
 ### 1. Scope / Trigger
 
-- Trigger: Shuheng exposes public release, gateway, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
-- Applies to: `src/shuheng/release_readiness.py`, `src/shuheng/runtime_evidence.py`, `src/shuheng/baseline.py`, `src/shuheng/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `context_inspector_snapshot(...)`, `permission_matrix(...)`, `append_gateway_agent_message(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and gateway/policy/runtime smoke tests.
-- Non-goal: This does not certify full A2A/MCP compliance, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
+- Trigger: Shuheng exposes release, local protocol-record, baseline, scheduler, and eval metadata that can otherwise overstate maturity.
+- Applies to: `src/shuheng/release_readiness.py`, `src/shuheng/runtime_evidence.py`, `src/shuheng/baseline.py`, `src/shuheng/gateway_registry.py`, app compatibility wrappers such as `ensure_gateway_registry(...)`, `gateway_baseline_evidence(...)`, `gateway_service_descriptor(...)`, `architecture_baseline_report(...)`, `context_inspector_snapshot(...)`, `permission_matrix(...)`, `append_gateway_agent_message(...)`, `append_task_eval(...)`, `append_runtime_evidence(...)`, scheduler registry metadata, README release wording, and policy/runtime smoke tests.
+- Non-goal: This does not certify full A2A/MCP compliance, expose a built-in network endpoint, install an always-on scheduler service, or replace heuristic eval with an authoritative external evaluator.
 
 ### 2. Signatures
 
@@ -6642,32 +6465,26 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
   - `repository_hygiene`
   - `distribution_smoke`
   - `verification_commands`
-- Gateway service descriptor:
+- Local protocol service descriptor:
   - `schema_version:"agentgateway.service.v1"`
-  - `status:"local_no_auth_compatibility_surface"`
+  - `status:"local_record_only"`
   - `security.schema_version:"shuheng.gateway_bind_safety.v1"`
-  - `security.auth:"none"`
-  - `security.local_only`
-  - `security.allowed`
+  - `security.network_enabled:false`
+  - `security.allowed:false`
   - `release_posture:"experimental_alpha"`
-  - `request_response.agent_directory:"/gateway/agents"`
-  - `request_response.a2a_message_send:"/a2a/messages"`
-- Public gateway HTTP registry:
-  - `schema_version:"agentgateway.public.v1"`
-  - `agent_directory.schema_version:"shuheng.agent_directory.v1"`
-  - `release_readiness.schema_version:"shuheng.release_readiness.v1"`
-  - `public_contract.context_exposed:false`
-  - `public_contract.permission_matrix_exposed:false`
-  - `gateway_service` omits internal registry, daemon, push-store, context, permission, and MCP resource-read path inventories.
-- Gateway baseline evidence:
+  - `base_url:""`
+  - `request_response.agent_directory:"agent-directory://local"`
+  - `request_response.message_inbox:"agent-mail://inbox"`
+- Local baseline evidence:
   - `gateway_baseline_evidence(state=None) -> dict`
   - `a2a_gateway.schema_version:"a2a.gateway.v1"`
   - `a2a_gateway.agent_cards[]`
   - `a2a_gateway.tasks[]`, `messages[]`, `artifacts[]`
-  - `a2a_gateway.request_response.message_send:"/a2a/messages"`
+  - `a2a_gateway.request_response.message_send:"agent-mail://inbox"`
   - `a2a_gateway.delivery.mode:"agent_mail_inbox"`
   - `a2a_gateway.delivery.auto_dispatch:false`
   - `mcp_gateway.schema_version:"mcp.gateway.v1"`
+  - `mcp_gateway.status:"local_record_only"`
   - `mcp_gateway.tools[]`, `resources[]`
   - `capability_registry`
   - `agent_directory.schema_version:"shuheng.agent_directory.v1"`
@@ -6676,19 +6493,19 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
   - `governance_components`
   - `gateway_service`
   - `bridge_registry`
-- A2A agent cards:
+- A2A-shaped agent cards:
   - `schema_version:"a2a.agent_card.v1"`
-  - `endpoint.transport:"http+agent-mail"`
-  - `endpoint.uri:"/a2a/messages"`
+  - `endpoint.transport:"local-agent-mail"`
+  - `endpoint.uri:"agent-mail://inbox"`
   - `delivery.mode:"agent_mail_inbox"`
   - `delivery.auto_dispatch:false`
   - `auth.policy` says execution inherits the Shuheng/TUI policy gate.
-- External agent directory entries:
+- Local agent directory entries:
   - `schema_version:"shuheng.agent_directory.v1"`
   - role/subagent entries expose `agent_id`, `kind`, `name`, `role`, `purpose`, `status`, `delivery`, `input_modes`, `output_modes`, `write_policy`, and `safety`.
   - Subagent skill/plugin refs, when present, are short display labels only.
   - Entries must not expose project context, spec paths, memory paths, workflow run internals, raw permission matrix rows, local skill/plugin paths, or Secret Vault plaintext.
-- MCP gateway resources include:
+- Local resource records include:
   - `resource://agent-mail/runtime-providers`
   - `resource://agent-mail/schedules`
   - `resource://agent-mail/schedule-runs`
@@ -6715,48 +6532,40 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 
 ### 3. Contracts
 
-- Public release posture must be explicit: stable local surfaces, experimental surfaces, and known gaps are separate lists.
-- A2A and MCP gateway metadata must use compatibility-surface wording until real third-party client end-to-end tests exist.
-- Gateway/Web Console has no built-in auth. It should bind to loopback by default; non-loopback daemon/serve binds require `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1`.
-- `/gateway` is the public HTTP registry for external agents. It must expose agent discovery and inbox-delivery metadata, not the full internal gateway registry.
-- `/health` is a public liveness response and must use the same path-stripped public service descriptor shape as `/gateway`.
-- `/gateway/agents` exposes a `shuheng.agent_directory.v1` directory for external agents to inspect what Shuheng roles/subagents are for and how to message them.
-- External gateway discovery must not expose broad project context, active spec paths, memory paths, workflow run internals, full permission matrices, Secret Vault plaintext, or internal ledger path inventories.
-- `context_inspector_snapshot(...)`, `/context`, `permission_matrix(...)`, and `/permissions` remain internal TUI/control-plane inspection surfaces. They may write durable local files for operator use, but they are not external gateway endpoints or MCP resources by default.
-- `POST /a2a/messages` accepts external agent messages only into Agent Mail, the task ledger, and trace rows. It must create a `kind:"gateway_message"` task row and an `agent_mail_inbox` message, but it must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
-- A2A agent cards must advertise `/a2a/messages` delivery with `auto_dispatch:false` so other agents know how to message discovered agents without assuming execution.
-- Message targets must resolve to the main orchestrator, a known role template, or a gateway-discovered subagent. Unknown targets are rejected and must not create phantom agent tasks.
-- Stateless gateway discovery may load persisted non-secret subagent metadata from the Shuheng-owned subagent store. Secret Vault subagents are visible only through unlocked TUI state and must not be discovered from plaintext stateless metadata.
-- MCP must not expose context-inspector or permission-matrix resources by default. External tool/resource discovery remains narrower than local operator inspection.
+- Public release posture must be explicit: stable local surfaces, experimental local record shapes, and known gaps are separate lists.
+- A2A/MCP-shaped metadata is local record output for inspection and adapter design. It is not a reachable protocol endpoint or certification claim.
+- Local protocol records must not expose broad project context, active spec paths, memory paths, workflow run internals, full permission matrices, Secret Vault plaintext, or internal ledger path inventories.
+- `context_inspector_snapshot(...)` and `permission_matrix(...)` remain internal TUI/control-plane inspection surfaces. They may write durable local files for operator use, but they are not adapter-facing resources by default.
+- Local Agent Mail intake helpers accept messages only into Agent Mail, the task ledger, and trace rows. They must create a `kind:"gateway_message"` task row and an `agent_mail_inbox` message, but they must not dispatch a runtime, approve a policy action, write memory, execute a workflow, or call a model/tool.
+- A2A-shaped agent cards must advertise `agent-mail://inbox` delivery with `auto_dispatch:false` so local adapters know how to submit messages without assuming execution.
+- Message targets must resolve to the main orchestrator, a known role template, or a locally discovered subagent. Unknown targets are rejected and must not create phantom agent tasks.
+- Stateless local discovery may load persisted non-secret subagent metadata from the Shuheng-owned subagent store. Secret Vault subagents are visible only through unlocked TUI state and must not be discovered from plaintext stateless metadata.
 - Baseline completion must not mean protocol certification. Structural checks such as callable existence, configured paths, schemas, and registry rows must be labeled as structural evidence.
 - Runtime/e2e checks must be persisted in `runtime_evidence.jsonl` under the Shuheng-owned `AGENT_HARNESS_DIR`; baseline reports may upgrade an item's strongest evidence level only from passed runtime evidence whose `target_items` match that baseline item.
-- Runtime evidence from local smoke tests is behavioral evidence for Shuheng's local harness path. It must not be described as A2A/MCP protocol certification or third-party client conformance.
+- Runtime evidence from local smoke tests is behavioral evidence for Shuheng's local harness path. It must not be described as protocol certification or third-party client conformance.
 - Release-readiness distribution-smoke metadata must be structured rather than
   only implied by command strings: it lists wheel and sdist artifacts,
   dependency-resolving install mode, public console scripts, checked entrypoint
   behaviors, and debug-only options that are not release gates.
-- `architecture_baseline_report(...)` must be self-contained: when `gateway_data` is omitted, it must build a no-write `gateway_baseline_evidence(...)` snapshot instead of reporting existing A2A/MCP/gateway evidence as missing due to caller ordering.
-- No-write evidence construction may read ledgers and daemon status, but must not rewrite `gateway.json`, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
-- `ensure_gateway_registry(...)` remains the write path for refreshing the durable gateway registry file; direct baseline reporting is only a report/evidence path.
+- `architecture_baseline_report(...)` must be self-contained: when `gateway_data` is omitted, it must build a no-write `gateway_baseline_evidence(...)` snapshot instead of reporting local protocol evidence as missing due to caller ordering.
+- No-write evidence construction may read ledgers and local status records, but must not rewrite `gateway.json`, `governance_components.json`, `bridge_registry.json`, runtime provider prompt files, ledgers, approvals, or artifacts.
+- `ensure_gateway_registry(...)` remains the write path for refreshing the durable local registry file; direct baseline reporting is only a report/evidence path.
 - Eval scores are heuristic. Factual/citation/source quality inferred from text/artifact presence must include limitations explaining that correctness is not independently verified.
-- Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or gateway/manual ticks, not by an installed always-on service by default.
+- Scheduler registry metadata must say scheduler work is evaluated by the TUI loop or local manual ticks, not by an installed always-on service by default.
 - Release-readiness helpers should remain pure and must not import `app.py`.
-- Runtime evidence, baseline item formatting, and gateway descriptor/resource payload helpers live outside `app.py`. These helper modules must not import `shuheng.app`; `app.py` owns runtime state, paths, daemon state, HTTP handlers, and compatibility wrapper names.
+- Runtime evidence, baseline item formatting, and local protocol descriptor/resource payload helpers live outside `app.py`. These helper modules must not import `shuheng.app`; `app.py` owns runtime state, paths, and compatibility wrapper names.
 
 ### 4. Validation & Error Matrix
 
-- `/gateway` registry missing `release_readiness` -> release posture regression.
-- `/gateway` returns the full internal registry, internal ledger paths, context inspector, or permission matrix -> external exposure regression.
-- `/health` exposes `registry_path`, daemon path fields, push-store path fields, or MCP resource-read path inventories -> external path exposure regression.
-- `/gateway/agents` missing `shuheng.agent_directory.v1` or agent purpose/delivery fields -> discovery regression.
-- `/gateway/context`, `/gateway/permissions`, `resource://agent-mail/context-inspector`, or `resource://agent-mail/permission-matrix` are externally readable by default -> context exposure regression.
-- A2A agent cards do not advertise `endpoint.transport:"http+agent-mail"`, `endpoint.uri:"/a2a/messages"`, or `delivery.auto_dispatch:false` -> external-agent delivery contract regression.
-- `POST /a2a/messages` dispatches a runtime, approves a policy action, writes long-term memory, or executes a workflow directly -> Orchestrator ownership regression.
-- `POST /a2a/messages` accepts an unknown target and creates a task for a phantom agent -> gateway discoverability regression.
-- Gateway service status is `network_capable` without no-auth/local wording -> overclaiming regression.
-- Non-loopback gateway daemon start without `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` -> failed daemon status with `remote_bind_requires_SHUHENG_GATEWAY_ALLOW_REMOTE_BIND`.
-- A2A/MCP status says certified/network-capable without compatibility metadata -> protocol overclaiming regression.
-- Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
+- Release readiness lists local records as reachable/certified protocol endpoints -> release posture regression.
+- Local protocol records expose active spec paths, context-pack directories, memory paths, workflow run ids, or permission matrix entries -> context exposure regression.
+- Local resource records include context-inspector or permission-matrix resources by default -> context exposure regression.
+- A2A-shaped agent cards do not advertise `endpoint.transport:"local-agent-mail"`, `endpoint.uri:"agent-mail://inbox"`, or `delivery.auto_dispatch:false` -> local adapter delivery contract regression.
+- Local Agent Mail intake dispatches a runtime, approves a policy action, writes long-term memory, or executes a workflow directly -> Orchestrator ownership regression.
+- Local Agent Mail intake accepts an unknown target and creates a task for a phantom agent -> discoverability regression.
+- Local service descriptor status is `network_capable` or has a non-empty `base_url` -> network-surface regression.
+- A2A/MCP status says certified/network-capable without local-record-only metadata -> protocol overclaiming regression.
+- Direct `architecture_baseline_report()` call without prebuilt `gateway_data` marks A2A/MCP, governance, or external bridge evidence as missing while `ensure_gateway_registry()` would mark it complete -> caller-ordering regression.
 - Direct baseline report rewrites `gateway.json`, `governance_components.json`, or `bridge_registry.json` -> read-only evidence regression.
 - Baseline item has no `evidence_checks` or `strongest_evidence_level` -> baseline evidence regression.
 - `runtime_evidence.py`, `baseline.py`, or `gateway_registry.py` imports `shuheng.app` -> monolith backslide regression.
@@ -6768,42 +6577,34 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `/gateway` says Shuheng is `experimental_alpha`, A2A/MCP are compatibility surfaces, gateway auth is `none`, and baseline items show structural evidence limits.
-- Good: `/gateway/agents` lists a researcher role and persistent non-secret subagents with purpose text plus `/a2a/messages` delivery targets, without exposing project context or full permission rows.
-- Good: an external agent posts a text message to a discovered subagent via `/a2a/messages`; Shuheng writes a `gateway_message` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
-- Good: `architecture_baseline_report()` called directly still reports A2A/MCP, governance, and external bridge evidence from a no-write snapshot.
-- Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and loopback HTTP only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
+- Good: release readiness says Shuheng is `experimental_alpha`, stable surfaces are local TUI/OMP/governance rows, and local protocol records are not reachable endpoints.
+- Good: local agent directory lists a researcher role and persistent non-secret subagents with purpose text plus `agent-mail://inbox` delivery targets, without exposing project context or full permission rows.
+- Good: a local adapter submits a text message to a discovered subagent through the Agent Mail helper; Shuheng writes a `gateway_message` task, Agent Mail row, and trace row, then waits for the Orchestrator/TUI to decide execution.
+- Good: `architecture_baseline_report()` called directly still reports local protocol records, governance, and external bridge evidence from a no-write snapshot.
+- Good: `scripts/runtime_smoke.py` runs in a temporary `SHUHENG_HOME`, uses fake agents and local registry records only, writes passed `agentruntime.evidence.v1` rows, and then the baseline report upgrades matching items to runtime/e2e evidence.
 - Good: A completed subagent task writes `agenteval.v2` with heuristic score limitations and audit refs.
-- Base: Local `127.0.0.1` gateway works without auth because it is loopback-only by default.
-- Base: Operator deliberately sets `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` and handles external access control outside Shuheng.
-- Bad: README or gateway metadata implies production-ready remote gateway or certified A2A/MCP support without client E2E evidence.
-- Bad: external `/gateway` or MCP resource reads expose active spec paths, context-pack directories, memory paths, workflow run ids, or permission matrix entries.
-- Bad: an external message to `/a2a/messages` immediately starts a subagent, auto-approves an approval row, or writes memory.
-- Bad: stateless `/gateway` lists Secret Vault subagents by reading normal plaintext metadata.
+- Bad: README or local metadata implies production-ready remote access or certified A2A/MCP support without client E2E evidence.
+- Bad: local adapter discovery exposes active spec paths, context-pack directories, memory paths, workflow run ids, or permission matrix entries.
+- Bad: a message accepted into Agent Mail immediately starts a subagent, auto-approves an approval row, or writes memory.
+- Bad: stateless local discovery lists Secret Vault subagents by reading normal plaintext metadata.
 - Bad: Baseline report marks a component complete only because a function exists while hiding that evidence is structural only.
 - Bad: A runtime smoke result is printed to stdout but not stored in `runtime_evidence.jsonl`, so later baseline reports cannot audit it.
 - Bad: Baseline report depends on the caller remembering to call `ensure_gateway_registry(...)` first.
 
 ### 6. Tests Required
 
-- `scripts/check_policy_gates.py` must assert `/gateway` contains `release_readiness` with stable, experimental, and known-gap lists.
-- `scripts/check_policy_gates.py` must assert internal `ensure_gateway_registry(...)` still builds `context_inspector` and `permission_matrix` for local operator use.
-- `scripts/check_policy_gates.py` must assert public `/gateway` returns `agentgateway.public.v1`, includes `shuheng.agent_directory.v1`, and omits `context_inspector`, `permission_matrix`, and `internal_agent_mail`.
-- `scripts/check_policy_gates.py` must assert public `/gateway` and `/health` do not expose local harness paths, daemon file paths, push-store file paths, or MCP resource-read path hints.
-- `scripts/check_policy_gates.py` must assert gateway service descriptors expose `/gateway/agents` and `/a2a/messages`, not `/gateway/context` or `/gateway/permissions`.
-- Tests must assert A2A agent cards use `endpoint.transport:"http+agent-mail"`, `endpoint.uri:"/a2a/messages"`, `delivery.mode:"agent_mail_inbox"`, and `delivery.auto_dispatch:false`.
-- Tests must assert `POST /a2a/messages` writes a `kind:"gateway_message"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
-- Tests must assert MCP resources omit and cannot read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` by default.
-- Tests must assert `/gateway` release readiness exposes structured
-  distribution-smoke metadata for wheel+sdist, dependency-resolving install
-  mode, public console scripts, and debug-only non-gate options.
-- Tests must assert gateway service descriptors use `local_no_auth_compatibility_surface`, `security.auth:"none"`, and loopback safety by default.
-- Tests must assert non-loopback gateway daemon start fails unless `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` is present.
-- Tests must assert A2A/MCP metadata carries `certification:"not_protocol_certified"`.
+- `scripts/check_policy_gates.py` must assert local protocol records expose `release_readiness` with stable, experimental, and known-gap lists.
+- `scripts/check_policy_gates.py` must assert internal `ensure_gateway_registry(...)` still builds `context_inspector` and `permission_matrix` for local operator use without advertising them as resources.
+- `scripts/check_policy_gates.py` must assert service descriptors use `local_record_only`, an empty `base_url`, `agent-directory://local`, and `agent-mail://inbox`.
+- Tests must assert A2A-shaped agent cards use `endpoint.transport:"local-agent-mail"`, `endpoint.uri:"agent-mail://inbox"`, `delivery.mode:"agent_mail_inbox"`, and `delivery.auto_dispatch:false`.
+- Tests must assert local Agent Mail intake writes a `kind:"gateway_message"` task and Agent Mail row, returns `auto_dispatch:false`, and rejects unknown targets without creating phantom tasks.
+- Tests must assert local resources omit and cannot read `resource://agent-mail/context-inspector` and `resource://agent-mail/permission-matrix` by default.
+- Tests must assert release readiness exposes structured distribution-smoke metadata for wheel+sdist, dependency-resolving install mode, public console scripts, and debug-only non-gate options.
+- Tests must assert protocol metadata carries `certification:"not_protocol_certified"` and `posture:"local_record_shape"`.
 - Tests must assert baseline reports contain evidence model, per-item evidence checks, strongest evidence level, and claim limits.
-- Tests must assert `runtime_evidence.jsonl` is registered in governance paths, MCP resources, and gateway internal-mail metadata.
+- Tests must assert `runtime_evidence.jsonl` is registered in governance paths, local resource records, and internal metadata.
 - Tests must assert a passed runtime/e2e evidence row upgrades a matching baseline item's `strongest_evidence_level` without changing the protocol-certification wording.
-- Tests must assert extracted release/baseline/gateway helper modules stay independent from `shuheng.app` and preserve the app compatibility wrapper behavior.
+- Tests must assert extracted release/baseline/local protocol helper modules stay independent from `shuheng.app` and preserve the app compatibility wrapper behavior.
 - CI must run `scripts/runtime_smoke.py` as an isolated local smoke path in addition to function-level policy gates.
 - Tests must assert direct `architecture_baseline_report()` completes A2A/MCP, governance, and external-bridge baseline items without mutating gateway/governance/bridge registry file signatures.
 - Tests must assert eval rows contain `score_method.method:"heuristic"` and limitations explaining factual/citation correctness is not independently verified.
@@ -6815,7 +6616,7 @@ runtime_subagent_list -> current host-tool runtime_agent.get_runtime_subagents()
 
 ```json
 {
-  "gateway_service": {"status": "network_capable"},
+  "gateway_service": {"status": "network_capable", "base_url": "http://127.0.0.1:8765"},
   "a2a_gateway": {
     "status": "network_capable",
     "delivery": {"mode": "direct_dispatch", "auto_dispatch": true}
@@ -6831,7 +6632,7 @@ def append_gateway_agent_message(payload):
 
 def architecture_baseline_report(state=None, gateway_data=None):
     gateway = gateway_data or {}
-    # Existing gateway evidence is now invisible unless caller remembered
+    # Existing local protocol evidence is now invisible unless caller remembered
     # to call ensure_gateway_registry(...) first.
 ```
 
@@ -6840,13 +6641,17 @@ def architecture_baseline_report(state=None, gateway_data=None):
 ```json
 {
   "gateway_service": {
-    "status": "local_no_auth_compatibility_surface",
-    "security": {"auth": "none", "local_only": true}
+    "status": "local_record_only",
+    "base_url": "",
+    "request_response": {
+      "agent_directory": "agent-directory://local",
+      "message_inbox": "agent-mail://inbox"
+    }
   },
   "a2a_gateway": {
-    "status": "compatibility_surface",
+    "status": "local_record_only",
     "compatibility": {"certification": "not_protocol_certified"},
-    "request_response": {"message_send": "/a2a/messages"},
+    "request_response": {"message_send": "agent-mail://inbox"},
     "delivery": {"mode": "agent_mail_inbox", "auto_dispatch": false}
   },
   "baseline_comparison": {

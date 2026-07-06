@@ -14,11 +14,12 @@ The TUI owns these top-level responsibilities:
 - Runtime provider selection and capability discovery.
 - Model routing, model validation, recent/default model records, and per-agent default model assignment.
 - Scheduled task registry and recurring dispatch through governed `agenttask.v2` delegation.
-- A2A/MCP gateway metadata for external agents and tools.
+- Local protocol-shaped records for agent/tool discovery metadata.
 
-The current public posture is experimental local alpha. Gateway, A2A, MCP,
-baseline, eval, and scheduler automation metadata are compatibility surfaces
-unless backed by explicit end-to-end client tests.
+The current public posture is experimental local alpha. Shuheng does not ship a
+built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint.
+A2A/MCP-shaped data is local registry metadata only, not a reachable protocol
+surface.
 
 Runtime providers own narrow execution:
 
@@ -99,12 +100,12 @@ The discoverable metadata contract is `RuntimeProviderSpec`.
 
 Provider metadata must include:
 
-- `provider_id`: Stable id such as `ohmypi`, `codex`, or `a2a.remote.researcher`.
+- `provider_id`: Stable id such as `ohmypi`, `codex`, or `local.researcher`.
 - `capabilities`: Streaming, interrupt, session restore, tool calling, artifact refs, memory candidates, and approval support.
 - `model_routing`: Whether the provider supports current-session switching, defaults, per-agent defaults, and how model selection is addressed.
 - `scheduler`: How scheduled jobs dispatch into the provider, normally through `agenttask.v2`.
 - `policy`: Approval owner, memory write policy, and risky action classes.
-- `a2a` / `mcp`: Gateway compatibility metadata.
+- `a2a` / `mcp`: Local protocol-shaped metadata, not HTTP endpoints.
 
 The default provider is `ohmypi`. Optional provider adapters may register only
 after their required checkout or binary is explicitly available.
@@ -146,21 +147,20 @@ Runtime and top-level control metadata are exposed through:
 - `model_orchestration`: `model_orchestration.v1`, built from the TUI model manager state.
 - `scheduled_task_registry`: `scheduledtask.registry.v1`, persisted at `schedules.jsonl`.
 - `scheduledtask.run.v1`: Scheduler run audit rows persisted at `schedule_runs.jsonl`.
-- `agent_directory`: `shuheng.agent_directory.v1`, exposed at
-  `/gateway/agents` and summarized by `/gateway`. This is the external-facing
-  discovery surface for other agents.
+- `agent_directory`: `shuheng.agent_directory.v1`, stored as a local discovery
+  record for other adapters to inspect through explicit local integration.
 - `context_inspector`: `shuheng.context_inspector.v1`, kept as an internal
   TUI/control-plane projection for local operator inspection.
 - `permission_matrix`: `shuheng.permission_matrix.v1`, kept as an internal
   TUI/control-plane projection for local operator inspection.
 - `shuheng-control.v2` schedule actions: `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, and `schedule.delete`.
 - `capability_registry.runtime_providers`: Provider details available to query tools.
-- A2A agent cards: discovered role templates and visible subagents advertise
-  `http+agent-mail` delivery through `/a2a/messages` with `auto_dispatch:false`.
-- A2A message intake: `POST /a2a/messages` accepts messages into Agent Mail,
-  the task ledger, and trace rows only. It records `kind:"gateway_message"` and
-  leaves execution, approvals, memory writes, and workflow continuation owned by
-  the Shuheng Orchestrator/TUI.
+- A2A-shaped agent cards: discovered role templates and visible subagents
+  advertise local `agent-mail://inbox` delivery with `auto_dispatch:false`.
+- Local Agent Mail intake helpers can record messages into Agent Mail, the task
+  ledger, and trace rows only. They record `kind:"gateway_message"` and leave
+  execution, approvals, memory writes, and workflow continuation owned by the
+  Shuheng Orchestrator/TUI.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `runtime_subagent_list`,
@@ -183,8 +183,8 @@ Runtime and top-level control metadata are exposed through:
 - TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
 - TUI runtime output view: `/runtime-output` formats the same OMP-native
   runtime subagent query helpers as an operator-readable, read-only snapshot.
-- Release readiness: `/gateway` exposes `release_readiness` with stable local
-  surfaces, experimental surfaces, known gaps, and verification commands.
+- Release readiness: `src/shuheng/release_readiness.py` exposes stable local
+  surfaces, experimental local records, known gaps, and verification commands.
 
 ## Design Rules
 
@@ -199,21 +199,19 @@ Runtime and top-level control metadata are exposed through:
 - Do not let OMP permission profiles override policy gates. `full` means normal
   runtime tool availability, not direct long-term memory writes or automatic
   approval for high-risk actions.
-- Do not describe A2A/MCP as certified protocol implementations without real
-  third-party client interoperability tests; use compatibility-surface wording
-  until those tests exist.
-- Do not bind the Web Console/gateway to a non-loopback interface unless
-  `SHUHENG_GATEWAY_ALLOW_REMOTE_BIND=1` is deliberately set and an external
-  trusted access boundary is in place. The built-in gateway has no auth layer.
-- Do not let `/a2a/messages` become a hidden executor. External agent messages
-  are inbox entries and ledger facts until the Orchestrator/TUI decides what to
-  run.
+- Do not describe A2A/MCP-shaped records as certified protocol implementations
+  or reachable endpoints.
+- Do not reintroduce a built-in Web Console, HTTP gateway, mobile endpoint, or
+  remote endpoint without a new explicit product decision.
+- Do not let local Agent Mail message intake become a hidden executor. External
+  adapter messages are inbox entries and ledger facts until the Orchestrator/TUI
+  decides what to run.
 - Do not expose broad project context, active specs, memory paths, workflow run
   internals, or full permission matrices to external agents by default. External
   discovery should describe what each agent/role is for and how to message it.
 - Do not include local harness paths, daemon pid/status/log paths, push-store
-  JSONL paths, or local skill/plugin filesystem paths in public `/gateway`,
-  `/gateway/agents`, or `/health` payloads.
+  JSONL paths, or local skill/plugin filesystem paths in adapter-facing
+  discovery records.
 - Do not create phantom message targets. Gateway message targets must resolve to
   the main orchestrator, a known role template, or a gateway-discovered subagent.
 - Do not list Secret Vault subagents from stateless plaintext metadata. Secret
@@ -229,8 +227,8 @@ Good next adapter candidates:
 
 - Codex CLI: code execution and review tasks, approval-gated write operations.
 - Claude Code: clean-context review and long-codebase reading.
-- OpenAI Agents SDK: agent-as-tool workers and remote tool-backed specialists.
-- A2A remote agents: cross-machine or cross-framework workers discovered through agent cards.
+- OpenAI Agents SDK: agent-as-tool workers behind an explicit local adapter.
+- Agent-card-shaped local adapters: cross-framework workers described through local records before any external transport is designed.
 
 Each new provider should first expose metadata and read-only smoke behavior before
 it is allowed to run write or external-send work.
