@@ -8455,10 +8455,61 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert unique_marker in a.build_subagent_direct_chat_prompt(reloaded, loaded_skilled, "hello")[0]
     assert unique_marker not in a.build_subagent_direct_chat_prompt(reloaded, loaded_plain, "hello")[0]
 
+    transient_marker = "TRANSIENT_SKILL_BODY_ONLY_FOR_CURRENT_PROMPT"
+    transient_skill_dir = Path(a.SHUHENG_SKILLS_DIR, "prompt-only-sop")
+    transient_skill_dir.mkdir(parents=True, exist_ok=True)
+    transient_skill_dir.joinpath("SKILL.md").write_text(
+        "\n".join([
+            "---",
+            "description: Prompt-only SOP for the policy gate.",
+            "---",
+            "# Prompt Only SOP",
+            "",
+            f"Only include {transient_marker} when the prompt requested this transient skill.",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    transient_pack, _transient_ref = a.build_context_pack(
+        reloaded,
+        loaded_plain,
+        "Use prompt-only SOP once",
+        "task_skill_transient",
+        transient_skill_refs=["prompt-only-sop"],
+    )
+    transient_prompt = a.format_context_pack_for_prompt(transient_pack)
+    assert transient_pack["skill_refs"] == [], transient_pack
+    assert transient_pack["transient_skill_refs"] == ["prompt-only-sop"], transient_pack
+    assert "Transient skills requested for this prompt only" in transient_prompt, transient_prompt
+    assert transient_marker in transient_prompt, transient_prompt
+    no_transient_pack, _no_transient_ref = a.build_context_pack(
+        reloaded,
+        loaded_plain,
+        "Do not use prompt-only SOP",
+        "task_skill_no_transient",
+    )
+    assert transient_marker not in a.format_context_pack_for_prompt(no_transient_pack)
+    assert transient_marker in a.build_subagent_direct_chat_prompt(
+        reloaded,
+        loaded_plain,
+        "hello",
+        transient_skill_refs=["prompt-only-sop"],
+    )[0]
+    assert transient_marker not in a.build_subagent_direct_chat_prompt(reloaded, loaded_plain, "hello")[0]
+
     outside_marker = "OUTSIDE_SKILL_FILE_MUST_NOT_BE_INJECTED"
     outside_file = Path(root, "outside-skill.md")
     outside_file.write_text(outside_marker, encoding="utf-8")
     assert a.subagent_skill_file_for_ref(str(outside_file)) == ""
+    outside_transient_pack, _outside_transient_ref = a.build_context_pack(
+        reloaded,
+        loaded_plain,
+        "Reject outside transient skill path",
+        "task_skill_outside_transient",
+        transient_skill_refs=[str(outside_file)],
+    )
+    assert outside_transient_pack["transient_skill_pack"]["included"][0]["resolved"] is False, outside_transient_pack
+    assert outside_marker not in a.format_context_pack_for_prompt(outside_transient_pack)
     a.set_subagent_skill_refs(reloaded, loaded_plain, [str(outside_file)], mode="replace")
     outside_pack, _outside_ref = a.build_context_pack(reloaded, loaded_plain, "Reject outside skill path", "task_skill_outside")
     outside_prompt = a.format_context_pack_for_prompt(outside_pack)

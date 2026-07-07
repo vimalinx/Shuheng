@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 CommandCandidate = tuple[str, str, str, bool]
+SkillCompletionCandidate = tuple[str, str, str, str]
 AgentCommandCompletionKind = Literal["none", "rows", "subagent", "role"]
 
 
@@ -19,6 +20,12 @@ class AgentCommandCompletionDecision:
     role_agent: str = ""
     role_prefix: str = ""
     role_base: str = ""
+
+
+@dataclass(frozen=True)
+class TransientSkillInvocation:
+    skill_refs: tuple[str, ...] = ()
+    prompt: str = ""
 
 
 AGENT_SUBCOMMANDS: list[CommandCandidate] = [
@@ -74,6 +81,53 @@ WORKSPACE_SUBCOMMANDS: list[CommandCandidate] = [
 def completion_insert_text(candidate: CommandCandidate) -> str:
     cmd, _args, _desc, sendable = candidate
     return cmd if sendable else cmd.rstrip() + " "
+
+
+def parse_transient_skill_invocation(text: str) -> TransientSkillInvocation:
+    """Parse leading `$skill` tokens without treating mid-prompt `$` as commands."""
+    rest = (text or "").strip()
+    refs: list[str] = []
+    while rest.startswith("$"):
+        parts = rest.split(maxsplit=1)
+        token = parts[0][1:].strip()
+        if not token:
+            break
+        refs.append(token.removeprefix("skill://").strip())
+        rest = parts[1].lstrip() if len(parts) == 2 else ""
+    return TransientSkillInvocation(tuple(ref for ref in refs if ref), rest)
+
+
+def transient_skill_completion_rows(
+    text: str,
+    skill_candidates: Iterable[SkillCompletionCandidate],
+) -> list[CommandCandidate]:
+    raw = text or ""
+    match = re.match(r"^\$(\S*)$", raw.strip())
+    if not match:
+        return []
+    prefix = (match.group(1) or "").removeprefix("skill://").lower()
+    name_matches: list[CommandCandidate] = []
+    summary_matches: list[CommandCandidate] = []
+    for ref, name, source, summary in skill_candidates:
+        ref_text = str(ref or "").strip().removeprefix("skill://").strip()
+        name_text = str(name or ref_text).strip()
+        if not ref_text:
+            continue
+        hay_name = f"{ref_text} {name_text}".lower()
+        hay_summary = str(summary or "").lower()
+        row = (
+            f"${ref_text}",
+            "",
+            " · ".join(part for part in (str(source or "").strip(), str(summary or "").strip()) if part),
+            False,
+        )
+        if not prefix or hay_name.startswith(prefix) or ref_text.lower().startswith(prefix) or name_text.lower().startswith(prefix):
+            name_matches.append(row)
+        elif prefix in hay_name:
+            name_matches.append(row)
+        elif prefix in hay_summary:
+            summary_matches.append(row)
+    return name_matches + summary_matches
 
 
 def top_level_command_matches(text: str, candidates: Iterable[CommandCandidate]) -> list[CommandCandidate]:

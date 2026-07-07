@@ -17,6 +17,8 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.AgentCommandCompletionDecision is commands.AgentCommandCompletionDecision
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
     assert app_module.subagent_settings_target_from_command is commands.subagent_settings_target_from_command
+    assert app_module.parse_transient_skill_invocation is commands.parse_transient_skill_invocation
+    assert app_module.transient_skill_completion_rows is commands.transient_skill_completion_rows
     assert app_module.archived_command_matches is commands.archived_command_matches
     assert app_module.workspace_command_matches is commands.workspace_command_matches
 
@@ -25,6 +27,34 @@ def test_completion_insert_text_preserves_sendable_behavior() -> None:
     assert commands.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
     assert commands.completion_insert_text(("/workspace", "<cmd>", "查看项目工作区 provenance", False)) == "/workspace "
     assert commands.completion_insert_text(("/agent new ", "", "新建", False)) == "/agent new "
+
+
+def test_transient_skill_invocation_parses_only_leading_tokens() -> None:
+    assert commands.parse_transient_skill_invocation("$huashu-info-search 调研 agent harness") == (
+        commands.TransientSkillInvocation(("huashu-info-search",), "调研 agent harness")
+    )
+    assert commands.parse_transient_skill_invocation("$a $b run this") == commands.TransientSkillInvocation(
+        ("a", "b"),
+        "run this",
+    )
+    assert commands.parse_transient_skill_invocation("ask with $huashu-info-search") == (
+        commands.TransientSkillInvocation((), "ask with $huashu-info-search")
+    )
+    assert commands.parse_transient_skill_invocation("$") == commands.TransientSkillInvocation((), "$")
+
+
+def test_transient_skill_completion_rows_rank_name_before_summary() -> None:
+    candidates = [
+        ("market-audit", "Market Audit", "omp", "Uses review evidence"),
+        ("review-sop", "Review SOP", "agents", "Primary review instructions"),
+    ]
+
+    assert commands.transient_skill_completion_rows("$rev", candidates) == [
+        ("$review-sop", "", "agents · Primary review instructions", False),
+        ("$market-audit", "", "omp · Uses review evidence", False),
+    ]
+    assert commands.transient_skill_completion_rows("normal $rev", candidates) == []
+    assert commands.transient_skill_completion_rows("$rev task", candidates) == []
 
 
 def test_top_level_command_matches_filter_visible_candidates() -> None:
@@ -218,6 +248,35 @@ def test_workspace_command_matches_filter_subcommands_and_reject_extra_args() ->
 def test_app_command_matches_still_uses_extracted_workspace_and_archived_helpers() -> None:
     assert app_module.command_matches("/archived t") == commands.archived_command_matches("/archived t")
     assert app_module.command_matches("/workspace r") == commands.workspace_command_matches("/workspace r")
+
+
+def test_app_command_matches_completes_skills_from_metadata_only(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "skills"
+    skill_dir = root / "alpha-skill"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "\n".join([
+            "---",
+            "description: Alpha skill description",
+            "---",
+            "# Alpha",
+            "FULL_BODY_MARKER_SHOULD_NOT_ENTER_COMPLETION",
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_module, "subagent_skill_roots", lambda: [str(root)])
+    app_module._SKILL_COMPLETION_CACHE = None
+
+    rows = app_module.command_matches("$alp", app_module.State(agent=None))
+
+    assert rows == [("$alpha-skill", "", "local · Alpha skill description", False)]
+    assert app_module.command_matches("@researcher $alp", app_module.State(agent=None)) == [
+        ("@researcher $alpha-skill", "", "local · Alpha skill description", False)
+    ]
+    assert app_module.command_matches("/agent ask researcher $alp", app_module.State(agent=None)) == [
+        ("/agent ask researcher $alpha-skill", "", "local · Alpha skill description", False)
+    ]
+    assert "FULL_BODY_MARKER" not in rows[0][2]
 
 
 def test_app_category_command_matches_keeps_history_owned_counts_and_sorting() -> None:

@@ -4757,8 +4757,11 @@ def policy_gate_for_subagent_task(
     parent_task_id: str = "",
     task_title: str = "",
     queue_if_required: bool = True,
+    deferred_prompt: str = "",
+    transient_skill_refs: Optional[list[str]] = None,
 ) -> PolicyDecision:
     task_objective = policy_relevant_subagent_prompt_text(prompt)
+    prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs or [])
     action = infer_policy_action_for_subagent_task(sub, prompt)
     decision = evaluate_policy_action(
         action,
@@ -4774,6 +4777,7 @@ def policy_gate_for_subagent_task(
             "parent_task_id": parent_task_id,
             "task_title": task_title,
             "prompt_preview": truncate_cells(task_objective, 240),
+            "transient_skill_refs": prompt_skill_refs,
         },
     )
     if queue_if_required and decision.approval_required:
@@ -4783,11 +4787,12 @@ def policy_gate_for_subagent_task(
             extra_payload={
                 "deferred_operation": "start_subagent_task",
                 "subagent_id": sub.agent_id,
-                "prompt": prompt,
+                "prompt": deferred_prompt or prompt,
                 "source": source,
                 "task_id": bus_task_id,
                 "parent_task_id": parent_task_id,
                 "task_title": task_title,
+                "transient_skill_refs": prompt_skill_refs,
             },
         )
     record_policy_decision(decision)
@@ -6787,6 +6792,7 @@ def build_context_pack(
     *,
     permission_profile: str = PERMISSION_PROFILE_STANDARD,
     role_override: str = "",
+    transient_skill_refs: Optional[list[str]] = None,
 ) -> tuple[dict[str, Any], str]:
     role = normalized_role(role_override) if role_override else normalized_subagent_role(sub.role)
     template = role_template(role)
@@ -6801,6 +6807,8 @@ def build_context_pack(
     workspace_context = workspace_context_payload(security_context=sub.security_context)
     skill_refs = normalize_subagent_skill_refs(sub.skill_refs)
     skill_pack = subagent_skill_pack_for_refs(skill_refs)
+    prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs or [])
+    transient_skill_pack = subagent_skill_pack_for_refs(prompt_skill_refs)
     memory_pack = memory_hydration_pack(
         task_id=task_id,
         sub=sub,
@@ -6844,6 +6852,8 @@ def build_context_pack(
         "permissions": permissions,
         "skill_refs": skill_refs,
         "skill_pack": skill_pack,
+        "transient_skill_refs": prompt_skill_refs,
+        "transient_skill_pack": transient_skill_pack,
         "context_policy": context_policy,
         "task": task_contract,
         "task_brief": {
@@ -6904,6 +6914,8 @@ def build_main_runtime_context_pack(
     objective: str,
     task_id: str,
     parent_task_id: str = "",
+    *,
+    transient_skill_refs: Optional[list[str]] = None,
 ) -> tuple[dict[str, Any], str]:
     permission_profile = default_omp_permission_profile()
     main_worker = SubAgentRuntime(
@@ -6929,6 +6941,7 @@ def build_main_runtime_context_pack(
         parent_task_id=parent_task_id,
         permission_profile=permission_profile,
         role_override="main_orchestrator",
+        transient_skill_refs=transient_skill_refs,
     )
 
 
@@ -9358,7 +9371,21 @@ def start_main_agent_task(
     remember_user: bool = False,
     clear_history: bool = False,
     runtime_context_mode: str = "default",
+    transient_skill_refs: Optional[list[str]] = None,
 ) -> bool:
+    raw_text = (text or "").strip()
+    task_text, prompt_skill_refs = split_transient_skill_prompt(raw_text)
+    if transient_skill_refs is not None:
+        prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs)
+        task_text = raw_text
+    if prompt_skill_refs:
+        text = task_text
+        if visible_user_text is None or visible_user_text.strip() == raw_text:
+            visible_user_text = task_text
+    if not (text or "").strip():
+        state.last_error = "主控输入为空。"
+        mark_dirty(state)
+        return False
     if state.status in {"running", "aborting", "restoring"}:
         state.last_error = "当前主控仍在运行，不能启动新的主控任务。"
         mark_dirty(state)
@@ -9423,6 +9450,7 @@ def start_main_agent_task(
                     state,
                     policy_relevant_subagent_prompt_text(text),
                     runtime_task_id,
+                    transient_skill_refs=prompt_skill_refs,
                 )
                 runtime_permissions = dict(context_pack.get("permissions") or runtime_permissions)
                 runtime_prompt = f"{runtime_context_prompt_for_agent(state.agent, context_pack, runtime_context_ref)}\n\n[Task]\n{agent_text}\n[/Task]"
@@ -9449,7 +9477,12 @@ def start_main_agent_task(
                 approval_policy=approval_metadata(),
                 output_contract={"required_sections": role_output_contract("main_orchestrator")},
                 artifact_refs=[runtime_context_ref] if runtime_context_ref else [],
-                metadata={"runtime_lane": "main", "ui_task_id": task_id, "security_context": "standard"},
+                metadata={
+                    "runtime_lane": "main",
+                    "ui_task_id": task_id,
+                    "security_context": "standard",
+                    "transient_skill_refs": prompt_skill_refs,
+                },
             )
             request.metadata["runtime_context_mode"] = runtime_context_mode or "default"
             dq = put_agent_runtime_task(state.agent, request)
@@ -10480,6 +10513,7 @@ def subagent_memory_text(sub: SubAgentRuntime) -> str:
 
 
 _PLUGIN_REGISTRY_CACHE: tuple[Any, Any, PluginRegistry] | None = None
+_SKILL_COMPLETION_CACHE: tuple[float, tuple[str, ...], list[command_helpers.SkillCompletionCandidate]] | None = None
 
 
 def clear_plugin_registry_cache() -> None:
@@ -10592,6 +10626,87 @@ def subagent_skill_summary_from_text(text: str, limit: int = 360) -> str:
         if len(" ".join(lines)) >= limit:
             break
     return truncate_cells(" ".join(lines), limit)
+
+
+def subagent_skill_source_label(root: str) -> str:
+    path = normalized_path(root)
+    known = [
+        (os.path.expanduser("~/.omp/agent/skills"), "omp"),
+        (os.path.expanduser("~/.agents/skills"), "agents"),
+        (os.path.expanduser("~/.codex/skills/.system"), "codex-system"),
+        (os.path.expanduser("~/.codex/skills"), "codex"),
+        (os.path.join(APP_ROOT_DIR, ".agents", "skills"), "project"),
+        (os.path.join(SHUHENG_HOME, "skills"), "shuheng-user"),
+        (SHUHENG_SKILLS_DIR, "shuheng"),
+    ]
+    for candidate, label in known:
+        if path == normalized_path(candidate):
+            return label
+    return "local"
+
+
+def read_skill_metadata_text(path: str, limit: int = 12000) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read(max(1, limit))
+    except OSError:
+        return ""
+
+
+def subagent_skill_completion_candidates(limit: int = 240) -> list[command_helpers.SkillCompletionCandidate]:
+    global _SKILL_COMPLETION_CACHE
+    roots = tuple(subagent_skill_roots())
+    now = time.time()
+    if _SKILL_COMPLETION_CACHE is not None:
+        cached_at, cached_roots, cached_candidates = _SKILL_COMPLETION_CACHE
+        if cached_roots == roots and now - cached_at < 5.0:
+            return list(cached_candidates[:limit])
+    candidates: list[command_helpers.SkillCompletionCandidate] = []
+    seen: set[str] = set()
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            names = sorted(os.listdir(root), key=str.casefold)
+        except OSError:
+            continue
+        for name in names:
+            if len(candidates) >= limit:
+                _SKILL_COMPLETION_CACHE = (now, roots, list(candidates))
+                return candidates
+            if not name or name.startswith("."):
+                continue
+            skill_path = ""
+            ref = ""
+            child = normalized_path(os.path.join(root, name))
+            if os.path.isdir(child):
+                skill_path = normalized_path(os.path.join(child, "SKILL.md"))
+                ref = name
+            elif name.lower().endswith(".md") and name.lower() not in {"readme.md", "license.md"}:
+                skill_path = child
+                ref = name[:-3]
+            if not ref:
+                continue
+            key = ref.casefold()
+            if key in seen or not os.path.isfile(skill_path):
+                continue
+            if not path_is_within(skill_path, root):
+                continue
+            seen.add(key)
+            summary = subagent_skill_summary_from_text(read_skill_metadata_text(skill_path))
+            candidates.append((
+                ref,
+                subagent_skill_display_name(ref) or ref,
+                subagent_skill_source_label(root),
+                summary,
+            ))
+    _SKILL_COMPLETION_CACHE = (now, roots, list(candidates))
+    return candidates[:limit]
+
+
+def split_transient_skill_prompt(prompt: str) -> tuple[str, list[str]]:
+    parsed = parse_transient_skill_invocation(prompt)
+    return parsed.prompt.strip(), normalize_subagent_skill_refs(list(parsed.skill_refs))
 
 
 def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
@@ -10988,9 +11103,21 @@ User message:
 """.strip()
 
 
-def build_subagent_direct_chat_prompt(state: State, sub: SubAgentRuntime, prompt: str) -> tuple[str, str, str]:
+def build_subagent_direct_chat_prompt(
+    state: State,
+    sub: SubAgentRuntime,
+    prompt: str,
+    *,
+    transient_skill_refs: Optional[list[str]] = None,
+) -> tuple[str, str, str]:
     chat_context_id = short_uid("chat")
-    context_pack, context_ref = build_context_pack(state, sub, prompt, chat_context_id)
+    context_pack, context_ref = build_context_pack(
+        state,
+        sub,
+        prompt,
+        chat_context_id,
+        transient_skill_refs=transient_skill_refs,
+    )
     prompt_text = "\n\n".join([
         runtime_context_prompt_for_agent(sub.agent, context_pack, context_ref),
         subagent_direct_chat_prompt(sub, prompt, context_ref=context_ref, chat_context_id=chat_context_id),
@@ -15916,6 +16043,8 @@ category_command_completion_rows = command_helpers.category_command_completion_r
 approval_command_completion_rows = command_helpers.approval_command_completion_rows
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
 subagent_settings_target_from_command = command_helpers.subagent_settings_target_from_command
+parse_transient_skill_invocation = command_helpers.parse_transient_skill_invocation
+transient_skill_completion_rows = command_helpers.transient_skill_completion_rows
 
 
 def subagent_completion_rows(state: Optional[State], prefix: str, subcmd: str) -> list[tuple[str, str, str, bool]]:
@@ -15990,13 +16119,35 @@ def approval_command_matches(text: str, state: Optional[State] = None) -> list[t
     return approval_command_completion_rows(text, approval_candidates)
 
 
+def transient_skill_command_matches(text: str) -> list[tuple[str, str, str, bool]]:
+    stripped = (text or "").strip()
+    patterns = [
+        r"^()\$(\S*)$",
+        r"^(@\S+\s+)\$(\S*)$",
+        r"^(/agent\s+(?:ask|input|run)\s+\S+\s+)\$(\S*)$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, stripped, re.I)
+        if not match:
+            continue
+        base = match.group(1)
+        prefix = match.group(2)
+        rows = transient_skill_completion_rows(f"${prefix}", subagent_skill_completion_candidates())
+        return [(base + cmd, args, desc, sendable) for cmd, args, desc, sendable in rows]
+    return []
+
+
 def command_matches(text: str, state: Optional[State] = None) -> list[tuple[str, str, str, bool]]:
     raw = text or ""
     stripped = raw.strip()
+    transient_rows = transient_skill_command_matches(stripped)
+    if transient_rows:
+        return transient_rows
     if not stripped.startswith("/"):
         return []
     if re.match(r"^/agent(?:\s|$)", raw):
-        return agent_command_matches(raw, state)
+        agent_rows = agent_command_matches(raw, state)
+        return agent_rows or transient_skill_command_matches(stripped)
     if re.match(r"^/workspaces?(?:\s|$)", raw, re.I):
         return workspace_command_matches(raw)
     if re.match(r"^/(?:filter|collapse|expand)\s", raw, re.I):
@@ -24501,6 +24652,14 @@ def submit(state: State, text: str) -> None:
         state.last_error = start_subagent_chat(state, active_sub, text, source="subagent_chat")
         mark_dirty(state)
         return
+    m_agent_mention = re.match(r"^@(\S+)\s+([\s\S]+)$", text)
+    if m_agent_mention:
+        sub = resolve_subagent(state, m_agent_mention.group(1))
+        if sub is None:
+            add_system(state, f"找不到子 agent: {m_agent_mention.group(1)}")
+            return
+        add_system(state, start_subagent_task(state, sub, m_agent_mention.group(2), source="user:mention"))
+        return
     if text == "/help":
         lines = [f"{cmd:<11} {args:<8} {desc}" for cmd, args, desc, _sendable in COMMANDS]
         add_system(state, "可用命令：\n" + "\n".join(lines))
@@ -25105,7 +25264,13 @@ def start_secret_subagent_task(
     policy_approved: bool = False,
     parent_task_id: str = "",
     task_title: str = "",
+    transient_skill_refs: Optional[list[str]] = None,
 ) -> str:
+    prompt, prompt_skill_refs = split_transient_skill_prompt(prompt)
+    if transient_skill_refs is not None:
+        prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs)
+    if not prompt:
+        return "子 agent 输入为空。"
     if not state.secret_vault.unlocked or not state.secret_vault.key:
         return "Secret Vault 已锁定，不能启动 Secret 子 agent。"
     role = normalized_subagent_role(sub.role)
@@ -25133,7 +25298,14 @@ def start_secret_subagent_task(
         return f"{sub.name} 默认模型未应用，已阻止启动：{model_msg}"
     sub.task_id += 1
     task_id = sub.task_id
-    context_pack, context_ref = build_context_pack(state, sub, task_objective, bus_task_id, parent_task_id=parent_task_id)
+    context_pack, context_ref = build_context_pack(
+        state,
+        sub,
+        task_objective,
+        bus_task_id,
+        parent_task_id=parent_task_id,
+        transient_skill_refs=prompt_skill_refs,
+    )
     sub.active_task_id = task_id
     sub.active_bus_task_id = bus_task_id
     sub.status = "running"
@@ -25176,7 +25348,12 @@ def start_secret_subagent_task(
         bus_task_id,
         "delegated",
         "working",
-        {"context_pack": context_ref, "source": source, "runtime_provider_id": agent_runtime_provider_id(agent)},
+        {
+            "context_pack": context_ref,
+            "source": source,
+            "runtime_provider_id": agent_runtime_provider_id(agent),
+            "transient_skill_refs": prompt_skill_refs,
+        },
     )
     agent_prompt = f"{runtime_context_prompt_for_agent(agent, context_pack, context_ref)}\n\n[Task]\n{prompt}\n[/Task]"
     try:
@@ -25195,7 +25372,12 @@ def start_secret_subagent_task(
             approval_policy=approval_metadata(),
             output_contract=task_contract_for_role(role, task_objective).get("output_contract") or {},
             artifact_refs=[context_ref],
-            metadata={"runtime_lane": "secret_subagent", "source": source, "security_context": sub.security_context},
+            metadata={
+                "runtime_lane": "secret_subagent",
+                "source": source,
+                "security_context": sub.security_context,
+                "transient_skill_refs": prompt_skill_refs,
+            },
         )
         dq = put_agent_runtime_task(agent, request)
     except Exception as exc:
@@ -25215,7 +25397,8 @@ def start_secret_subagent_task(
 
 
 def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source: str = "subagent_chat") -> str:
-    prompt = (prompt or "").strip()
+    raw_prompt = (prompt or "").strip()
+    prompt, transient_skill_refs = split_transient_skill_prompt(raw_prompt)
     if not prompt:
         return "子 agent 聊天输入为空。"
     role = normalized_subagent_role(sub.role)
@@ -25240,7 +25423,7 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
         return fail_visible("Secret Vault 已锁定，不能与 Secret 子 agent 聊天。")
     record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
-        return queue_subagent_chat_input(state, sub, prompt, interrupt_requested=sub.status == "aborting")
+        return queue_subagent_chat_input(state, sub, raw_prompt, interrupt_requested=sub.status == "aborting")
     agent = ensure_subagent_agent(state, sub)
     ok_model, model_msg = apply_subagent_default_model(state, sub)
     if not ok_model:
@@ -25258,7 +25441,12 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     save_subagent_chat_session(state, sub, source=source)
     mark_subagent_messages_changed(state, sub)
     append_subagent_event(sub, source, prompt, state=state)
-    agent_prompt, context_ref, chat_context_id = build_subagent_direct_chat_prompt(state, sub, prompt)
+    agent_prompt, context_ref, chat_context_id = build_subagent_direct_chat_prompt(
+        state,
+        sub,
+        prompt,
+        transient_skill_refs=transient_skill_refs,
+    )
     try:
         runtime_source = f"subagent-chat:{sub.agent_id}"
         request = runtime_task_request_for_agent(
@@ -25278,6 +25466,7 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
                 "runtime_lane": "subagent_chat",
                 "chat_context_id": chat_context_id,
                 "security_context": sub.security_context,
+                "transient_skill_refs": transient_skill_refs,
             },
         )
         dq = put_agent_runtime_task(agent, request)
@@ -25312,7 +25501,8 @@ def start_subagent_task(
     parent_task_id: str = "",
     task_title: str = "",
 ) -> str:
-    prompt = (prompt or "").strip()
+    raw_prompt = (prompt or "").strip()
+    prompt, transient_skill_refs = split_transient_skill_prompt(raw_prompt)
     if not prompt:
         return "子 agent 输入为空。"
     role = normalized_subagent_role(sub.role)
@@ -25326,13 +25516,14 @@ def start_subagent_task(
             policy_approved=policy_approved,
             parent_task_id=parent_task_id,
             task_title=task_title,
+            transient_skill_refs=transient_skill_refs,
         )
     record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
         return queue_subagent_task(
             state,
             sub,
-            prompt,
+            raw_prompt,
             source=source,
             policy_approved=policy_approved,
             parent_task_id=parent_task_id,
@@ -25348,6 +25539,8 @@ def start_subagent_task(
             bus_task_id=bus_task_id,
             parent_task_id=parent_task_id,
             task_title=task_title,
+            deferred_prompt=raw_prompt,
+            transient_skill_refs=transient_skill_refs,
         )
         if decision.approval_required:
             append_orchestrator_plan(
@@ -25458,7 +25651,14 @@ def start_subagent_task(
         )
         append_trace(bus_task_id, "single_writer_denied", agent_id=sub.agent_id, status="rejected", payload={"error": lock_error, "checkpoint_id": checkpoint.get("checkpoint_id", "")})
         return lock_error
-    context_pack, context_ref = build_context_pack(state, sub, task_objective, bus_task_id, parent_task_id=parent_task_id)
+    context_pack, context_ref = build_context_pack(
+        state,
+        sub,
+        task_objective,
+        bus_task_id,
+        parent_task_id=parent_task_id,
+        transient_skill_refs=transient_skill_refs,
+    )
     append_orchestrator_plan(
         sub,
         task_objective,
@@ -25508,6 +25708,7 @@ def start_subagent_task(
             "runtime_provider_id": runtime_provider_id,
             "output_contract": {"required_sections": role_output_contract(role)},
             "permissions": permissions_for_role(role, security_context=sub.security_context),
+            "transient_skill_refs": transient_skill_refs,
         },
         artifact_refs=[context_ref],
         budget=default_task_budget(role),
@@ -25528,7 +25729,7 @@ def start_subagent_task(
         state=state,
         agent_id=sub.agent_id,
         summary=truncate_cells(task_objective, 240),
-        extra={"context_pack_ref": context_ref},
+        extra={"context_pack_ref": context_ref, "transient_skill_refs": transient_skill_refs},
     )
     append_trace(
         bus_task_id,
@@ -25540,6 +25741,7 @@ def start_subagent_task(
             "role": role,
             "checkpoint_id": checkpoint.get("checkpoint_id", ""),
             "runtime_provider_id": runtime_provider_id,
+            "transient_skill_refs": transient_skill_refs,
         },
     )
     agent_prompt = f"{runtime_context_prompt_for_agent(agent, context_pack, context_ref)}\n\n[Task]\n{prompt}\n[/Task]"
@@ -25559,7 +25761,12 @@ def start_subagent_task(
             approval_policy=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
             output_contract=task_contract_for_role(role, task_objective).get("output_contract") or {},
             artifact_refs=[context_ref],
-            metadata={"runtime_lane": "subagent", "source": source, "security_context": sub.security_context},
+            metadata={
+                "runtime_lane": "subagent",
+                "source": source,
+                "security_context": sub.security_context,
+                "transient_skill_refs": transient_skill_refs,
+            },
         )
         dq = put_agent_runtime_task(agent, request)
     except Exception as exc:
