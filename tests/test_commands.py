@@ -33,6 +33,12 @@ def test_transient_skill_invocation_parses_only_leading_tokens() -> None:
     assert commands.parse_transient_skill_invocation("$huashu-info-search 调研 agent harness") == (
         commands.TransientSkillInvocation(("huashu-info-search",), "调研 agent harness")
     )
+    assert commands.parse_transient_skill_invocation("$+huashu-info-search 调研 agent harness") == (
+        commands.TransientSkillInvocation(("huashu-info-search",), "调研 agent harness")
+    )
+    assert commands.parse_transient_skill_invocation("$+skill://huashu-info-search 调研") == (
+        commands.TransientSkillInvocation(("huashu-info-search",), "调研")
+    )
     assert commands.parse_transient_skill_invocation("$a $b run this") == commands.TransientSkillInvocation(
         ("a", "b"),
         "run this",
@@ -52,6 +58,10 @@ def test_transient_skill_completion_rows_rank_name_before_summary() -> None:
     assert commands.transient_skill_completion_rows("$rev", candidates) == [
         ("$review-sop", "", "agents · Primary review instructions", False),
         ("$market-audit", "", "omp · Uses review evidence", False),
+    ]
+    assert commands.transient_skill_completion_rows("$+rev", candidates) == [
+        ("$+review-sop", "", "agents · Primary review instructions", False),
+        ("$+market-audit", "", "omp · Uses review evidence", False),
     ]
     assert commands.transient_skill_completion_rows("normal $rev", candidates) == []
     assert commands.transient_skill_completion_rows("$rev task", candidates) == []

@@ -8480,8 +8480,9 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     transient_prompt = a.format_context_pack_for_prompt(transient_pack)
     assert transient_pack["skill_refs"] == [], transient_pack
     assert transient_pack["transient_skill_refs"] == ["prompt-only-sop"], transient_pack
-    assert "Transient skills requested for this prompt only" in transient_prompt, transient_prompt
-    assert transient_marker in transient_prompt, transient_prompt
+    assert "OMP native transient skill command refs for this prompt" in transient_prompt, transient_prompt
+    assert "- prompt-only-sop" in transient_prompt, transient_prompt
+    assert transient_marker not in transient_prompt, transient_prompt
     no_transient_pack, _no_transient_ref = a.build_context_pack(
         reloaded,
         loaded_plain,
@@ -8489,13 +8490,33 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
         "task_skill_no_transient",
     )
     assert transient_marker not in a.format_context_pack_for_prompt(no_transient_pack)
-    assert transient_marker in a.build_subagent_direct_chat_prompt(
+    transient_chat_prompt = a.build_subagent_direct_chat_prompt(
         reloaded,
         loaded_plain,
         "hello",
         transient_skill_refs=["prompt-only-sop"],
     )[0]
+    assert "OMP native transient skill command refs for this prompt" in transient_chat_prompt, transient_chat_prompt
+    assert transient_marker not in transient_chat_prompt, transient_chat_prompt
     assert transient_marker not in a.build_subagent_direct_chat_prompt(reloaded, loaded_plain, "hello")[0]
+    runtime_agent = RuntimeCaptureFakeAgent()
+    loaded_plain.agent = runtime_agent
+    native_started = a.start_subagent_task(
+        reloaded,
+        loaded_plain,
+        "$+prompt-only-sop Run prompt-only SOP through OMP",
+        source="user",
+    )
+    assert native_started.startswith("已启动子 agent"), native_started
+    assert runtime_agent.runtime_requests, runtime_agent.runtime_requests
+    native_request = runtime_agent.runtime_requests[-1]
+    assert native_request.prompt.startswith("/skill:prompt-only-sop "), native_request.prompt
+    assert "OMP native transient skill command refs for this prompt" in native_request.prompt, native_request.prompt
+    assert transient_marker not in native_request.prompt, native_request.prompt
+    assert "[Task]\nRun prompt-only SOP through OMP\n[/Task]" in native_request.prompt, native_request.prompt
+    assert native_request.objective == "Run prompt-only SOP through OMP", native_request
+    assert native_request.metadata["transient_skill_refs"] == ["prompt-only-sop"], native_request.metadata
+    assert a.normalize_subagent_skill_refs(loaded_plain.skill_refs) == [], loaded_plain.skill_refs
 
     outside_marker = "OUTSIDE_SKILL_FILE_MUST_NOT_BE_INJECTED"
     outside_file = Path(root, "outside-skill.md")

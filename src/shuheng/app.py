@@ -6808,7 +6808,7 @@ def build_context_pack(
     skill_refs = normalize_subagent_skill_refs(sub.skill_refs)
     skill_pack = subagent_skill_pack_for_refs(skill_refs)
     prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs or [])
-    transient_skill_pack = subagent_skill_pack_for_refs(prompt_skill_refs)
+    transient_skill_pack = transient_skill_metadata_for_refs(prompt_skill_refs)
     memory_pack = memory_hydration_pack(
         task_id=task_id,
         sub=sub,
@@ -9462,6 +9462,7 @@ def start_main_agent_task(
                     status="failed",
                     payload={"error": f"{type(exc).__name__}: {exc}", "runtime_provider_id": agent_runtime_provider_id(state.agent)},
                 )
+        runtime_prompt = runtime_prompt_with_transient_skill_command(state.agent, runtime_prompt, prompt_skill_refs)
     try:
         if hasattr(state.agent, "put_runtime_task") and not secret_task:
             request = runtime_task_request_for_agent(
@@ -10707,6 +10708,53 @@ def subagent_skill_completion_candidates(limit: int = 240) -> list[command_helpe
 def split_transient_skill_prompt(prompt: str) -> tuple[str, list[str]]:
     parsed = parse_transient_skill_invocation(prompt)
     return parsed.prompt.strip(), normalize_subagent_skill_refs(list(parsed.skill_refs))
+
+
+def omp_native_transient_skill_ref_for_agent(agent: Any, transient_skill_refs: Optional[list[str]]) -> str:
+    if not is_ohmypi_runtime_agent(agent):
+        return ""
+    for ref in normalize_subagent_skill_refs(transient_skill_refs or []):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", ref):
+            continue
+        return ref
+    return ""
+
+
+def transient_skill_metadata_for_refs(refs: list[str]) -> dict[str, Any]:
+    normalized_refs = normalize_subagent_skill_refs(refs)
+    included: list[dict[str, Any]] = []
+    for ref in normalized_refs:
+        display = subagent_skill_display_name(ref) or ref
+        command_eligible = bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", ref))
+        included.append({
+            "ref": ref,
+            "name": display,
+            "resolved": command_eligible,
+            "command_eligible": command_eligible,
+            "loader": "omp-native-skill-command",
+            "summary": "Requested for this prompt via OMP native /skill command; Shuheng does not inject the skill body.",
+            "body": "",
+            "body_excerpt": "",
+        })
+    return {
+        "schema_version": "subagent.transient_skill_refs.v1",
+        "skill_refs": normalized_refs,
+        "included": included,
+    }
+
+
+def runtime_prompt_with_transient_skill_command(
+    agent: Any,
+    prompt: str,
+    transient_skill_refs: Optional[list[str]],
+) -> str:
+    native_ref = omp_native_transient_skill_ref_for_agent(agent, transient_skill_refs)
+    if not native_ref:
+        return prompt
+    stripped_prompt = (prompt or "").strip()
+    if stripped_prompt.startswith("/skill:"):
+        return stripped_prompt
+    return f"/skill:{native_ref} {stripped_prompt}" if stripped_prompt else f"/skill:{native_ref}"
 
 
 def subagent_skill_pack_for_refs(refs: list[str]) -> dict[str, Any]:
@@ -25356,6 +25404,7 @@ def start_secret_subagent_task(
         },
     )
     agent_prompt = f"{runtime_context_prompt_for_agent(agent, context_pack, context_ref)}\n\n[Task]\n{prompt}\n[/Task]"
+    agent_prompt = runtime_prompt_with_transient_skill_command(agent, agent_prompt, prompt_skill_refs)
     try:
         runtime_source = f"secret-subagent:{sub.agent_id}"
         request = runtime_task_request_for_agent(
@@ -25447,6 +25496,7 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
         prompt,
         transient_skill_refs=transient_skill_refs,
     )
+    agent_prompt = runtime_prompt_with_transient_skill_command(agent, agent_prompt, transient_skill_refs)
     try:
         runtime_source = f"subagent-chat:{sub.agent_id}"
         request = runtime_task_request_for_agent(
@@ -25745,6 +25795,7 @@ def start_subagent_task(
         },
     )
     agent_prompt = f"{runtime_context_prompt_for_agent(agent, context_pack, context_ref)}\n\n[Task]\n{prompt}\n[/Task]"
+    agent_prompt = runtime_prompt_with_transient_skill_command(agent, agent_prompt, transient_skill_refs)
     try:
         runtime_source = f"subagent:{sub.agent_id}"
         request = runtime_task_request_for_agent(

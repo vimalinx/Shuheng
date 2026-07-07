@@ -90,9 +90,12 @@ def parse_transient_skill_invocation(text: str) -> TransientSkillInvocation:
     while rest.startswith("$"):
         parts = rest.split(maxsplit=1)
         token = parts[0][1:].strip()
+        if token.startswith("+"):
+            token = token[1:].strip()
+        token = token.removeprefix("skill://").strip()
         if not token:
             break
-        refs.append(token.removeprefix("skill://").strip())
+        refs.append(token)
         rest = parts[1].lstrip() if len(parts) == 2 else ""
     return TransientSkillInvocation(tuple(ref for ref in refs if ref), rest)
 
@@ -102,10 +105,12 @@ def transient_skill_completion_rows(
     skill_candidates: Iterable[SkillCompletionCandidate],
 ) -> list[CommandCandidate]:
     raw = text or ""
-    match = re.match(r"^\$(\S*)$", raw.strip())
+    match = re.match(r"^\$(\+?\S*)$", raw.strip())
     if not match:
         return []
-    prefix = (match.group(1) or "").removeprefix("skill://").lower()
+    raw_prefix = match.group(1) or ""
+    plus_prefix = raw_prefix.startswith("+")
+    prefix = raw_prefix.removeprefix("+").removeprefix("skill://").lower()
     name_matches: list[CommandCandidate] = []
     summary_matches: list[CommandCandidate] = []
     for ref, name, source, summary in skill_candidates:
@@ -116,7 +121,7 @@ def transient_skill_completion_rows(
         hay_name = f"{ref_text} {name_text}".lower()
         hay_summary = str(summary or "").lower()
         row = (
-            f"${ref_text}",
+            f"${'+' if plus_prefix else ''}{ref_text}",
             "",
             " · ".join(part for part in (str(source or "").strip(), str(summary or "").strip()) if part),
             False,

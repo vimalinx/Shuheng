@@ -1,0 +1,1 @@
+{"file":".trellis/spec/backend/agent-control-protocol.md","reason":"Existing dedicated skill ownership and prompt-injection contract; new transient skill invocation must extend this boundary without creating a parallel skill system."}

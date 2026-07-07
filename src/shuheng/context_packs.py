@@ -283,7 +283,7 @@ def format_context_pack_for_prompt(
     layered_memory = pack.get("layered_memory") or {}
     shared_profile = pack.get("shared_user_profile") or ((pack.get("layers") or {}).get("L1_user_profile") or {}).get("profile") or {}
     skill_pack = pack.get("skill_pack") or {}
-    transient_skill_pack = pack.get("transient_skill_pack") or {}
+    transient_skill_refs = [str(ref) for ref in (pack.get("transient_skill_refs") or []) if str(ref or "").strip()]
     layers = pack.get("layers") or {}
     boundaries = "\n".join(f"- {item}" for item in (task.get("boundaries") or []))
     success = "\n".join(f"- {item}" for item in (task.get("success_criteria") or []))
@@ -309,7 +309,7 @@ def format_context_pack_for_prompt(
     for item in ((layers.get("L7_artifacts") or {}).get("items") or [])[-5:]:
         artifact_items.append(f"- {item.get('uri', '')} {item.get('hash', '')} task={item.get('source_task_id', '')}")
     skill_items = skill_pack_prompt_items(skill_pack)
-    transient_skill_items = skill_pack_prompt_items(transient_skill_pack)
+    transient_skill_items = [f"- {ref}" for ref in transient_skill_refs]
     return f"""
 [Shuheng Context Pack]
 task_id: {pack.get("task_id", "")}
@@ -360,7 +360,7 @@ Recent artifact refs:
 Dedicated skills for this agent only:
 {chr(10).join(skill_items) or "- (none)"}
 
-Transient skills requested for this prompt only:
+OMP native transient skill command refs for this prompt:
 {chr(10).join(transient_skill_items) or "- (none)"}
 
 Profile excerpt:

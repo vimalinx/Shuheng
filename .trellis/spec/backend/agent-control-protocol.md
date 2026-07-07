@@ -2019,48 +2019,52 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 
 ### 1. Scope / Trigger
 
-- Trigger: The user prefixes a delegated subagent prompt with `$<skill-ref>` to request one existing local/OMP skill for that prompt only.
+- Trigger: The user prefixes a delegated subagent prompt with `$<skill-ref>` or `$+<skill-ref>` to request one existing local/OMP skill for that prompt only.
 - Applies to: `$` command completion, direct user text such as `$huashu-info-search research ...`, mention dispatch such as `@researcher $huashu-info-search research ...`, `/agent ask|run|input <agent> $<skill-ref> ...`, selected-subagent direct chat, subagent task queues, policy-approval retry payloads, context pack construction, prompt rendering, task/mail/trace metadata, and policy gates.
 - Non-goal: This does not create a new skill registry, skill marketplace, plugin execution layer, background installer, permission grant, global skill injection, or replacement for `/agent skill ...`.
 
 ### 2. Signatures
 
-- Prompt prefix: one or more leading `$<skill-ref>` tokens before the actual task text.
+- Prompt prefix: one or more leading `$<skill-ref>` or `$+<skill-ref>` tokens before the actual task text. `$+` is a tolerated shorthand variant and does not persist the `+` into the normalized skill ref.
 - Parser owner: `src/shuheng/commands.py` owns pure `parse_transient_skill_invocation(...)` and `$` completion ranking over explicit candidate metadata.
-- App owner: `src/shuheng/app.py` owns allowed skill-root discovery, skill-file resolution, context-pack assembly, target subagent routing, approval queue payloads, and runtime dispatch.
+- App owner: `src/shuheng/app.py` owns command-safe skill-name validation, context-pack metadata assembly, target subagent routing, approval queue payloads, and runtime dispatch.
+- OMP native command mapping: for OhMyPi / OMP runtime agents, the first command-safe prompt-level transient skill ref is dispatched as OMP's native `/skill:<name> ...` command while the Shuheng context pack and stripped task text remain inside the command args.
 - Context-pack fields:
   - `transient_skill_refs`
-  - `transient_skill_pack.schema_version == "subagent.skill_pack.v1"`
-- Prompt label: `Transient skills requested for this prompt only`.
+  - `transient_skill_pack.schema_version == "subagent.transient_skill_refs.v1"`
+- Prompt label: `OMP native transient skill command refs for this prompt`.
 
 ### 3. Contracts
 
 - `$<skill-ref>` is parsed only at the beginning of submitted text. A `$` token in the middle of normal prose is not a skill invocation.
-- Leading transient `$<skill-ref>` tokens are stripped before policy-action inference, visible task objective construction, and the `[Task]...[/Task]` runtime payload.
+- Leading transient `$<skill-ref>` / `$+<skill-ref>` tokens are stripped before policy-action inference, visible task objective construction, and the `[Task]...[/Task]` task payload. For OMP runtime dispatch, the full runtime prompt may be wrapped as `/skill:<first-ref> <context-and-task-payload>` so OMP's native skill loader is triggered without reintroducing the shorthand token into the task objective.
 - Transient skill refs are normalized with the same `normalize_subagent_skill_refs(...)` helper used by persistent dedicated skills, but they must not be written to `SubAgentRuntime.skill_refs`, persistent metadata, Secret metadata, plugin refs, memory, or global state.
-- Transient skill refs combine with the target subagent's persistent `skill_refs` for the current context pack only. Persistent skills remain in `skill_pack`; prompt-level skills remain in `transient_skill_pack`.
-- Resolved transient refs load full local `SKILL.md` or markdown skill files only through the existing Shuheng/Codex/agents/OMP/repo roots and plugin skill resolver. Explicit paths must pass the same root-containment check as persistent dedicated skills.
-- Unresolved transient refs stay visible in `transient_skill_refs` / `transient_skill_pack.included[].resolved:false` and inject no arbitrary body text.
+- Transient skill refs do not combine into the target subagent's persistent `skill_pack`. Persistent `/agent skill ...` entries remain the only prompt-body skill injection path owned by Shuheng.
+- Prompt-level `$skill` never causes Shuheng to read or inject the transient skill body. The skill body is loaded only by OMP's own `/skill:<name>` command path when OMP has that skill in `session.skills`.
+- Non-command-shaped transient refs stay visible in `transient_skill_refs` / `transient_skill_pack.included[].command_eligible:false` and are not converted into `/skill:<name>`.
 - `$` completion candidates are built from metadata only: ref/name, source label, and bounded summary/description. Completion must not inject or expose full skill bodies.
 - Completion ranking prefers skill ref/name matches before description or summary matches.
 - Approval-required subagent tasks must preserve the original prompt or equivalent transient refs so approving later still dispatches with the requested transient skill.
+- OMP native skill commands support one skill command at a time. When multiple transient refs are requested, Shuheng maps only the first command-safe ref to `/skill:<name>` and keeps all normalized refs in `transient_skill_refs` / metadata for audit.
+- Shuheng must not add a fallback transient body pack if OMP does not load the skill. OMP's native loader is the source of truth for prompt-level `$skill`.
 - Skill support must not weaken role write policy, approval gates, Secret Vault isolation, single-writer enforcement, or Orchestrator ownership.
 
 ### 4. Validation & Error Matrix
 
-- `$huashu-info-search research topic` -> target task sees objective `research topic` plus `transient_skill_refs:["huashu-info-search"]`.
+- `$huashu-info-search research topic` -> target task sees objective `research topic` plus `transient_skill_refs:["huashu-info-search"]`; if the runtime agent is OMP, the dispatched prompt starts with `/skill:huashu-info-search `.
+- `$+huashu-info-search research topic` -> same normalized transient ref and objective as `$huashu-info-search research topic`.
 - `@researcher $huashu-info-search research topic` -> dispatches one governed task to `researcher`, not the main Orchestrator.
-- `/agent ask researcher $huashu-info-search research topic` -> dispatches one governed task to `researcher` with the transient skill pack.
-- Selected subagent chat `$custom-sop hello` -> the direct-chat context pack includes `custom-sop` only for that turn.
+- `/agent ask researcher $huashu-info-search research topic` -> dispatches one governed task to `researcher` with `/skill:huashu-info-search` at the start of the OMP prompt.
+- Selected subagent chat `$custom-sop hello` -> the direct-chat OMP prompt starts with `/skill:custom-sop`; Shuheng context metadata records the ref only.
 - Normal text `Please explain $PATH` -> no transient skill invocation.
-- `$missing-skill do work` -> `missing-skill` remains unresolved and no body text is injected.
-- `$<absolute-path-outside-skill-roots> do work` -> unresolved; outside file body is not injected.
+- `$missing-skill do work` -> OMP receives `/skill:missing-skill ...`; if OMP does not have that skill, OMP owns the resulting behavior. Shuheng still injects no body text.
+- `$<absolute-path-outside-skill-roots> do work` -> not command-safe, so it is not converted to `/skill:<name>` and outside file body is not injected.
 - Approval-required transient task -> approval retry still includes the transient skill refs.
-- Subsequent task without `$skill` -> no transient skill body appears unless it is also a persistent dedicated skill for that subagent.
+- Subsequent task without `$skill` -> no `/skill:<name>` prefix appears unless the user asks for it again.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `$huashu-info-search 调研 workflow` injects the existing OMP/local `huashu-info-search` skill for this prompt and strips the `$...` token from the task text.
+- Good: `$huashu-info-search 调研 workflow` or `$+huashu-info-search 调研 workflow` strips the `$...` token from the task text and triggers OMP's native `/skill:huashu-info-search` loader when the target runtime is OMP.
 - Good: `/agent skill add researcher huashu-info-search` remains the only long-term way to persist a dedicated skill on `researcher`.
 - Base: Duplicate skill names across roots are completed according to existing root resolution precedence.
 - Bad: Creating a separate Shuheng-only skill marketplace or registry for `$skill`.
@@ -2069,10 +2073,10 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 
 ### 6. Tests Required
 
-- `tests/test_commands.py` must assert leading-only transient parser behavior and `$` completion ranking with name matches before summary matches.
+- `tests/test_commands.py` must assert leading-only transient parser behavior, `$+` compatibility, and `$` completion ranking with name matches before summary matches.
 - App-level tests must assert `$` completion lists allowed-root skills using metadata only and does not expose full body markers in completion rows.
-- Context-pack tests must assert persistent `skill_pack` and prompt-level `transient_skill_pack` render under distinct labels.
-- `scripts/check_policy_gates.py` must assert transient skill body text appears only in the target context/direct-chat prompt for the current request, does not persist to `skill_refs`, disappears on the next request without `$skill`, and unresolved outside paths inject no body text.
+- Context-pack tests must assert persistent `skill_pack` can render body text while prompt-level `transient_skill_refs` render refs only.
+- `scripts/check_policy_gates.py` must assert transient skill body text is not injected by Shuheng, OMP runtime dispatch starts with `/skill:<name>` for the first command-safe transient ref, the stripped task objective stays clean, transient refs do not persist to `skill_refs`, no `/skill:<name>` prefix appears on the next request without `$skill`, and unresolved outside paths inject no body text.
 - Existing dedicated-skill tests must remain green so `/agent skill ...` persistence is not replaced or weakened.
 
 ### 7. Wrong vs Correct
@@ -2086,7 +2090,7 @@ $huashu-info-search task -> append "huashu-info-search" to every agent's skill_r
 #### Correct
 
 ```text
-$huashu-info-search task -> only this delegated context_pack.transient_skill_pack includes huashu-info-search
+$huashu-info-search task -> OMP receives /skill:huashu-info-search task; Shuheng records only transient_skill_refs metadata
 ```
 
 ## Scenario: Declarative User Plugins

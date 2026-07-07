@@ -58,6 +58,44 @@ def test_runtime_provider_identity_helpers() -> None:
     assert runtime_dispatch.is_ohmypi_runtime_agent(legacy) is False
 
 
+def test_omp_runtime_prompt_uses_native_transient_skill_command(tmp_path) -> None:
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "prompt-only-sop"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text("# Prompt Only SOP\n", encoding="utf-8")
+    original_skill_dir = app_module.SHUHENG_SKILLS_DIR
+    original_home = app_module.SHUHENG_HOME
+    try:
+        app_module.SHUHENG_SKILLS_DIR = str(skill_root)
+        app_module.SHUHENG_HOME = str(tmp_path / "shuheng-home")
+        prompt = "[Shuheng Context Pack]\n...\n\n[Task]\ndo work\n[/Task]"
+        native = app_module.runtime_prompt_with_transient_skill_command(
+            RuntimeTaskAgent(),
+            prompt,
+            ["prompt-only-sop", "secondary-sop"],
+        )
+        assert native.startswith("/skill:prompt-only-sop "), native
+        assert "[Shuheng Context Pack]" in native and "[Task]\ndo work\n[/Task]" in native
+        assert app_module.runtime_prompt_with_transient_skill_command(
+            LegacyTaskAgent(),
+            prompt,
+            ["prompt-only-sop"],
+        ) == prompt
+        assert app_module.runtime_prompt_with_transient_skill_command(
+            RuntimeTaskAgent(),
+            prompt,
+            ["missing-sop"],
+        ).startswith("/skill:missing-sop ")
+        assert app_module.runtime_prompt_with_transient_skill_command(
+            RuntimeTaskAgent(),
+            prompt,
+            ["/outside/skill.md"],
+        ) == prompt
+    finally:
+        app_module.SHUHENG_SKILLS_DIR = original_skill_dir
+        app_module.SHUHENG_HOME = original_home
+
+
 def test_ohmypi_native_metadata_helpers() -> None:
     agent = RuntimeTaskAgent()
 

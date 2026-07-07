@@ -1,0 +1,1 @@
+{"file":".trellis/spec/backend/agent-control-protocol.md","reason":"Verify transient $skill invocation preserves Orchestrator, per-agent skill scoping, root containment, and audit boundaries."}

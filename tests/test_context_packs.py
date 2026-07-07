@@ -77,6 +77,7 @@ def _sample_pack() -> dict:
                 }
             ]
         },
+        "transient_skill_refs": ["prompt-skill"],
         "profile_excerpt": "Profile excerpt",
         "memory_excerpt": "Memory excerpt",
     }
@@ -195,8 +196,9 @@ def test_prompt_and_ref_formatting_round_trip() -> None:
     assert "Memory hydration pack:" in prompt
     assert "Recent artifact refs:" in prompt
     assert "Dedicated skills for this agent only:" in prompt
-    assert "Transient skills requested for this prompt only:" in prompt
-    assert "Use this skill only for the current prompt." in prompt
+    assert "OMP native transient skill command refs for this prompt:" in prompt
+    assert "- prompt-skill" in prompt
+    assert "Use this skill only for the current prompt." not in prompt
     assert "deictic_reference_rule:" in prompt
     assert "context_pack_ref: artifact://context_packs/agent-test/task_context_test.json" in ref_prompt
     assert "deictic_reference_rule:" in ref_prompt
