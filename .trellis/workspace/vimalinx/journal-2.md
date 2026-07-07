@@ -306,3 +306,36 @@ Added a local TUI /inbox for Agent Mail intake, explicit reviewed/ignored handli
 ### Next Steps
 
 - None - task complete
+
+
+## Session 55: Dogfood local stdio agent gateway
+
+**Date**: 2026-07-08
+**Task**: Dogfood local stdio agent gateway
+**Branch**: `main`
+
+### Summary
+
+Added a real local JSONL stdio gateway dogfood smoke that seeds an isolated Shuheng home, starts shuheng-agent-gateway serve --stdio, verifies agent_directory/message_send/task_status over one process, and checks task, approval, and trace ledgers. Synced policy gates, release hygiene, CI, docs, MANIFEST, and backend spec.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9244195` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
