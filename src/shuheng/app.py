@@ -25068,7 +25068,13 @@ def submit(state: State, text: str) -> None:
     active_sub = selected_subagent(state)
     home_sub = selected_home_subagent(state)
     if home_sub is not None and not text.startswith("/"):
-        switch_to_subagent_chat_session(state, home_sub.agent_id, "")
+        block_reason = subagent_chat_session_switch_block_reason(home_sub)
+        if block_reason:
+            state.last_error = block_reason
+            mark_dirty(state)
+            return
+        new_subagent_chat_session(state, home_sub)
+        switch_to_subagent_chat_session(state, home_sub.agent_id, home_sub.chat_session_id)
         if selected_subagent(state) is not home_sub:
             return
         state.last_error = start_subagent_chat(state, home_sub, text, source="subagent_chat")

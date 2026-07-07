@@ -7937,8 +7937,21 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert reloaded_empty_sub is not None
     assert reloaded_empty_sub.chat_session_id == previous_chat_session_id, reloaded_empty_sub.chat_session_id
     assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
+    reloaded_empty_sub.agent = SequencedFakeAgent(["fresh home reply"])
     a.show_subagent_home(reloaded_empty, reloaded_empty_sub)
-    a.submit(reloaded_empty, "/chat")
+    a.submit(reloaded_empty, "home starts fresh")
+    assert reloaded_empty.selected_session == reloaded_empty_sub.agent_id, reloaded_empty.selected_session
+    assert reloaded_empty_sub.chat_session_id != previous_chat_session_id, reloaded_empty_sub.chat_session_id
+    assert [msg.content for msg in reloaded_empty_sub.messages[:1]] == ["home starts fresh"], reloaded_empty_sub.messages
+    assert reloaded_empty_sub.agent.prompts[-1][1] == f"subagent-chat:{reloaded_empty_sub.agent_id}", reloaded_empty_sub.agent.prompts
+    assert "home starts fresh" in reloaded_empty_sub.agent.prompts[-1][0], reloaded_empty_sub.agent.prompts[-1]
+    drain_ui(reloaded_empty)
+    assert reloaded_empty_sub.messages[1].content == "fresh home reply", reloaded_empty_sub.messages
+    fresh_home_session_id = reloaded_empty_sub.chat_session_id
+    fresh_entries = a.subagent_chat_session_entries(reloaded_empty, reloaded_empty_sub)
+    assert any(entry["session_id"] == previous_chat_session_id for entry in fresh_entries), fresh_entries
+    assert any(entry["session_id"] == fresh_home_session_id for entry in fresh_entries), fresh_entries
+    assert any(entry["session_id"] == fresh_home_session_id and entry["message_count"] >= 2 for entry in fresh_entries), fresh_entries
     legacy_sub = a.create_subagent(state, "Legacy Chat Agent", role="researcher")
     legacy_session_id = "legacy-chat-session"
     os.makedirs(a.subagent_sessions_dir(legacy_sub), exist_ok=True)
@@ -7966,7 +7979,7 @@ def assert_selected_subagent_chat_is_direct_session() -> None:
     assert [msg.content for msg in legacy_sub.messages[:2]] == ["legacy hello", "legacy reply"], legacy_sub.messages
     state.selected_session = sub.agent_id
     assert reloaded_empty.selected_session == reloaded_empty_sub.agent_id, reloaded_empty.selected_session
-    assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["hello direct", "direct reply"], reloaded_empty_sub.messages
+    assert [msg.content for msg in reloaded_empty_sub.messages[:2]] == ["home starts fresh", "fresh home reply"], reloaded_empty_sub.messages
     reloaded.selected_session = reloaded_sub.agent_id
     screen = FakeDrawScreen()
     a.draw_rightbar(screen, reloaded, 18, 140)
