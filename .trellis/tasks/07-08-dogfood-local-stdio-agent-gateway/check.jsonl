@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify policy gates and docs preserve the Shuheng local stdio gateway contract."}
+{"file": "docs/runtime-provider-control-plane.md", "reason": "Check implementation against runtime ownership and external discovery privacy rules."}
+{"file": "docs/agent-harness-architecture.md", "reason": "Compare final behavior against the governed harness baseline."}
+{"file": "docs/public-alpha-readiness.md", "reason": "Ensure release-facing claims stay experimental local alpha and no remote/Web surface is introduced."}

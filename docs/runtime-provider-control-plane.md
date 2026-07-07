@@ -42,6 +42,11 @@ gateway, not a Web/HTTP server. `register` writes the local registration record,
 agent discovery, `message-send` dispatches through the Orchestrator-owned
 subagent task path, and `task-status` reads ledger status.
 
+`scripts/dogfood_stdio_gateway.py` is the executable end-to-end proof for this
+surface. It starts a real `serve --stdio` subprocess under an isolated
+`SHUHENG_HOME`, sends JSONL `agent_directory`, `message_send`, and `task_status`
+requests over the same process, and verifies task, approval, and trace ledgers.
+
 ## Storage Boundary
 
 External compatibility providers are not the owner of Shuheng state and are not

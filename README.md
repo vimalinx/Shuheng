@@ -391,6 +391,14 @@ shuheng-agent-gateway task-status --task-id <task-id>
 
 `serve --stdio` 是给外部 AI/supervisor 持有的持久本地进程。它只通过 stdin/stdout 传 JSONL，不启动 Web/HTTP 服务；`message-send` 会走 Shuheng Orchestrator 的子 agent task 路径和审批门。
 
+本地端到端验证：
+
+```bash
+python scripts/dogfood_stdio_gateway.py
+```
+
+该脚本会在隔离的 `SHUHENG_HOME` 中启动真实 `serve --stdio` 子进程，验证 `agent_directory`、`message_send`、`task_status`、task ledger、approval ledger 和 trace ledger。
+
 ## 开发
 
 源码运行：
@@ -408,9 +416,10 @@ shuheng-check
 提交前建议：
 
 ```bash
-python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/dogfood_stdio_gateway.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/dogfood_stdio_gateway.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts

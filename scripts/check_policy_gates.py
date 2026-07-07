@@ -6242,6 +6242,28 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert "PYTHONPATH=" in tool_source, tool_source
 
 
+def assert_stdio_agent_gateway_dogfood() -> None:
+    script_path = ROOT / "scripts" / "dogfood_stdio_gateway.py"
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=str(ROOT),
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert lines, result.stdout
+    payload = json.loads(lines[-1])
+    assert payload["schema_version"] == "shuheng.gateway_dogfood.v1", payload
+    assert payload["ok"] is True, payload
+    assert payload["status"] == "approval_required", payload
+    assert "message_send" in payload["checked"], payload
+    assert "task_status" in payload["checked"], payload
+    assert "approval_ledger" in payload["checked"], payload
+
+
 def assert_ohmypi_memory_candidate_signal_filters() -> None:
     assert omp.ohmypi_memory_candidate_signal("", source="test") is None
     assert omp.ohmypi_memory_candidate_signal("too short", source="test") is None
@@ -11646,6 +11668,7 @@ def run_checks() -> None:
     assert_ohmypi_tui_proposal_host_tool_contract()
     assert_ohmypi_credential_request_host_tool_contract()
     assert_agent_bridge_contract_and_omp_plugin()
+    assert_stdio_agent_gateway_dogfood()
     assert_ohmypi_memory_candidate_signal_filters()
     assert_ohmypi_missing_binary_and_abort()
     assert_top_bar_header_requested_fields()

@@ -16,6 +16,7 @@ include scripts/check_policy_gates.py
 include scripts/check_release_hygiene.py
 include scripts/release_scan_rules.py
 include scripts/runtime_smoke.py
+include scripts/dogfood_stdio_gateway.py
 include scripts/wheel_smoke.py
 prune .codex
 prune .pytest_cache

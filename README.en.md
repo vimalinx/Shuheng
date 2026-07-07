@@ -391,6 +391,14 @@ shuheng-agent-gateway task-status --task-id <task-id>
 
 `serve --stdio` is the long-lived local process intended for an external AI or supervisor to hold. It speaks JSONL over stdin/stdout only and starts no Web/HTTP service. `message-send` dispatches through the Shuheng Orchestrator's governed subagent task path and approval gates.
 
+Local end-to-end verification:
+
+```bash
+python scripts/dogfood_stdio_gateway.py
+```
+
+The script launches a real `serve --stdio` subprocess under an isolated `SHUHENG_HOME` and verifies `agent_directory`, `message_send`, `task_status`, the task ledger, approval ledger, and trace ledger.
+
 ## Development
 
 Run from source:
@@ -408,9 +416,10 @@ shuheng-check
 Recommended checks before committing:
 
 ```bash
-python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py
+python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/dogfood_stdio_gateway.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_release_hygiene.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
+PYTHONDONTWRITEBYTECODE=1 python scripts/dogfood_stdio_gateway.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts

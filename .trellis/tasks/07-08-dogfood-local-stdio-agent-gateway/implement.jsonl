@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Active Shuheng control protocol, naming, release hygiene, and gateway boundary contracts."}
+{"file": "docs/runtime-provider-control-plane.md", "reason": "Runtime ownership, local stdio gateway, agent discovery privacy, and no Web/HTTP boundary."}
+{"file": "docs/agent-harness-architecture.md", "reason": "Architecture baseline for Orchestrator ownership, restricted subagents, ledgers, approvals, artifacts, and auditable communication."}
+{"file": "docs/public-alpha-readiness.md", "reason": "Public alpha posture and known gaps for local gateway proof without remote endpoint claims."}

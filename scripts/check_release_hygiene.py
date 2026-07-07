@@ -34,6 +34,7 @@ REQUIRED_FILES = (
     ".github/workflows/ci.yml",
     "scripts/check_policy_gates.py",
     "scripts/check_release_hygiene.py",
+    "scripts/dogfood_stdio_gateway.py",
     "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
@@ -107,6 +108,7 @@ REQUIRED_MANIFEST_LINES = (
     "recursive-include tests *.py",
     "include scripts/check_policy_gates.py",
     "include scripts/check_release_hygiene.py",
+    "include scripts/dogfood_stdio_gateway.py",
     "include scripts/release_scan_rules.py",
     "include scripts/runtime_smoke.py",
     "include scripts/wheel_smoke.py",
@@ -128,9 +130,10 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
 RELEASE_WHEEL_SMOKE_FRAGMENT = "scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist"
 PYTHON_VERSION_PATTERN = re.compile(r"(?<!\d)(\d+\.\d+)(?!\d)")
 PUBLIC_RELEASE_COMMAND_FRAGMENTS = (
-    "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
+    "python -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/dogfood_stdio_gateway.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
     "python scripts/check_release_hygiene.py",
     "python scripts/check_policy_gates.py",
+    "python scripts/dogfood_stdio_gateway.py",
     "python scripts/runtime_smoke.py",
     "python -m pytest -q -p no:cacheprovider",
     "python -m compileall -q src scripts",

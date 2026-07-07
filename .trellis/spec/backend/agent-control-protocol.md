@@ -1919,6 +1919,7 @@ state.last_error carries the same short reason
 - `tests/test_cli.py` must assert gateway/Web flags are absent from help output.
 - `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, `/inbox` stays a local TUI-only Agent Mail intake panel, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
 - `scripts/check_policy_gates.py` must assert `shuheng-agent-gateway` is a public script, registration writes `agentgateway.registration.v1`, public registry strips registration paths, and `message_send` dispatches through the governed subagent task path with no Web/HTTP surface.
+- `scripts/dogfood_stdio_gateway.py` must start a real `shuheng-agent-gateway serve --stdio` subprocess under an isolated `SHUHENG_HOME`, then verify `gateway_status`, `agent_directory`, `message_send`, `task_status`, task ledger, approval ledger, and trace ledger through JSONL stdio.
 - `scripts/runtime_smoke.py` must run without starting an HTTP server and must record local runtime evidence.
 - `scripts/check_release_hygiene.py` must require public README wording that states no built-in Web/HTTP surface.
 - `scripts/wheel_smoke.py` must reject built wheels that contain removed Web/local service modules such as `shuheng/web_console.py`, `shuheng/web_console_static.py`, or `shuheng/gateway_registry.py`, including when stale `build/` contents would otherwise leak into the archive.
