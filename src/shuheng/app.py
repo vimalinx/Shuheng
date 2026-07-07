@@ -16092,6 +16092,7 @@ approval_command_completion_rows = command_helpers.approval_command_completion_r
 agent_command_completion_decision = command_helpers.agent_command_completion_decision
 subagent_settings_target_from_command = command_helpers.subagent_settings_target_from_command
 parse_transient_skill_invocation = command_helpers.parse_transient_skill_invocation
+is_runtime_skill_command_input = command_helpers.is_runtime_skill_command_input
 transient_skill_completion_rows = command_helpers.transient_skill_completion_rows
 
 
@@ -24660,6 +24661,13 @@ def submit(state: State, text: str) -> None:
         return
     state.command_index = 0
     mark_dirty(state)
+    if is_runtime_skill_command_input(text):
+        add_system(
+            state,
+            "Shuheng 的 / 只用于程序内命令；临时调用 skill 请用 `$<skill-name> <任务>`，"
+            "例如 `$huashu-info-search 调研 workflow`。/skill: 是发给 OMP 的内部运行时协议，不会从输入框直接转发。",
+        )
+        return
     if secret_blocks_normal_command(state, text):
         add_system(state, "Secret Vault 已解锁：普通历史/普通 harness 面板已隔离。请先 /lock 再查看普通数据。")
         return

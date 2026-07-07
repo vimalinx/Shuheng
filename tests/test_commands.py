@@ -18,6 +18,7 @@ def test_app_command_completion_helpers_reexport_module_symbols() -> None:
     assert app_module.agent_command_completion_decision is commands.agent_command_completion_decision
     assert app_module.subagent_settings_target_from_command is commands.subagent_settings_target_from_command
     assert app_module.parse_transient_skill_invocation is commands.parse_transient_skill_invocation
+    assert app_module.is_runtime_skill_command_input is commands.is_runtime_skill_command_input
     assert app_module.transient_skill_completion_rows is commands.transient_skill_completion_rows
     assert app_module.archived_command_matches is commands.archived_command_matches
     assert app_module.workspace_command_matches is commands.workspace_command_matches
@@ -46,7 +47,20 @@ def test_transient_skill_invocation_parses_only_leading_tokens() -> None:
     assert commands.parse_transient_skill_invocation("ask with $huashu-info-search") == (
         commands.TransientSkillInvocation((), "ask with $huashu-info-search")
     )
+    assert commands.parse_transient_skill_invocation("/skill:huashu-info-search 调研") == (
+        commands.TransientSkillInvocation((), "/skill:huashu-info-search 调研")
+    )
     assert commands.parse_transient_skill_invocation("$") == commands.TransientSkillInvocation((), "$")
+
+
+def test_runtime_skill_command_input_is_reserved_for_internal_runtime_protocol() -> None:
+    assert commands.is_runtime_skill_command_input("/skill:huashu-info-search task") is True
+    assert commands.is_runtime_skill_command_input("/SKILL:huashu-info-search task") is True
+    assert commands.is_runtime_skill_command_input("/skill huashu-info-search task") is True
+    assert commands.is_runtime_skill_command_input("/skill") is True
+    assert commands.is_runtime_skill_command_input("$huashu-info-search task") is False
+    assert commands.is_runtime_skill_command_input("/agent skill worker add huashu-info-search") is False
+    assert commands.is_runtime_skill_command_input("/skills") is False
 
 
 def test_transient_skill_completion_rows_rank_name_before_summary() -> None:
@@ -287,6 +301,26 @@ def test_app_command_matches_completes_skills_from_metadata_only(tmp_path, monke
         ("/agent ask researcher $alpha-skill", "", "local · Alpha skill description", False)
     ]
     assert "FULL_BODY_MARKER" not in rows[0][2]
+
+
+def test_submit_rejects_user_facing_omp_skill_command(monkeypatch) -> None:
+    state = app_module.State(agent=None)
+    calls: list[str] = []
+
+    def forbidden_start_main_agent_task(*args, **kwargs):
+        del args, kwargs
+        calls.append("called")
+        return True
+
+    monkeypatch.setattr(app_module, "start_main_agent_task", forbidden_start_main_agent_task)
+
+    app_module.submit(state, "/skill:huashu-info-search 调研 workflow")
+
+    assert calls == []
+    assert state.status == "idle"
+    assert state.messages[-1].role == "system"
+    assert "$<skill-name> <任务>" in state.messages[-1].content
+    assert "/skill:" in state.messages[-1].content
 
 
 def test_app_category_command_matches_keeps_history_owned_counts_and_sorting() -> None:

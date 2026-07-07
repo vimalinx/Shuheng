@@ -2020,12 +2020,13 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 1. Scope / Trigger
 
 - Trigger: The user prefixes a delegated subagent prompt with `$<skill-ref>` or `$+<skill-ref>` to request one existing local/OMP skill for that prompt only.
-- Applies to: `$` command completion, direct user text such as `$huashu-info-search research ...`, mention dispatch such as `@researcher $huashu-info-search research ...`, `/agent ask|run|input <agent> $<skill-ref> ...`, selected-subagent direct chat, subagent task queues, policy-approval retry payloads, context pack construction, prompt rendering, task/mail/trace metadata, and policy gates.
+- Applies to: `$` command completion, direct user text such as `$huashu-info-search research ...`, mention dispatch such as `@researcher $huashu-info-search research ...`, `/agent ask|run|input <agent> $<skill-ref> ...`, selected-subagent direct chat, subagent task queues, policy-approval retry payloads, context pack construction, prompt rendering, task/mail/trace metadata, user-input rejection of OMP-native `/skill:` strings, and policy gates.
 - Non-goal: This does not create a new skill registry, skill marketplace, plugin execution layer, background installer, permission grant, global skill injection, or replacement for `/agent skill ...`.
 
 ### 2. Signatures
 
 - Prompt prefix: one or more leading `$<skill-ref>` or `$+<skill-ref>` tokens before the actual task text. `$+` is a tolerated shorthand variant and does not persist the `+` into the normalized skill ref.
+- Reserved internal OMP command: `/skill:<name>` is not a Shuheng user command. It may appear only after Shuheng has parsed a `$<skill-ref>` request and is constructing the OMP runtime prompt.
 - Parser owner: `src/shuheng/commands.py` owns pure `parse_transient_skill_invocation(...)` and `$` completion ranking over explicit candidate metadata.
 - App owner: `src/shuheng/app.py` owns command-safe skill-name validation, context-pack metadata assembly, target subagent routing, approval queue payloads, and runtime dispatch.
 - OMP native command mapping: for OhMyPi / OMP runtime agents, the first command-safe prompt-level transient skill ref is dispatched as OMP's native `/skill:<name> ...` command while the Shuheng context pack and stripped task text remain inside the command args.
@@ -2037,6 +2038,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 ### 3. Contracts
 
 - `$<skill-ref>` is parsed only at the beginning of submitted text. A `$` token in the middle of normal prose is not a skill invocation.
+- User-submitted `/skill:<name> ...` or `/skill <name> ...` must be intercepted by Shuheng with guidance to use `$<skill-ref> ...`; it must not be forwarded as a main task, subagent task, or OMP runtime command.
 - Leading transient `$<skill-ref>` / `$+<skill-ref>` tokens are stripped before policy-action inference, visible task objective construction, and the `[Task]...[/Task]` task payload. For OMP runtime dispatch, the full runtime prompt may be wrapped as `/skill:<first-ref> <context-and-task-payload>` so OMP's native skill loader is triggered without reintroducing the shorthand token into the task objective.
 - Transient skill refs are normalized with the same `normalize_subagent_skill_refs(...)` helper used by persistent dedicated skills, but they must not be written to `SubAgentRuntime.skill_refs`, persistent metadata, Secret metadata, plugin refs, memory, or global state.
 - Transient skill refs do not combine into the target subagent's persistent `skill_pack`. Persistent `/agent skill ...` entries remain the only prompt-body skill injection path owned by Shuheng.
@@ -2061,15 +2063,18 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - `$<absolute-path-outside-skill-roots> do work` -> not command-safe, so it is not converted to `/skill:<name>` and outside file body is not injected.
 - Approval-required transient task -> approval retry still includes the transient skill refs.
 - Subsequent task without `$skill` -> no `/skill:<name>` prefix appears unless the user asks for it again.
+- `/skill:huashu-info-search research topic` submitted in the Shuheng input -> Shuheng returns a system guidance message and does not call the main or subagent runtime.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `$huashu-info-search 调研 workflow` or `$+huashu-info-search 调研 workflow` strips the `$...` token from the task text and triggers OMP's native `/skill:huashu-info-search` loader when the target runtime is OMP.
+- Good: Direct user `/skill:huashu-info-search 调研 workflow` is rejected at the Shuheng input boundary with `$huashu-info-search 调研 workflow` guidance.
 - Good: `/agent skill add researcher huashu-info-search` remains the only long-term way to persist a dedicated skill on `researcher`.
 - Base: Duplicate skill names across roots are completed according to existing root resolution precedence.
 - Bad: Creating a separate Shuheng-only skill marketplace or registry for `$skill`.
 - Bad: Adding transient refs to `sub.skill_refs` or subagent metadata after one prompt.
 - Bad: Putting every known skill summary or body into the main Orchestrator prompt.
+- Bad: Treating user-entered `/skill:<name>` as an ordinary Shuheng prompt or silently forwarding it to OMP.
 
 ### 6. Tests Required
 
@@ -2077,6 +2082,7 @@ custom-sop installed globally -> every subagent sees custom SOP body text
 - App-level tests must assert `$` completion lists allowed-root skills using metadata only and does not expose full body markers in completion rows.
 - Context-pack tests must assert persistent `skill_pack` can render body text while prompt-level `transient_skill_refs` render refs only.
 - `scripts/check_policy_gates.py` must assert transient skill body text is not injected by Shuheng, OMP runtime dispatch starts with `/skill:<name>` for the first command-safe transient ref, the stripped task objective stays clean, transient refs do not persist to `skill_refs`, no `/skill:<name>` prefix appears on the next request without `$skill`, and unresolved outside paths inject no body text.
+- `scripts/check_policy_gates.py` must assert direct user input starting with `/skill:` is blocked at the Shuheng input boundary while runtime-internal prompts may still start with `/skill:<name>` after `$skill` parsing.
 - Existing dedicated-skill tests must remain green so `/agent skill ...` persistence is not replaced or weakened.
 
 ### 7. Wrong vs Correct

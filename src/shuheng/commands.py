@@ -100,6 +100,11 @@ def parse_transient_skill_invocation(text: str) -> TransientSkillInvocation:
     return TransientSkillInvocation(tuple(ref for ref in refs if ref), rest)
 
 
+def is_runtime_skill_command_input(text: str) -> bool:
+    """Return true when user text tries to use OMP's internal skill command."""
+    return bool(re.match(r"^/skill(?::|\s|$)", (text or "").strip(), re.I))
+
+
 def transient_skill_completion_rows(
     text: str,
     skill_candidates: Iterable[SkillCompletionCandidate],

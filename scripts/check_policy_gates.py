@@ -433,6 +433,7 @@ def assert_commands_module_boundary() -> None:
         "approval_command_completion_rows",
         "agent_command_completion_decision",
         "subagent_settings_target_from_command",
+        "is_runtime_skill_command_input",
         "archived_command_matches",
         "workspace_command_matches",
     ):
@@ -458,6 +459,8 @@ def assert_commands_module_boundary() -> None:
     assert commands_mod.subagent_settings_target_from_command("/AGENT MODEL Worker-2") == "Worker-2"
     assert commands_mod.subagent_settings_target_from_command("/agent detail worker extra") == ""
     assert a.subagent_settings_target_from_command("/agent prefs worker") == "worker"
+    assert commands_mod.is_runtime_skill_command_input("/skill:custom-sop do work") is True
+    assert commands_mod.is_runtime_skill_command_input("/agent skill worker add custom-sop") is False
     assert commands_mod.completion_insert_text(("/agent new", "<name>", "新建", False)) == "/agent new "
     assert commands_mod.completion_insert_text(("/archived on", "", "显示归档", True)) == "/archived on"
     command_candidates = [
@@ -8517,6 +8520,12 @@ def assert_subagent_dedicated_skills_are_agent_scoped() -> None:
     assert native_request.objective == "Run prompt-only SOP through OMP", native_request
     assert native_request.metadata["transient_skill_refs"] == ["prompt-only-sop"], native_request.metadata
     assert a.normalize_subagent_skill_refs(loaded_plain.skill_refs) == [], loaded_plain.skill_refs
+    direct_skill_state = a.State(agent=RuntimeCaptureFakeAgent())
+    a.submit(direct_skill_state, "/skill:prompt-only-sop Run prompt-only SOP through OMP")
+    assert not direct_skill_state.agent.runtime_requests, direct_skill_state.agent.runtime_requests
+    assert direct_skill_state.status == "idle", direct_skill_state.status
+    assert direct_skill_state.messages[-1].role == "system", direct_skill_state.messages[-1]
+    assert "$<skill-name> <任务>" in direct_skill_state.messages[-1].content, direct_skill_state.messages[-1].content
 
     outside_marker = "OUTSIDE_SKILL_FILE_MUST_NOT_BE_INJECTED"
     outside_file = Path(root, "outside-skill.md")

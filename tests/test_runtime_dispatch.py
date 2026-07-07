@@ -91,6 +91,11 @@ def test_omp_runtime_prompt_uses_native_transient_skill_command(tmp_path) -> Non
             prompt,
             ["/outside/skill.md"],
         ) == prompt
+        assert app_module.runtime_prompt_with_transient_skill_command(
+            RuntimeTaskAgent(),
+            "/skill:already-internal payload",
+            ["prompt-only-sop"],
+        ) == "/skill:already-internal payload"
     finally:
         app_module.SHUHENG_SKILLS_DIR = original_skill_dir
         app_module.SHUHENG_HOME = original_home
