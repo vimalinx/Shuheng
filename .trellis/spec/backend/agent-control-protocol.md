@@ -1852,14 +1852,15 @@ state.last_error carries the same short reason
 
 ### 1. Scope / Trigger
 
-- Trigger: The active Shuheng product surface is local curses TUI plus OMP runtime output/control.
-- Applies to: CLI flags, TUI command table, Web Console modules, HTTP handler/server code, runtime smoke, policy gates, release-readiness metadata, README wording, and local protocol registry records.
+- Trigger: The active Shuheng product surface is local curses TUI plus OMP runtime output/control plus a local JSONL stdio agent gateway.
+- Applies to: CLI flags, TUI command table, Web Console modules, HTTP handler/server code, stdio gateway bridge code, runtime smoke, policy gates, release-readiness metadata, README wording, and local protocol registry records.
 - Non-goal: This does not remove local task/progress ledgers, Agent Mail, approvals, artifacts, traces, scheduler, workflows, plugins, runtime provider metadata, or local protocol-shaped records used for inspection.
 
 ### 2. Signatures
 
 - Active user surfaces:
   - `shuheng` / `python -m shuheng.app` local curses TUI.
+  - `shuheng-agent-gateway` / `python -m shuheng.agent_bridge` local JSONL stdio gateway for purpose-only agent discovery, governed message dispatch, task status reads, and registration.
   - `/runtime-output` for OMP-native runtime output/control visibility.
   - Local commands such as `/tasks`, `/bus`, `/inbox`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/baseline`, `/runtimes`, `/schedules`, `/plugins`, and `/workflows`.
 - Removed active surfaces:
@@ -1875,12 +1876,16 @@ state.last_error carries the same short reason
   - `resource://agent-mail/*`.
   - `local-task-query://{task_id}`.
   - `local-resource-read://{uri}`.
+  - `shuheng-gateway://message-send`.
+  - `shuheng-gateway://task-status/{task_id}`.
 
 ### 3. Contracts
 
-- Shuheng must not advertise or start a built-in Web Console, HTTP gateway, mobile endpoint, remote endpoint, SSE stream, push subscription route, or daemon lifecycle.
+- Shuheng must not advertise or start a built-in Web Console, HTTP gateway, mobile endpoint, remote endpoint, SSE stream, push subscription route, or network daemon lifecycle.
+- The only persistent gateway surface is local JSONL stdio. `shuheng-agent-gateway register` may write `agentgateway.registration.v1` for `shuheng.local`, and `serve --stdio` may keep a process alive, but it must not bind sockets, start HTTP, enable SSE/push, or expose local filesystem state as a protocol endpoint.
 - A2A/MCP-shaped objects may remain only as local record shapes for registry, baseline, and adapter inspection. They must not claim to be reachable protocol endpoints or certified implementations.
 - Agent discovery records must describe role/subagent purpose and local inbox delivery only. They must not expose broad project context, active spec paths, memory paths, permission matrices, Secret Vault plaintext, or workflow internals.
+- `message_send` through the local stdio gateway may dispatch to a concrete existing subagent only through `start_subagent_task_structured(...)`; policy approval, task/progress ledgers, artifacts, and runtime dispatch remain app/Orchestrator-owned. Role templates and unknown targets must not spawn uncontrolled workers.
 - Local Agent Mail intake helpers may write Agent Mail, task ledger, and trace rows. They must not dispatch runtimes, approve policy actions, write long-term memory, execute workflows, call providers, send network requests, or auto-deliver push notifications.
 - `/inbox` is a local TUI command/panel for inspecting Agent Mail intake rows and marking them reviewed or ignored. Review/ignore handling may append task/progress/mail/trace audit rows, but it must not start subagent work, create approvals, execute workflows, call providers, write memory, or expose Web/HTTP/mobile/remote surfaces.
 - Release readiness must say the stable surface is local TUI + OMP runtime output/control, and that Web/HTTP/mobile/remote endpoints are not active product surfaces.
@@ -1894,13 +1899,16 @@ state.last_error carries the same short reason
 - Runtime exposes `GatewayRequestHandler`, `make_gateway_http_server`, `serve_gateway`, gateway daemon start/stop/restart helpers, Web Console snapshot/action/html helpers, SSE helpers, or push-delivery helpers -> active Web/HTTP regression.
 - Runtime smoke imports `urllib.request` for a Shuheng HTTP client or calls a gateway HTTP server -> verification regression.
 - Release readiness lists Web Console, HTTP gateway, A2A compatibility surface, or MCP compatibility surface as active experimental surfaces -> release posture regression.
-- Local protocol records use `/gateway`, `/a2a`, `/mcp`, `http+agent-mail`, active SSE, active push notifications, or daemon commands -> registry wording regression.
+- Local protocol records use `/gateway`, `/a2a`, `/mcp`, `http+agent-mail`, active SSE, active push notifications, network daemon commands, or Web/HTTP gateway commands -> registry wording regression.
+- `shuheng-agent-gateway serve --stdio` opens a socket or emits HTTP/SSE/push endpoint metadata -> gateway transport regression.
+- `message_send` writes only Agent Mail inbox rows when mode is `task`, bypasses policy gates, or starts work outside `start_subagent_task_structured(...)` -> dispatch ownership regression.
 - Agent Mail intake sends network push notifications -> remote side-effect regression.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `agent_directory.message_endpoint == "agent-mail://inbox"` and each role/subagent delivery target uses local Agent Mail with `auto_dispatch:false`.
 - Good: `gateway_service.status == "local_record_only"`, SSE and push are disabled, and daemon commands are empty.
+- Good: after explicit registration, `gateway_service.status == "local_persistent_stdio_gateway"`, `transport == "local-jsonl-stdio"`, `network_enabled:false`, and daemon commands are stdio commands only.
 - Good: A2A/MCP-shaped registry sections use `local_record_only` status and local URI schemes.
 - Base: `ensure_local_protocol_registry(...)` may continue writing a local `gateway.json` registry file for operator inspection and baseline comparison.
 - Bad: Re-adding a loopback-only HTTP server because it is "local"; the active product surface still becomes Web/HTTP again.
@@ -1910,6 +1918,7 @@ state.last_error carries the same short reason
 
 - `tests/test_cli.py` must assert gateway/Web flags are absent from help output.
 - `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, `/inbox` stays a local TUI-only Agent Mail intake panel, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
+- `scripts/check_policy_gates.py` must assert `shuheng-agent-gateway` is a public script, registration writes `agentgateway.registration.v1`, public registry strips registration paths, and `message_send` dispatches through the governed subagent task path with no Web/HTTP surface.
 - `scripts/runtime_smoke.py` must run without starting an HTTP server and must record local runtime evidence.
 - `scripts/check_release_hygiene.py` must require public README wording that states no built-in Web/HTTP surface.
 - `scripts/wheel_smoke.py` must reject built wheels that contain removed Web/local service modules such as `shuheng/web_console.py`, `shuheng/web_console_static.py`, or `shuheng/gateway_registry.py`, including when stale `build/` contents would otherwise leak into the archive.
@@ -4466,6 +4475,7 @@ memory_write: candidate_only
 - `contextUsage.tokens`, `contextUsage.contextWindow`, and `contextUsage.percent` from OMP are the source of truth for OMP context display.
 - When an OMP-backed Shuheng session completes, Shuheng stores the OMP `sessionFile` in `session_meta.json` for the visible `model_responses*.txt` row.
 - Restoring a history row with an existing `ohmypi_session_file` must call OMP `switch_session` and must not parse the visible `model_responses*.txt` transcript back into provider history.
+- A successful native OMP history restore is a new Shuheng runtime-session context boundary: it must reset only Shuheng's per-agent context-pack prompt counters so the next prompt sends a fresh `[Shuheng Context Pack]`, while still avoiding OMP `new_session` / `reset_runtime_session()`.
 - If the OMP session file is missing or switching fails, Shuheng may fall back to legacy transcript parsing, but the fallback must be explicit and must not be treated as the native OMP path.
 - Shuheng left history remains a Shuheng-owned UI/index surface; the provider context remains OMP's active `SessionManager` state.
 
@@ -4474,6 +4484,7 @@ memory_write: candidate_only
 - `get_state.contextUsage` is present -> token panel shows OMP context tokens/window instead of `tracker unavailable`.
 - `get_state.model.contextWindow` is present -> backend `contextWindow` and `context_win` mirror it.
 - `ohmypi_session_file` exists -> restore calls `switch_runtime_session()` and avoids `reset_runtime_session()` plus backend-history replay.
+- `ohmypi_session_file` exists and native switch succeeds -> the next OMP prompt contains a full `[Shuheng Context Pack]`, not only a `[Shuheng Context Ref]`.
 - `ohmypi_session_file` missing -> restore uses the legacy Shuheng transcript fallback.
 - `switch_session` returns `cancelled:true` or RPC error -> restore falls back and includes a visible native-switch failure note.
 - `compact` succeeds -> provider refreshes `get_state` before exposing updated context usage.
@@ -4481,6 +4492,7 @@ memory_write: candidate_only
 ### 5. Good/Base/Bad Cases
 
 - Good: A restored OMP history row switches to `/.../sessions/<session>.jsonl`, then the next prompt continues from OMP's compacted provider context.
+- Good: A restored OMP history row keeps the native OMP session active but refreshes Shuheng runtime metadata by sending one fresh full context pack on the next prompt.
 - Good: The left status panel shows `ctx 123k/1.00M 12%` from OMP `contextUsage`.
 - Base: A legacy Shuheng-only transcript has no OMP session metadata and still restores with the old parser.
 - Bad: Restoring an OMP row builds backend history from folded process/UI transcript text.
@@ -4491,7 +4503,7 @@ memory_write: candidate_only
 - `scripts/check_policy_gates.py` must assert OMP provider consumes `get_state.contextUsage`, `sessionFile`, `sessionId`, `sessionName`, and `messageCount`.
 - Tests must assert `switch_runtime_session()` sends `switch_session` with `sessionPath` and refreshes native state.
 - Tests must assert `compact_runtime_session()` refreshes native context usage after compacting.
-- Tests must assert restoring a Shuheng row with `ohmypi_session_file` uses native switch and does not call `reset_runtime_session()`.
+- Tests must assert restoring a Shuheng row with `ohmypi_session_file` uses native switch, does not call `reset_runtime_session()`, resets only Shuheng context-pack prompt counters, and makes the next prompt send `[Shuheng Context Pack]` instead of `[Shuheng Context Ref]`.
 - Tests must assert OMP token panel lines render OMP `contextUsage` even when Shuheng's cost tracker is unavailable.
 
 ### 7. Wrong vs Correct
@@ -5205,7 +5217,7 @@ def put_agent_runtime_task(agent, request):
 - Isolated runtime helpers: `ohmypi_runtime_root(harness_dir)`, `ohmypi_isolated_agent_dir(harness_dir)`, `ohmypi_config_path(agent_dir)`, `ohmypi_models_path(agent_dir)`, `write_ohmypi_runtime_files(...)`, and `ohmypi_subprocess_env(...)`.
 - Isolated runtime records: `OhMyPiRuntimeConfig` and `OhMyPiRuntimeModel`.
 - Compatibility TUI host tools exposed to OMP: `shuheng_query` and `shuheng_propose`.
-- Typed TUI host tools exposed to OMP include `agent_list`, `agent_get`, `agent_match`, `task_list`, `task_get`, `approval_list`, `artifact_list`, `capability_list`, `schedule_list`, `memory_context_get`, `proposal_submit`, `memory_candidate_submit`, and `schedule_create`.
+- Typed TUI host tools exposed to OMP include `agent_list`, `agent_get`, `agent_match`, `task_list`, `task_get`, `approval_list`, `artifact_list`, `capability_list`, `schedule_list`, `memory_context_get`, `proposal_submit`, `memory_candidate_submit`, `schedule_create`, and `credential_request`.
 - Read-only host tool definition helper: `ohmypi_tui_readonly_host_tool_definitions()`.
 - Typed read-only host tool definition helper: `ohmypi_typed_readonly_host_tool_definitions()`.
 - Governed proposal host tool definition helper: `ohmypi_tui_proposal_host_tool_definition()`.
@@ -5322,6 +5334,8 @@ def put_agent_runtime_task(agent, request):
 - `memory_candidate_submit` must call the same governed memory-candidate path as `shuheng_propose` with `proposal_type:"memory_candidate"`.
 - `proposal_submit` must call the same governed proposal path as `shuheng_propose`.
 - `schedule_create` may create a TUI-owned schedule through the scheduler service; it must use the existing schedule registry and must not call OMP or any runtime directly.
+- `credential_request` may create a runtime-only pending local credential input for a registered TUI target. It must return only safe `shuheng.tool.v1` pending metadata such as `request_id`, `target`, status, and labels; it must reject secret-bearing argument keys such as `password`, `secret`, `token`, `content`, `messages`, `prompt`, and `attachments`.
+- While `credential_request` is pending, local input must be masked and consumed before normal commands, pending interactions, queued user input, subagent chat, or LLM dispatch. The entered credential must be passed directly to the registered target handler and must not be appended to messages, input history, pending interactions, ledgers, traces, artifacts, host-tool results, model prompts, or logs. `/cancel`, `/lock`, or empty input cancels without delivery. Secret Vault password entry remains higher priority.
 - Host tool registration must happen after OMP emits `{"type":"ready"}` and before the first prompt command is sent for that process.
 - OMP `host_tool_call` frames must be answered with `host_tool_result` using the same frame `id`.
 - Host tool result payloads must be AgentToolResult-shaped JSON, with bounded redacted text under `content:[{"type":"text","text":"..."}]`.
@@ -5354,6 +5368,8 @@ def put_agent_runtime_task(agent, request):
 - OMP `host_tool_call` for a typed read-only tool such as `agent_list`, `schedule_list`, or `memory_context_get` -> app callback routes through the same control-plane query/context helpers and sends a JSON-safe `host_tool_result`.
 - OMP `host_tool_call` for `memory_candidate_submit` -> app callback routes through `queue_curated_memory_candidate(...)` and returns candidate/approval/artifact refs when queued.
 - OMP `host_tool_call` for `schedule_create` -> app callback writes a TUI-owned `scheduledtask.v1` row with default provider `ohmypi` when no explicit provider is supplied.
+- OMP `host_tool_call` for `credential_request` -> app callback sets a runtime-only pending local credential request for a registered target and returns pending metadata; the credential itself is typed locally later and delivered only to that target handler.
+- OMP `host_tool_call` for `credential_request` with a password/secret/token/content/messages/prompt/attachments field, no TUI state, or an unknown target -> app callback returns `shuheng.tool.v1` with `status:"error"` and no pending credential request.
 - OMP `host_tool_call` for `shuheng_propose` memory candidate -> app callback routes through `queue_curated_memory_candidate(...)` and returns a JSON-safe proposal result with candidate/approval/artifact refs when queued.
 - OMP `host_tool_call` for `shuheng_propose` current-schema control -> app callback routes through `apply_tui_controls_from_text(...)` and returns control result lines.
 - OMP `host_tool_call` for `shuheng_propose` with unknown proposal type, missing required fields, missing TUI state, unresolved target, invalid schema, or no known action -> callback returns `schema_version:"shuheng.proposal.v1"` with `status:"error"`.
@@ -5455,7 +5471,8 @@ def put_agent_runtime_task(agent, request):
 - Tests must assert unknown or failing host tool calls receive `host_tool_result` with `isError:true`.
 - Tests must assert `host_tool_cancel` frames are handled safely.
 - Tests must assert `shuheng_query` remains read-only and `shuheng_propose` supports governed `shuheng_control` and `memory_candidate` proposals.
-- Tests must assert typed OMP tools include read-only state queries, `memory_context_get`, `memory_candidate_submit`, and `schedule_create`.
+- Tests must assert typed OMP tools include read-only state queries, `memory_context_get`, `memory_candidate_submit`, `schedule_create`, and `credential_request`.
+- Tests must assert `credential_request` returns only pending metadata, rejects secret-bearing args, fails closed for unknown targets, uses masked local input, delivers the entered credential only to the registered target handler, clears pending/input state, and does not leave the credential in messages, input history, pending interactions, host-tool results, traces, ledgers, artifacts, or logs.
 - Tests must assert `memory_context_get` writes a Shuheng context-pack artifact under the harness and returns its artifact ref.
 - Tests must assert `shuheng_propose` memory candidates create existing memory approval artifacts/approval rows and invalid proposals return structured errors.
 - Tests must assert provider metadata advertises `tui_readonly_host_tools:true`, `tui_governed_proposal_tools:true`, `tui_typed_host_tools:true`, `runtime_task_requests:true`, and `runtime_task_events:true` while keeping unrestricted `host_tools:false`.

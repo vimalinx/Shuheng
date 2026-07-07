@@ -41,7 +41,7 @@
 
 `枢衡 Shuheng` 是面向本地多 Agent 的终端控制面。它不重写底层 agent runtime，而是把用户每天真正接触的执行、调度、审批、记忆和会话工作台单独维护起来。
 
-当前发布定位是 **experimental local alpha**：本地 curses TUI、会话、任务账本、artifact、审批、Secret Vault 和 OMP runtime 输出/控制是主要稳定面。Shuheng 不再内置 Web Console、HTTP gateway、mobile 或 remote endpoint；A2A/MCP-shaped 数据只作为本地 registry/record 形状保留，不代表可访问的协议服务或完整认证。
+当前发布定位是 **experimental local alpha**：本地 curses TUI、会话、任务账本、artifact、审批、Secret Vault 和 OMP runtime 输出/控制是主要稳定面。Shuheng 不再内置 Web Console、HTTP gateway、mobile 或 remote endpoint；这些方向已经归档。需要外部 AI 接入时，使用本地 JSONL stdio 的 `shuheng-agent-gateway`。A2A/MCP-shaped 数据只作为本地 registry/record 形状保留，不代表可访问的协议服务或完整认证。
 
 你可以把它理解成：
 
@@ -341,7 +341,7 @@ shuheng
 | `src/shuheng/release_readiness.py` | 发布成熟度、baseline 证据等级、本地协议安全姿态和启发式 eval 纯函数 |
 | `src/shuheng/control_protocol.py` | agent task 控制协议(v2)解析 |
 | `src/shuheng/frontend_history_compat.py` | Shuheng 本地历史/命名 fallback |
-| `src/shuheng/agent_bridge.py` | 本地 agent bridge API,供 OMP 等客户端读写 Shuheng 状态 |
+| `src/shuheng/agent_bridge.py` | 本地 agent bridge / stdio gateway API,供 OMP、Codex、Claude Code 等客户端发现 agent、投递任务和提交治理提案 |
 | `src/shuheng/ohmypi_provider.py` | OMP runtime adapter(进程、host tool、usage 同步) |
 | `src/shuheng/compat_legacy.py` | 历史会话/记忆的兼容解析 |
 | `tests/` | pytest 测试套件,覆盖纯函数与加解密、解析器 |
@@ -367,6 +367,7 @@ docs/agent-harness-architecture.md
 | 可审计 | task ledger、progress ledger、mail、artifact、approval、eval、trace 可追踪 |
 | 人类审批门 | 长期记忆、Secret、删除、部署和外部副作用需要审批 |
 | 协议记录 | A2A/MCP-shaped 对象只作为本地 registry/record 形状存在；没有内建 HTTP endpoint 或协议认证 |
+| 本地 gateway | `shuheng-agent-gateway serve --stdio` 可作为持久本地 JSONL gateway；不打开 socket，不暴露 Web/HTTP |
 
 如果改动触及 TUI、子 Agent、审批、记忆、artifact、recovery、eval/trace、A2A/MCP 或 orchestration 行为，完成前都应对照架构基线检查。
 
@@ -375,8 +376,20 @@ docs/agent-harness-architecture.md
 Shuheng 的发布成熟度元数据由 `src/shuheng/release_readiness.py` 维护。当前默认结论：
 
 - 稳定本地面：curses TUI、会话工作区、任务账本、artifact、审批、Secret Vault、OMP runtime 输出/控制。
-- 实验面：baseline report、runtime/evidence smoke、heuristic eval、scheduler runtime dispatch、本地 protocol-shaped registry records。
-- 已知缺口：`app.py` 仍是大型 composition module；eval 不证明事实/引用正确；A2A/MCP-shaped records 不是可访问协议 endpoint；Web Console、HTTP gateway、mobile、remote endpoint 不是当前产品面。
+- 实验面：baseline report、runtime/evidence smoke、heuristic eval、scheduler runtime dispatch、本地 protocol-shaped registry records、stdio agent gateway。
+- 已知缺口：`app.py` 仍是大型 composition module；eval 不证明事实/引用正确；A2A/MCP-shaped records 不是可访问协议 endpoint；Web Console、HTTP gateway、mobile、remote endpoint 已归档且不是当前产品面。
+
+### 本地 Agent Gateway
+
+```bash
+shuheng-agent-gateway register
+shuheng-agent-gateway agent-directory
+shuheng-agent-gateway serve --stdio
+shuheng-agent-gateway message-send --target <agent-id> --message "要交给这个 agent 的任务"
+shuheng-agent-gateway task-status --task-id <task-id>
+```
+
+`serve --stdio` 是给外部 AI/supervisor 持有的持久本地进程。它只通过 stdin/stdout 传 JSONL，不启动 Web/HTTP 服务；`message-send` 会走 Shuheng Orchestrator 的子 agent task 路径和审批门。
 
 ## 开发
 
@@ -413,7 +426,7 @@ git diff --check
 ### 开源发布边界
 
 - License: MIT，见 `LICENSE`。
-- 安全报告与边界：见 `SECURITY.md`。Shuheng 不内置 Web Console、HTTP gateway、mobile 或 remote endpoint；涉及外部发送、部署、删除、Secret、长期记忆的操作仍走本地审批门。
+- 安全报告与边界：见 `SECURITY.md`。Shuheng 不内置 Web Console、HTTP gateway、mobile 或 remote endpoint；本地 agent gateway 仅走 JSONL stdio。涉及外部发送、部署、删除、Secret、长期记忆的操作仍走本地审批门。
 - 贡献流程：见 `CONTRIBUTING.md`；行为准则见 `CODE_OF_CONDUCT.md`。
 - 发布记录：见 `CHANGELOG.md`。
 - CI: `.github/workflows/ci.yml` 运行 release hygiene、policy gate、runtime smoke、pytest、compile、package build、wheel smoke 和 `git diff --check`。

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Owns Shuheng host-tool, approval, Secret Vault, and runtime protocol boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Requires reuse of existing Secret Vault and host-tool patterns before adding new helpers."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Credential requests cross host tools, TUI input, state, and local target handlers."}
+{"file": "docs/agent-harness-architecture.md", "reason": "Baseline requires strong Orchestrator ownership, approval gates, and auditable protocols without leaking secrets."}

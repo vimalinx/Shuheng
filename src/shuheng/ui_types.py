@@ -287,6 +287,8 @@ class State:
     paste_mode: bool = False
     paste_buffer: str = ""
     pending_interaction: Optional[dict[str, Any]] = None
+    credential_request: dict[str, Any] = field(default_factory=dict, repr=False)
+    credential_targets: dict[str, Any] = field(default_factory=dict, repr=False)
     secret_vault: SecretVaultState = field(default_factory=SecretVaultState)
     active_task_secret: bool = False
     active_secret_user_text: str = ""

@@ -218,3 +218,32 @@ def test_app_formatting_wrappers_match_context_pack_module() -> None:
         ref,
         default_permission_profile=app_module.PERMISSION_PROFILE_STANDARD,
     )
+
+
+def test_omp_native_session_switch_resets_context_prompt_state(monkeypatch) -> None:
+    class NativeSwitchAgent:
+        _shuheng_runtime_provider_id = "ohmypi"
+
+        def __init__(self) -> None:
+            self.switches: list[str] = []
+            self._shuheng_runtime_context_full_sent = 1
+            self._shuheng_runtime_context_prompt_count = 4
+
+        def switch_runtime_session(self, session_path: str) -> bool:
+            self.switches.append(session_path)
+            return True
+
+    agent = NativeSwitchAgent()
+    monkeypatch.setattr(app_module, "ohmypi_session_file_for_history_path", lambda _path: "/tmp/omp-session.jsonl")
+
+    ok, message = app_module.switch_ohmypi_runtime_to_history_session(agent, "/tmp/history.txt")
+
+    assert ok is True
+    assert "已切换到 OMP 原生会话" in message
+    assert agent.switches == ["/tmp/omp-session.jsonl"]
+    assert agent._shuheng_runtime_context_full_sent == 0
+    assert agent._shuheng_runtime_context_prompt_count == 0
+
+    prompt = app_module.runtime_context_prompt_for_agent(agent, _sample_pack(), "artifact://context/ref.json")
+    assert "[Shuheng Context Pack]" in prompt
+    assert "[Shuheng Context Ref]" not in prompt

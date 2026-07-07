@@ -102,6 +102,7 @@ def retarget_harness(root: str) -> None:
     a.AGENT_SCHEDULES_PATH = os.path.join(a.AGENT_HARNESS_DIR, "schedules.jsonl")
     a.AGENT_SCHEDULE_RUNS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "schedule_runs.jsonl")
     a.AGENT_BRIDGE_REGISTRY_PATH = os.path.join(a.AGENT_HARNESS_DIR, "bridge_registry.json")
+    a.AGENT_GATEWAY_REGISTRATION_PATH = os.path.join(a.AGENT_HARNESS_DIR, "gateway_registration.json")
     a.LLM_RECENT_MODELS_PATH = os.path.join(a.AGENT_HARNESS_DIR, "recent_models.json")
     a.SECRET_VAULT_DIR = os.path.join(a.SHUHENG_MEMORY_DIR, "secret_vault")
     a.SECRET_VAULT_META_PATH = os.path.join(a.SECRET_VAULT_DIR, "vault.json")
@@ -3322,6 +3323,7 @@ def assert_shuheng_brand_entrypoints() -> None:
     for script in (
         "shuheng",
         "shuheng-agent-bridge",
+        "shuheng-agent-gateway",
         "shuheng-check",
         "shuheng-install-core-shim",
         "shuheng-integration",
@@ -4560,6 +4562,8 @@ def assert_ohmypi_native_session_state_and_restore() -> None:
             self.switches: list[str] = []
             self.reset_calls = 0
             self.log_path = ""
+            self._shuheng_runtime_context_full_sent = 1
+            self._shuheng_runtime_context_prompt_count = 3
 
         def switch_runtime_session(self, session_path: str) -> bool:
             self.switches.append(session_path)
@@ -4583,6 +4587,22 @@ def assert_ohmypi_native_session_state_and_restore() -> None:
     messages, restore_msg, loaded_rounds, total_rounds, _history_message_count = a.restore_backend_and_recent_messages(restore_agent, shuheng_path)
     assert restore_agent.switches == [native_session_path], restore_agent.switches
     assert restore_agent.reset_calls == 0, restore_agent.reset_calls
+    assert restore_agent._shuheng_runtime_context_full_sent == 0, restore_agent._shuheng_runtime_context_full_sent
+    assert restore_agent._shuheng_runtime_context_prompt_count == 0, restore_agent._shuheng_runtime_context_prompt_count
+    restored_context_prompt = a.runtime_context_prompt_for_agent(
+        restore_agent,
+        {
+            "task_id": "policy_gate_native_restore_context",
+            "for_agent": {"id": "main", "name": "Main", "role": "main_orchestrator"},
+            "objective": "Verify native restore context boundary",
+            "memory_pack": {"included": []},
+            "workspace_context": {"included": False},
+            "layers": {},
+        },
+        "artifact://context_packs/native-restore/ref.json",
+    )
+    assert "[Shuheng Context Pack]" in restored_context_prompt, restored_context_prompt
+    assert "[Shuheng Context Ref]" not in restored_context_prompt, restored_context_prompt
     assert "已切换到 OMP 原生会话" in restore_msg, restore_msg
     assert loaded_rounds == 1 and total_rounds == 1, (loaded_rounds, total_rounds)
     assert [msg.role for msg in messages[:2]] == ["user", "assistant"], messages
@@ -5736,6 +5756,7 @@ def assert_ohmypi_tui_query_host_tool_contract() -> None:
         "schedule_list",
         "memory_context_get",
         "memory_candidate_submit",
+        "credential_request",
         "runtime_subagent_list",
         "runtime_subagent_messages",
     } <= tool_names, all_tools
@@ -6024,6 +6045,61 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
     assert "TUI state is not bound" in missing_state["error"], missing_state
 
 
+def assert_ohmypi_credential_request_host_tool_contract() -> None:
+    state = a.State(agent=FakeLLMAgent())
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def local_target(password: str, request: dict[str, object]) -> dict[str, object]:
+        captured.append((password, request))
+        return {
+            "message": f"connected with {password}",
+            "password": password,
+            "nested": {"content": password},
+        }
+
+    a.register_credential_target(state, "sudo", local_target, label="Sudo Password")
+    tools = [tool.to_rpc() for tool in a.ohmypi_tui_host_tool_definitions()]
+    credential_tool = next(tool for tool in tools if tool["name"] == "credential_request")
+    assert "never accepted in tool arguments" in credential_tool["description"], credential_tool
+    assert credential_tool["parameters"]["required"] == ["target"], credential_tool
+    assert "password" not in credential_tool["parameters"]["properties"], credential_tool
+
+    handler = a.ohmypi_tui_host_tool_handler(state)
+    forbidden = handler("credential_request", {"target": "sudo", "password": "credential-leak-marker"})
+    assert forbidden["schema_version"] == "shuheng.tool.v1", forbidden
+    assert forbidden["status"] == "error", forbidden
+    assert "password" in forbidden["forbidden_fields"], forbidden
+    assert "credential-leak-marker" not in json.dumps(forbidden, ensure_ascii=False), forbidden
+    assert state.credential_request == {}, state.credential_request
+
+    missing = handler("credential_request", {"target": "missing"})
+    assert missing["status"] == "error", missing
+    assert missing["supported_targets"] == ["sudo"], missing
+    assert state.credential_request == {}, state.credential_request
+
+    pending = handler(
+        "credential_request",
+        {"target": "sudo", "request_id": "cred-policy-gate", "purpose": "unit gate", "account": "root"},
+    )
+    assert pending["schema_version"] == "shuheng.tool.v1", pending
+    assert pending["status"] == "pending", pending
+    assert pending["request_id"] == "cred-policy-gate", pending
+    assert pending["target"] == "sudo", pending
+    assert a.credential_input_active(state) is True
+
+    password = "credential-policy-secret"
+    a.submit(state, password)
+    assert captured and captured[-1][0] == password, captured
+    assert captured[-1][1]["request_id"] == "cred-policy-gate", captured
+    assert state.credential_request == {}, state.credential_request
+    assert state.input_text == ""
+    assert password not in json.dumps(pending, ensure_ascii=False), pending
+    assert password not in json.dumps([message.content for message in state.messages], ensure_ascii=False)
+    assert password not in json.dumps(state.input_history, ensure_ascii=False)
+    assert password not in json.dumps(state.pending_interaction, ensure_ascii=False)
+    assert "[redacted credential]" in state.messages[-1].content, state.messages[-1].content
+
+
 def assert_agent_bridge_contract_and_omp_plugin() -> None:
     root = tempfile.mkdtemp(prefix="shuheng_agent_bridge_")
     retarget_harness(root)
@@ -6040,7 +6116,12 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert metadata["schema_version"] == "shuheng.agent_bridge.v1", metadata
     assert metadata["owner"] == "shuheng.control_plane", metadata
     assert "memory_context_get" in metadata["supported_actions"], metadata
+    assert "agent_directory" in metadata["supported_actions"], metadata
+    assert "message_send" in metadata["supported_actions"], metadata
+    assert "gateway_register" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
+    assert metadata["policy"]["web_http_surface"] is False, metadata
+    assert metadata["policy"]["network_surface"] == "none", metadata
     assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
     assert metadata["paths"]["external_runtime_checkout_configured"] == bool(a.GENERICAGENT_ROOT), metadata
     assert "external_runtime_checkout" not in metadata["paths"], metadata
@@ -6054,6 +6135,58 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert metadata["paths"]["secret_vault_dir"] == a.SECRET_VAULT_DIR, metadata
     assert a.path_is_within(metadata["paths"]["harness_dir"], a.SHUHENG_HOME), metadata
     assert a.path_is_within(metadata["paths"]["subagents_dir"], a.SHUHENG_HOME), metadata
+
+    directory = service.handle({"action": "agent_directory"})
+    assert directory["schema_version"] == "shuheng.agent_directory.v1", directory
+    assert directory["counts"]["agents"] >= 1, directory
+    assert directory["discovery_policy"]["context_exposed"] is False, directory
+    assert "permissions" not in json.dumps(directory, ensure_ascii=False), directory
+
+    registration = service.handle({"action": "gateway_register"})
+    assert registration["schema_version"] == "agentgateway.registration.v1", registration
+    assert registration["gateway_id"] == "shuheng.local", registration
+    assert registration["transport"] == "local-jsonl-stdio", registration
+    assert registration["web_http_surface"] is False, registration
+    assert registration["state"]["status"] == "registered", registration
+    assert os.path.exists(a.AGENT_GATEWAY_REGISTRATION_PATH), a.AGENT_GATEWAY_REGISTRATION_PATH
+
+    gateway_status = service.handle({"action": "gateway_status"})
+    assert gateway_status["schema_version"] == "shuheng.agent_gateway.v1", gateway_status
+    assert gateway_status["status"] == "running", gateway_status
+    assert gateway_status["web_http_surface"] is False, gateway_status
+
+    registered_registry = a.ensure_local_protocol_registry(state)
+    registered_service = registered_registry["gateway_service"]
+    assert registered_service["status"] == "local_persistent_stdio_gateway", registered_service
+    assert registered_service["transport"] == "local-jsonl-stdio", registered_service
+    assert registered_service["security"]["network_enabled"] is False, registered_service
+    assert registered_service["daemon"]["commands"], registered_service
+    assert registered_service["daemon"]["state"]["registration_path"] == a.AGENT_GATEWAY_REGISTRATION_PATH, registered_service
+    registered_public = a.local_protocol_public_registry(registered_registry)
+    assert registered_public["gateway_service"]["status"] == "local_persistent_stdio_gateway", registered_public
+    assert registered_public["gateway_service"]["daemon"]["state"]["status"] == "registered", registered_public
+    assert a.AGENT_GATEWAY_REGISTRATION_PATH not in json.dumps(registered_public, ensure_ascii=False), registered_public
+
+    sent = service.handle({
+        "action": "message_send",
+        "args": {
+            "target": target.agent_id,
+            "message": "Summarize the local persistent gateway contract.",
+            "task_title": "Bridge gateway smoke",
+        },
+    })
+    assert sent["schema_version"] == "a2a.message_send_response.v1", sent
+    assert sent["accepted"] is True, sent
+    assert sent["delivery"]["mode"] == "orchestrator_agent_task", sent
+    assert sent["delivery"]["auto_dispatch"] is True, sent
+    assert sent["delivery"]["web_http_surface"] is False, sent
+    assert sent["target"] == target.agent_id, sent
+    assert sent["task_id"], sent
+    sent_task = a.latest_task_records()[sent["task_id"]]
+    assert sent_task["assigned_agent"] == target.agent_id, sent_task
+    status = service.handle({"action": "task_status", "args": {"task_id": sent["task_id"]}})
+    assert status["schema_version"] == "shuheng.query.v1", status
+    assert status["status"] == "ok", status
 
     context = service.handle({
         "action": "memory_context_get",
@@ -6770,6 +6903,8 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert service["request_response"]["registry"] == "resource://agent-mail/local-protocol-registry", service
     assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
     assert service["request_response"]["agent_directory"] == "agent-directory://local", service
+    assert "message_send" not in service["request_response"], service
+    assert "task_status" not in service["request_response"], service
     assert "context_inspector" not in service["request_response"], service
     assert "permission_matrix" not in service["request_response"], service
     assert service["sse"]["enabled"] is False, service
@@ -6891,6 +7026,9 @@ def assert_local_protocol_public_schema(registry: dict) -> None:
     service = registry["gateway_service"]
     assert service["request_response"]["agent_directory"] == "agent-directory://local", service
     assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
+    if service.get("status") == "local_record_only":
+        assert "message_send" not in service["request_response"], service
+        assert "task_status" not in service["request_response"], service
     assert "mcp_resource_read" not in service["request_response"], service
     assert "context_inspector" not in service["request_response"], service
     assert "permission_matrix" not in service["request_response"], service
@@ -6944,6 +7082,7 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert {
         "shuheng",
         "shuheng-agent-bridge",
+        "shuheng-agent-gateway",
         "shuheng-check",
         "shuheng-install-core-shim",
         "shuheng-integration",
@@ -11492,6 +11631,7 @@ def run_checks() -> None:
     assert_ohmypi_host_tool_bridge()
     assert_ohmypi_tui_query_host_tool_contract()
     assert_ohmypi_tui_proposal_host_tool_contract()
+    assert_ohmypi_credential_request_host_tool_contract()
     assert_agent_bridge_contract_and_omp_plugin()
     assert_ohmypi_memory_candidate_signal_filters()
     assert_ohmypi_missing_binary_and_abort()

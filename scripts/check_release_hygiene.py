@@ -208,6 +208,7 @@ def check_pyproject_metadata(errors: list[str]) -> None:
     required_scripts = {
         "shuheng",
         "shuheng-agent-bridge",
+        "shuheng-agent-gateway",
         "shuheng-check",
         "shuheng-install-core-shim",
         "shuheng-integration",

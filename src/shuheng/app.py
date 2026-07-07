@@ -473,6 +473,7 @@ AGENT_RUNTIME_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_providers
 AGENT_SCHEDULES_PATH = os.path.join(AGENT_HARNESS_DIR, "schedules.jsonl")
 AGENT_SCHEDULE_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "schedule_runs.jsonl")
 AGENT_BRIDGE_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "bridge_registry.json")
+AGENT_GATEWAY_REGISTRATION_PATH = os.path.join(AGENT_HARNESS_DIR, "gateway_registration.json")
 LLM_RECENT_MODELS_PATH = os.path.join(AGENT_HARNESS_DIR, "recent_models.json")
 SECRET_VAULT_DIR = os.path.abspath(os.path.expanduser(os.environ.get("SHUHENG_SECRET_VAULT_DIR") or os.path.join(SHUHENG_MEMORY_DIR, "secret_vault")))
 SECRET_VAULT_META_PATH = os.path.join(SECRET_VAULT_DIR, "vault.json")
@@ -920,7 +921,7 @@ def queue_user_input_for_current_step(state: State, text: str, *, interrupt_requ
 
 
 def queue_input_draft_for_interrupt(state: State) -> bool:
-    if secret_password_entry_active(state):
+    if secret_password_entry_active(state) or credential_input_active(state):
         return False
     draft = state.input_text
     if not draft.strip():
@@ -1799,16 +1800,21 @@ def reset_agent_runtime_context_no_snapshot(agent: Any, history: Optional[list[d
         agent.handler = None
     if hasattr(agent, "_shuheng_pending_key_info"):
         setattr(agent, "_shuheng_pending_key_info", "")
-    for attr in ("_shuheng_runtime_context_full_sent", "_shuheng_runtime_context_prompt_count"):
-        if hasattr(agent, attr):
-            try:
-                setattr(agent, attr, 0)
-            except Exception:
-                pass
+    reset_agent_runtime_context_prompt_state(agent)
     reset_runtime_session = getattr(agent, "reset_runtime_session", None)
     if callable(reset_runtime_session):
         try:
             reset_runtime_session()
+        except Exception:
+            pass
+
+
+def reset_agent_runtime_context_prompt_state(agent: Any) -> None:
+    if agent is None:
+        return
+    for attr in ("_shuheng_runtime_context_full_sent", "_shuheng_runtime_context_prompt_count"):
+        try:
+            setattr(agent, attr, 0)
         except Exception:
             pass
 
@@ -3515,6 +3521,257 @@ def secret_hint_lines(state: State, width: int) -> list[tuple[str, int]]:
     lines.append((truncate_cells(f"  crypto: {status}", width), cp(1)))
     lines.append((truncate_cells("  Enter 提交；/lock 取消并清除输入。", width), cp(1)))
     return lines
+
+
+CREDENTIAL_REQUEST_SCHEMA = "shuheng.credential_request.v1"
+CREDENTIAL_FORBIDDEN_ARG_KEYS = {
+    "apikey",
+    "api_key",
+    "attachment",
+    "attachments",
+    "authorization",
+    "content",
+    "message",
+    "messages",
+    "passphrase",
+    "passwd",
+    "password",
+    "prompt",
+    "secret",
+    "token",
+}
+CREDENTIAL_FORBIDDEN_RESULT_KEYS = CREDENTIAL_FORBIDDEN_ARG_KEYS - {"message"}
+
+
+def credential_input_active(state: State) -> bool:
+    return bool(getattr(state, "credential_request", None))
+
+
+def credential_prompt_text(state: State) -> str:
+    request = state.credential_request if isinstance(state.credential_request, dict) else {}
+    target = str(request.get("target_label") or request.get("target") or "credential").strip()
+    return f"{truncate_cells(target, 20)}> "
+
+
+def credential_hint_lines(state: State, width: int) -> list[tuple[str, int]]:
+    request = state.credential_request if isinstance(state.credential_request, dict) else {}
+    target = str(request.get("target_label") or request.get("target") or "credential").strip()
+    purpose = str(request.get("purpose") or "").strip()
+    account = str(request.get("account") or "").strip()
+    title = f"输入 {target} 密码；不会发送给模型或写入日志"
+    lines = [(truncate_cells(f"? Credential: {title}", width), cp(7) | curses.A_BOLD)]
+    detail_parts = []
+    if purpose:
+        detail_parts.append(f"purpose: {truncate_cells(purpose, 48)}")
+    if account:
+        detail_parts.append(f"account: {truncate_cells(account, 32)}")
+    if detail_parts:
+        lines.append((truncate_cells("  " + " · ".join(detail_parts), width), cp(1)))
+    lines.append((truncate_cells("  Enter 提交；/cancel、/lock 或空输入取消。", width), cp(1)))
+    return lines
+
+
+def credential_arg_key_is_forbidden(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").strip().lower()).strip("_")
+    compact = normalized.replace("_", "")
+    return normalized in CREDENTIAL_FORBIDDEN_ARG_KEYS or compact in CREDENTIAL_FORBIDDEN_ARG_KEYS
+
+
+def credential_result_key_is_forbidden(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").strip().lower()).strip("_")
+    compact = normalized.replace("_", "")
+    return normalized in CREDENTIAL_FORBIDDEN_RESULT_KEYS or compact in CREDENTIAL_FORBIDDEN_RESULT_KEYS
+
+
+def credential_forbidden_argument_paths(value: Any, prefix: str = "") -> list[str]:
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key, item in value.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            if credential_arg_key_is_forbidden(key_text):
+                paths.append(path)
+                continue
+            paths.extend(credential_forbidden_argument_paths(item, path))
+        return paths
+    if isinstance(value, list):
+        paths = []
+        for index, item in enumerate(value):
+            path = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            paths.extend(credential_forbidden_argument_paths(item, path))
+        return paths
+    return []
+
+
+def credential_safe_text(value: Any, limit: int = 200) -> str:
+    return truncate_cells(clean_text(str(value or "")).replace("\n", " ").strip(), limit)
+
+
+def registered_credential_target_ids(state: Optional[State]) -> list[str]:
+    if state is None:
+        return []
+    targets = getattr(state, "credential_targets", {})
+    if not isinstance(targets, dict):
+        return []
+    return sorted(str(key) for key in targets.keys())
+
+
+def register_credential_target(
+    state: State,
+    target: str,
+    handler: Any,
+    *,
+    label: str = "",
+    description: str = "",
+) -> str:
+    target_id = credential_safe_text(target, 80)
+    if not target_id:
+        raise ValueError("credential target is required")
+    if not callable(handler):
+        raise ValueError("credential target handler must be callable")
+    state.credential_targets[target_id] = {
+        "handler": handler,
+        "label": credential_safe_text(label or target_id, 80),
+        "description": credential_safe_text(description, 240),
+    }
+    return target_id
+
+
+def clear_pending_credential_request(state: State) -> None:
+    state.credential_request = {}
+
+
+def credential_request_metadata(args: dict[str, Any], target_entry: dict[str, Any], target: str) -> dict[str, Any]:
+    request_id = credential_safe_text(args.get("request_id") or args.get("requestId") or short_uid("cred"), 120)
+    metadata = args.get("metadata") if isinstance(args.get("metadata"), dict) else {}
+    return {
+        "schema_version": CREDENTIAL_REQUEST_SCHEMA,
+        "request_id": request_id,
+        "target": target,
+        "target_label": credential_safe_text(target_entry.get("label") or target, 80),
+        "purpose": credential_safe_text(args.get("purpose"), 240),
+        "account": credential_safe_text(args.get("account"), 120),
+        "metadata": tui_query_json_safe(metadata),
+        "created_at": now_iso(),
+    }
+
+
+def tui_tool_credential_request(state: Optional[State], args: dict[str, Any]) -> dict[str, Any]:
+    if state is None:
+        return tui_tool_error("TUI state is not bound; credential_request requires an active TUI state.")
+    if not isinstance(args, dict):
+        return tui_tool_error("credential_request arguments must be an object.")
+    forbidden = credential_forbidden_argument_paths(args)
+    if forbidden:
+        return tui_tool_error(
+            "credential_request does not accept secret-bearing fields.",
+            forbidden_fields=sorted(forbidden),
+            supported_fields=["target", "request_id", "requestId", "purpose", "account", "metadata"],
+        )
+    target = credential_safe_text(args.get("target"), 80)
+    if not target:
+        return tui_tool_error(
+            "Missing credential target.",
+            supported_targets=registered_credential_target_ids(state),
+        )
+    targets = getattr(state, "credential_targets", {})
+    target_entry = targets.get(target) if isinstance(targets, dict) else None
+    if not isinstance(target_entry, dict) or not callable(target_entry.get("handler")):
+        return tui_tool_error(
+            "Credential target is not registered.",
+            target=target,
+            supported_targets=registered_credential_target_ids(state),
+        )
+    request = credential_request_metadata(args, target_entry, target)
+    state.credential_request = request
+    set_input_text(state, "")
+    reset_input_history_browse(state)
+    mark_dirty(state)
+    return tui_tool_ok(
+        "credential.request",
+        status="pending",
+        request_id=request["request_id"],
+        target=request["target"],
+        target_label=request["target_label"],
+        note="Awaiting local masked input; the credential is delivered only to the registered local target.",
+    )
+
+
+def credential_result_sanitized(value: Any, credential: str) -> Any:
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if credential_result_key_is_forbidden(key_text):
+                continue
+            safe[key_text] = credential_result_sanitized(item, credential)
+        return safe
+    if isinstance(value, list):
+        return [credential_result_sanitized(item, credential) for item in value]
+    if isinstance(value, tuple):
+        return [credential_result_sanitized(item, credential) for item in value]
+    if isinstance(value, str):
+        text = clean_text(value)
+        if credential:
+            text = text.replace(credential, "[redacted credential]")
+        return truncate_cells(text, 1000)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return truncate_cells(str(value), 300)
+
+
+def credential_handler_message(result: Any, *, credential: str, request: dict[str, Any]) -> str:
+    target = str(request.get("target_label") or request.get("target") or "credential target").strip()
+    fallback = f"Credential delivered to {target}."
+    safe = credential_result_sanitized(result, credential)
+    if safe is None:
+        return fallback
+    if isinstance(safe, str):
+        return safe.strip() or fallback
+    if isinstance(safe, dict):
+        message = str(safe.get("message") or safe.get("status_message") or "").strip()
+        if message:
+            return message
+        if safe:
+            return fallback + "\n" + json.dumps(safe, ensure_ascii=False, sort_keys=True)
+        return fallback
+    if isinstance(safe, list):
+        return fallback + "\n" + json.dumps(safe, ensure_ascii=False)
+    return fallback
+
+
+def accept_credential_input(state: State, password: str) -> str:
+    request = state.credential_request if isinstance(state.credential_request, dict) else {}
+    if not request:
+        return ""
+    submitted = password or ""
+    command = submitted.strip().lower()
+    if not submitted or command in {"/cancel", "/lock"}:
+        set_input_text(state, "")
+        clear_pending_credential_request(state)
+        mark_dirty(state)
+        return "Credential request canceled; no credential was delivered."
+    target = str(request.get("target") or "").strip()
+    targets = getattr(state, "credential_targets", {})
+    target_entry = targets.get(target) if isinstance(targets, dict) else None
+    handler = target_entry.get("handler") if isinstance(target_entry, dict) else None
+    if not callable(handler):
+        set_input_text(state, "")
+        clear_pending_credential_request(state)
+        mark_dirty(state)
+        return "Credential request failed closed: target handler is no longer registered."
+    result: Any = None
+    try:
+        result = handler(submitted, dict(request))
+    except Exception as exc:
+        set_input_text(state, "")
+        clear_pending_credential_request(state)
+        mark_dirty(state)
+        return f"Credential delivery failed closed: {type(exc).__name__}."
+    set_input_text(state, "")
+    clear_pending_credential_request(state)
+    mark_dirty(state)
+    return credential_handler_message(result, credential=submitted, request=request)
 
 
 def secret_auto_tor_enabled() -> bool:
@@ -8082,11 +8339,73 @@ def current_release_readiness_report() -> dict[str, Any]:
     )
 
 
+def persistent_agent_gateway_descriptor() -> dict[str, Any]:
+    return {
+        "schema_version": "agentgateway.registration.v1",
+        "gateway_id": "shuheng.local",
+        "status": "registered",
+        "registered_at": now_iso(),
+        "owner": "shuheng.control_plane",
+        "transport": "local-jsonl-stdio",
+        "persistent": True,
+        "web_http_surface": False,
+        "network_surface": "none",
+        "commands": {
+            "serve": ["shuheng-agent-gateway", "serve", "--stdio"],
+            "module_serve": [sys.executable or "python3", "-m", "shuheng.agent_bridge", "serve", "--stdio"],
+            "call": ["shuheng-agent-gateway", "call", '{"action":"agent_directory"}'],
+            "message_send": ["shuheng-agent-gateway", "message-send", "--target", "<agent-id>", "--message", "<text>"],
+            "task_status": ["shuheng-agent-gateway", "task-status", "--task-id", "<task-id>"],
+        },
+        "request_response": {
+            "agent_directory": "agent-directory://local",
+            "message_send": "shuheng-gateway://message-send",
+            "task_status": "shuheng-gateway://task-status/{task_id}",
+        },
+        "state": {
+            "schema_version": "agentgateway.daemon.v1",
+            "status": "registered",
+            "alive": False,
+            "supervisor": "external",
+            "transport": "local-jsonl-stdio",
+            "pid": 0,
+            "started_at": "",
+            "registration_path": AGENT_GATEWAY_REGISTRATION_PATH,
+        },
+        "policy": {
+            "execution_owner": "shuheng.orchestrator",
+            "context_exposed": False,
+            "permission_matrix_exposed": False,
+            "secret_plaintext_exposed": False,
+            "long_term_memory_write": "candidate_only",
+        },
+    }
+
+
+def register_persistent_agent_gateway() -> dict[str, Any]:
+    registration = persistent_agent_gateway_descriptor()
+    write_text_atomic(
+        AGENT_GATEWAY_REGISTRATION_PATH,
+        json.dumps(registration, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+    return registration
+
+
+def loaded_persistent_agent_gateway_registration() -> dict[str, Any]:
+    data = read_json_dict_file(AGENT_GATEWAY_REGISTRATION_PATH)
+    if not isinstance(data, dict) or data.get("schema_version") != "agentgateway.registration.v1":
+        return {}
+    if str(data.get("gateway_id") or "") != "shuheng.local":
+        return {}
+    return data
+
+
 def local_protocol_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
     del port
     bind_safety = local_protocol_bind_safety(host)
     return local_protocol_registry_helpers.local_protocol_service_descriptor(
         bind_safety=bind_safety,
+        persistent_gateway=loaded_persistent_agent_gateway_registration(),
     )
 
 
@@ -8098,6 +8417,10 @@ def local_protocol_public_service_descriptor(service: dict[str, Any]) -> dict[st
         for key in ("health", "registry", "a2a", "agent_directory", "a2a_message_send")
         if key in request_response
     }
+    if "message_send" in request_response:
+        public_request_response["message_send"] = request_response["message_send"]
+    if "task_status" in request_response:
+        public_request_response["task_status"] = request_response["task_status"]
     if "agent_cards" not in public_request_response and "a2a" in request_response:
         public_request_response["agent_cards"] = str(request_response["a2a"]).rstrip("/") + "/agent-cards"
     push = service.get("push_notifications") if isinstance(service.get("push_notifications"), dict) else {}
@@ -8106,7 +8429,7 @@ def local_protocol_public_service_descriptor(service: dict[str, Any]) -> dict[st
     public_daemon_state = {
         key: value
         for key, value in daemon_state.items()
-        if key not in {"pid_path", "status_path", "log_path"}
+        if key not in {"pid_path", "status_path", "log_path", "registration_path"}
     }
     return {
         "schema_version": service.get("schema_version") or "agentgateway.service.v1",
@@ -13832,6 +14155,7 @@ OHMYPI_TYPED_GOVERNED_TOOL_NAMES = (
     "proposal_submit",
     "memory_candidate_submit",
     "schedule_create",
+    "credential_request",
 )
 
 
@@ -14013,6 +14337,32 @@ def ohmypi_typed_governed_host_tool_definitions() -> list[RpcHostToolDefinition]
                     },
                 },
                 "required": ["name"],
+            },
+        ),
+        RpcHostToolDefinition(
+            name="credential_request",
+            label="credential.request",
+            description=(
+                "Request local masked credential input for a registered Shuheng target. The model only receives "
+                "a pending request id; the credential is never accepted in tool arguments, returned in tool "
+                "results, or sent through the LLM."
+            ),
+            parameters={
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {
+                    "target": {"type": "string", "description": "Registered local credential target id."},
+                    "request_id": {"type": "string", "description": "Optional caller-supplied request id."},
+                    "requestId": {"type": "string", "description": "Optional caller-supplied request id."},
+                    "purpose": {"type": "string", "description": "Safe user-visible reason for the credential request."},
+                    "account": {"type": "string", "description": "Safe account label; not a password/token."},
+                    "metadata": {
+                        "type": "object",
+                        "description": "Optional safe metadata. Secret-bearing fields are rejected.",
+                        "additionalProperties": True,
+                    },
+                },
+                "required": ["target"],
             },
         ),
     ]
@@ -14329,6 +14679,8 @@ def ohmypi_tui_host_tool_handler(state: Optional[State] = None, *, runtime_agent
             return ohmypi_tui_propose_memory_candidate(state, payload)
         if tool_name == "schedule_create":
             return tui_tool_schedule_create(state, args if isinstance(args, dict) else {})
+        if tool_name == "credential_request":
+            return tui_tool_credential_request(state, args if isinstance(args, dict) else {})
         if tool_name == OHMYPI_TUI_PROPOSE_TOOL_NAME:
             return ohmypi_tui_propose_host_tool_handler(state, args)
         if tool_name != OHMYPI_TUI_QUERY_TOOL_NAME:
@@ -18789,6 +19141,7 @@ def switch_ohmypi_runtime_to_history_session(agent: Any, path: str) -> tuple[boo
         return False, f"OMP 原生会话切换失败: {type(exc).__name__}: {exc}"
     if not ok:
         return False, "OMP 原生会话切换失败，已尝试旧式上下文恢复。"
+    reset_agent_runtime_context_prompt_state(agent)
     return True, f"已切换到 OMP 原生会话：{os.path.basename(session_file)}"
 
 
@@ -20589,19 +20942,31 @@ def draw_main(stdscr, state: State, height: int, width: int, sidebar_w: int, rig
     state.running_indicator_rect = None
     state.input_cursor_screen = None
     secret_input = secret_password_entry_active(state)
-    matches = [] if secret_input else command_matches(state.input_text, state)
+    credential_input = credential_input_active(state) if not secret_input else False
+    protected_input = secret_input or credential_input
+    matches = [] if protected_input else command_matches(state.input_text, state)
     clamp_command_index(state, matches)
     visible_limit = min(len(matches), 10, max(0, height - 8))
     if visible_limit and state.command_index >= visible_limit:
         state.command_index = visible_limit - 1
     visible_commands = matches[:visible_limit]
-    active_interaction = current_interaction_payload(state) if not matches and not secret_input else None
-    interaction_lines = secret_hint_lines(state, main_w) if secret_input else interaction_hint_lines(active_interaction, main_w)
-    queued_lines = [] if secret_input else queued_user_input_hint_lines(state, main_w)
+    active_interaction = current_interaction_payload(state) if not matches and not protected_input else None
+    if secret_input:
+        interaction_lines = secret_hint_lines(state, main_w)
+    elif credential_input:
+        interaction_lines = credential_hint_lines(state, main_w)
+    else:
+        interaction_lines = interaction_hint_lines(active_interaction, main_w)
+    queued_lines = [] if protected_input else queued_user_input_hint_lines(state, main_w)
     max_input_lines = max(1, min(6, height - len(visible_commands) - len(interaction_lines) - len(queued_lines) - 8))
     clamp_input_cursor(state)
-    input_prompt = secret_prompt_text(state) if secret_input else interaction_input_prompt(active_interaction)
-    input_text = "*" * len(state.input_text) if secret_input else state.input_text
+    if secret_input:
+        input_prompt = secret_prompt_text(state)
+    elif credential_input:
+        input_prompt = credential_prompt_text(state)
+    else:
+        input_prompt = interaction_input_prompt(active_interaction)
+    input_text = "*" * len(state.input_text) if protected_input else state.input_text
     input_lines, cursor_y, cursor_x = input_layout(input_text, main_w, max_input_lines, state.input_cursor, input_prompt)
     input_h = 2 + len(visible_commands) + len(interaction_lines) + len(queued_lines) + len(input_lines)
     body_h = max(1, height - input_h - 2)
@@ -24641,6 +25006,11 @@ def submit(state: State, text: str) -> None:
         if result:
             add_system(state, result)
         return
+    if not secret_password_entry_active(state) and credential_input_active(state):
+        result = accept_credential_input(state, raw_text)
+        if result:
+            add_system(state, result)
+        return
     active_visible_sub = active_subagent_view(state)
     if active_visible_sub is not None and active_visible_sub.pending_interaction and not text.startswith("/"):
         answer = accept_subagent_interaction_input(state, active_visible_sub, raw_text)
@@ -27316,7 +27686,9 @@ def handle_key(stdscr, state: State, key) -> None:
         open_rename_modal(stdscr, state)
         return
     secret_input = secret_password_entry_active(state)
-    matches = [] if secret_input else command_matches(state.input_text, state)
+    credential_input = credential_input_active(state) if not secret_input else False
+    protected_input = secret_input or credential_input
+    matches = [] if protected_input else command_matches(state.input_text, state)
     clamp_command_index(state, matches)
     if matches and key in (curses.KEY_UP,):
         state.command_index = (state.command_index - 1) % min(len(matches), 10)
@@ -27326,7 +27698,7 @@ def handle_key(stdscr, state: State, key) -> None:
         state.command_index = (state.command_index + 1) % min(len(matches), 10)
         mark_dirty(state)
         return
-    active_interaction = current_interaction_payload(state)
+    active_interaction = None if protected_input else current_interaction_payload(state)
     if active_interaction and not matches and key in (curses.KEY_UP,):
         if move_interaction_selection(state, -1):
             return
@@ -27342,12 +27714,12 @@ def handle_key(stdscr, state: State, key) -> None:
     if key in (curses.KEY_UP,):
         if move_input_cursor_vertical(state, input_width_for_key(stdscr), -1):
             return
-        if not (state.secret_vault.unlocked or secret_input) and browse_input_history(state, -1):
+        if not (state.secret_vault.unlocked or protected_input) and browse_input_history(state, -1):
             return
     if key in (curses.KEY_DOWN,):
         if move_input_cursor_vertical(state, input_width_for_key(stdscr), 1):
             return
-        if not (state.secret_vault.unlocked or secret_input) and browse_input_history(state, 1):
+        if not (state.secret_vault.unlocked or protected_input) and browse_input_history(state, 1):
             return
     if matches and key == "\t":
         set_input_text(state, completion_insert_text(matches[state.command_index]))
@@ -27420,6 +27792,10 @@ def handle_key(stdscr, state: State, key) -> None:
         else:
             text = state.input_text
         if secret_input and text.strip().lower() != "/lock":
+            set_input_text(state, "")
+            submit(state, text)
+            return
+        if credential_input:
             set_input_text(state, "")
             submit(state, text)
             return

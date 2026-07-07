@@ -41,7 +41,7 @@ Bring session management, multi-agent orchestration, task planning, memory gover
 
 `Shuheng` is a terminal control plane for local multi-agent work. It does not reimplement agent runtimes; it separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
 
-Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, Secret Vault, and OMP runtime output/control are the primary stable surfaces. Shuheng no longer ships a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint. A2A/MCP-shaped data remains only as local registry/record shapes, not as reachable protocol services or certification claims.
+Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, Secret Vault, and OMP runtime output/control are the primary stable surfaces. Shuheng no longer ships a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; those directions are archived. External AI clients should use the local JSONL stdio `shuheng-agent-gateway`. A2A/MCP-shaped data remains only as local registry/record shapes, not as reachable protocol services or certification claims.
 
 Think of it as:
 
@@ -341,7 +341,7 @@ Type `/help` inside the TUI for the full command list.
 | `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, local protocol safety posture, and heuristic eval helpers |
 | `src/shuheng/control_protocol.py` | Agent task control protocol (v2) parsing |
 | `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback |
-| `src/shuheng/agent_bridge.py` | Local agent bridge API for OMP and other clients to read/write Shuheng state |
+| `src/shuheng/agent_bridge.py` | Local agent bridge / stdio gateway API for OMP, Codex, Claude Code, and other clients to discover agents, send tasks, and submit governed proposals |
 | `src/shuheng/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
 | `src/shuheng/compat_legacy.py` | Legacy session/memory compatibility parsing |
 | `tests/` | pytest suite covering pure functions, crypto, and parsers |
@@ -367,6 +367,7 @@ docs/agent-harness-architecture.md
 | Auditability | task ledger, progress ledger, mail, artifacts, approvals, evals, and traces remain inspectable |
 | Human approval gates | Long-term memory, Secret operations, deletion, deployment, and external side effects require approval |
 | Protocol records | A2A/MCP-shaped objects exist only as local registry/record shapes; there is no built-in HTTP endpoint or protocol certification |
+| Local gateway | `shuheng-agent-gateway serve --stdio` can run as a persistent local JSONL gateway; it opens no socket and exposes no Web/HTTP surface |
 
 Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery, eval/trace, A2A/MCP, or orchestration should be checked against the architecture baseline before completion.
 
@@ -375,8 +376,20 @@ Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery
 Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py`. Current default posture:
 
 - Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault, OMP runtime output/control.
-- Experimental surfaces: baseline report, runtime/evidence smoke, heuristic eval, scheduler runtime dispatch, local protocol-shaped registry records.
-- Known gaps: `app.py` remains a large composition module; eval does not prove factual/citation correctness; A2A/MCP-shaped records are not reachable protocol endpoints; Web Console, HTTP gateway, mobile, and remote endpoints are not current product surfaces.
+- Experimental surfaces: baseline report, runtime/evidence smoke, heuristic eval, scheduler runtime dispatch, local protocol-shaped registry records, stdio agent gateway.
+- Known gaps: `app.py` remains a large composition module; eval does not prove factual/citation correctness; A2A/MCP-shaped records are not reachable protocol endpoints; Web Console, HTTP gateway, mobile, and remote endpoints are archived and are not current product surfaces.
+
+### Local Agent Gateway
+
+```bash
+shuheng-agent-gateway register
+shuheng-agent-gateway agent-directory
+shuheng-agent-gateway serve --stdio
+shuheng-agent-gateway message-send --target <agent-id> --message "task for this agent"
+shuheng-agent-gateway task-status --task-id <task-id>
+```
+
+`serve --stdio` is the long-lived local process intended for an external AI or supervisor to hold. It speaks JSONL over stdin/stdout only and starts no Web/HTTP service. `message-send` dispatches through the Shuheng Orchestrator's governed subagent task path and approval gates.
 
 ## Development
 
@@ -413,7 +426,7 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 ### Open-Source Release Boundaries
 
 - License: MIT, see `LICENSE`.
-- Security reporting and boundaries: see `SECURITY.md`. Shuheng does not ship a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; external sending, deployment, deletion, Secret access, and long-term memory writes still go through local approval gates.
+- Security reporting and boundaries: see `SECURITY.md`. Shuheng does not ship a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; the local agent gateway is JSONL stdio only. External sending, deployment, deletion, Secret access, and long-term memory writes still go through local approval gates.
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
 - CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, wheel smoke, and `git diff --check`.

@@ -39,6 +39,7 @@ REQUIRED_CONTINUE_FUNCS = (
 PUBLIC_CONSOLE_SCRIPTS = (
     "shuheng",
     "shuheng-agent-bridge",
+    "shuheng-agent-gateway",
     "shuheng-check",
     "shuheng-install-core-shim",
     "shuheng-integration",
@@ -46,6 +47,7 @@ PUBLIC_CONSOLE_SCRIPTS = (
 
 HELP_SAFE_CONSOLE_SCRIPTS = (
     "shuheng-agent-bridge",
+    "shuheng-agent-gateway",
     "shuheng-install-core-shim",
     "shuheng-integration",
 )

@@ -17,9 +17,9 @@ The TUI owns these top-level responsibilities:
 - Local protocol-shaped records for agent/tool discovery metadata.
 
 The current public posture is experimental local alpha. Shuheng does not ship a
-built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint.
-A2A/MCP-shaped data is local registry metadata only, not a reachable protocol
-surface.
+built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; those
+surfaces are archived product directions. A2A/MCP-shaped data is local registry
+metadata only, not a certified reachable protocol surface.
 
 Runtime providers own narrow execution:
 
@@ -34,6 +34,13 @@ of scraping files or writing ledgers. The local bridge entrypoint is
 `shuheng-agent-bridge` / `python -m shuheng.agent_bridge`; it exposes read-only
 context retrieval and governed proposal submission while keeping approvals,
 memory, schedules, artifacts, and traces in the TUI control plane.
+
+For external agents that need a long-lived local gateway, Shuheng exposes
+`shuheng-agent-gateway` / `python -m shuheng.agent_bridge`. It is a JSONL stdio
+gateway, not a Web/HTTP server. `register` writes the local registration record,
+`serve --stdio` keeps the process alive, `agent-directory` exposes purpose-only
+agent discovery, `message-send` dispatches through the Orchestrator-owned
+subagent task path, and `task-status` reads ledger status.
 
 ## Storage Boundary
 
@@ -161,6 +168,11 @@ Runtime and top-level control metadata are exposed through:
   ledger, and trace rows only. They record `kind:"agent_mail_intake"` and leave
   execution, approvals, memory writes, and workflow continuation owned by the
   Shuheng Orchestrator/TUI.
+- Local persistent gateway registration: `agentgateway.registration.v1` at
+  `gateway_registration.json` records `shuheng.local` as a local JSONL stdio
+  gateway. It may expose `message-send` and `task-status` over the bridge CLI,
+  but it must not open sockets, expose HTTP routes, or leak context/permission
+  internals in public discovery.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `runtime_subagent_list`,
@@ -202,7 +214,8 @@ Runtime and top-level control metadata are exposed through:
 - Do not describe A2A/MCP-shaped records as certified protocol implementations
   or reachable endpoints.
 - Do not reintroduce a built-in Web Console, HTTP gateway, mobile endpoint, or
-  remote endpoint without a new explicit product decision.
+  remote endpoint without a new explicit product decision. The supported
+  gateway path is local JSONL stdio, not Web/HTTP.
 - Do not let local Agent Mail message intake become a hidden executor. External
   adapter messages are inbox entries and ledger facts until the Orchestrator/TUI
   decides what to run.

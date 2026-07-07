@@ -29,20 +29,29 @@ def mcp_resource_registry(paths: dict[str, str]) -> list[dict[str, Any]]:
 def local_protocol_service_descriptor(
     *,
     bind_safety: dict[str, Any],
+    persistent_gateway: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    gateway = persistent_gateway or {}
+    request_response = {
+        "registry": "resource://agent-mail/local-protocol-registry",
+        "agent_directory": "agent-directory://local",
+        "message_inbox": "agent-mail://inbox",
+        "resource_registry": "resource://agent-mail/*",
+    }
+    if gateway:
+        request_response.update({
+            "message_send": "shuheng-gateway://message-send",
+            "task_status": "shuheng-gateway://task-status/{task_id}",
+        })
     return {
         "schema_version": "agentgateway.service.v1",
-        "status": "local_record_only",
+        "status": "local_persistent_stdio_gateway" if gateway else "local_record_only",
         "bind": {"host": "", "port": 0},
         "base_url": "",
         "security": bind_safety,
         "release_posture": "experimental_alpha",
-        "request_response": {
-            "registry": "resource://agent-mail/local-protocol-registry",
-            "agent_directory": "agent-directory://local",
-            "message_inbox": "agent-mail://inbox",
-            "resource_registry": "resource://agent-mail/*",
-        },
+        "transport": "local-jsonl-stdio" if gateway else "local-record",
+        "request_response": request_response,
         "sse": {
             "enabled": False,
             "endpoint": "",
@@ -56,7 +65,8 @@ def local_protocol_service_descriptor(
             "auth": "none",
         },
         "daemon": {
-            "commands": [],
-            "state": {"schema_version": "agentgateway.daemon.v1", "status": "removed", "alive": False},
+            "commands": gateway.get("commands") or [],
+            "state": gateway.get("state") or {"schema_version": "agentgateway.daemon.v1", "status": "removed", "alive": False},
+            "transport": gateway.get("transport") or "none",
         },
     }

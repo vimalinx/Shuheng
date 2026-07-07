@@ -187,6 +187,7 @@ def distribution_smoke_contract() -> dict[str, Any]:
         "public_console_scripts": [
             "shuheng",
             "shuheng-agent-bridge",
+            "shuheng-agent-gateway",
             "shuheng-check",
             "shuheng-install-core-shim",
             "shuheng-integration",

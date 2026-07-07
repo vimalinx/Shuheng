@@ -56,6 +56,7 @@ dev = [
 [project.scripts]
 shuheng = "shuheng.cli:main"
 shuheng-agent-bridge = "shuheng.agent_bridge:main"
+shuheng-agent-gateway = "shuheng.agent_bridge:gateway_main"
 shuheng-check = "shuheng.integration:doctor_main"
 shuheng-install-core-shim = "shuheng.integration:install_core_shim_main"
 shuheng-integration = "shuheng.integration:main"

@@ -11,13 +11,23 @@ import importlib
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
 
 BRIDGE_SCHEMA_VERSION = "shuheng.agent_bridge.v1"
+GATEWAY_SCHEMA_VERSION = "shuheng.agent_gateway.v1"
 SUPPORTED_ACTIONS = (
     "metadata",
+    "agent_directory",
+    "agent_list",
+    "agent_get",
+    "agent_match",
+    "message_send",
+    "task_status",
+    "gateway_status",
+    "gateway_register",
     "query",
     "memory_context_get",
     "memory_candidate_submit",
@@ -89,9 +99,13 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
         "owner": "shuheng.control_plane",
         "supported_actions": list(SUPPORTED_ACTIONS),
         "contracts": {
+            "agent_directory": "purpose_only_agent_discovery",
+            "message_send": "orchestrator_owned_agent_task_dispatch",
+            "task_status": "task_ledger_status_query",
             "memory_context_get": "read_only_context_pack",
             "memory_candidate_submit": "candidate_only_human_approval",
             "proposal_submit": "governed_schema_proposal",
+            "gateway_transport": "jsonl_stdio_or_one_shot_cli",
         },
         "paths": {
             "app_root_dir": getattr(app, "APP_ROOT_DIR", ""),
@@ -109,6 +123,9 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
             "long_term_memory_write": "candidate_only",
             "approval_owner": "shuheng.policy",
             "provider_direct_writes": False,
+            "network_surface": "none",
+            "web_http_surface": False,
+            "execution_owner": "shuheng.orchestrator",
         },
     }
 
@@ -128,9 +145,120 @@ class AgentBridgeService:
     def __init__(self, app: Any | None = None, state: Any | None = None) -> None:
         self.app = app or load_app()
         self.state = state if state is not None else create_bridge_state(self.app)
+        self.started_at = time.time()
 
     def query(self, endpoint: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.app.ohmypi_tui_query_endpoint(self.state, endpoint, args or {})
+
+    def refresh(self) -> None:
+        try:
+            self.app.load_subagents(self.state)
+        except Exception:
+            pass
+
+    def gateway_status(self) -> dict[str, Any]:
+        metadata = bridge_metadata(self.app)
+        return {
+            "schema_version": GATEWAY_SCHEMA_VERSION,
+            "status": "running",
+            "transport": "jsonl_stdio_or_one_shot_cli",
+            "pid": os.getpid(),
+            "uptime_seconds": max(0, int(time.time() - self.started_at)),
+            "owner": "shuheng.control_plane",
+            "web_http_surface": False,
+            "network_surface": "none",
+            "supported_actions": list(SUPPORTED_ACTIONS),
+            "metadata": metadata,
+        }
+
+    def gateway_registration(self) -> dict[str, Any]:
+        register_fn = getattr(self.app, "register_persistent_agent_gateway", None)
+        if not callable(register_fn):
+            return bridge_error("Shuheng app does not expose gateway registration.")
+        return register_fn()
+
+    def agent_directory(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(args or {})
+        self.refresh()
+        if payload.get("public", True):
+            registry = self.app.ensure_local_protocol_registry(self.state)
+            return self.app.local_protocol_public_registry(registry)["agent_directory"]
+        return self.query("agent_list", payload)
+
+    def agent_list(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.refresh()
+        return self.query("agent_list", args or {})
+
+    def agent_get(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.refresh()
+        return self.query("agent_get", args or {})
+
+    def agent_match(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.refresh()
+        return self.query("agent_match", args or {})
+
+    def message_send(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(args or {})
+        self.refresh()
+        target = str(payload.get("target") or payload.get("agent_id") or payload.get("recipient") or "").strip()
+        text = str(payload.get("message") or payload.get("text") or payload.get("content") or payload.get("objective") or "").strip()
+        if not target:
+            return bridge_error("message_send requires target.")
+        if not text:
+            return bridge_error("message_send requires message text.")
+        mode = str(payload.get("mode") or "task").strip().lower()
+        if mode not in {"task", "inbox"}:
+            return bridge_error("message_send mode must be task or inbox.", mode=mode)
+        if mode == "inbox":
+            result, status_code = self.app.append_agent_mail_intake_message({
+                **payload,
+                "target": target,
+                "message": text,
+                "from_agent": str(payload.get("from_agent") or payload.get("from") or "external.agent"),
+            })
+            result["http_status_equivalent"] = status_code
+            return result
+        sub = self.app.resolve_subagent(self.state, target)
+        if sub is None:
+            return bridge_error("Target subagent was not found or was ambiguous.", target=target)
+        dispatch = self.app.start_subagent_task_structured(
+            self.state,
+            sub,
+            text,
+            source=str(payload.get("source") or "agent_gateway"),
+            parent_task_id=str(payload.get("parent_task_id") or payload.get("parentTaskId") or ""),
+            task_title=str(payload.get("task_title") or payload.get("title") or ""),
+        )
+        return {
+            "schema_version": "a2a.message_send_response.v1",
+            "accepted": dispatch.status not in {"failed", "rejected"},
+            "status": dispatch.status,
+            "contextId": "shuheng",
+            "delivery": {
+                "mode": "orchestrator_agent_task",
+                "auto_dispatch": True,
+                "transport": "local_jsonl_stdio",
+                "execution_owner": "shuheng.orchestrator",
+                "web_http_surface": False,
+            },
+            "target": sub.agent_id,
+            "agent": {"agent_id": sub.agent_id, "name": sub.name, "role": self.app.normalized_subagent_role(sub.role)},
+            "task_id": dispatch.task_id,
+            "approval_id": dispatch.approval_id,
+            "provider_id": dispatch.provider_id,
+            "message": dispatch.message,
+            "error": dispatch.error,
+        }
+
+    def task_status(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(args or {})
+        task_id = str(payload.get("task_id") or payload.get("taskId") or "").strip()
+        if not task_id:
+            return bridge_error("task_status requires task_id.")
+        row = self.app.latest_task_records().get(task_id)
+        if not isinstance(row, dict):
+            return bridge_error("task was not found.", task_id=task_id)
+        return self.app.tui_tool_task_get(self.state, {"task_id": task_id})
 
     def memory_context_get(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.query("memory_context_get", args or {})
@@ -211,6 +339,22 @@ class AgentBridgeService:
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         if action == "metadata":
             return bridge_metadata(self.app)
+        if action == "gateway_status":
+            return self.gateway_status()
+        if action == "gateway_register":
+            return self.gateway_registration()
+        if action == "agent_directory":
+            return self.agent_directory(args)
+        if action == "agent_list":
+            return self.agent_list(args)
+        if action == "agent_get":
+            return self.agent_get(args)
+        if action == "agent_match":
+            return self.agent_match(args)
+        if action == "message_send":
+            return self.message_send(args)
+        if action == "task_status":
+            return self.task_status(args)
         if action == "query":
             endpoint = str(payload.get("endpoint") or args.get("endpoint") or "").strip()
             endpoint_args = args.get("args") if isinstance(args.get("args"), dict) else args
@@ -248,6 +392,26 @@ def run_bridge_call(payload: dict[str, Any], options: BridgeOptions | None = Non
     return service.handle(payload)
 
 
+def serve_jsonl(options: BridgeOptions | None = None, *, stdin: Any = None, stdout: Any = None) -> int:
+    service = AgentBridgeService(app=load_app(options), state=None)
+    in_fh = stdin or sys.stdin
+    out_fh = stdout or sys.stdout
+    out_fh.write(json.dumps(service.gateway_status(), ensure_ascii=False, sort_keys=True) + "\n")
+    out_fh.flush()
+    for raw_line in in_fh:
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        try:
+            payload = parse_json_object(line)
+            response = service.handle(payload)
+        except Exception as exc:
+            response = bridge_error(f"{type(exc).__name__}: {exc}")
+        out_fh.write(json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n")
+        out_fh.flush()
+    return 0
+
+
 def _common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", default="", help="optional compatibility checkout path")
     parser.add_argument("--harness-dir", default="", help="Shuheng harness directory override")
@@ -273,9 +437,34 @@ def main(argv: list[str] | None = None) -> int:
     metadata = sub.add_parser("metadata", help="print bridge metadata")
     _common_options(metadata)
 
+    status = sub.add_parser("status", help="print local gateway status")
+    _common_options(status)
+
+    register = sub.add_parser("register", help="register Shuheng as a local persistent stdio gateway")
+    _common_options(register)
+
+    serve = sub.add_parser("serve", help="serve bridge requests over JSONL stdio; no socket or HTTP server is opened")
+    _common_options(serve)
+    serve.add_argument("--stdio", action="store_true", help="serve JSONL over stdin/stdout")
+
     call = sub.add_parser("call", help="execute a bridge JSON payload")
     _common_options(call)
     call.add_argument("payload", nargs="?", default="", help="JSON payload; reads stdin when omitted")
+
+    directory = sub.add_parser("agent-directory", help="print public agent directory")
+    _common_options(directory)
+
+    send = sub.add_parser("message-send", help="send a governed local message/task to a Shuheng agent")
+    _common_options(send)
+    send.add_argument("--target", required=True)
+    send.add_argument("--message", required=True)
+    send.add_argument("--mode", choices=["task", "inbox"], default="task")
+    send.add_argument("--from-agent", default="external.agent")
+    send.add_argument("--title", default="")
+
+    task_status = sub.add_parser("task-status", help="read task status for a dispatched message")
+    _common_options(task_status)
+    task_status.add_argument("--task-id", required=True)
 
     query = sub.add_parser("query", help="execute a read-only query endpoint")
     _common_options(query)
@@ -303,9 +492,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "metadata":
             _print_json(bridge_metadata(load_app(options)))
             return 0
+        if args.command == "status":
+            _print_json(AgentBridgeService(app=load_app(options)).gateway_status())
+            return 0
+        if args.command == "register":
+            _print_json(AgentBridgeService(app=load_app(options)).gateway_registration())
+            return 0
+        if args.command == "serve":
+            return serve_jsonl(options)
         if args.command == "call":
             raw_payload = args.payload or sys.stdin.read()
             _print_json(run_bridge_call(parse_json_object(raw_payload), options))
+            return 0
+        if args.command == "agent-directory":
+            _print_json(run_bridge_call({"action": "agent_directory", "args": {}}, options))
+            return 0
+        if args.command == "message-send":
+            payload = {
+                "action": "message_send",
+                "args": {
+                    "target": args.target,
+                    "message": args.message,
+                    "mode": args.mode,
+                    "from_agent": args.from_agent,
+                    "task_title": args.title,
+                },
+            }
+            _print_json(run_bridge_call(payload, options))
+            return 0
+        if args.command == "task-status":
+            _print_json(run_bridge_call({"action": "task_status", "args": {"task_id": args.task_id}}, options))
             return 0
         if args.command == "query":
             payload = {
@@ -343,6 +559,10 @@ def main(argv: list[str] | None = None) -> int:
         _print_json(bridge_error(f"{type(exc).__name__}: {exc}"))
         return 1
     return 2
+
+
+def gateway_main(argv: list[str] | None = None) -> int:
+    return main(argv)
 
 
 if __name__ == "__main__":
