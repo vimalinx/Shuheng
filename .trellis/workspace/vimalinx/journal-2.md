@@ -405,3 +405,36 @@ Closed public alpha release blockers: ignored private local knowledge base, adde
 ### Next Steps
 
 - None - task complete
+
+
+## Session 58: Publish Shuheng public alpha
+
+**Date**: 2026-07-08
+**Task**: Publish Shuheng public alpha
+**Branch**: `main`
+
+### Summary
+
+Published vimalinx/Shuheng as public experimental local alpha, pushed main and v0.1.0-alpha.1 to the dedicated public remote, created a GitHub prerelease with wheel and sdist artifacts, and verified the full release gate plus wheel smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64470de` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
