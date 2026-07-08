@@ -372,3 +372,36 @@ Added a Shuheng CLI installer for the bundled shared local stdio gateway skill, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 57: Prepare public alpha release
+
+**Date**: 2026-07-08
+**Task**: Prepare public alpha release
+**Branch**: `main`
+
+### Summary
+
+Closed public alpha release blockers: ignored private local knowledge base, added fresh-machine install and platform support docs, updated release readiness/changelog, tightened release hygiene and wheel smoke contracts, and ran the full release gate.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a6e9464` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
