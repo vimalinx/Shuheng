@@ -49,6 +49,7 @@ from shuheng import runtime_dispatch as runtime_dispatch_mod  # noqa: E402
 from shuheng import rendering as rendering_mod  # noqa: E402
 from shuheng import scheduler as sched  # noqa: E402
 from shuheng import secret_vault as secret_vault_mod  # noqa: E402
+from shuheng import skill_installer as skill_installer_mod  # noqa: E402
 from shuheng import subagent_store as subagent_store_mod  # noqa: E402
 from shuheng import text_utils as text_utils_mod  # noqa: E402
 from shuheng import ui_types as ui_types_mod  # noqa: E402
@@ -3406,6 +3407,48 @@ def assert_shuheng_brand_entrypoints() -> None:
             text = path.read_text(encoding="utf-8", errors="replace")
             for forbidden in retired_task_fragments:
                 assert forbidden not in text, f"{path}: {forbidden}"
+
+
+def assert_shared_agent_gateway_skill_installer() -> None:
+    tmp_root = Path(tempfile.mkdtemp(prefix="shuheng_shared_skill_"))
+    try:
+        installed = skill_installer_mod.install_agent_gateway_skill(tmp_root)
+        assert installed.name == "shuheng-agent-gateway", installed
+        assert installed.destination == tmp_root / "shuheng-agent-gateway", installed
+        record = installed.to_record()
+        assert record["schema_version"] == "shuheng.skill_install.v1", record
+        assert record["status"] == "installed", record
+        skill_file = installed.destination / "SKILL.md"
+        metadata_file = installed.destination / "agents" / "openai.yaml"
+        assert skill_file.is_file(), skill_file
+        assert metadata_file.is_file(), metadata_file
+        skill_text = skill_file.read_text(encoding="utf-8")
+        metadata_text = metadata_file.read_text(encoding="utf-8")
+        assert "shuheng-agent-gateway agent-directory" in skill_text, skill_text
+        assert "shuheng-agent-gateway message-send" in skill_text, skill_text
+        assert "shuheng-agent-gateway serve --stdio" in skill_text, skill_text
+        assert "Do not read Shuheng internal context packs" in skill_text, skill_text
+        assert "Web, HTTP, mobile, remote" in skill_text, skill_text
+        assert "$shuheng-agent-gateway" in metadata_text, metadata_text
+        combined = skill_text + metadata_text
+        assert str(tmp_root) not in combined, combined
+        assert "/home/" not in combined, combined
+        help_env = os.environ.copy()
+        help_env["PYTHONPATH"] = str(ROOT / "src")
+        help_result = subprocess.run(
+            [sys.executable, "-m", "shuheng", "--help"],
+            cwd=str(ROOT),
+            env=help_env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert help_result.returncode == 0, help_result.stderr
+        assert "install-agent-gateway-skill" in help_result.stdout, help_result.stdout
+        assert "--serve-gateway" not in help_result.stdout, help_result.stdout
+        assert "--gateway-daemon" not in help_result.stdout, help_result.stdout
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
 
 
 def assert_shuheng_history_storage_owned() -> None:
@@ -11632,6 +11675,7 @@ def run_checks() -> None:
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
     assert_shuheng_brand_entrypoints()
+    assert_shared_agent_gateway_skill_installer()
     assert_shuheng_history_storage_owned()
     assert_token_usage_registry_prunes_removed_history()
     assert_shuheng_workspace_memory_context()

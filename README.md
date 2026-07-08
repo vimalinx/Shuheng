@@ -382,12 +382,15 @@ Shuheng 的发布成熟度元数据由 `src/shuheng/release_readiness.py` 维护
 ### 本地 Agent Gateway
 
 ```bash
+shuheng install-agent-gateway-skill
 shuheng-agent-gateway register
 shuheng-agent-gateway agent-directory
 shuheng-agent-gateway serve --stdio
 shuheng-agent-gateway message-send --target <agent-id> --message "要交给这个 agent 的任务"
 shuheng-agent-gateway task-status --task-id <task-id>
 ```
+
+`shuheng install-agent-gateway-skill` 会把 Shuheng 自带的 `shuheng-agent-gateway` skill 安装/更新到共享 skill 根目录，默认是 `~/.agents/skills`。这样其他本地 agent 可以通过 `$shuheng-agent-gateway` 学会使用本地 stdio gateway；该 skill 只说明 agent 发现、投递消息和查询任务状态，不暴露 Shuheng 内部上下文、账本、Secret 或权限矩阵。
 
 `serve --stdio` 是给外部 AI/supervisor 持有的持久本地进程。它只通过 stdin/stdout 传 JSONL，不启动 Web/HTTP 服务；`message-send` 会走 Shuheng Orchestrator 的子 agent task 路径和审批门。
 

@@ -382,12 +382,15 @@ Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py`
 ### Local Agent Gateway
 
 ```bash
+shuheng install-agent-gateway-skill
 shuheng-agent-gateway register
 shuheng-agent-gateway agent-directory
 shuheng-agent-gateway serve --stdio
 shuheng-agent-gateway message-send --target <agent-id> --message "task for this agent"
 shuheng-agent-gateway task-status --task-id <task-id>
 ```
+
+`shuheng install-agent-gateway-skill` installs or updates Shuheng's bundled `shuheng-agent-gateway` skill into the shared skill root, defaulting to `~/.agents/skills`. Other local agents can then use `$shuheng-agent-gateway` to learn the local stdio gateway contract. The skill only documents agent discovery, governed message dispatch, and task-status reads; it does not expose Shuheng internal context, ledgers, secrets, or permission matrices.
 
 `serve --stdio` is the long-lived local process intended for an external AI or supervisor to hold. It speaks JSONL over stdin/stdout only and starts no Web/HTTP service. `message-send` dispatches through the Shuheng Orchestrator's governed subagent task path and approval gates.
 

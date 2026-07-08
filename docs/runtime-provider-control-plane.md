@@ -42,6 +42,12 @@ gateway, not a Web/HTTP server. `register` writes the local registration record,
 agent discovery, `message-send` dispatches through the Orchestrator-owned
 subagent task path, and `task-status` reads ledger status.
 
+`shuheng install-agent-gateway-skill` installs Shuheng's bundled
+`shuheng-agent-gateway` skill into the shared local skill root. That skill is an
+agent-facing usage guide for the stdio gateway only: it may teach discovery,
+message dispatch, and task-status reads, but must not expose internal contexts,
+ledgers, secrets, permission matrices, or private filesystem paths.
+
 `scripts/dogfood_stdio_gateway.py` is the executable end-to-end proof for this
 surface. It starts a real `serve --stdio` subprocess under an isolated
 `SHUHENG_HOME`, sends JSONL `agent_directory`, `message_send`, and `task_status`

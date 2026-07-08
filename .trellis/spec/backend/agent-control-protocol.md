@@ -1860,6 +1860,7 @@ state.last_error carries the same short reason
 
 - Active user surfaces:
   - `shuheng` / `python -m shuheng.app` local curses TUI.
+  - `shuheng install-agent-gateway-skill` installs the bundled shared skill that teaches external local agents how to use the stdio gateway.
   - `shuheng-agent-gateway` / `python -m shuheng.agent_bridge` local JSONL stdio gateway for purpose-only agent discovery, governed message dispatch, task status reads, and registration.
   - `/runtime-output` for OMP-native runtime output/control visibility.
   - Local commands such as `/tasks`, `/bus`, `/inbox`, `/approvals`, `/artifacts`, `/recover`, `/evals`, `/baseline`, `/runtimes`, `/schedules`, `/plugins`, and `/workflows`.
@@ -1885,6 +1886,7 @@ state.last_error carries the same short reason
 - The only persistent gateway surface is local JSONL stdio. `shuheng-agent-gateway register` may write `agentgateway.registration.v1` for `shuheng.local`, and `serve --stdio` may keep a process alive, but it must not bind sockets, start HTTP, enable SSE/push, or expose local filesystem state as a protocol endpoint.
 - A2A/MCP-shaped objects may remain only as local record shapes for registry, baseline, and adapter inspection. They must not claim to be reachable protocol endpoints or certified implementations.
 - Agent discovery records must describe role/subagent purpose and local inbox delivery only. They must not expose broad project context, active spec paths, memory paths, permission matrices, Secret Vault plaintext, or workflow internals.
+- The bundled `shuheng-agent-gateway` skill must be installed by Shuheng's CLI, default to the shared local skill root, remain offline/idempotent, and document only `agent-directory`, `message-send`, `task-status`, and JSONL stdio usage. It must not expose internal contexts, ledgers, secrets, permission matrices, private filesystem paths, or Web/HTTP/mobile/remote assumptions.
 - `message_send` through the local stdio gateway may dispatch to a concrete existing subagent only through `start_subagent_task_structured(...)`; policy approval, task/progress ledgers, artifacts, and runtime dispatch remain app/Orchestrator-owned. Role templates and unknown targets must not spawn uncontrolled workers.
 - Local Agent Mail intake helpers may write Agent Mail, task ledger, and trace rows. They must not dispatch runtimes, approve policy actions, write long-term memory, execute workflows, call providers, send network requests, or auto-deliver push notifications.
 - `/inbox` is a local TUI command/panel for inspecting Agent Mail intake rows and marking them reviewed or ignored. Review/ignore handling may append task/progress/mail/trace audit rows, but it must not start subagent work, create approvals, execute workflows, call providers, write memory, or expose Web/HTTP/mobile/remote surfaces.
@@ -1894,6 +1896,8 @@ state.last_error carries the same short reason
 ### 4. Validation & Error Matrix
 
 - `shuheng --help` contains `--serve-gateway` or `--gateway-daemon` -> CLI surface regression.
+- `shuheng --help` omits `install-agent-gateway-skill` -> shared agent-facing skill installer regression.
+- `shuheng install-agent-gateway-skill` writes outside the shared skill root, requires network, imports the TUI app for help/install routing, or generates skill content containing private paths/internal ledgers/secrets/permission matrices -> shared skill installer regression.
 - `COMMANDS` contains `/gateway` -> TUI surface regression.
 - `src/shuheng/web_console.py` or `src/shuheng/web_console_static.py` exists -> Web Console resurrection regression.
 - Runtime exposes `GatewayRequestHandler`, `make_gateway_http_server`, `serve_gateway`, gateway daemon start/stop/restart helpers, Web Console snapshot/action/html helpers, SSE helpers, or push-delivery helpers -> active Web/HTTP regression.
@@ -1907,6 +1911,7 @@ state.last_error carries the same short reason
 ### 5. Good/Base/Bad Cases
 
 - Good: `agent_directory.message_endpoint == "agent-mail://inbox"` and each role/subagent delivery target uses local Agent Mail with `auto_dispatch:false`.
+- Good: `shuheng install-agent-gateway-skill` creates `shuheng-agent-gateway/SKILL.md` and `agents/openai.yaml` under the shared local skill root, and the generated skill points agents to `shuheng-agent-gateway serve --stdio`.
 - Good: `gateway_service.status == "local_record_only"`, SSE and push are disabled, and daemon commands are empty.
 - Good: after explicit registration, `gateway_service.status == "local_persistent_stdio_gateway"`, `transport == "local-jsonl-stdio"`, `network_enabled:false`, and daemon commands are stdio commands only.
 - Good: A2A/MCP-shaped registry sections use `local_record_only` status and local URI schemes.
@@ -1917,7 +1922,9 @@ state.last_error carries the same short reason
 ### 6. Tests Required
 
 - `tests/test_cli.py` must assert gateway/Web flags are absent from help output.
+- `tests/test_cli.py` must assert `shuheng --help` advertises `install-agent-gateway-skill`, installation is idempotent, and generated skill files avoid local absolute paths/internal context leakage.
 - `scripts/check_policy_gates.py` must assert removed modules and runtime callables are absent, `/gateway` is not a TUI command, `/inbox` stays a local TUI-only Agent Mail intake panel, runtime smoke does not open Shuheng HTTP clients, release readiness says no built-in Web/HTTP surface, and local protocol registry records use local URI schemes.
+- `scripts/check_policy_gates.py` must assert the shared `shuheng-agent-gateway` skill installer writes the bundled skill files, `shuheng --help` exposes the installer, and the generated skill teaches only local stdio gateway usage without private Shuheng internals.
 - `scripts/check_policy_gates.py` must assert `shuheng-agent-gateway` is a public script, registration writes `agentgateway.registration.v1`, public registry strips registration paths, and `message_send` dispatches through the governed subagent task path with no Web/HTTP surface.
 - `scripts/dogfood_stdio_gateway.py` must start a real `shuheng-agent-gateway serve --stdio` subprocess under an isolated `SHUHENG_HOME`, then verify `gateway_status`, `agent_directory`, `message_send`, `task_status`, task ledger, approval ledger, and trace ledger through JSONL stdio.
 - `scripts/runtime_smoke.py` must run without starting an HTTP server and must record local runtime evidence.

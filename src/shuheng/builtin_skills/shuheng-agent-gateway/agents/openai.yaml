@@ -1,0 +1,6 @@
+interface:
+  display_name: "Shuheng Agent Gateway"
+  short_description: "Route work through Shuheng local agents"
+  default_prompt: "Use $shuheng-agent-gateway to discover Shuheng agents and send a governed local task."
+policy:
+  allow_implicit_invocation: true

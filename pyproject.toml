@@ -68,6 +68,8 @@ where = ["src"]
 "shuheng" = [
     "builtin_plugins/shuheng-examples/plugin.json",
     "builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
+    "builtin_skills/shuheng-agent-gateway/SKILL.md",
+    "builtin_skills/shuheng-agent-gateway/agents/openai.yaml",
 ]
 
 [tool.pytest.ini_options]

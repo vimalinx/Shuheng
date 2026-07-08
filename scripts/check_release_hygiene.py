@@ -105,6 +105,7 @@ REQUIRED_MANIFEST_LINES = (
     "recursive-include docs *.md",
     "recursive-include integrations/omp-shuheng-plugin *.md *.json *.ts",
     "recursive-include src/shuheng/builtin_plugins *.json",
+    "recursive-include src/shuheng/builtin_skills *.md *.yaml",
     "recursive-include tests *.py",
     "include scripts/check_policy_gates.py",
     "include scripts/check_release_hygiene.py",
