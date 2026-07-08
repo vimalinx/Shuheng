@@ -66,6 +66,7 @@ SDIST_REQUIRED_MEMBERS = (
     "README.md",
     "SECURITY.md",
     "docs/agent-harness-architecture.md",
+    "docs/install.md",
     "docs/runtime-provider-control-plane.md",
     "integrations/omp-shuheng-plugin/README.md",
     "integrations/omp-shuheng-plugin/package.json",
@@ -104,6 +105,7 @@ SDIST_FORBIDDEN_MEMBERS = (
 SDIST_FORBIDDEN_PREFIXES = (
     ".codex/",
     ".trellis/",
+    "_knowledge_base/",
     "config/",
     "goal-",
     "memory/",

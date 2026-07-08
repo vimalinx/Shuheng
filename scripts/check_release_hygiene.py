@@ -25,6 +25,7 @@ REQUIRED_FILES = (
     "CHANGELOG.md",
     "README.md",
     "README.en.md",
+    "docs/install.md",
     "docs/public-alpha-readiness.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/bug_report.md",
@@ -46,6 +47,7 @@ PRIVATE_PATH_PREFIXES = (
     ".trellis/.cache/",
     ".trellis/.runtime/",
     ".trellis/worktrees/",
+    "_knowledge_base/",
     "config/",
     "goal-",
     "memory/",
@@ -90,6 +92,7 @@ PUBLIC_WORDING_FILES = (
     "README.en.md",
     "README.md",
     "docs/app-py-decomposition-plan.md",
+    "docs/install.md",
     "docs/public-alpha-readiness.md",
     "docs/runtime-provider-control-plane.md",
 )
@@ -120,6 +123,7 @@ REQUIRED_MANIFEST_EXCLUSIONS = (
     "exclude docs/homework-pricing-research.md",
     "prune .codex",
     "prune .trellis",
+    "prune _knowledge_base",
     "prune config",
     "prune memory",
     "prune references",
@@ -294,6 +298,21 @@ def check_public_positioning(errors: list[str]) -> None:
             errors.append(f"{path} must list wheel smoke in release checks")
         if "wheel smoke" not in text.lower():
             errors.append(f"{path} CI summary must mention wheel smoke")
+
+    install_doc = read_text("docs/install.md")
+    install_required = (
+        "Linux",
+        "Windows via WSL2",
+        "macOS",
+        "Windows native",
+        "shuheng install-agent-gateway-skill",
+        "shuheng-check",
+        "~/.shuheng/",
+        "~/.agents/skills/",
+    )
+    for fragment in install_required:
+        if fragment not in install_doc:
+            errors.append(f"docs/install.md missing install/platform fragment: {fragment}")
 
     package_json = read_text("integrations/omp-shuheng-plugin/package.json")
     if '"name": "@shuheng/omp-bridge"' not in package_json:

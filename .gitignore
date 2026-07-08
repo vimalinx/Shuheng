@@ -36,6 +36,7 @@ tmp/
 *.key
 
 # Private/local release-excluded notes and tool configs.
+_knowledge_base/
 config/*.json
 references/
 docs/foreign-student-acquisition-research.md

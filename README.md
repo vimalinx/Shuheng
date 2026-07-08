@@ -173,6 +173,8 @@
 
 ### 1. 安装
 
+完整新机器安装、平台支持和状态迁移说明见 [`docs/install.md`](docs/install.md)。
+
 ```bash
 python -m pip install -e .
 ```

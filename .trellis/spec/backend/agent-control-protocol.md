@@ -115,13 +115,18 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
 - Local dependency lock: `uv.lock` is ignored for this package-style alpha
   unless a future task explicitly adopts uv-locked application releases.
 - Public wording files guarded by release hygiene: `README.md`,
-  `README.en.md`, `CONTRIBUTING.md`, `docs/public-alpha-readiness.md`,
-  `docs/runtime-provider-control-plane.md`, `docs/app-py-decomposition-plan.md`,
-  and `.github/ISSUE_TEMPLATE/bug_report.md`.
+  `README.en.md`, `CONTRIBUTING.md`, `docs/install.md`,
+  `docs/public-alpha-readiness.md`, `docs/runtime-provider-control-plane.md`,
+  `docs/app-py-decomposition-plan.md`, and
+  `.github/ISSUE_TEMPLATE/bug_report.md`.
 
 ### 3. Contracts
 
 - Public release posture stays `experimental local alpha`.
+- The public install contract lives in `docs/install.md` and must state the
+  platform support truth: Linux is the supported alpha target, Windows users
+  should use WSL2, macOS is best-effort until verified, and native Windows is
+  unsupported.
 - `scripts/check_release_hygiene.py` must fail on missing governance files,
   missing release scripts, missing package metadata, public legacy `shuheng*`
   console scripts, unignored private/local paths, realistic secret literals,
@@ -150,7 +155,7 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   dependency-resolving install mode, public console scripts, checked entrypoint
   behaviors, and debug-only options that are not release gates.
 - The sdist must include intended public docs and integration plugin files while
-  excluding private research/config/reference paths.
+  excluding private research/config/reference paths, including `_knowledge_base/`.
 - Wheel smoke must inspect the built wheel archive contents directly so the
   release gate proves wheel metadata, license, entry points, package modules,
   and private/local path exclusions before install.
@@ -183,13 +188,14 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
 - `config/mcporter.json` or private research docs are tracked or unignored ->
   release hygiene fails.
 - Local runtime state such as `memory/`, `temp/`, `tmp/`, `goal-*`, `.codex/`,
-  or local Trellis runtime/cache files are tracked or unignored -> release
-  hygiene fails.
-- MANIFEST drops release scripts or private-path exclusions -> release hygiene
-  fails.
+  `_knowledge_base/`, or local Trellis runtime/cache files are tracked or
+  unignored -> release hygiene fails.
+- MANIFEST drops release scripts, `docs/install.md`, or private-path exclusions
+  such as `prune _knowledge_base` -> release hygiene fails.
 - Built sdist archive omits required public docs/scripts/tests or contains
   private/local paths such as `config/`, `.trellis/`, `memory/`, `temp/`,
-  `tmp/`, `goal-*`, or private research docs -> wheel smoke fails.
+  `tmp/`, `goal-*`, `_knowledge_base/`, or private research docs -> wheel smoke
+  fails.
 - Built sdist metadata omits `Name: shuheng`, `Version`, `shuheng` top-level
   package, or any public console-script entry point -> wheel smoke fails.
 - Built sdist `SOURCES.txt` is missing, has duplicate/unsafe rows, omits a real
@@ -235,8 +241,8 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
 
 - Good: `scripts/check_release_hygiene.py` passes, wheel smoke installs both
   the latest wheel and sdist, and the sdist contains `README.en.md`,
-  `SECURITY.md`, docs, release scripts, and the OMP plugin, but not private
-  research docs or local runtime state.
+  `SECURITY.md`, `docs/install.md`, release scripts, and the OMP plugin, but
+  not private research docs, `_knowledge_base/`, or local runtime state.
 - Good: `@shuheng/omp-bridge` exposes compatibility tool names
   `shuheng_context_get` and `shuheng_memory_candidate_submit`.
 - Good: `git status --short` does not show `uv.lock`, because it is ignored as
@@ -254,6 +260,8 @@ Expose Shuheng as the canonical package, CLI, protocol, tool, runtime prompt, do
   true license/CI/security booleans and lists release hygiene, Ruff, runtime
   smoke, package build, wheel smoke, `shuheng-check`, and `git diff --check`
   commands.
+- Release hygiene tests must assert `docs/install.md` remains present and
+  contains the supported platform matrix plus shared gateway skill setup.
 - `scripts/check_policy_gates.py` must assert release-readiness metadata exposes
   structured wheel+sdist distribution-smoke evidence, dependency-resolving
   install mode, public console script names, isolated `shuheng-check`, and

@@ -173,6 +173,9 @@ Organize my historical sessions.
 
 ### 1. Install
 
+For full fresh-machine setup, platform support, and state migration notes, see
+[`docs/install.md`](docs/install.md).
+
 ```bash
 python -m pip install -e .
 ```

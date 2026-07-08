@@ -22,6 +22,7 @@ include scripts/wheel_smoke.py
 prune .codex
 prune .pytest_cache
 prune .trellis
+prune _knowledge_base
 prune config
 prune memory
 prune references
