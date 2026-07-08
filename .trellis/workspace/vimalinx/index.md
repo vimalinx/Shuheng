@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 55
+- **Total Sessions**: 56
 - **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~341 | Active |
+| `journal-2.md` | ~374 | Active |
 | `journal-1.md` | ~1982 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 56 | 2026-07-08 | Install shared agent gateway skill | `3664608` | `main` |
 | 55 | 2026-07-08 | Dogfood local stdio agent gateway | `9244195` | `main` |
 | 54 | 2026-07-07 | Agent Mail intake inbox TUI | `8a2350c` | `main` |
 | 53 | 2026-07-06 | Rename local protocol surface | `21b24d2` | `main` |

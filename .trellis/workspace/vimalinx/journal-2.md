@@ -339,3 +339,36 @@ Added a real local JSONL stdio gateway dogfood smoke that seeds an isolated Shuh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 56: Install shared agent gateway skill
+
+**Date**: 2026-07-08
+**Task**: Install shared agent gateway skill
+**Branch**: `main`
+
+### Summary
+
+Added a Shuheng CLI installer for the bundled shared local stdio gateway skill, installed it into the shared skill root, updated docs/spec/release gates, and verified full tests plus wheel smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3664608` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
