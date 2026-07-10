@@ -22,6 +22,22 @@ Run the local application from source:
 PYTHONPATH=src python -m shuheng
 ```
 
+## Branch Workflow
+
+- `main` is the release-ready OMP core line and the repository default. Do not
+  use it for day-to-day feature development.
+- `dev` is the integration line for Pi ecosystem, custom Agent, Skill/Plugin,
+  scheduler, and other forward development. The full CI matrix runs on every
+  push to `dev`.
+- Start normal work from `dev`, preferably on a short-lived `feature/*` branch,
+  and merge it back into `dev` after CI.
+- Promote a release candidate with a `dev -> main` pull request. `main` requires
+  the Python 3.10 and 3.13 checks, an up-to-date branch, and linear history.
+- Start urgent fixes from `main` on `hotfix/*`, merge them into `main` through a
+  pull request, then bring the resulting `main` commit back into `dev`.
+- Pi remains optional and explicit on the release line. Its presence in the
+  source tree does not make `runtime setup-pi` part of the default install.
+
 ## Required Checks
 
 Run these before opening a pull request:
