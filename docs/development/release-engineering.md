@@ -48,6 +48,25 @@ CI must pass on the exact public commit that will be tagged. A local green run
 is supporting evidence, not a substitute. Publishing, pushing, or creating a
 GitHub release remains a separate human-approved action.
 
+## Branch topology and promotion
+
+`main` is the default, release-ready OMP core line. `dev` is the integration
+line for Pi ecosystem, custom Agent, Skill/Plugin, scheduler, and other forward
+development. Both branches run the full CI matrix on push; pull requests run
+the same matrix independently of their base branch.
+
+Normal work starts from `dev` or a short-lived `feature/*` branch. A release
+candidate moves through a `dev -> main` pull request only after the strict
+Python 3.10 and 3.13 checks pass on an up-to-date head. `main` uses linear
+history and forbids force pushes and deletion. `dev` accepts normal integration
+pushes but also forbids force pushes and deletion.
+
+Hotfixes branch from `main`, return to `main` through a pull request, and are
+then synchronized back into `dev`. The repository default remains `main`, so
+public browsing and installer references resolve to the release-ready line.
+Optional Pi setup remains explicit on `main`; experimental work belongs on
+`dev` until promoted through the same release gate.
+
 ## Scenario: Alpha build, install, and upgrade proof
 
 ### 1. Scope / Trigger
