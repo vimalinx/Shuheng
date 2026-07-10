@@ -36,3 +36,8 @@ whose simulated real home remains untouched.
 Run the full suite with bytecode/cache writes disabled for the release gate.
 When concurrency or import-order behavior changes, include at least one clean
 subprocess or spawned-process test rather than relying only on mocks.
+
+Patch a dependency in the module that owns the function's runtime globals.
+Replacing a re-exported alias does not affect calls made inside the original
+module and can create a false green when the maintainer machine happens to
+provide the external service that CI lacks.

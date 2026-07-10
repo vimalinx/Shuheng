@@ -12300,13 +12300,13 @@ def run_checks() -> None:
             os.environ.pop(a.SECRET_AUTO_TOR_ENV, None)
         else:
             os.environ[a.SECRET_AUTO_TOR_ENV] = old_auto_tor
-    old_proxy_health = a.secret_proxy_endpoint_healthy
+    old_proxy_health = a.secret_vault_store.secret_proxy_endpoint_healthy
     old_chain = os.environ.pop(a.SECRET_NETWORK_CHAIN_ENV, None)
     old_tor = os.environ.pop(a.SECRET_TOR_SOCKS_ENV, None)
     old_auto_tor = os.environ.pop(a.SECRET_AUTO_TOR_ENV, None)
     auto_secret_state = a.State(agent=FakeLLMAgent())
     try:
-        a.secret_proxy_endpoint_healthy = lambda endpoint, timeout=1.0: (True, f"ok:{endpoint}")
+        a.secret_vault_store.secret_proxy_endpoint_healthy = lambda endpoint, timeout=1.0: (True, f"ok:{endpoint}")
         assert a.secret_configured_proxy_chain() == ["tor"]
         auto_secret_state.running = True
         auto_secret_state.secret_vault.unlocked = True
@@ -12330,7 +12330,7 @@ def run_checks() -> None:
         assert os.environ["HTTPS_PROXY"] == a.SECRET_DEFAULT_TOR_SOCKS
         assert os.environ["NO_PROXY"] == ""
     finally:
-        a.secret_proxy_endpoint_healthy = old_proxy_health
+        a.secret_vault_store.secret_proxy_endpoint_healthy = old_proxy_health
         a.restore_secret_proxy_env(auto_secret_state)
         if old_chain is not None:
             os.environ[a.SECRET_NETWORK_CHAIN_ENV] = old_chain
