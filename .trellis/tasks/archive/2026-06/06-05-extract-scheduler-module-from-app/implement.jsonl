@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and active guideline discovery for scheduler extraction."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable contract for schedule tools, scheduler records, run audit semantics, and governed dispatch."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Extraction must create one scheduler source of truth instead of duplicating app.py logic."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Scheduler behavior crosses control schema, tools, UI commands, daemon loop, ledgers, gateway, MCP, and tests."}

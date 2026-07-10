@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/guides/index.md", "reason": "General thinking guide index for repo changes and helper extraction decisions."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Required when creating or moving helper functions; enforces search-before-new-helper behavior."}
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for this single-repo Shuheng task."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Active Shuheng architecture/control-plane spec for TUI, orchestration, release, workflow, and protocol boundaries."}

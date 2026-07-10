@@ -73,6 +73,14 @@ class TestPathIsWithin:
         assert app.path_is_within is path_utils.path_is_within
 
 
+def test_private_directory_creation_tightens_existing_mode(tmp_path: Path) -> None:
+    target = tmp_path / "state"
+    target.mkdir(mode=0o755)
+
+    assert path_utils.ensure_private_directory(str(target)) == str(target)
+    assert target.stat().st_mode & 0o777 == 0o700
+
+
 class TestNormalSessionLogPath:
     def test_accepts_model_response_inside_history_root(self, tmp_path: Path) -> None:
         history_root = tmp_path / "model_responses"

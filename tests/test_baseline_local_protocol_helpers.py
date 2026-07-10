@@ -55,35 +55,34 @@ def test_local_protocol_resource_registry_and_descriptor_shapes() -> None:
     }
 
     resources = local_protocol_registry.mcp_resource_registry(paths)
-    descriptor = local_protocol_registry.local_protocol_service_descriptor(
-        bind_safety={"auth": "none", "local_only": False, "allowed": True},
-    )
+    descriptor = local_protocol_registry.local_protocol_service_descriptor()
 
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in resources)
     assert not any(item["uri"] == "resource://agent-mail/context-inspector" for item in resources)
     assert not any(item["uri"] == "resource://agent-mail/permission-matrix" for item in resources)
-    assert not any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in resources)
-    assert descriptor["base_url"] == ""
     assert descriptor["status"] == "local_record_only"
+    assert descriptor["transport"] == "local-record"
     assert descriptor["request_response"]["message_inbox"] == "agent-mail://inbox"
     assert descriptor["request_response"]["agent_directory"] == "agent-directory://local"
     assert "message_send" not in descriptor["request_response"]
     assert "task_status" not in descriptor["request_response"]
     assert "context_inspector" not in descriptor["request_response"]
     assert "permission_matrix" not in descriptor["request_response"]
-    assert descriptor["sse"]["enabled"] is False
-    assert descriptor["push_notifications"]["enabled"] is False
-    assert descriptor["push_notifications"]["auth"] == "none"
-    assert descriptor["daemon"]["commands"] == []
+    assert descriptor["stdio"] == {
+        "framing": "jsonl",
+        "input": "stdin",
+        "output": "stdout",
+        "commands": [],
+        "state": {"schema_version": "agentgateway.runtime.v1", "status": "local_record_only"},
+    }
 
 
 def test_local_protocol_descriptor_reports_registered_stdio_gateway_only_when_registered() -> None:
     descriptor = local_protocol_registry.local_protocol_service_descriptor(
-        bind_safety={"auth": "none", "network_enabled": False},
         persistent_gateway={
             "transport": "local-jsonl-stdio",
             "commands": {"serve": ["shuheng-agent-gateway", "serve", "--stdio"]},
-            "state": {"schema_version": "agentgateway.daemon.v1", "status": "registered", "alive": False},
+            "state": {"schema_version": "agentgateway.runtime.v1", "status": "registered", "alive": False},
         },
     )
 
@@ -91,5 +90,5 @@ def test_local_protocol_descriptor_reports_registered_stdio_gateway_only_when_re
     assert descriptor["transport"] == "local-jsonl-stdio"
     assert descriptor["request_response"]["message_send"] == "shuheng-gateway://message-send"
     assert descriptor["request_response"]["task_status"] == "shuheng-gateway://task-status/{task_id}"
-    assert descriptor["daemon"]["commands"]["serve"] == ["shuheng-agent-gateway", "serve", "--stdio"]
-    assert descriptor["daemon"]["state"]["status"] == "registered"
+    assert descriptor["stdio"]["commands"]["serve"] == ["shuheng-agent-gateway", "serve", "--stdio"]
+    assert descriptor["stdio"]["state"]["status"] == "registered"

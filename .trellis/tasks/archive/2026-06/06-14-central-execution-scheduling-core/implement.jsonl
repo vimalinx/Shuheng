@@ -1,4 +1,0 @@
-{"file":".trellis/spec/backend/agent-control-protocol.md","reason":"Preserve ga-control, proposal, memory-candidate, host-tool, and policy-gate contracts while adding bridge/plugin paths."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Bridge spans Python service, OMP plugin, CLI, docs, and policy tests; boundary contracts must stay explicit."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing context-pack and memory-candidate approval services instead of duplicating governance logic."}
-{"file":".trellis/tasks/06-14-central-execution-scheduling-core/research/internal-core-layering.md","reason":"Documents the selected GA-TUI control-plane plus OMP plugin architecture and fallback fork boundary."}

@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for runtime provider governance changes."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable contract for OMP runtime provider, ga-control, TUI query tools, memory candidates, and proposal boundaries."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for cross-layer and reuse checks."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Proposal bridge crosses provider RPC, app state, policy gates, memory approvals, artifacts, and tests."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing ga-control and memory candidate helpers instead of duplicating governance logic."}
-{"file": ".trellis/tasks/06-12-omp-governed-actions-memory-loop/research/local-governance-paths.md", "reason": "Local evidence and recommended approach for the OMP proposal bridge."}

@@ -1,5 +1,0 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for runtime provider and memory-governance changes."}
-{"file": ".trellis/tasks/06-12-fuse-ohmypi-runtime-ga-memory/research/runtime-memory-architecture.md", "reason": "Research and chosen MVP for OMP default plus GA/TUI memory injection and candidate signaling."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Runtime-memory fusion crosses provider adapter, app orchestration, ledgers, tests, and docs."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Runtime provider, Oh My Pi, control-plane, and memory candidate contracts."}

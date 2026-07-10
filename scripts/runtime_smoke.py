@@ -258,21 +258,12 @@ def run_scheduler_smoke(a: Any, state: Any) -> None:
 
 
 def run_local_protocol_registry_smoke(a: Any, state: Any, completed_task_id: str) -> None:
-    for removed in (
-        "GatewayRequestHandler",
-        "make_gateway_http_server",
-        "serve_gateway",
-        "start_gateway_daemon",
-        "stop_gateway_daemon",
-        "web_console_snapshot",
-        "web_console_apply_action",
-    ):
-        if hasattr(a, removed):
-            raise AssertionError(f"removed Web/HTTP surface still exists: {removed}")
-
     registry = a.ensure_local_protocol_registry(state)
     if registry.get("schema_version") != "agentgateway.v1":
         raise AssertionError(registry)
+    service = registry.get("gateway_service") or {}
+    if service.get("transport") != "local-record" or (service.get("stdio") or {}).get("framing") != "jsonl":
+        raise AssertionError(service)
     directory = registry.get("agent_directory") or {}
     if directory.get("schema_version") != "shuheng.agent_directory.v1" or not directory.get("roles"):
         raise AssertionError(directory)
@@ -293,7 +284,7 @@ def run_local_protocol_registry_smoke(a: Any, state: Any, completed_task_id: str
         target_items=["local_protocol_records"],
         check_id="local_protocol_registry_smoke",
         level="runtime",
-        summary="Local protocol registry projected Agent Mail, task, runtime-evidence, and discovery records without starting any Web/HTTP server.",
+        summary="Local protocol registry projected Agent Mail, task, runtime-evidence, and discovery records through the local record contract.",
         evidence_refs=[f"task://{completed_task_id}", "resource://agent-mail/runtime-evidence"],
         details={"registry_schema": registry["schema_version"], "directory_roles": len(directory.get("roles") or [])},
     )

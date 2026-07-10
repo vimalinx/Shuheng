@@ -1,6 +1,6 @@
 # Agent Harness Architecture Baseline
 
-以下内容是用户提供的架构基准原文。后续完成 TUI / agent harness 相关工作后，都要自动和本文档比对，确认实现是否更接近该目标架构。
+以下内容由用户提供并作为持续维护的架构基准。后续完成 TUI / agent harness 相关工作后，都要自动和本文档比对，确认实现是否更接近该目标架构。
 
 ---
 
@@ -182,7 +182,7 @@ A2A 适合这种 team，因为它定义了 Agent Card、Task、Message、Part、
 你内部可以设计一个轻量协议，外部兼容 A2A，工具调用走 MCP。
 
 1. 协议分层
-用户 / Feishu / OpenClaw / CLI / Web UI
+用户 / Feishu / OpenClaw / CLI / Local JSONL stdio client
         ↓
 Meta Orchestrator
         ↓

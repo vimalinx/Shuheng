@@ -198,33 +198,57 @@ def install_core_shim(
     return path
 
 
-def _print_report(root: Path | None, failures: Iterable[str]) -> int:
+def _print_report(root: Path | None, failures: Iterable[str], *, package_only: bool = False) -> int:
+    validation_failures = list(failures)
     print(f"Shuheng root: {tui_repo_root()}")
     print("Core runtime: OhMyPi / OMP")
     print("Launch without legacy patches: shuheng")
     print("Optional shim: shuheng-install-core-shim --target tuiapp")
-    if root is None:
-        print("Status: OK")
-        return 0
-    print("External runtime checkout: configured")
-    if failures:
+    runtime_failed = False
+    if package_only:
+        print("OMP runtime check: SKIPPED (--package-only artifact/debug mode)")
+        print("Package-only mode does not prove that a Shuheng installation can run its main agent.")
+    else:
+        from .runtime_setup import OMP_PACKAGE_SPEC, check_omp_runtime
+
+        probe = check_omp_runtime()
+        print(f"OMP package: {OMP_PACKAGE_SPEC}")
+        print(f"OMP runtime check: {'OK' if probe.ok else 'FAIL'} ({probe.status})")
+        if probe.binary:
+            print(f"OMP binary: {probe.binary}")
+        if probe.detected_version:
+            print(f"OMP version: {probe.detected_version}")
+        if probe.detail:
+            print(probe.detail)
+        if probe.action:
+            print(probe.action)
+        runtime_failed = not probe.ok
+    if root is not None:
+        print("External compatibility checkout: configured")
+    if runtime_failed or validation_failures:
         print("Status: FAIL")
-        for failure in failures:
+        for failure in validation_failures:
             print(f"- {failure}")
         return 1
     print("Status: OK")
-    print("External runtime imports: agentmain, continue_cmd")
+    if root is not None:
+        print("External compatibility imports: agentmain, continue_cmd")
     return 0
 
 
 def doctor_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate Shuheng core integration")
     parser.add_argument("--root", default="", help="optional compatibility checkout path")
+    parser.add_argument(
+        "--package-only",
+        action="store_true",
+        help="skip the required OMP probe for isolated artifact smoke/debugging",
+    )
     args = parser.parse_args(argv)
     if args.root:
         root = Path(args.root).expanduser().resolve()
-        return _print_report(root, validate_legacy_provider_root(root))
-    return _print_report(None, [])
+        return _print_report(root, validate_legacy_provider_root(root), package_only=args.package_only)
+    return _print_report(None, [], package_only=args.package_only)
 
 
 def install_core_shim_main(argv: list[str] | None = None) -> int:
@@ -254,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="validate imports and discovery")
     doctor.add_argument("--root", default="")
+    doctor.add_argument("--package-only", action="store_true")
     install = sub.add_parser("install-core-shim", help="install launcher shim into an external checkout")
     install.add_argument("--root", default="")
     install.add_argument("--target", choices=("tuiapp-curses", "tuiapp"), default="tuiapp-curses")
@@ -263,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         doctor_args = []
         if args.root:
             doctor_args += ["--root", args.root]
+        if args.package_only:
+            doctor_args.append("--package-only")
         return doctor_main(doctor_args)
     if args.command == "install-core-shim":
         install_args = []

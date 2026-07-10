@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for active Shuheng agent-control contracts."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Workflow runner, workflow agent task bridge, approval bridge, ledger, and Orchestrator boundary contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared cross-layer and reuse thinking checklist for implementation."}
-{"file": ".trellis/tasks/07-03-add-workflow-auto-continue-on-agent-task-completion/research/workflow-auto-continue-design.md", "reason": "Design note for automatic workflow continuation after terminal subagent task rows."}

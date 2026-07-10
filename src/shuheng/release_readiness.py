@@ -134,27 +134,6 @@ def heuristic_eval_assessment(data: HeuristicEvalInput) -> dict[str, Any]:
     }
 
 
-def is_loopback_host(host: str) -> bool:
-    host = str(host or "").strip().lower()
-    return host in {"", "127.0.0.1", "localhost", "::1"}
-
-
-def local_protocol_bind_safety(host: str, *, allow_remote: bool = False) -> dict[str, Any]:
-    host = str(host or "127.0.0.1").strip() or "127.0.0.1"
-    local_only = is_loopback_host(host)
-    del allow_remote
-    return {
-        "schema_version": "shuheng.local_protocol_bind_safety.v1",
-        "host": host,
-        "local_only": local_only,
-        "auth": "none",
-        "allowed": False,
-        "network_enabled": False,
-        "reason": "builtin_http_surface_removed",
-        "operator_note": "Shuheng no longer ships a built-in Web Console or HTTP gateway; protocol metadata is local record output only.",
-    }
-
-
 def protocol_compatibility_metadata(kind: str) -> dict[str, Any]:
     kind = str(kind or "local protocol")
     return {
@@ -165,7 +144,7 @@ def protocol_compatibility_metadata(kind: str) -> dict[str, Any]:
             "request/response conformance fixture",
             "streaming/push behavior fixture",
         ],
-        "wording": f"{kind} is represented as local Shuheng protocol-shaped records only; no built-in HTTP surface or certified protocol endpoint is active.",
+        "wording": f"{kind} is represented as local Shuheng record shapes over Agent Mail and resource registries.",
     }
 
 
@@ -204,11 +183,13 @@ def distribution_smoke_contract() -> dict[str, Any]:
             "sdist artifact content leak scan",
             "public console scripts exist",
             "shuheng --help",
+            "shuheng --version",
             "helper --help entrypoints",
-            "python -m shuheng.integration doctor",
-            "shuheng-check core in isolated install",
+            "python -m shuheng.integration doctor --package-only",
+            "shuheng-check --package-only in isolated artifact install",
         ],
-        "debug_options_not_release_gates": ["--no-deps", "--wheel-only"],
+        "upgrade_smoke": "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist --upgrade-from-alpha1",
+        "debug_options_not_release_gates": ["--no-deps", "--wheel-only", "shuheng-check --package-only"],
     }
 
 
@@ -223,7 +204,7 @@ def release_readiness_report(
         "app.py remains a large composition module and is not fully decomposed",
         "A2A/MCP-shaped records are local metadata only and not certified protocol endpoints",
         "heuristic eval does not prove factual or citation correctness",
-        "built-in Web Console, HTTP gateway, mobile, and remote endpoints are not active product surfaces",
+        "Pi-native custom Tools are trusted local code and are not an operating-system sandbox",
         "scheduler is runtime-owned rather than an installed always-on service",
     ]
     missing_hygiene = []
@@ -238,7 +219,7 @@ def release_readiness_report(
     return {
         "schema_version": "shuheng.release_readiness.v1",
         "status": "experimental_alpha",
-        "public_position": "local-first governed agent TUI with OMP runtime output/control and no built-in Web/HTTP surface",
+        "public_position": "local-first governed agent TUI with a pinned OMP main runtime and local JSONL stdio integration",
         "support_level": {
             "stable_local_surfaces": [
                 "curses TUI session workspace",
@@ -247,8 +228,10 @@ def release_readiness_report(
                 "Secret Vault local encryption flow",
                 "runtime provider registry metadata",
                 "OMP runtime output/control",
+                "pinned OMP setup and health diagnosis",
             ],
             "experimental_surfaces": [
+                "Pi-native Agent Projects and trusted local Tools",
                 "architecture baseline comparison",
                 "heuristic eval and trace quality scoring",
                 "scheduler runtime dispatch",
@@ -270,12 +253,18 @@ def release_readiness_report(
         "verification_commands": [
             "python3 -m ruff check src tests scripts/check_policy_gates.py scripts/check_release_hygiene.py scripts/release_scan_rules.py scripts/runtime_smoke.py scripts/wheel_smoke.py",
             "python3 scripts/check_release_hygiene.py",
+            "python3 scripts/dogfood_stdio_gateway.py",
             "python3 -m pytest -q -p no:cacheprovider",
             "python3 scripts/check_policy_gates.py",
             "python3 scripts/runtime_smoke.py",
             "python3 -m compileall -q src scripts",
+            "npm ci --ignore-scripts --prefix integrations/pi-native-sidecar",
+            "node --check integrations/pi-native-sidecar/sidecar.mjs",
             "python3 -m build --sdist --wheel --outdir /tmp/shuheng-dist",
             "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist",
+            "python3 scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist --upgrade-from-alpha1",
+            "shuheng --version",
+            "shuheng runtime check",
             "shuheng-check",
             "git diff --check",
         ],

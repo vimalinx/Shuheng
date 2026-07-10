@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Quality check must verify the prompt path remains a UI/input convenience over the existing workflow runner."}
-{"file": ".trellis/tasks/07-03-add-workflow-panel-run-input-prompt-v1/research/workflow-benchmark.md", "reason": "Quality check should keep workflow capability analysis aligned with external orchestration patterns."}

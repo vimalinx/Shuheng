@@ -15,6 +15,8 @@ from .ui_types import MAIN_HOME_SESSION_KEY, SCHEDULED_REPORTS_SESSION_KEY, SUBA
 SUBAGENT_SESSION_PREFIX = "subagent_session:"
 SUBAGENT_CHAT_HISTORY_SCOPE = "subagent_chat"
 SUBAGENT_CHAT_MESSAGES_META_KEY = "subagent_chat_messages"
+SUBAGENT_META_LIFECYCLE_FIELDS = frozenset({"deleted", "deleted_at", "deleted_by"})
+SUBAGENT_META_ALLOWED_EXTRA_FIELDS = SUBAGENT_META_LIFECYCLE_FIELDS
 _SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -121,6 +123,10 @@ def unique_runtime_subagent_id(name: str, *, existing_ids: Collection[str]) -> s
         candidate = f"{base}-{time.time_ns() % 1_000_000_000_000}-{counter}"
         counter += 1
     return candidate
+
+
+def allowed_subagent_meta_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in fields.items() if key in SUBAGENT_META_ALLOWED_EXTRA_FIELDS}
 
 
 def normalize_subagent_skill_refs(value: Any, limit: int | None = None) -> list[str]:
@@ -252,6 +258,54 @@ def subagent_chat_history_meta_matches(meta: dict[str, Any], agent_id: str, sess
     if session_id and str(meta.get("subagent_chat_session_id") or "") != session_id:
         return False
     return True
+
+
+def subagent_chat_history_key(
+    registry: dict[str, dict[str, Any]],
+    agent_id: str,
+    session_id: str,
+) -> str:
+    for key, meta in registry.items():
+        if isinstance(meta, dict) and not bool(meta.get("deleted")) and subagent_chat_history_meta_matches(meta, agent_id, session_id):
+            return key
+    return ""
+
+
+def ensure_subagent_chat_history_entry(
+    registry: dict[str, dict[str, Any]],
+    *,
+    agent_id: str,
+    agent_name: str,
+    session_id: str,
+    security_context: str,
+    title: str,
+    history_dir: str,
+    new_path: Callable[[], str],
+) -> tuple[str, str]:
+    key = subagent_chat_history_key(registry, agent_id, session_id)
+    if key:
+        return key, os.path.join(history_dir, key)
+    path = new_path()
+    key = os.path.basename(path)
+    now = time.time()
+    registry[key] = {
+        "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "subagent_chat_session_id": session_id,
+        "security_context": security_context,
+        "created_at": now,
+        "updated_at": now,
+        "title": title,
+        "preview": title,
+        "rounds": 0,
+        "last_user_at": now,
+        "ui_preview_messages": [],
+        "ui_preview_loaded_rounds": 0,
+        "ui_preview_total_rounds": 0,
+        "ui_preview_message_count": 0,
+    }
+    return key, path
 
 
 def normalize_loaded_subagent_chat_messages(messages: list[Message]) -> list[Message]:

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "shuheng"
-version = "0.1.0"
+version = "0.2.0a1"
 description = "Shuheng: governed terminal control plane for local agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,6 +51,7 @@ dev = [
     "build>=1.2.0",
     "pytest>=7.0",
     "ruff>=0.15.0",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]
@@ -70,6 +71,14 @@ where = ["src"]
     "builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
     "builtin_skills/shuheng-agent-gateway/SKILL.md",
     "builtin_skills/shuheng-agent-gateway/agents/openai.yaml",
+]
+
+[tool.setuptools.data-files]
+"share/shuheng/pi-native-sidecar" = [
+    "integrations/pi-native-sidecar/README.md",
+    "integrations/pi-native-sidecar/package-lock.json",
+    "integrations/pi-native-sidecar/package.json",
+    "integrations/pi-native-sidecar/sidecar.mjs",
 ]
 
 [tool.pytest.ini_options]

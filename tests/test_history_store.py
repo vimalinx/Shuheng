@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
+import time
 from pathlib import Path
+
+import pytest
 
 from shuheng import app as app_module
 from shuheng import history_store
@@ -10,7 +14,66 @@ from shuheng import path_utils
 from shuheng.ui_types import Message
 
 
+def _session_meta_increment_worker(path: str, worker_id: int, iterations: int, start_event) -> None:
+    start_event.wait(timeout=10)
+    for _ in range(iterations):
+        def mutate(registry):
+            shared = dict(registry.get("model_responses_shared.txt", {}))
+            shared["rounds"] = int(shared.get("rounds") or 0) + 1
+            registry["model_responses_shared.txt"] = shared
+            registry[f"model_responses_worker_{worker_id}.txt"] = {"worker_id": worker_id}
+            time.sleep(0.005)
+            return shared["rounds"]
+
+        committed, result = history_store.transact_session_meta_registry(path, mutate)
+        assert result >= 1
+        assert f"model_responses_worker_{worker_id}.txt" in committed
+
+
+def _history_text_write_worker(path: str, text: str, start_event) -> None:
+    start_event.wait(timeout=10)
+    history_store.write_text_atomic(path, text)
+
+
+def _legacy_history_copy_worker(source_dir: str, destination_dir: str, start_event) -> None:
+    start_event.wait(timeout=10)
+    app_module.copy_legacy_history_to_shuheng(source_dir, destination_dir)
+
+
+def _start_and_join_processes(processes, start_event) -> None:
+    for process in processes:
+        process.start()
+    start_event.set()
+    try:
+        for process in processes:
+            process.join(timeout=20)
+        assert [process.exitcode for process in processes] == [0] * len(processes)
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+
+
 class TestSessionMetaRegistry:
+    def test_name_rollback_does_not_overwrite_a_later_writer(self) -> None:
+        names = {"session.txt": "original"}
+
+        class Registry:
+            def name_for(self, path: str) -> str:
+                return names.get(Path(path).name, "")
+
+            def set_name(self, path: str, name: str) -> None:
+                names[Path(path).name] = name
+
+        rollback = history_store.RollbackStack()
+        rollback.set_session_name(Registry(), "/history/session.txt", "failed writer")
+        names["session.txt"] = "later successful writer"
+
+        rollback()
+
+        assert names["session.txt"] == "later successful writer"
+
     def test_round_trip_filters_non_dict_values(self, tmp_path: Path) -> None:
         path = tmp_path / "session_meta.json"
         path.write_text(
@@ -43,6 +106,200 @@ class TestSessionMetaRegistry:
             assert history_store.load_session_meta_registry(app_module.SESSION_META_PATH)["model_responses_a.txt"]["rounds"] == 2
         finally:
             app_module.SESSION_META_PATH = old_path
+
+    def test_transaction_serializes_processes_without_lost_updates(self, tmp_path: Path) -> None:
+        path = tmp_path / "session_meta.json"
+        worker_count = 4
+        iterations = 6
+        ctx = multiprocessing.get_context("spawn")
+        start_event = ctx.Event()
+        processes = [
+            ctx.Process(
+                target=_session_meta_increment_worker,
+                args=(str(path), worker_id, iterations, start_event),
+            )
+            for worker_id in range(worker_count)
+        ]
+
+        _start_and_join_processes(processes, start_event)
+
+        registry = history_store.load_session_meta_registry(str(path))
+        assert registry["model_responses_shared.txt"]["rounds"] == worker_count * iterations
+        assert {
+            registry[f"model_responses_worker_{worker_id}.txt"]["worker_id"]
+            for worker_id in range(worker_count)
+        } == set(range(worker_count))
+
+    def test_transaction_supports_delete_and_rolls_back_exceptions(self, tmp_path: Path) -> None:
+        path = tmp_path / "session_meta.json"
+        original = {
+            "model_responses_keep.txt": {"rounds": 1},
+            "model_responses_delete.txt": {"rounds": 2},
+        }
+        history_store.save_session_meta_registry(str(path), original)
+
+        committed, removed = history_store.transact_session_meta_registry(
+            str(path),
+            lambda registry: registry.pop("model_responses_delete.txt", None),
+        )
+
+        assert removed == {"rounds": 2}
+        assert committed == {"model_responses_keep.txt": {"rounds": 1}}
+
+        def fail_after_mutation(registry):
+            registry["model_responses_keep.txt"]["rounds"] = 99
+            raise RuntimeError("stop before commit")
+
+        with pytest.raises(RuntimeError, match="stop before commit"):
+            history_store.transact_session_meta_registry(str(path), fail_after_mutation)
+
+        assert history_store.load_session_meta_registry(str(path)) == committed
+        assert not list(tmp_path.glob("session_meta.json.tmp.*"))
+
+    def test_noop_transaction_does_not_replace_registry_file(self, tmp_path: Path) -> None:
+        path = tmp_path / "session_meta.json"
+        history_store.save_session_meta_registry(str(path), {"model_responses_a.txt": {"rounds": 1}})
+        inode_before = path.stat().st_ino
+
+        committed, result = history_store.transact_session_meta_registry(str(path), lambda _registry: "unchanged")
+
+        assert result == "unchanged"
+        assert committed == {"model_responses_a.txt": {"rounds": 1}}
+        assert path.stat().st_ino == inode_before
+
+    def test_transaction_persists_in_place_nested_dict_and_list_mutations(self, tmp_path: Path) -> None:
+        path = tmp_path / "session_meta.json"
+        key = "model_responses_nested.txt"
+        history_store.save_session_meta_registry(
+            str(path),
+            {
+                key: {
+                    "activity": {"counts": {"messages": 1}},
+                    "durable_messages": [{"content": "first"}],
+                }
+            },
+        )
+        retained_registry = {}
+
+        def mutate(registry):
+            retained_registry["value"] = registry
+            registry[key]["activity"]["counts"]["messages"] += 1
+            registry[key]["durable_messages"].append({"content": "second"})
+            return "nested-updated"
+
+        committed, result = history_store.transact_session_meta_registry(str(path), mutate)
+
+        expected = {
+            key: {
+                "activity": {"counts": {"messages": 2}},
+                "durable_messages": [{"content": "first"}, {"content": "second"}],
+            }
+        }
+        assert result == "nested-updated"
+        assert committed == expected
+        assert history_store.load_session_meta_registry(str(path)) == expected
+
+        retained_registry["value"][key]["activity"]["counts"]["messages"] = 99
+        retained_registry["value"][key]["durable_messages"].append({"content": "after-commit"})
+        assert committed == expected
+        assert history_store.load_session_meta_registry(str(path)) == expected
+
+    def test_legacy_merge_adds_missing_entries_and_preserves_current_values(self, tmp_path: Path) -> None:
+        path = tmp_path / "session_meta.json"
+        history_store.save_session_meta_registry(
+            str(path),
+            {"model_responses_shared.txt": {"title": "current"}},
+        )
+
+        committed, changed = history_store.merge_session_meta_registry(
+            str(path),
+            {
+                "model_responses_legacy.txt": {"title": "legacy"},
+                "model_responses_shared.txt": {"title": "stale"},
+            },
+        )
+
+        assert changed is True
+        assert committed == {
+            "model_responses_legacy.txt": {"title": "legacy"},
+            "model_responses_shared.txt": {"title": "current"},
+        }
+
+    def test_concurrent_legacy_name_imports_preserve_existing_and_independent_titles(self, tmp_path: Path) -> None:
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        names_path = destination / "session_names.json"
+        names_path.write_text(json.dumps({"shared.txt": "current"}), encoding="utf-8")
+        sources: list[Path] = []
+        for worker_id in range(4):
+            source = tmp_path / f"source-{worker_id}"
+            source.mkdir()
+            (source / "session_names.json").write_text(
+                json.dumps({"shared.txt": "stale", f"worker-{worker_id}.txt": f"title-{worker_id}"}),
+                encoding="utf-8",
+            )
+            sources.append(source)
+
+        ctx = multiprocessing.get_context("spawn")
+        start_event = ctx.Event()
+        processes = [
+            ctx.Process(target=_legacy_history_copy_worker, args=(str(source), str(destination), start_event))
+            for source in sources
+        ]
+
+        _start_and_join_processes(processes, start_event)
+
+        names = json.loads(names_path.read_text(encoding="utf-8"))
+        assert names["shared.txt"] == "current"
+        assert {names[f"worker-{worker_id}.txt"] for worker_id in range(4)} == {
+            f"title-{worker_id}" for worker_id in range(4)
+        }
+        assert not list(destination.glob("session_names.json.tmp*"))
+
+
+class TestAtomicHistoryTextWrites:
+    def test_transcript_rollback_does_not_overwrite_a_later_writer(self, tmp_path: Path) -> None:
+        path = tmp_path / "transcript.txt"
+        path.write_bytes(b"original")
+        rollback = history_store.RollbackStack()
+        rollback.write_subagent_transcript(
+            str(path),
+            [Message("user", "failed writer"), Message("assistant", "failed response")],
+        )
+        path.write_bytes(b"later successful writer")
+
+        rollback()
+
+        assert path.read_bytes() == b"later successful writer"
+
+    def test_concurrent_processes_use_collision_safe_temporary_files(self, tmp_path: Path) -> None:
+        path = tmp_path / "transcript.txt"
+        payloads = [f"writer-{idx}\n" * 2000 for idx in range(4)]
+        ctx = multiprocessing.get_context("spawn")
+        start_event = ctx.Event()
+        processes = [
+            ctx.Process(target=_history_text_write_worker, args=(str(path), payload, start_event))
+            for payload in payloads
+        ]
+
+        _start_and_join_processes(processes, start_event)
+
+        assert path.read_text(encoding="utf-8") in payloads
+        assert not list(tmp_path.glob("transcript.txt.tmp.*"))
+
+    def test_replace_failure_cleans_unique_temporary_file(self, tmp_path: Path, monkeypatch) -> None:
+        path = tmp_path / "transcript.txt"
+
+        def fail_replace(_source, _target):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(history_store.os, "replace", fail_replace)
+
+        with pytest.raises(OSError, match="replace failed"):
+            history_store.write_text_atomic(str(path), "new transcript")
+
+        assert not path.exists()
+        assert not list(tmp_path.glob("transcript.txt.tmp.*"))
 
 
 class TestRecentHistoryItems:

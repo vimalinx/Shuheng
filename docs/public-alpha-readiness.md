@@ -9,11 +9,11 @@ Shuheng is a public alpha for local-first agent control-plane work. The supporte
 claim is:
 
 > experimental local alpha: stable local TUI/control-plane surfaces with
-> stable OMP runtime output/control, no built-in Web/HTTP/mobile/remote
-> endpoint, and experimental local scheduler, workflow, baseline, eval, and
-> protocol-shaped registry records.
+> stable OMP runtime output/control, a local JSONL stdio gateway, and
+> experimental local scheduler, workflow, baseline, eval, and protocol-shaped
+> registry records.
 
-Do not describe the project as production-ready, remotely secured, or fully
+Do not describe the project as production-ready, network-service hardened, or fully
 A2A/MCP certified. Current A2A/MCP-shaped data is local metadata only, not a
 reachable protocol service.
 
@@ -30,12 +30,17 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/dogfood_stdio_gateway.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
+npm ci --ignore-scripts --prefix integrations/pi-native-sidecar
+node --check integrations/pi-native-sidecar/sidecar.mjs
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
+PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist --upgrade-from-alpha1
 git diff --check
 ```
 
-Also run `shuheng-check` in the target checkout.
+Also run `shuheng --version`, `shuheng runtime check`, and `shuheng-check` in
+the target checkout. `--package-only` is an artifact/debug escape hatch and is
+not runtime-readiness evidence.
 
 The fresh-machine install and platform support contract lives in
 [`docs/install.md`](install.md). The release support claim is Linux-first
@@ -43,39 +48,30 @@ experimental local alpha; Windows users should use WSL2, macOS is best-effort
 until covered by CI or real terminal smoke verification, and native Windows is
 not supported by the curses TUI.
 
-## Trellis Repository State
+## Maintainer Workflow State
 
-The tracked `.trellis/` tree is project development metadata, not Shuheng
-runtime state and not part of the Python source distribution.
+Maintainer agent-framework state is not part of Shuheng's public source or
+runtime contract. `.trellis/`, generated `.agents/`, `.claude/`, and `.codex/`
+remain local and ignored. They must not enter Git, wheel, or sdist artifacts.
 
-The current public-alpha decision is:
-
-- Keep `.trellis/spec/`, `.trellis/workflow.md`, `.trellis/scripts/`, and task
-  records in the source repository because they explain the governed development
-  process and preserve implementation provenance.
-- Keep `.trellis/.runtime/`, `.trellis/.cache/`, `.trellis/.developer`,
-  template hashes, backups, and worktrees ignored.
-- Keep `.trellis` pruned from sdist/wheel artifacts through `MANIFEST.in`.
-- Keep `_knowledge_base/` ignored and pruned as private local research material.
-- Do not bulk-delete or bulk-archive task directories only to make the GitHub
-  tree look smaller. A task directory is a development ledger entry; cleanup
-  should be explicit and reviewable.
-
-Some task directories may show `in_progress` while representing older local
-workflow state. Treat them as development ledger records, not product features
-or release promises.
+Contributor-facing Shuheng contracts live under [`docs/development/`](development/)
+and the architecture baseline remains
+[`docs/agent-harness-architecture.md`](agent-harness-architecture.md). This keeps
+the public MIT boundary independent from whichever local workflow framework a
+maintainer chooses to use.
 
 ## Public Alpha Known Gaps
 
 - `src/shuheng/app.py` remains a large composition module and should continue to
   shrink through small helper extractions with compatibility aliases.
-- Built-in Web Console, HTTP gateway, mobile endpoints, and remote endpoints are
-  not active product surfaces.
 - A2A/MCP-shaped records are local metadata only, not certified protocol
   implementations or reachable endpoints.
 - Heuristic eval and trace scoring do not prove factual or citation correctness.
 - Scheduler/workflow automation is runtime-owned, not an installed always-on
   service by default.
+- Pi-native custom Tools are trusted local code and are not an OS sandbox.
+- OMP full/yolo host access is an explicit operator opt-in, not the public
+  default safety posture.
 
 ## Fresh Clone Expectations
 
@@ -84,9 +80,9 @@ A new contributor should be able to:
 1. Create a virtual environment.
 2. Install `.[dev]`.
 3. Follow `docs/install.md` for supported platform expectations.
-4. Run `shuheng --help` before configuring any optional external adapter.
-5. Run `shuheng-check` or `python -m shuheng.integration doctor` without extra
-   local runtime checkouts.
+4. Run `shuheng --help` and `shuheng --version` before configuring models.
+5. Run `shuheng-check` or `python -m shuheng.integration doctor`; the command
+   must verify OMP or return an actionable non-zero missing-runtime result.
 6. Run the release hygiene and runtime smoke checks without maintainer-local
    state.
 

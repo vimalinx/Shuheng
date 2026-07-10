@@ -6,6 +6,9 @@ ledgers, artifact references, approval gates, and auditable protocols.
 
 ## Development Setup
 
+Read [`docs/development/`](docs/development/index.md) before changing runtime,
+storage, orchestration, packaging, or release behavior.
+
 ```bash
 python -m venv .venv
 . .venv/bin/activate
@@ -31,6 +34,8 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/dogfood_stdio_gateway.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
+npm ci --ignore-scripts --prefix integrations/pi-native-sidecar
+node --check integrations/pi-native-sidecar/sidecar.mjs
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
 git diff --check
@@ -48,6 +53,12 @@ git diff --check
   `docs/agent-harness-architecture.md`.
 - Do not describe A2A/MCP as certified implementations without real third-party
   client interoperability tests.
+
+## Contribution License
+
+Unless explicitly stated otherwise, contributions submitted to this repository
+are licensed under the repository's MIT License. By submitting a contribution,
+you confirm that you have the right to provide it under those terms.
 
 ## Release Hygiene
 

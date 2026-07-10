@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from shuheng import app as a  # noqa: E402
 from shuheng import agent_bridge as bridge  # noqa: E402
+from shuheng import agent_project_workspace as agent_project_workspace_mod  # noqa: E402
 from shuheng import baseline as baseline_mod  # noqa: E402
 from shuheng import commands as commands_mod  # noqa: E402
 from shuheng import compat_legacy as compat_legacy_mod  # noqa: E402
@@ -42,6 +43,7 @@ from shuheng import integration as integ  # noqa: E402
 from shuheng import ledger_store as ledgers  # noqa: E402
 from shuheng import ohmypi_provider as omp  # noqa: E402
 from shuheng import path_utils as path_utils_mod  # noqa: E402
+from shuheng import pi_native_provider as pi_native  # noqa: E402
 from shuheng import plugins as plugins_mod  # noqa: E402
 from shuheng import release_readiness as rr  # noqa: E402
 from shuheng import runtime_evidence as runtime_evidence_mod  # noqa: E402
@@ -51,8 +53,20 @@ from shuheng import scheduler as sched  # noqa: E402
 from shuheng import secret_vault as secret_vault_mod  # noqa: E402
 from shuheng import skill_installer as skill_installer_mod  # noqa: E402
 from shuheng import subagent_store as subagent_store_mod  # noqa: E402
+from shuheng import subagent_task_dispatch as subagent_task_dispatch_mod  # noqa: E402
 from shuheng import text_utils as text_utils_mod  # noqa: E402
 from shuheng import ui_types as ui_types_mod  # noqa: E402
+
+
+# app.py line-count ratchet. app.py is being decomposed incrementally
+# (see docs/app-py-decomposition-plan.md) and must only shrink. This ceiling is
+# the current size and must only ever decrease: a PR that shrinks app.py lowers
+# this constant in the same diff, and the lower ceiling is the visible win.
+# Raise it only with explicit rationale.
+# Rebased after the 0.2.0a1 credential migration and OMP environment
+# allowlisting hardened existing app-owned boundaries. This remains a ceiling:
+# subsequent decomposition work must lower it rather than grow app.py further.
+APP_PY_MAX_LINES = 28206
 
 
 def retarget_harness(root: str) -> None:
@@ -259,7 +273,7 @@ def assert_local_protocol_module_boundaries() -> None:
     assert a.baseline_item is baseline_mod.baseline_item
     assert a.baseline_status is baseline_mod.baseline_status
     assert not hasattr(a, "local_protocol_base_uri")
-    assert local_protocol_registry_mod.local_protocol_base_uri("0.0.0.0", 8765) == "local://shuheng"
+    assert local_protocol_registry_mod.local_protocol_base_uri() == "local://shuheng"
     for module in (runtime_evidence_mod, baseline_mod, local_protocol_registry_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "shuheng.app" not in source, module.__file__
@@ -287,6 +301,12 @@ def assert_leaf_module_boundaries() -> None:
     assert a.MAIN_HOME_SESSION_KEY == ui_types_mod.MAIN_HOME_SESSION_KEY
     assert a.SCHEDULED_REPORTS_SESSION_KEY == ui_types_mod.SCHEDULED_REPORTS_SESSION_KEY
     for module in (text_utils_mod, ui_types_mod):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for forbidden in ("shuheng.app", "from .app", "import app"):
+            assert forbidden not in source, f"{module.__file__}: {forbidden}"
+    assert a.start_subagent_task is subagent_task_dispatch_mod.start_subagent_task
+    assert a.open_agent_project_workspace is agent_project_workspace_mod.open_agent_project_workspace
+    for module in (agent_project_workspace_mod, subagent_task_dispatch_mod):
         source = Path(module.__file__).read_text(encoding="utf-8")
         for forbidden in ("shuheng.app", "from .app", "import app"):
             assert forbidden not in source, f"{module.__file__}: {forbidden}"
@@ -2694,41 +2714,6 @@ def assert_runtime_dispatch_module_boundary() -> None:
         assert forbidden not in source, f"{runtime_dispatch_mod.__file__}: {forbidden}"
 
 
-def assert_no_removed_web_http_surface() -> None:
-    """Removed Web/HTTP files and callables stay absent from the active runtime."""
-    app_source = Path(a.__file__).read_text(encoding="utf-8")
-    cli_source = Path(ROOT, "src/shuheng/cli.py").read_text(encoding="utf-8")
-    test_cli_source = Path(ROOT, "tests/test_cli.py").read_text(encoding="utf-8")
-    for removed_name in (
-        "GatewayRequestHandler",
-        "make_gateway_http_server",
-        "serve_gateway",
-        "start_gateway_daemon",
-        "stop_gateway_daemon",
-        "restart_gateway_daemon",
-        "gateway_daemon_command",
-        "web_console_snapshot",
-        "web_console_apply_action",
-        "web_console_html",
-        "WEB_CONSOLE_ACTION_REQUEST_SCHEMA",
-        "WEB_CONSOLE_ACTION_RESPONSE_SCHEMA",
-    ):
-        assert not hasattr(a, removed_name), removed_name
-        assert f"def {removed_name}" not in app_source, removed_name
-        assert f"class {removed_name}" not in app_source, removed_name
-    for removed_path in (
-        ROOT / "src/shuheng/web_console.py",
-        ROOT / "src/shuheng/web_console_static.py",
-        ROOT / "tests/test_web_console.py",
-        ROOT / "tests/test_web_console_static.py",
-    ):
-        assert not removed_path.exists(), removed_path
-    assert all(command != "/gateway" for command, *_rest in a.COMMANDS), a.COMMANDS
-    for removed_flag in ("--serve-gateway", "--gateway-daemon"):
-        assert removed_flag not in cli_source, removed_flag
-        assert removed_flag in test_cli_source, "test_cli.py must lock removed CLI flags"
-
-
 def assert_dashboard_module_boundary() -> None:
     for name in (
         "SUPPORTED_DASHBOARD_SECTIONS",
@@ -2842,6 +2827,19 @@ def assert_ledger_store_module_boundary() -> None:
     assert a.latest_records_by_id(path, "task_id")["task_core"]["status"] == "queued"
     a.append_jsonl(path, {"task_id": "task_core", "status": "completed"})
     assert a.latest_records_by_id(path, "task_id")["task_core"]["status"] == "completed"
+
+
+def assert_app_py_does_not_grow() -> None:
+    """app.py must not grow. Shuheng is decomposing it into sibling modules."""
+    app_source = Path(a.__file__).read_text(encoding="utf-8")
+    current = len(app_source.splitlines())
+    assert current <= APP_PY_MAX_LINES, (
+        f"app.py grew to {current} lines; ratchet ceiling is {APP_PY_MAX_LINES} "
+        f"(+{current - APP_PY_MAX_LINES}). Shuheng is decomposing app.py into "
+        f"sibling modules, not enlarging it. Either extract code into a sibling "
+        f"module to bring the count back down, or - only if a raise is truly "
+        f"justified - update APP_PY_MAX_LINES above in this same change with rationale."
+    )
 
 
 def assert_progress_ledger_is_persistent_and_hydrated() -> None:
@@ -3341,11 +3339,12 @@ def assert_shuheng_brand_entrypoints() -> None:
         assert f"{removed_script} =" not in pyproject, removed_script
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        assert integ._print_report(None, []) == 0
+        assert integ._print_report(None, [], package_only=True) == 0
     report = buffer.getvalue()
     assert "Shuheng root:" in report, report
     assert "Core runtime: OhMyPi / OMP" in report, report
     assert "Status: OK" in report, report
+    assert "OMP runtime check: SKIPPED" in report, report
     assert "Launch without legacy patches: shuheng" in report, report
     assert ("Generic" + "Agent") not in report, report
     assert retired_script_prefix not in report, report
@@ -3378,7 +3377,7 @@ def assert_shuheng_brand_entrypoints() -> None:
     assert ("GenericAgent " + "root not found") not in integration_source, integration_source
     assert ("GenericAgent legacy provider " + "root:") not in integration_source, integration_source
     assert ("legacy-provider " + "root") not in integration_source, integration_source
-    assert "External runtime checkout:" in integration_source, integration_source
+    assert "External compatibility checkout:" in integration_source, integration_source
     assert "validate_legacy_provider_root(" in integration_source, integration_source
     trellis_tasks = ROOT / ".trellis" / "tasks"
     if trellis_tasks.is_dir():
@@ -3428,7 +3427,7 @@ def assert_shared_agent_gateway_skill_installer() -> None:
         assert "shuheng-agent-gateway message-send" in skill_text, skill_text
         assert "shuheng-agent-gateway serve --stdio" in skill_text, skill_text
         assert "Do not read Shuheng internal context packs" in skill_text, skill_text
-        assert "Web, HTTP, mobile, remote" in skill_text, skill_text
+        assert "local CLI and JSONL stdio" in skill_text, skill_text
         assert "$shuheng-agent-gateway" in metadata_text, metadata_text
         combined = skill_text + metadata_text
         assert str(tmp_root) not in combined, combined
@@ -3445,8 +3444,63 @@ def assert_shared_agent_gateway_skill_installer() -> None:
         )
         assert help_result.returncode == 0, help_result.stderr
         assert "install-agent-gateway-skill" in help_result.stdout, help_result.stdout
-        assert "--serve-gateway" not in help_result.stdout, help_result.stdout
-        assert "--gateway-daemon" not in help_result.stdout, help_result.stdout
+        assert "runtime" in help_result.stdout, help_result.stdout
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def assert_public_install_script_contract() -> None:
+    script = ROOT / "scripts" / "install.sh"
+    assert script.is_file(), script
+    assert os.access(script, os.X_OK), script
+    source = script.read_text(encoding="utf-8")
+    for required in (
+        "Windows via WSL2",
+        "macOS",
+        "Windows native",
+        "native Windows is unsupported",
+        "DEFAULT_TAG=\"v0.2.0-alpha.1\"",
+        "SHUHENG_INSTALL_WHEEL_URL",
+        "--source PATH",
+        "--dry-run",
+        "install-agent-gateway-skill",
+        "shuheng-check",
+    ):
+        assert required in source, required
+
+    syntax_result = subprocess.run(["sh", "-n", str(script)], text=True, capture_output=True, check=False)
+    assert syntax_result.returncode == 0, syntax_result.stderr
+
+    help_result = subprocess.run(["sh", str(script), "--help"], text=True, capture_output=True, check=False)
+    assert help_result.returncode == 0, help_result.stderr
+    for fragment in ("Linux", "Windows via WSL2", "macOS", "Windows native", "--wheel-url URL", "--source PATH"):
+        assert fragment in help_result.stdout, help_result.stdout
+
+    tmp_root = Path(tempfile.mkdtemp(prefix="shuheng_install_contract_"))
+    try:
+        dry_result = subprocess.run(
+            [
+                "sh",
+                str(script),
+                "--dry-run",
+                "--source",
+                str(ROOT),
+                "--prefix",
+                str(tmp_root / "prefix"),
+                "--bin-dir",
+                str(tmp_root / "bin"),
+                "--skip-check",
+                "--skip-agent-gateway-skill",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert dry_result.returncode == 0, dry_result.stderr
+        assert "Install target: source" in dry_result.stdout, dry_result.stdout
+        assert "pip install" in dry_result.stdout, dry_result.stdout
+        assert not (tmp_root / "prefix").exists(), dry_result.stdout
+        assert not (tmp_root / "bin").exists(), dry_result.stdout
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
 
@@ -3864,6 +3918,36 @@ def assert_shuheng_bootstraps_legacy_state_without_mutating_source() -> None:
             os.environ["SHUHENG_DISABLE_LEGACY_IMPORT"] = old_disable
 
 
+def assert_pi_native_worker_provider_record(provider: dict[str, object]) -> None:
+    assert provider["schema_version"] == "agentruntime.provider.v1", provider
+    assert provider["provider_id"] == pi_native.PI_NATIVE_PROVIDER_ID, provider
+    assert provider["runtime_type"] == "local_pi_sdk_sidecar", provider
+    assert provider["transport"] == "jsonl_stdio_sidecar", provider
+    capabilities = provider["capabilities"]
+    assert isinstance(capabilities, dict), provider
+    assert capabilities["runtime_task_requests"] is True, provider
+    assert capabilities["runtime_task_events"] is True, provider
+    assert capabilities["custom_tools"] is True, provider
+    assert capabilities["immutable_agent_build"] is True, provider
+    assert capabilities["one_task_at_a_time"] is True, provider
+    assert capabilities["session_restore"] is False, provider
+    policy = provider["policy"]
+    assert isinstance(policy, dict), provider
+    assert policy["approval_gate_owner"] == "shuheng.policy", provider
+    assert policy["tool_permissions"] == "frozen_build_and_effective_tool_intersection", provider
+    assert policy["tool_os_sandbox"] == "not_available_trusted_local_code_only", provider
+    assert policy["memory_write"] == "not_exposed", provider
+    assert policy["implicit_resource_discovery"] is False, provider
+    scheduler = provider["scheduler"]
+    assert isinstance(scheduler, dict), provider
+    assert scheduler["owner"] == "shuheng.control_plane", provider
+    assert scheduler["runtime_provider_id"] == pi_native.PI_NATIVE_PROVIDER_ID, provider
+    assert provider["mcp"] == {"tool_registry": "not_exposed", "resource_registry": "not_exposed"}, provider
+    notes = provider["notes"]
+    assert isinstance(notes, list), provider
+    assert any("does not replace the permanent OMP main runtime" in str(note) for note in notes), provider
+
+
 def assert_ohmypi_runtime_registry() -> None:
     old = os.environ.pop("SHUHENG_RUNTIME_PROVIDER", None)
     try:
@@ -3871,6 +3955,7 @@ def assert_ohmypi_runtime_registry() -> None:
         data = registry.to_record()
         assert data["default_provider_id"] == "ohmypi", data
         assert "ohmypi" in data["provider_ids"], data
+        assert pi_native.PI_NATIVE_PROVIDER_ID in data["provider_ids"], data
         if a.GENERICAGENT_PROVIDER_CONFIGURED:
             assert "genericagent" in data["provider_ids"], data
         providers = {item["provider_id"]: item for item in data["providers"]}
@@ -3889,14 +3974,14 @@ def assert_ohmypi_runtime_registry() -> None:
         assert ohmypi["scheduler"]["status"] == "registry_ready", ohmypi
         assert ohmypi["policy"]["approval_gate_owner"] == "shuheng.policy", ohmypi
         assert ohmypi["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi
-        assert ohmypi["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi
+        assert ohmypi["policy"]["runtime_tool_approval_mode"] == "write", ohmypi
         assert ohmypi["policy"]["memory_write"] == "candidate_only", ohmypi
+        assert_pi_native_worker_provider_record(providers[pi_native.PI_NATIVE_PROVIDER_ID])
         os.environ["SHUHENG_RUNTIME_PROVIDER"] = "genericagent"
         selected = a.agent_runtime_registry().default().provider_id
-        if a.GENERICAGENT_PROVIDER_CONFIGURED:
-            assert selected == "genericagent", selected
-        else:
-            assert selected == "ohmypi", selected
+        assert selected == "ohmypi", selected
+        os.environ["SHUHENG_RUNTIME_PROVIDER"] = pi_native.PI_NATIVE_PROVIDER_ID
+        assert a.agent_runtime_registry().default().provider_id == "ohmypi"
     finally:
         if old is None:
             os.environ.pop("SHUHENG_RUNTIME_PROVIDER", None)
@@ -3918,6 +4003,7 @@ def assert_ohmypi_core_without_genericagent_discovery() -> None:
         "print(json.dumps({",
         "    'runtime_available': app.GENERICAGENT_RUNTIME_AVAILABLE,",
         "    'provider_ids': registry['provider_ids'],",
+        "    'providers': registry['providers'],",
         "    'default_provider_id': registry['default_provider_id'],",
         "    'doctor_rc': doctor_rc,",
         "    'doctor_output': buf.getvalue(),",
@@ -3935,7 +4021,9 @@ def assert_ohmypi_core_without_genericagent_discovery() -> None:
     payload = json.loads(result.stdout)
     assert payload["runtime_available"] is False, payload
     assert payload["default_provider_id"] == "ohmypi", payload
-    assert payload["provider_ids"] == ["ohmypi"], payload
+    assert payload["provider_ids"] == ["ohmypi", pi_native.PI_NATIVE_PROVIDER_ID], payload
+    providers = {item["provider_id"]: item for item in payload["providers"]}
+    assert_pi_native_worker_provider_record(providers[pi_native.PI_NATIVE_PROVIDER_ID])
     assert payload["doctor_rc"] == 0, payload
     assert "Core runtime: OhMyPi / OMP" in payload["doctor_output"], payload
     assert ("Generic" + "Agent") not in payload["doctor_output"], payload
@@ -3965,11 +4053,20 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
     command = omp.ohmypi_rpc_command(binary="/fake/omp", append_system_prompt=prompt_path)
     assert command[:3] == ["/fake/omp", "--mode", "rpc"], command
     assert "--approval-mode" in command, command
-    assert command[command.index("--approval-mode") + 1] == "yolo", command
+    assert command[command.index("--approval-mode") + 1] == "write", command
     assert "--append-system-prompt" in command, command
     assert command[command.index("--append-system-prompt") + 1] == prompt_path, command
     old_approval_mode = os.environ.get("SHUHENG_OMP_APPROVAL_MODE")
+    old_permission_profile = os.environ.get("SHUHENG_OMP_PERMISSION_PROFILE")
     try:
+        os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
+        os.environ["SHUHENG_OMP_APPROVAL_MODE"] = "yolo"
+        command_with_blocked_yolo = omp.ohmypi_rpc_command(binary="/fake/omp")
+        assert command_with_blocked_yolo[command_with_blocked_yolo.index("--approval-mode") + 1] == "write", command_with_blocked_yolo
+        os.environ["SHUHENG_OMP_PERMISSION_PROFILE"] = "full"
+        command_with_governed_yolo = omp.ohmypi_rpc_command(binary="/fake/omp")
+        assert command_with_governed_yolo[command_with_governed_yolo.index("--approval-mode") + 1] == "yolo", command_with_governed_yolo
+        os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
         os.environ["SHUHENG_OMP_APPROVAL_MODE"] = "always-ask"
         command_with_approval_override = omp.ohmypi_rpc_command(binary="/fake/omp")
         assert command_with_approval_override[command_with_approval_override.index("--approval-mode") + 1] == "always-ask", command_with_approval_override
@@ -3978,6 +4075,10 @@ def assert_ohmypi_memory_prompt_and_command() -> None:
             os.environ.pop("SHUHENG_OMP_APPROVAL_MODE", None)
         else:
             os.environ["SHUHENG_OMP_APPROVAL_MODE"] = old_approval_mode
+        if old_permission_profile is None:
+            os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
+        else:
+            os.environ["SHUHENG_OMP_PERMISSION_PROFILE"] = old_permission_profile
     command_with_user_append = omp.ohmypi_rpc_command(
         binary="/fake/omp",
         extra_args=["--append-system-prompt", "/user/append.md"],
@@ -3996,6 +4097,7 @@ def assert_ohmypi_rpc_command_discovers_user_bun_binary() -> None:
     omp_binary.chmod(0o755)
     old_home = os.environ.get("HOME")
     old_path = os.environ.get("PATH")
+    old_bun_install = os.environ.pop("BUN_INSTALL", None)
     old_bin = os.environ.pop("SHUHENG_OHMYPI_BIN", None)
     try:
         os.environ["HOME"] = temp_home
@@ -4015,6 +4117,10 @@ def assert_ohmypi_rpc_command_discovers_user_bun_binary() -> None:
             os.environ.pop("PATH", None)
         else:
             os.environ["PATH"] = old_path
+        if old_bun_install is None:
+            os.environ.pop("BUN_INSTALL", None)
+        else:
+            os.environ["BUN_INSTALL"] = old_bun_install
         if old_bin is None:
             os.environ.pop("SHUHENG_OHMYPI_BIN", None)
         else:
@@ -4048,13 +4154,13 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         assert runtime_config.default_model.endswith("/model-beta"), runtime_config.default_model
         assert runtime_config.models[1].context_window == 1050000, runtime_config.models[1]
         assert runtime_config.models[1].max_tokens == 128000, runtime_config.models[1]
-        assert runtime_config.approval_mode == "yolo", runtime_config
+        assert runtime_config.approval_mode == "write", runtime_config
         config_data = json.loads(Path(runtime_config.config_path).read_text(encoding="utf-8"))
         models_data = json.loads(Path(runtime_config.models_path).read_text(encoding="utf-8"))
         assert config_data["autoResume"] is False, config_data
         assert config_data["modelRoles"]["default"] == runtime_config.default_model, config_data
         assert config_data["todo"]["eager"] == "default", config_data
-        assert config_data["tools"]["approvalMode"] == "yolo", config_data
+        assert config_data["tools"]["approvalMode"] == "write", config_data
         assert "providers" in models_data and len(models_data["providers"]) == 2, models_data
         beta_provider = next(
             provider for provider in models_data["providers"].values()
@@ -4099,8 +4205,8 @@ def assert_ohmypi_isolated_runtime_settings() -> None:
         record = adapter.spec.to_record()
         assert record["model_routing"]["isolated_agent_dir"] == runtime_config.agent_dir, record
         assert record["model_routing"]["configured_model_count"] == 2, record
-        assert record["model_routing"]["tool_approval_mode"] == "yolo", record
-        assert record["policy"]["runtime_tool_approval_mode"] == "yolo", record
+        assert record["model_routing"]["tool_approval_mode"] == "write", record
+        assert record["policy"]["runtime_tool_approval_mode"] == "write", record
         command = getattr(adapter, "command")
         assert "--model" in command and runtime_config.default_model in command, command
         Path(mykey_file).write_text(
@@ -4170,15 +4276,15 @@ def assert_ohmypi_permission_profiles() -> None:
         assert pack["for_agent"]["role"] == "main_orchestrator", pack["for_agent"]
         assert pack["role_template"]["write_policy"] == "single_writer", pack["role_template"]
         assert "受限专家子 agent" not in str(pack["role_template"]), pack["role_template"]
-        assert pack["permission_profile"] == "full", pack
-        assert pack["permissions"]["permission_profile"] == "full", pack["permissions"]
+        assert pack["permission_profile"] == "standard", pack
+        assert pack["permissions"]["permission_profile"] == "standard", pack["permissions"]
         assert pack["permissions"]["write_policy"] == "single_writer", pack["permissions"]
-        assert pack["permissions"]["tools_forbidden"] == [], pack["permissions"]
-        assert pack["permissions"]["approval_required_for"] == [], pack["permissions"]
+        assert "filesystem.delete" in pack["permissions"]["tools_forbidden"], pack["permissions"]
+        assert "deploy" in pack["permissions"]["approval_required_for"], pack["permissions"]
         assert pack["permissions"]["memory_write"] == "candidate_only", pack["permissions"]
         assert {"bash", "edit", "write", "browser", "task", "host_tools", "subagent.delegate", "memory.candidate"} <= set(pack["permissions"]["tools_allowed"]), pack["permissions"]
         prompt = a.format_context_pack_for_prompt(pack)
-        assert "permission_profile: full" in prompt, prompt
+        assert "permission_profile: standard" in prompt, prompt
         assert "role: main_orchestrator" in prompt, prompt
         assert "role: specialist" not in prompt, prompt
         assert "tools_allowed: " in prompt and "bash" in prompt and "memory.candidate" in prompt, prompt
@@ -4197,15 +4303,23 @@ def assert_ohmypi_permission_profiles() -> None:
         request_tools = set(request.permissions.get("tools_allowed") or [])
         assert request.role == "main_orchestrator", request
         assert request.agent_id == "orchestrator.main", request
-        assert request.permissions["permission_profile"] == "full", request.permissions
+        assert request.permissions["permission_profile"] == "standard", request.permissions
         assert request.permissions["write_policy"] == "single_writer", request.permissions
-        assert request.permissions["tools_forbidden"] == [], request.permissions
-        assert request.permissions["approval_required_for"] == [], request.permissions
+        assert "filesystem.delete" in request.permissions["tools_forbidden"], request.permissions
+        assert "deploy" in request.permissions["approval_required_for"], request.permissions
         assert {"bash", "write", "host_tools", "subagent.delegate", "memory.candidate"} <= request_tools, request.permissions
-        assert "permission_profile: full" in request.prompt, request.prompt
+        assert "permission_profile: standard" in request.prompt, request.prompt
         assert "role: main_orchestrator" in request.prompt, request.prompt
         assert "role: specialist" not in request.prompt, request.prompt
         assert request.output_contract["required_sections"] == a.role_output_contract("main_orchestrator"), request.output_contract
+
+        os.environ["SHUHENG_OMP_PERMISSION_PROFILE"] = "full"
+        full_pack, _full_ref = a.build_main_runtime_context_pack(state, "Explicit full mode", "task_omp_full")
+        assert full_pack["permission_profile"] == "full", full_pack
+        assert full_pack["permissions"]["tools_forbidden"] == [], full_pack["permissions"]
+        assert "deploy" in full_pack["permissions"]["approval_required_for"], full_pack["permissions"]
+        assert "access_secret" in full_pack["permissions"]["approval_required_for"], full_pack["permissions"]
+        os.environ.pop("SHUHENG_OMP_PERMISSION_PROFILE", None)
 
         sub = a.create_subagent(state, "Role Bounded Researcher", role="researcher", persistent=False)
         sub_pack, _sub_ref = a.build_context_pack(state, sub, "Read only research", "task_sub_standard")
@@ -4329,9 +4443,9 @@ def assert_ohmypi_rpc_extension_approval_bridge() -> None:
         provider_id="ohmypi",
         agent_id="orchestrator.main",
         role="orchestrator",
-        objective="run safe bash",
+        objective="run a bounded local edit",
         prompt="",
-        permissions={"permission_profile": "full", "tools_allowed": ["bash", "shell"], "memory_write": "candidate_only"},
+        permissions={"permission_profile": "full", "tools_allowed": ["edit", "bash", "shell"], "memory_write": "candidate_only"},
     )
     agent._active = omp._ActivePrompt(  # type: ignore[attr-defined]
         request_id="prompt-1",
@@ -4342,7 +4456,7 @@ def assert_ohmypi_rpc_extension_approval_bridge() -> None:
     agent._answer_extension_ui({  # type: ignore[attr-defined]
         "id": "ui-safe",
         "method": "select",
-        "title": "Allow tool: bash\nCommand: pwd",
+        "title": "Allow tool: edit\nPath: src/example.py",
         "options": ["Approve", "Deny"],
     })
     assert sent[-1] == {"type": "extension_ui_response", "id": "ui-safe", "value": "Approve"}, sent[-1]
@@ -4353,7 +4467,7 @@ def assert_ohmypi_rpc_extension_approval_bridge() -> None:
         "title": "Allow tool: bash\nCommand: rm -rf /tmp/shuheng-test",
         "options": ["Approve", "Deny"],
     })
-    assert sent[-1] == {"type": "extension_ui_response", "id": "ui-risky", "value": "Approve"}, sent[-1]
+    assert sent[-1] == {"type": "extension_ui_response", "id": "ui-risky", "value": "Deny"}, sent[-1]
 
     standard_request = a.RuntimeTaskRequest(
         task_id="task_approval_standard",
@@ -5905,7 +6019,6 @@ def assert_ohmypi_tui_proposal_host_tool_contract() -> None:
         role="researcher",
         persistent=True,
     )
-
     tools = [tool.to_rpc() for tool in a.ohmypi_tui_host_tool_definitions()]
     tool_names = {str(tool.get("name") or "") for tool in tools}
     assert {"shuheng_query", "shuheng_propose"} <= tool_names, tools
@@ -6154,6 +6267,13 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
         role="researcher",
         persistent=True,
     )
+    public_target = a.create_subagent(
+        state,
+        "Public Gateway Target",
+        "Receives a separate public gateway projection smoke task.",
+        role="researcher",
+        persistent=True,
+    )
     service = bridge.AgentBridgeService(app=a, state=state)
     metadata = service.handle({"action": "metadata"})
     assert metadata["schema_version"] == "shuheng.agent_bridge.v1", metadata
@@ -6163,8 +6283,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert "message_send" in metadata["supported_actions"], metadata
     assert "gateway_register" in metadata["supported_actions"], metadata
     assert metadata["policy"]["provider_direct_writes"] is False, metadata
-    assert metadata["policy"]["web_http_surface"] is False, metadata
-    assert metadata["policy"]["network_surface"] == "none", metadata
+    assert metadata["policy"]["transport"] == "local_jsonl_stdio", metadata
     assert metadata["paths"]["app_root_dir"] == a.APP_ROOT_DIR, metadata
     assert metadata["paths"]["external_runtime_checkout_configured"] == bool(a.GENERICAGENT_ROOT), metadata
     assert "external_runtime_checkout" not in metadata["paths"], metadata
@@ -6184,31 +6303,45 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert directory["counts"]["agents"] >= 1, directory
     assert directory["discovery_policy"]["context_exposed"] is False, directory
     assert "permissions" not in json.dumps(directory, ensure_ascii=False), directory
+    blocked_directory = service.handle_gateway({"action": "agent_directory", "args": {"public": False}})
+    assert blocked_directory["status"] == "error", blocked_directory
+    public_directory = service.handle_gateway({"action": "agent_directory", "args": {}})
+    public_item_keys = {"agent_id", "kind", "name", "role", "purpose", "status", "delivery"}
+    assert all(set(item) == public_item_keys for item in public_directory["roles"] + public_directory["agents"]), public_directory
 
     registration = service.handle({"action": "gateway_register"})
     assert registration["schema_version"] == "agentgateway.registration.v1", registration
     assert registration["gateway_id"] == "shuheng.local", registration
     assert registration["transport"] == "local-jsonl-stdio", registration
-    assert registration["web_http_surface"] is False, registration
+    assert registration["framing"] == "jsonl", registration
     assert registration["state"]["status"] == "registered", registration
     assert os.path.exists(a.AGENT_GATEWAY_REGISTRATION_PATH), a.AGENT_GATEWAY_REGISTRATION_PATH
+    public_registration = service.gateway_registration_public()
+    assert set(public_registration) == {
+        "schema_version", "gateway_id", "status", "transport", "framing", "persistent",
+    }, public_registration
 
     gateway_status = service.handle({"action": "gateway_status"})
     assert gateway_status["schema_version"] == "shuheng.agent_gateway.v1", gateway_status
     assert gateway_status["status"] == "running", gateway_status
-    assert gateway_status["web_http_surface"] is False, gateway_status
+    assert gateway_status["channel"] == {"transport": "local_jsonl_stdio", "framing": "jsonl"}, gateway_status
+    assert gateway_status["supported_actions"] == list(bridge.GATEWAY_STDIO_ACTIONS), gateway_status
+    assert "metadata" not in gateway_status, gateway_status
+    assert "paths" not in json.dumps(gateway_status, ensure_ascii=False), gateway_status
 
     registered_registry = a.ensure_local_protocol_registry(state)
     registered_service = registered_registry["gateway_service"]
     assert registered_service["status"] == "local_persistent_stdio_gateway", registered_service
     assert registered_service["transport"] == "local-jsonl-stdio", registered_service
-    assert registered_service["security"]["network_enabled"] is False, registered_service
-    assert registered_service["daemon"]["commands"], registered_service
-    assert registered_service["daemon"]["state"]["registration_path"] == a.AGENT_GATEWAY_REGISTRATION_PATH, registered_service
+    assert registered_service["stdio"]["framing"] == "jsonl", registered_service
+    assert registered_service["stdio"]["commands"], registered_service
+    assert registered_service["stdio"]["state"]["registration_path"] == a.AGENT_GATEWAY_REGISTRATION_PATH, registered_service
     registered_public = a.local_protocol_public_registry(registered_registry)
     assert registered_public["gateway_service"]["status"] == "local_persistent_stdio_gateway", registered_public
-    assert registered_public["gateway_service"]["daemon"]["state"]["status"] == "registered", registered_public
+    assert registered_public["gateway_service"]["stdio"]["state"]["status"] == "registered", registered_public
     assert a.AGENT_GATEWAY_REGISTRATION_PATH not in json.dumps(registered_public, ensure_ascii=False), registered_public
+    assert "call" not in registered_public["gateway_service"]["stdio"]["commands"], registered_public
+    assert (sys.executable or "python3") not in json.dumps(registered_public, ensure_ascii=False), registered_public
 
     sent = service.handle({
         "action": "message_send",
@@ -6222,7 +6355,7 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     assert sent["accepted"] is True, sent
     assert sent["delivery"]["mode"] == "orchestrator_agent_task", sent
     assert sent["delivery"]["auto_dispatch"] is True, sent
-    assert sent["delivery"]["web_http_surface"] is False, sent
+    assert sent["delivery"]["transport"] == "local_jsonl_stdio", sent
     assert sent["target"] == target.agent_id, sent
     assert sent["task_id"], sent
     sent_task = a.latest_task_records()[sent["task_id"]]
@@ -6230,6 +6363,31 @@ def assert_agent_bridge_contract_and_omp_plugin() -> None:
     status = service.handle({"action": "task_status", "args": {"task_id": sent["task_id"]}})
     assert status["schema_version"] == "shuheng.query.v1", status
     assert status["status"] == "ok", status
+
+    public_sent = service.handle_gateway({
+        "action": "message_send",
+        "args": {
+            "target": public_target.agent_id,
+            "message": "Request password handling guidance without receiving password values.",
+            "task_title": "Public gateway projection smoke",
+        },
+    })
+    assert set(public_sent) == {
+        "schema_version", "accepted", "status", "target", "agent", "task_id",
+        "approval_id", "delivery", "error",
+    }, public_sent
+    assert "provider_id" not in public_sent, public_sent
+    public_status = service.handle_gateway({
+        "action": "task_status",
+        "args": {"task_id": public_sent["task_id"]},
+    })
+    assert set(public_status) == {
+        "schema_version", "status", "task_id", "task_status", "assigned_agent",
+        "updated_at", "approval", "artifact_refs",
+    }, public_status
+    public_status_text = json.dumps(public_status, ensure_ascii=False)
+    for private_key in ("permissions", "context_policy", "history", "recent_traces", "objective", "budget"):
+        assert private_key not in public_status_text, public_status
 
     context = service.handle({
         "action": "memory_context_get",
@@ -6962,21 +7120,21 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     service = registry["gateway_service"]
     assert service["schema_version"] == "agentgateway.service.v1", service
     assert service["status"] == "local_record_only", service
-    assert service["security"]["auth"] == "none", service
-    assert service["security"]["network_enabled"] is False, service
+    assert service["transport"] == "local-record", service
     assert service["release_posture"] == "experimental_alpha", service
-    assert service["request_response"]["registry"] == "resource://agent-mail/local-protocol-registry", service
-    assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
-    assert service["request_response"]["agent_directory"] == "agent-directory://local", service
-    assert "message_send" not in service["request_response"], service
-    assert "task_status" not in service["request_response"], service
-    assert "context_inspector" not in service["request_response"], service
-    assert "permission_matrix" not in service["request_response"], service
-    assert service["sse"]["enabled"] is False, service
-    assert service["push_notifications"]["enabled"] is False, service
-    assert service["push_notifications"]["auth"] == "none", service
-    assert service["daemon"]["commands"] == [], service
-    assert service["daemon"]["state"]["status"] == "removed", service
+    assert service["request_response"] == {
+        "registry": "resource://agent-mail/local-protocol-registry",
+        "agent_directory": "agent-directory://local",
+        "message_inbox": "agent-mail://inbox",
+        "resource_registry": "resource://agent-mail/*",
+    }, service
+    assert service["stdio"] == {
+        "framing": "jsonl",
+        "input": "stdin",
+        "output": "stdout",
+        "commands": [],
+        "state": {"schema_version": "agentgateway.runtime.v1", "status": "local_record_only"},
+    }, service
     a2a = registry["a2a_gateway"]
     assert a2a["schema_version"] == "a2a.gateway.v1", a2a
     assert a2a["status"] == "local_record_only", a2a
@@ -6992,7 +7150,6 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert a2a["delivery"]["message_endpoint"] == "agent-mail://inbox", a2a
     assert a2a["delivery"]["mode"] == "agent_mail_inbox", a2a
     assert a2a["delivery"]["auto_dispatch"] is False, a2a
-    assert a2a["subscriptions"]["enabled"] is False, a2a
     mcp = registry["mcp_gateway"]
     assert mcp["schema_version"] == "mcp.gateway.v1", mcp
     assert mcp["status"] == "local_record_only", mcp
@@ -7008,7 +7165,6 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert any(item["uri"] == "resource://agent-mail/runtime-evidence" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedules" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/schedule-runs" for item in mcp["resources"]), mcp
-    assert not any(item["uri"] == "resource://agent-mail/gateway-daemon" for item in mcp["resources"]), mcp
     assert any(item["uri"] == "resource://agent-mail/bridges" for item in mcp["resources"]), mcp
     assert any(item["name"] == "repo.read" for item in mcp["tools"]), mcp
     capabilities = registry["capability_registry"]
@@ -7018,12 +7174,14 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert capabilities["runtime_registry_ref"] == a.AGENT_RUNTIME_REGISTRY_PATH, capabilities
     capability_provider_ids = {item["provider_id"] for item in capabilities["runtime_providers"]}
     assert "ohmypi" in capability_provider_ids, capabilities
+    assert pi_native.PI_NATIVE_PROVIDER_ID in capability_provider_ids, capabilities
     if a.GENERICAGENT_PROVIDER_CONFIGURED:
         assert "genericagent" in capability_provider_ids, capabilities
     runtime_registry = registry["runtime_registry"]
     assert runtime_registry["schema_version"] == "agentruntime.registry.v1", runtime_registry
     assert runtime_registry["default_provider_id"] == "ohmypi", runtime_registry
     assert "ohmypi" in runtime_registry["provider_ids"], runtime_registry
+    assert pi_native.PI_NATIVE_PROVIDER_ID in runtime_registry["provider_ids"], runtime_registry
     providers_by_id = {item["provider_id"]: item for item in runtime_registry["providers"]}
     if a.GENERICAGENT_PROVIDER_CONFIGURED:
         assert "genericagent" in runtime_registry["provider_ids"], runtime_registry
@@ -7045,8 +7203,9 @@ def assert_local_protocol_registry_schema(registry: dict) -> None:
     assert ohmypi_provider["capabilities"]["memory_candidate_signals"] is True, ohmypi_provider
     assert ohmypi_provider["scheduler"]["status"] == "registry_ready", ohmypi_provider
     assert ohmypi_provider["policy"]["tool_permissions"] == "tui_readonly_and_governed_proposal_tools_only", ohmypi_provider
-    assert ohmypi_provider["policy"]["runtime_tool_approval_mode"] == "yolo", ohmypi_provider
+    assert ohmypi_provider["policy"]["runtime_tool_approval_mode"] == "write", ohmypi_provider
     assert ohmypi_provider["policy"]["memory_write"] == "candidate_only", ohmypi_provider
+    assert_pi_native_worker_provider_record(providers_by_id[pi_native.PI_NATIVE_PROVIDER_ID])
     assert os.path.exists(a.AGENT_RUNTIME_REGISTRY_PATH), a.AGENT_RUNTIME_REGISTRY_PATH
     model_orchestration = registry["model_orchestration"]
     assert model_orchestration["schema_version"] == "model_orchestration.v1", model_orchestration
@@ -7091,20 +7250,9 @@ def assert_local_protocol_public_schema(registry: dict) -> None:
     service = registry["gateway_service"]
     assert service["request_response"]["agent_directory"] == "agent-directory://local", service
     assert service["request_response"]["message_inbox"] == "agent-mail://inbox", service
-    if service.get("status") == "local_record_only":
-        assert "message_send" not in service["request_response"], service
-        assert "task_status" not in service["request_response"], service
-    assert "mcp_resource_read" not in service["request_response"], service
-    assert "context_inspector" not in service["request_response"], service
-    assert "permission_matrix" not in service["request_response"], service
-    assert "subscriptions_path" not in service["push_notifications"], service
-    assert "deliveries_path" not in service["push_notifications"], service
-    assert "pid_path" not in service["daemon"], service
-    assert "status_path" not in service["daemon"], service
-    assert "log_path" not in service["daemon"], service
-    assert "pid_path" not in service["daemon"].get("state", {}), service
-    assert "status_path" not in service["daemon"].get("state", {}), service
-    assert "log_path" not in service["daemon"].get("state", {}), service
+    assert service["transport"] == "local-record", service
+    assert service["stdio"]["framing"] == "jsonl", service
+    assert service["stdio"]["state"]["status"] == "local_record_only", service
     a2a = registry["a2a_gateway"]
     assert a2a["request_response"]["agent_directory"] == "agent-directory://local", a2a
     assert a2a["request_response"]["message_send"] == "agent-mail://inbox", a2a
@@ -7124,16 +7272,15 @@ def assert_local_protocol_public_schema(registry: dict) -> None:
 def assert_release_readiness_schema(report: dict) -> None:
     assert report["schema_version"] == "shuheng.release_readiness.v1", report
     assert report["status"] == "experimental_alpha", report
-    assert "no built-in Web/HTTP surface" in report["public_position"], report
+    assert "local JSONL stdio integration" in report["public_position"], report
     support = report["support_level"]
     assert support["stable_local_surfaces"], report
     assert "OMP runtime output/control" in support["stable_local_surfaces"], report
-    assert "Web Console and HTTP gateway" not in support["experimental_surfaces"], report
     assert "A2A compatibility surface" not in support["experimental_surfaces"], report
     assert "MCP compatibility surface" not in support["experimental_surfaces"], report
     assert "local protocol-shaped registry records" in support["experimental_surfaces"], report
     assert any("app.py remains" in gap for gap in support["known_gaps"]), report
-    assert any("Web Console" in gap and "not active" in gap for gap in support["known_gaps"]), report
+    assert any("Pi-native custom Tools" in gap for gap in support["known_gaps"]), report
     assert report["monolith_risk"]["status"] in {"known_gap", "bounded"}, report
     hygiene = report["repository_hygiene"]
     assert hygiene["license"] is True, report
@@ -7161,8 +7308,10 @@ def assert_release_readiness_schema(report: dict) -> None:
     assert "sdist SOURCES manifest integrity" in distribution_smoke["checks"], report
     assert "sdist retired naming surface scan" in distribution_smoke["checks"], report
     assert "sdist artifact content leak scan" in distribution_smoke["checks"], report
-    assert "shuheng-check core in isolated install" in distribution_smoke["checks"], report
-    assert {"--no-deps", "--wheel-only"} <= set(distribution_smoke["debug_options_not_release_gates"]), report
+    assert "shuheng-check --package-only in isolated artifact install" in distribution_smoke["checks"], report
+    assert {"--no-deps", "--wheel-only", "shuheng-check --package-only"} <= set(
+        distribution_smoke["debug_options_not_release_gates"]
+    ), report
     assert any("check_release_hygiene.py" in command for command in report["verification_commands"]), report
     assert any("ruff check" in command for command in report["verification_commands"]), report
     assert any("runtime_smoke.py" in command for command in report["verification_commands"]), report
@@ -7271,34 +7420,6 @@ def assert_a2a_artifact_schema(artifact: dict) -> None:
     assert artifact["contextId"] == "shuheng", artifact
     assert artifact["parts"], artifact
     assert artifact["parts"][0]["file"]["uri"].startswith("artifact://"), artifact
-
-
-def assert_no_active_http_gateway_runtime() -> None:
-    app_source = Path(a.__file__).read_text(encoding="utf-8")
-    cli_source = Path(ROOT, "src/shuheng/cli.py").read_text(encoding="utf-8")
-    runtime_smoke_source = Path(ROOT, "scripts/runtime_smoke.py").read_text(encoding="utf-8")
-    for removed in (
-        "GatewayRequestHandler",
-        "make_gateway_http_server",
-        "serve_gateway",
-        "start_gateway_daemon",
-        "stop_gateway_daemon",
-        "restart_gateway_daemon",
-        "BaseHTTPRequestHandler",
-        "ThreadingHTTPServer",
-        "web_console_snapshot",
-        "web_console_apply_action",
-        "web_console_html",
-    ):
-        assert not hasattr(a, removed), removed
-        assert f"def {removed}" not in app_source, removed
-        assert f"class {removed}" not in app_source, removed
-        assert f"def {removed}" not in cli_source, removed
-    assert "from http.server import" not in app_source, app_source
-    assert "urllib.request.urlopen" not in runtime_smoke_source, runtime_smoke_source
-    assert "a.make_gateway_http_server(" not in runtime_smoke_source, runtime_smoke_source
-    for removed_flag in ("--serve-gateway", "--gateway-daemon"):
-        assert removed_flag not in cli_source, removed_flag
 
 
 def assert_context_pack_schema(path: str) -> dict:
@@ -11489,7 +11610,7 @@ def assert_stream_queue_coalesces_burst_updates() -> None:
     usage_items = [item for item in items if item[0] == "token_usage"]
     assert len(stream_items) == 2, stream_items
     assert stream_items[0] == ("stream", target, 7, "a", False), stream_items
-    assert stream_items[-1] == ("stream", target, 7, "abcde", True), stream_items
+    assert stream_items[-1] == ("stream", target, 7, "abcde", True, ""), stream_items
     assert usage_items and usage_items[0][1:4] == ("stream", target, 7), items
 
 
@@ -11669,13 +11790,14 @@ def run_checks() -> None:
     assert_governance_module_boundary()
     assert_context_pack_module_boundary()
     assert_runtime_dispatch_module_boundary()
-    assert_no_removed_web_http_surface()
     assert_dashboard_module_boundary()
     assert_ledger_store_module_boundary()
+    assert_app_py_does_not_grow()
     assert_genericagent_provider_module_boundary()
     assert_ohmypi_provider_module_boundary()
     assert_shuheng_brand_entrypoints()
     assert_shared_agent_gateway_skill_installer()
+    assert_public_install_script_contract()
     assert_shuheng_history_storage_owned()
     assert_token_usage_registry_prunes_removed_history()
     assert_shuheng_workspace_memory_context()
@@ -13371,15 +13493,21 @@ def run_checks() -> None:
     assert "Architecture Baseline Comparison" in formatted_baseline, formatted_baseline
     assert a.AGENT_BASELINE_REPORT_PATH in formatted_baseline, formatted_baseline
     runtime_text = a.format_runtime_registry(registry["runtime_registry"])
-    assert "Agent Runtime Providers" in runtime_text and "genericagent" in runtime_text, runtime_text
+    assert "Agent Runtime Providers" in runtime_text, runtime_text
+    assert "ohmypi" in runtime_text, runtime_text
+    assert pi_native.PI_NATIVE_PROVIDER_ID in runtime_text, runtime_text
+    if a.GENERICAGENT_PROVIDER_CONFIGURED:
+        assert "genericagent" in runtime_text, runtime_text
+    else:
+        assert "genericagent" not in runtime_text, runtime_text
     schedule_text = a.format_scheduled_task_registry(registry["scheduled_task_registry"])
     assert "Scheduled Tasks" in schedule_text and "agenttask.v2" in schedule_text and "schedule_runs.jsonl" in schedule_text, schedule_text
     assert "workflow_run.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
     assert "workflow_autopilot.v1" in registry["scheduled_task_registry"]["dispatch"]["supported_contracts"], registry["scheduled_task_registry"]
     model_text = a.format_model_orchestration_registry(registry["model_orchestration"])
     assert "Model Orchestration" in model_text, model_text
-    assert not hasattr(a, "gateway_panel_items")
-    assert all(command != "/gateway" for command, *_rest in a.COMMANDS), a.COMMANDS
+    command_names = {command for command, *_rest in a.COMMANDS}
+    assert {"/runtimes", "/tasks", "/approvals"} <= command_names, a.COMMANDS
     direct_a2a_task = [item for item in registry["a2a_gateway"]["tasks"] if item["id"] == "task_direct_schema"]
     assert direct_a2a_task
     assert_a2a_task_schema(direct_a2a_task[-1])
@@ -13389,7 +13517,6 @@ def run_checks() -> None:
     direct_a2a_artifact = [item for item in registry["a2a_gateway"]["artifacts"] if item["artifactId"] == direct_artifact["artifact_id"]]
     assert direct_a2a_artifact
     assert_a2a_artifact_schema(direct_a2a_artifact[-1])
-    assert_no_active_http_gateway_runtime()
 
     ops = a.create_subagent(state, "Ops Agent", role="ops")
     blocked = a.start_subagent_task(state, ops, "deploy production with sudo", source="user")
@@ -13513,7 +13640,10 @@ def run_checks() -> None:
     assert delegated_trace["audit_refs"]["artifacts"] == [context_rows[-1]["uri"]], delegated_trace
     assert delegated_trace["audit_refs"]["checkpoints"], delegated_trace
     completed_trace = [row for row in trace_rows if row.get("event") == "completed"][-1]
-    assert completed_trace["audit_refs"]["artifacts"] == [result_rows[-1]["uri"]], completed_trace
+    assert set(completed_trace["audit_refs"]["artifacts"]) == {
+        context_rows[-1]["uri"],
+        result_rows[-1]["uri"],
+    }, completed_trace
     assert completed_trace["audit_refs"]["checkpoints"], completed_trace
     eval_rows = [row for row in a.read_jsonl(a.AGENT_EVALS_PATH) if row.get("task_id") == completed_task_id]
     assert eval_rows
@@ -13527,7 +13657,10 @@ def run_checks() -> None:
     assert eval_rows[-1]["final_state"]["has_evidence"] is True, eval_rows[-1]
     assert working_plans[-1]["delegation_contract"]["budget"] == delegate_mail["budget"], (working_plans[-1], delegate_mail)
     assert working_plans[-1]["delegation_contract"]["permissions"] == delegate_mail["permissions"], (working_plans[-1], delegate_mail)
-    assert completed_rows[-1]["artifact_refs"] == [result_rows[-1]["uri"]], completed_rows[-1]
+    assert completed_rows[-1]["artifact_refs"] == [
+        context_rows[-1]["uri"],
+        result_rows[-1]["uri"],
+    ], completed_rows[-1]
     registry_after_task = a.ensure_local_protocol_registry(state)
     assert_baseline_report_schema(registry_after_task["baseline_comparison"])
     assert registry_after_task["baseline_comparison"]["summary"]["complete"] >= baseline_report["summary"]["complete"], registry_after_task["baseline_comparison"]

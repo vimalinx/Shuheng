@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify the final implementation preserves the documented Shuheng user command namespace and OMP runtime boundary."}
-{"file": "docs/agent-harness-architecture.md", "reason": "Confirm the change moves Shuheng closer to a strong Orchestrator and auditable runtime boundary."}

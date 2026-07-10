@@ -10,6 +10,7 @@ import argparse
 import importlib
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Any
 
 BRIDGE_SCHEMA_VERSION = "shuheng.agent_bridge.v1"
 GATEWAY_SCHEMA_VERSION = "shuheng.agent_gateway.v1"
+GATEWAY_TASK_STATUS_SCHEMA_VERSION = "shuheng.gateway.task_status.v1"
 SUPPORTED_ACTIONS = (
     "metadata",
     "agent_directory",
@@ -35,6 +37,15 @@ SUPPORTED_ACTIONS = (
     "delegate",
     "studio_state",
     "studio_update",
+)
+GATEWAY_STDIO_ACTIONS = (
+    "agent_directory",
+    "message_send",
+    "task_status",
+    "gateway_status",
+)
+PUBLIC_ARTIFACT_REF_PATTERN = re.compile(
+    r"artifact://[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*"
 )
 
 
@@ -123,8 +134,7 @@ def bridge_metadata(app: Any | None = None) -> dict[str, Any]:
             "long_term_memory_write": "candidate_only",
             "approval_owner": "shuheng.policy",
             "provider_direct_writes": False,
-            "network_surface": "none",
-            "web_http_surface": False,
+            "transport": "local_jsonl_stdio",
             "execution_owner": "shuheng.orchestrator",
         },
     }
@@ -137,6 +147,24 @@ def bridge_error(message: str, **extra: Any) -> dict[str, Any]:
         "error": message,
         **extra,
     }
+
+
+def gateway_error(message: str, *, code: str = "invalid_request") -> dict[str, Any]:
+    return {
+        "schema_version": GATEWAY_SCHEMA_VERSION,
+        "status": "error",
+        "error": message,
+        "code": code,
+    }
+
+
+def is_public_artifact_ref(value: Any) -> bool:
+    text = str(value or "")
+    if len(text) > 2048 or PUBLIC_ARTIFACT_REF_PATTERN.fullmatch(text) is None:
+        return False
+    parts = text.removeprefix("artifact://").split("/")
+    expected_segments = {"artifacts": 3, "context_packs": 3, "checkpoints": 2}
+    return len(parts) == expected_segments.get(parts[0], -1)
 
 
 class AgentBridgeService:
@@ -157,18 +185,14 @@ class AgentBridgeService:
             pass
 
     def gateway_status(self) -> dict[str, Any]:
-        metadata = bridge_metadata(self.app)
         return {
             "schema_version": GATEWAY_SCHEMA_VERSION,
             "status": "running",
             "transport": "jsonl_stdio_or_one_shot_cli",
-            "pid": os.getpid(),
             "uptime_seconds": max(0, int(time.time() - self.started_at)),
             "owner": "shuheng.control_plane",
-            "web_http_surface": False,
-            "network_surface": "none",
-            "supported_actions": list(SUPPORTED_ACTIONS),
-            "metadata": metadata,
+            "channel": {"transport": "local_jsonl_stdio", "framing": "jsonl"},
+            "supported_actions": list(GATEWAY_STDIO_ACTIONS),
         }
 
     def gateway_registration(self) -> dict[str, Any]:
@@ -177,6 +201,19 @@ class AgentBridgeService:
             return bridge_error("Shuheng app does not expose gateway registration.")
         return register_fn()
 
+    def gateway_registration_public(self) -> dict[str, Any]:
+        registration = self.gateway_registration()
+        if registration.get("status") == "error":
+            return gateway_error("Gateway registration failed.", code="registration_failed")
+        return {
+            "schema_version": "agentgateway.registration.v1",
+            "gateway_id": str(registration.get("gateway_id") or "shuheng.local"),
+            "status": str(registration.get("status") or "registered"),
+            "transport": "local-jsonl-stdio",
+            "framing": "jsonl",
+            "persistent": True,
+        }
+
     def agent_directory(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = dict(args or {})
         self.refresh()
@@ -184,6 +221,44 @@ class AgentBridgeService:
             registry = self.app.ensure_local_protocol_registry(self.state)
             return self.app.local_protocol_public_registry(registry)["agent_directory"]
         return self.query("agent_list", payload)
+
+    def gateway_agent_directory(self) -> dict[str, Any]:
+        directory = self.agent_directory({"public": True})
+
+        def public_item(item: Any) -> dict[str, Any]:
+            row = item if isinstance(item, dict) else {}
+            agent_id = str(row.get("agent_id") or "")
+            return {
+                "agent_id": agent_id,
+                "kind": str(row.get("kind") or ""),
+                "name": str(row.get("name") or ""),
+                "role": str(row.get("role") or ""),
+                "purpose": str(row.get("purpose") or "")[:1000],
+                "status": str(row.get("status") or ""),
+                "delivery": {
+                    "endpoint": "agent-mail://inbox",
+                    "target": agent_id,
+                    "auto_dispatch": False,
+                },
+            }
+
+        roles = [public_item(item) for item in directory.get("roles", []) if isinstance(item, dict)]
+        agents = [public_item(item) for item in directory.get("agents", []) if isinstance(item, dict)]
+        return {
+            "schema_version": "shuheng.agent_directory.v1",
+            "updated_at": str(directory.get("updated_at") or ""),
+            "purpose": "Discover public Shuheng agent purposes and routing identifiers.",
+            "discovery_policy": {
+                "external_scope": "agent_purpose_and_delivery_only",
+                "context_exposed": False,
+                "permission_matrix_exposed": False,
+                "auto_dispatch": False,
+            },
+            "message_endpoint": "agent-mail://inbox",
+            "roles": roles,
+            "agents": agents,
+            "counts": {"roles": len(roles), "agents": len(agents), "total": len(roles) + len(agents)},
+        }
 
     def agent_list(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
         self.refresh()
@@ -239,7 +314,6 @@ class AgentBridgeService:
                 "auto_dispatch": True,
                 "transport": "local_jsonl_stdio",
                 "execution_owner": "shuheng.orchestrator",
-                "web_http_surface": False,
             },
             "target": sub.agent_id,
             "agent": {"agent_id": sub.agent_id, "name": sub.name, "role": self.app.normalized_subagent_role(sub.role)},
@@ -248,6 +322,41 @@ class AgentBridgeService:
             "provider_id": dispatch.provider_id,
             "message": dispatch.message,
             "error": dispatch.error,
+        }
+
+    def gateway_message_send(self, args: dict[str, Any]) -> dict[str, Any]:
+        result = self.message_send({
+            "target": str(args.get("target") or ""),
+            "message": str(args.get("message") or ""),
+            "task_title": str(args.get("task_title") or args.get("title") or ""),
+            "parent_task_id": str(args.get("parent_task_id") or ""),
+            "source": "agent_gateway",
+            "mode": "task",
+        })
+        if result.get("status") == "error":
+            return gateway_error("Task dispatch request was rejected.", code="dispatch_rejected")
+        raw_agent = result.get("agent") if isinstance(result.get("agent"), dict) else {}
+        accepted = result.get("accepted") is True
+        task_id = str(result.get("task_id") or "")
+        if not accepted or not task_id:
+            return gateway_error("Task dispatch was not accepted.", code="dispatch_rejected")
+        return {
+            "schema_version": "a2a.message_send_response.v1",
+            "accepted": accepted,
+            "status": str(result.get("status") or "unknown"),
+            "target": str(result.get("target") or ""),
+            "agent": {
+                "agent_id": str(raw_agent.get("agent_id") or ""),
+                "name": str(raw_agent.get("name") or ""),
+                "role": str(raw_agent.get("role") or ""),
+            },
+            "task_id": task_id,
+            "approval_id": str(result.get("approval_id") or ""),
+            "delivery": {
+                "mode": "orchestrator_agent_task",
+                "auto_dispatch": bool((result.get("delivery") or {}).get("auto_dispatch")),
+            },
+            "error": "",
         }
 
     def task_status(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -259,6 +368,45 @@ class AgentBridgeService:
         if not isinstance(row, dict):
             return bridge_error("task was not found.", task_id=task_id)
         return self.app.tui_tool_task_get(self.state, {"task_id": task_id})
+
+    def gateway_task_status(self, args: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(args.get("task_id") or "").strip()
+        if not task_id:
+            return gateway_error("task_status requires task_id.")
+        row = self.app.latest_task_records().get(task_id)
+        if not isinstance(row, dict):
+            return gateway_error("Task was not found.", code="not_found")
+        approval = row.get("approval") if isinstance(row.get("approval"), dict) else {}
+        task_status = str(row.get("status") or "unknown")
+        artifact_index = self.app.artifact_index_latest()
+        artifact_refs: list[str] = []
+        for ref in row.get("artifact_refs") or []:
+            ref = str(ref or "")
+            record = artifact_index.get(ref) if isinstance(artifact_index, dict) else None
+            path = str(record.get("path") or "") if isinstance(record, dict) else ""
+            if not is_public_artifact_ref(ref) or not path:
+                continue
+            if not self.app.path_is_within(path, self.app.AGENT_HARNESS_DIR):
+                continue
+            if self.app.harness_artifact_uri(path) != ref:
+                continue
+            artifact_refs.append(ref)
+            if len(artifact_refs) >= 20:
+                break
+        return {
+            "schema_version": GATEWAY_TASK_STATUS_SCHEMA_VERSION,
+            "status": "ok",
+            "task_id": task_id,
+            "task_status": task_status,
+            "assigned_agent": str(row.get("assigned_agent") or ""),
+            "updated_at": str(row.get("updated_at") or row.get("timestamp") or ""),
+            "approval": {
+                "required": task_status == "approval_required",
+                "id": str(row.get("approval_id") or approval.get("approval_id") or approval.get("id") or ""),
+                "status": str(approval.get("approval_status") or approval.get("status") or ""),
+            },
+            "artifact_refs": artifact_refs,
+        }
 
     def memory_context_get(self, args: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.query("memory_context_get", args or {})
@@ -375,6 +523,35 @@ class AgentBridgeService:
             return self.studio_update(args)
         return bridge_error("Unsupported action.", action=action, supported_actions=list(SUPPORTED_ACTIONS))
 
+    def handle_gateway(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return gateway_error("Gateway request must be a JSON object.")
+        if set(payload) - {"action", "args"}:
+            return gateway_error("Gateway request contains unsupported fields.")
+        if not isinstance(payload.get("action"), str):
+            return gateway_error("Gateway action must be a string.")
+        if "args" in payload and not isinstance(payload.get("args"), dict):
+            return gateway_error("Gateway args must be a JSON object.")
+        action = str(payload.get("action") or "").strip()
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        allowed_args = {
+            "agent_directory": set(),
+            "gateway_status": set(),
+            "message_send": {"target", "message", "task_title", "title", "parent_task_id"},
+            "task_status": {"task_id"},
+        }
+        if action not in GATEWAY_STDIO_ACTIONS:
+            return gateway_error("Unsupported gateway action.", code="unsupported_action")
+        if set(args) - allowed_args[action]:
+            return gateway_error("Gateway action received unsupported arguments.")
+        if action == "agent_directory":
+            return self.gateway_agent_directory()
+        if action == "message_send":
+            return self.gateway_message_send(args)
+        if action == "task_status":
+            return self.gateway_task_status(args)
+        return self.gateway_status()
+
 
 def parse_json_object(text: str) -> dict[str, Any]:
     try:
@@ -404,9 +581,11 @@ def serve_jsonl(options: BridgeOptions | None = None, *, stdin: Any = None, stdo
             continue
         try:
             payload = parse_json_object(line)
-            response = service.handle(payload)
-        except Exception as exc:
-            response = bridge_error(f"{type(exc).__name__}: {exc}")
+            response = service.handle_gateway(payload)
+        except ValueError:
+            response = gateway_error("Invalid JSON request.")
+        except Exception:
+            response = gateway_error("Gateway action failed.", code="operation_failed")
         out_fh.write(json.dumps(response, ensure_ascii=False, sort_keys=True) + "\n")
         out_fh.flush()
     return 0
@@ -443,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
     register = sub.add_parser("register", help="register Shuheng as a local persistent stdio gateway")
     _common_options(register)
 
-    serve = sub.add_parser("serve", help="serve bridge requests over JSONL stdio; no socket or HTTP server is opened")
+    serve = sub.add_parser("serve", help="serve bridge requests over a local JSONL stdin/stdout stream")
     _common_options(serve)
     serve.add_argument("--stdio", action="store_true", help="serve JSONL over stdin/stdout")
 
@@ -562,7 +741,45 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def gateway_main(argv: list[str] | None = None) -> int:
-    return main(argv)
+    parser = argparse.ArgumentParser(description="Shuheng public local agent gateway")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("status", help="print local gateway status")
+    sub.add_parser("register", help="register the local persistent stdio gateway")
+    serve = sub.add_parser("serve", help="serve public gateway requests over JSONL stdio")
+    serve.add_argument("--stdio", action="store_true", help="serve JSONL over stdin/stdout")
+    sub.add_parser("agent-directory", help="print the purpose-only public agent directory")
+    send = sub.add_parser("message-send", help="send a governed task to a Shuheng agent")
+    send.add_argument("--target", required=True)
+    send.add_argument("--message", required=True)
+    send.add_argument("--title", default="")
+    task_status = sub.add_parser("task-status", help="read a public task-status projection")
+    task_status.add_argument("--task-id", required=True)
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == "serve":
+            return serve_jsonl()
+        service = AgentBridgeService(app=load_app())
+        if args.command == "status":
+            result = service.gateway_status()
+        elif args.command == "register":
+            result = service.gateway_registration_public()
+        elif args.command == "agent-directory":
+            result = service.gateway_agent_directory()
+        elif args.command == "message-send":
+            result = service.gateway_message_send({
+                "target": args.target,
+                "message": args.message,
+                "title": args.title,
+            })
+        else:
+            result = service.gateway_task_status({"task_id": args.task_id})
+        _print_json(result)
+        return 0 if result.get("status") != "error" else 1
+    except Exception:
+        _print_json(gateway_error("Gateway operation failed.", code="operation_failed"))
+        return 1
 
 
 if __name__ == "__main__":

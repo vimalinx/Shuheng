@@ -24,7 +24,7 @@ import queue
 import re
 import shutil
 import shlex
-import socket
+import stat
 import subprocess
 import sys
 import termios
@@ -36,7 +36,7 @@ import urllib.request
 import unicodedata
 import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 locale.setlocale(locale.LC_ALL, "")
 
@@ -119,6 +119,9 @@ try:
     from . import subagent_store as subagent_store_helpers
     from . import plugins as plugin_helpers
     from . import workflows as workflow_helpers
+    from . import agent_projects as agent_project_helpers
+    from . import agent_project_workspace as agent_project_workspace_helpers
+    from . import subagent_task_dispatch as subagent_task_dispatch_helpers
     from .genericagent_provider import (
         GenericAgentRuntimeAdapter,
         TUI_AGENT_CONTROL_HINT,
@@ -144,7 +147,7 @@ try:
         OhMyPiRuntimeAdapter,
         OhMyPiRuntimeModel,
         RpcHostToolDefinition,
-        normalized_ohmypi_approval_mode,
+        governed_ohmypi_approval_mode,
         ohmypi_isolated_agent_dir,
         ohmypi_memory_prompt_path,
         ohmypi_provider_spec,
@@ -154,10 +157,10 @@ try:
         write_ohmypi_runtime_files,
         write_ohmypi_memory_prompt,
     )
+    from .pi_native_provider import PiNativeRuntimeAdapter, pi_native_provider_spec
     from .runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec
     from .release_readiness import (
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        local_protocol_bind_safety,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -268,6 +271,9 @@ except Exception:
     import subagent_store as subagent_store_helpers  # type: ignore
     import plugins as plugin_helpers  # type: ignore
     import workflows as workflow_helpers  # type: ignore
+    import agent_projects as agent_project_helpers  # type: ignore
+    import agent_project_workspace as agent_project_workspace_helpers  # type: ignore
+    import subagent_task_dispatch as subagent_task_dispatch_helpers  # type: ignore
     from genericagent_provider import (  # type: ignore
         GenericAgentRuntimeAdapter,
         TUI_AGENT_CONTROL_HINT,
@@ -293,7 +299,7 @@ except Exception:
         OhMyPiRuntimeAdapter,
         OhMyPiRuntimeModel,
         RpcHostToolDefinition,
-        normalized_ohmypi_approval_mode,
+        governed_ohmypi_approval_mode,
         ohmypi_isolated_agent_dir,
         ohmypi_memory_prompt_path,
         ohmypi_provider_spec,
@@ -303,10 +309,10 @@ except Exception:
         write_ohmypi_runtime_files,
         write_ohmypi_memory_prompt,
     )
+    from pi_native_provider import PiNativeRuntimeAdapter, pi_native_provider_spec  # type: ignore
     from runtime import RuntimeRegistry, RuntimeTaskEvent, RuntimeTaskRequest, genericagent_provider_spec  # type: ignore
     from release_readiness import (  # type: ignore
         EVIDENCE_LEVEL_DESCRIPTIONS,
-        local_protocol_bind_safety,
         protocol_compatibility_metadata,
         release_readiness_report,
     )
@@ -403,6 +409,7 @@ SHUHENG_WORKSPACES_DIR = os.path.join(SHUHENG_HOME, "workspaces")
 SHUHENG_WORKSPACE_STATE_PATH = os.path.join(SHUHENG_WORKSPACES_DIR, "active.json")
 SHUHENG_SKILLS_DIR = os.path.join(SHUHENG_MEMORY_DIR, "skills")
 SHUHENG_PLUGINS_DIR = os.path.join(SHUHENG_HOME, "plugins")
+SHUHENG_AGENT_PROJECTS_DIR = os.path.join(SHUHENG_HOME, "agent_projects")
 WORKSPACE_MANIFEST_FILENAME = "manifest.json"
 WORKSPACE_MEMORY_FILENAME = "memory.md"
 WORKSPACE_INDEX_FILENAME = "index.json"
@@ -470,6 +477,7 @@ AGENT_RECOVERY_PLANS_PATH = os.path.join(AGENT_HARNESS_DIR, "recovery_plans.json
 AGENT_BASELINE_REPORT_PATH = os.path.join(AGENT_HARNESS_DIR, "baseline_report.json")
 AGENT_GOVERNANCE_PATH = os.path.join(AGENT_HARNESS_DIR, "governance_components.json")
 AGENT_RUNTIME_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "runtime_providers.json")
+AGENT_PROJECT_RUNS_DIR = os.path.join(AGENT_ARTIFACTS_DIR, "agent_project_runs")
 AGENT_SCHEDULES_PATH = os.path.join(AGENT_HARNESS_DIR, "schedules.jsonl")
 AGENT_SCHEDULE_RUNS_PATH = os.path.join(AGENT_HARNESS_DIR, "schedule_runs.jsonl")
 AGENT_BRIDGE_REGISTRY_PATH = os.path.join(AGENT_HARNESS_DIR, "bridge_registry.json")
@@ -490,8 +498,6 @@ SECRET_SUBAGENT_MEMORY_KIND = secret_vault_store.SECRET_SUBAGENT_MEMORY_KIND
 SECRET_SUBAGENT_CHAT_KIND = secret_vault_store.SECRET_SUBAGENT_CHAT_KIND
 SUBAGENT_CHAT_HISTORY_SCOPE = subagent_store_helpers.SUBAGENT_CHAT_HISTORY_SCOPE
 SUBAGENT_CHAT_MESSAGES_META_KEY = subagent_store_helpers.SUBAGENT_CHAT_MESSAGES_META_KEY
-SUBAGENT_META_LIFECYCLE_FIELDS = frozenset({"deleted", "deleted_at", "deleted_by"})
-SUBAGENT_META_ALLOWED_EXTRA_FIELDS = SUBAGENT_META_LIFECYCLE_FIELDS
 SECRET_VAULT_MIN_PASSWORD_CHARS = secret_vault_store.SECRET_VAULT_MIN_PASSWORD_CHARS
 SECRET_COPY_CONFIRM_TTL_SECONDS = 20.0
 SECRET_VAULT_PASSWORD_RULE_TEXT = secret_vault_store.SECRET_VAULT_PASSWORD_RULE_TEXT
@@ -751,6 +757,8 @@ COMMANDS: list[tuple[str, str, str, bool]] = [
     ("/agent skill", "<cmd>", "给指定子 agent 配置专属 skill", False),
     ("/plugins", "", "列出本地声明式插件", True),
     ("/plugin", "<cmd>", "查看插件详情或创建插件 agent", False),
+    ("/agent-projects", "", "打开 Pi worker Agent Project 工作台", True),
+    ("/agent-project", "<cmd>", "创建、Fork、构建或运行 Agent Project", False),
     ("/workflows", "", "查看声明式 workflow 注册表", True),
     ("/workflow", "<cmd>", "生成、保存、查看或运行声明式 workflow", False),
     ("/context", "", "查看当前控制面上下文来源", True),
@@ -998,9 +1006,9 @@ def request_main_interrupt(state: State, prefix: str = "Ctrl+C") -> None:
         state.last_error = f"{prefix} 只用于中止任务；退出 TUI 请按 Ctrl+Q。"
     mark_dirty(state)
 
-
 normalized_path = path_utils.normalized_path
 path_is_within = path_utils.path_is_within
+path_utils.ensure_private_directory(SHUHENG_HOME)
 PluginRegistry = plugin_helpers.PluginRegistry
 discover_plugins = plugin_helpers.discover_plugins
 format_plugin_info = plugin_helpers.format_plugin_info
@@ -1076,6 +1084,13 @@ def save_session_meta_registry(meta: dict[str, dict[str, Any]]) -> None:
     history_store.save_session_meta_registry(SESSION_META_PATH, meta)
 
 
+def transact_state_session_meta(state: Optional[State], mutator: Callable[[dict[str, dict[str, Any]]], Any], on_failure: Optional[Callable[[], None]] = None) -> Any:
+    committed, result = history_store.transact_session_meta_registry(SESSION_META_PATH, mutator, on_failure)
+    if state is not None:
+        state.session_meta = committed
+    return result
+
+
 def session_meta_for(state: State, path: str) -> dict[str, Any]:
     return state.session_meta.get(session_key(path), {})
 
@@ -1092,14 +1107,16 @@ def set_session_meta_fields(state: State, path: str, **fields: Any) -> None:
     key = session_key(path)
     if not key:
         return
-    entry = dict(state.session_meta.get(key, {}))
-    for field_name, value in fields.items():
-        if value in (None, "", False) and field_name not in {"pinned", "archived", "deleted"}:
-            entry.pop(field_name, None)
-        else:
-            entry[field_name] = value
-    state.session_meta[key] = entry
-    save_session_meta_registry(state.session_meta)
+    transact_state_session_meta(state, lambda registry: history_store.update_session_meta_fields(registry, key, fields))
+
+
+def clear_session_name(state: State, path: str) -> None:
+    if session_names is not None:
+        rollback = history_store.RollbackStack()
+        try:
+            transact_state_session_meta(state, lambda _registry: rollback.set_session_name(session_names, path, ""), rollback)
+        except Exception:
+            pass
 
 
 def remember_ohmypi_native_session_for_path(state: State, agent: Any, path: str) -> bool:
@@ -1193,54 +1210,26 @@ def persist_ui_system_message_for_path(path: str, text: str, *, kind: str = "") 
     if not content.strip() or not message_kind or not key:
         return False
 
-    registry = load_session_meta_registry()
-    entry = dict(registry.get(key) or {})
-    raw_messages = entry.get(UI_DURABLE_SYSTEM_MESSAGES_KEY)
-    messages = [dict(item) for item in raw_messages if isinstance(item, dict)] if isinstance(raw_messages, list) else []
-    if message_kind == "subagent_result":
-        notice = parse_subagent_result_notice(content)
-        notice_key = (notice or {}).get("task_id", ""), (notice or {}).get("artifact_ref", "")
-        if all(notice_key):
-            for idx, item in enumerate(messages):
-                existing = parse_subagent_result_notice(str(item.get("content") or ""))
-                existing_key = (existing or {}).get("task_id", ""), (existing or {}).get("artifact_ref", "")
-                if existing_key != notice_key:
-                    continue
-                if str(item.get("content") or "") == content:
-                    return False
-                replacement = dict(item)
-                replacement.update({
-                    "role": "system",
-                    "content": content,
-                    "kind": message_kind,
-                    "updated_at": time.time(),
-                })
-                messages[idx] = replacement
-                entry[UI_DURABLE_SYSTEM_MESSAGES_KEY] = messages[-UI_DURABLE_SYSTEM_MESSAGE_LIMIT:]
-                registry[key] = entry
-                save_session_meta_registry(registry)
-                return True
-    if any(str(item.get("content") or "") == content for item in messages):
-        if key not in registry:
-            registry[key] = entry
-        save_session_meta_registry(registry)
-        return False
-    messages.append({
-        "role": "system",
-        "content": content,
-        "kind": message_kind,
-        "created_at": time.time(),
-    })
-    entry[UI_DURABLE_SYSTEM_MESSAGES_KEY] = messages[-UI_DURABLE_SYSTEM_MESSAGE_LIMIT:]
-    registry[key] = entry
-    save_session_meta_registry(registry)
-    return True
+    _committed, changed = history_store.transact_session_meta_registry(
+        SESSION_META_PATH,
+        lambda registry: history_store.upsert_durable_system_message(
+            registry,
+            key,
+            content,
+            message_kind,
+            field_name=UI_DURABLE_SYSTEM_MESSAGES_KEY,
+            limit=UI_DURABLE_SYSTEM_MESSAGE_LIMIT,
+            parse_result_notice=parse_subagent_result_notice,
+            updated_at=time.time(),
+        ),
+    )
+    return bool(changed)
 
 
 def persist_ui_system_message(state: State, text: str, *, kind: str = "") -> None:
     path = active_ui_session_path(state)
-    if persist_ui_system_message_for_path(path, text, kind=kind):
-        state.session_meta = load_session_meta_registry()
+    persist_ui_system_message_for_path(path, text, kind=kind)
+    state.session_meta = load_session_meta_registry()
 
 
 def subagent_result_artifact_ref(refs: Any) -> str:
@@ -1404,7 +1393,12 @@ def clear_missing_source_session_meta(meta: dict[str, Any]) -> tuple[dict[str, A
 assistant_text_from_response_body = history_store.assistant_text_from_response_body
 
 
-def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+def missing_source_session_rows(
+    state: State,
+    existing_keys: set[str],
+    registry: Optional[dict[str, dict[str, Any]]] = None,
+) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+    session_meta = registry if registry is not None else state.session_meta
     names: dict[str, str] = {}
     if session_names is not None:
         try:
@@ -1413,7 +1407,7 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
             names = {}
     candidates = {
         key
-        for key in [*state.session_meta.keys(), *names.keys()]
+        for key in [*session_meta.keys(), *names.keys()]
         if is_model_response_basename(str(key))
     }
     rows: list[tuple[str, float, str, int, str]] = []
@@ -1424,7 +1418,7 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
         path = os.path.join(MODEL_RESPONSES_DIR, key)
         if os.path.exists(path):
             continue
-        meta = dict(state.session_meta.get(key, {}))
+        meta = dict(session_meta.get(key, {}))
         if bool(meta.get("deleted")) or bool(meta.get("hidden_subagent_log")) or bool(meta.get("hidden_internal_task_log")):
             continue
         title = normalize_session_title(str(names.get(key) or ""))
@@ -1457,13 +1451,18 @@ def missing_source_session_rows(state: State, existing_keys: set[str]) -> tuple[
         if rounds and not entry.get("rounds"):
             entry["rounds"] = rounds
         if entry != meta:
-            state.session_meta[key] = entry
+            session_meta[key] = entry
             changed = True
         rows.append((path, last_user_at, preview, rounds, desc))
     return rows, changed
 
 
-def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+def cached_session_rows(
+    state: State,
+    exclude_pid: Optional[int] = None,
+    registry: Optional[dict[str, dict[str, Any]]] = None,
+) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+    session_meta = registry if registry is not None else state.session_meta
     tag = f"model_responses_{exclude_pid}.txt" if exclude_pid is not None else ""
     path_stats: list[tuple[str, os.stat_result]] = []
     try:
@@ -1488,10 +1487,10 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
     for path, stat in path_stats:
         key = session_key(path)
         existing_keys.add(key)
-        meta = state.session_meta.get(key, {})
+        meta = session_meta.get(key, {})
         cleaned_meta, cleaned = clear_missing_source_session_meta(meta)
         if cleaned:
-            state.session_meta[key] = cleaned_meta
+            session_meta[key] = cleaned_meta
             meta = cleaned_meta
             changed = True
         cache_identity_ok = (
@@ -1511,7 +1510,7 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
             entry["rounds"] = int(entry.get("rounds") or 0)
             entry["last_user_at"] = float(entry.get("last_user_at") or stat.st_mtime)
             if entry != meta:
-                state.session_meta[key] = entry
+                session_meta[key] = entry
                 changed = True
             continue
         refresh_process_cache = history_cache_has_process_only_preview(meta)
@@ -1542,7 +1541,7 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
             entry["rounds"] = 0
             entry["last_user_at"] = stat.st_mtime
             if entry != meta:
-                state.session_meta[key] = entry
+                session_meta[key] = entry
                 changed = True
             continue
         try:
@@ -1566,7 +1565,7 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
             entry["rounds"] = rounds
             entry["last_user_at"] = last_user_at
             if entry != meta:
-                state.session_meta[key] = entry
+                session_meta[key] = entry
                 changed = True
             continue
         desc = "" if refresh_process_cache else compact_description(str(meta.get("description") or ""))
@@ -1589,15 +1588,22 @@ def cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tupl
         if desc:
             entry["description"] = desc
         if entry != meta:
-            state.session_meta[key] = entry
+            session_meta[key] = entry
             changed = True
         rows.append((path, last_user_at, preview, rounds, desc))
-    missing_rows, missing_changed = missing_source_session_rows(state, existing_keys)
+    missing_rows, missing_changed = missing_source_session_rows(state, existing_keys, session_meta)
     if missing_changed:
         changed = True
     rows.extend(missing_rows)
     rows.sort(key=lambda item: item[1], reverse=True)
     return rows, changed
+
+
+def transact_cached_session_rows(state: State, exclude_pid: Optional[int] = None) -> tuple[list[tuple[str, float, str, int, str]], bool]:
+    return transact_state_session_meta(
+        state,
+        lambda registry: cached_session_rows(state, exclude_pid=exclude_pid, registry=registry),
+    )
 
 
 def l4_archive_zip_paths() -> list[str]:
@@ -1683,19 +1689,16 @@ def restore_missing_source_from_l4_archive(state: State, path: str, meta: dict[s
     if best is None or best[0] < 12:
         return False, "未找到可信的 L4 归档映射。"
     score, zip_path, member_name, content = best
-    write_text_atomic(path, content)
-    state.session_meta = load_session_meta_registry()
     key = session_key(path)
-    entry = dict(state.session_meta.get(key, {}))
-    entry.update({
-        "source_restored_from": "L4_raw_sessions",
-        "source_restored_archive": os.path.basename(zip_path),
-        "source_restored_member": member_name,
-        "source_restored_score": score,
-        "source_restored_at": time.time(),
-    })
-    state.session_meta[key] = entry
-    save_session_meta_registry(state.session_meta)
+    rollback = history_store.RollbackStack()
+
+    def mutate(registry: dict[str, dict[str, Any]]) -> None:
+        rollback.write_bytes(path, content.encode("utf-8"))
+        history_store.update_session_meta_fields(registry, key, {
+            "source_restored_from": "L4_raw_sessions", "source_restored_archive": os.path.basename(zip_path),
+            "source_restored_member": member_name, "source_restored_score": score, "source_restored_at": time.time(),
+        })
+    transact_state_session_meta(state, mutate, rollback)
     return True, f"已从 L4 归档恢复源文件：{os.path.basename(zip_path)}::{member_name}"
 
 
@@ -1905,6 +1908,21 @@ def copy_legacy_history_to_shuheng(src_dir: str, dst_dir: str) -> dict[str, int]
     for sidecar in ("session_meta.json", "session_names.json", "session_token_usage.json"):
         src_path = os.path.join(src_dir, sidecar)
         dst_path = os.path.join(dst_dir, sidecar)
+        if sidecar in {"session_meta.json", "session_names.json"}:
+            source_meta = history_store.load_session_meta_registry(src_path) if sidecar == "session_meta.json" else read_json_dict_file(src_path)
+            existed = os.path.exists(dst_path)
+            if source_meta:
+                meta_path = os.path.join(dst_dir, "session_meta.json")
+                if sidecar == "session_meta.json":
+                    _committed, changed = history_store.merge_session_meta_registry(meta_path, source_meta)
+                else:
+                    _committed, changed = history_store.transact_session_meta_registry(
+                        meta_path, lambda _registry: history_store.merge_json_dict_registry(dst_path, source_meta)
+                    )
+                if changed:
+                    merged += int(existed)
+                    copied += int(not existed)
+            continue
         if not os.path.exists(dst_path):
             if copy_file_if_missing(src_path, dst_path):
                 copied += 1
@@ -2840,6 +2858,11 @@ parse_secret_import_args = secret_vault_store.parse_secret_import_args
 messages_from_secret_session_payload = secret_vault_store.messages_from_secret_session_payload
 parse_secret_proxy_chain = secret_vault_store.parse_secret_proxy_chain
 normalize_secret_proxy_endpoint = secret_vault_store.normalize_secret_proxy_endpoint
+secret_auto_tor_enabled = secret_vault_store.secret_auto_tor_enabled
+secret_configured_proxy_chain = secret_vault_store.secret_configured_proxy_chain
+secret_proxy_endpoint_healthy = secret_vault_store.secret_proxy_endpoint_healthy
+secret_proxy_env_target = secret_vault_store.secret_proxy_env_target
+secret_network_status = secret_vault_store.secret_network_status
 resolve_secret_imported_session_entry = secret_vault_store.resolve_secret_imported_session_entry
 resolve_secret_native_session_entry = secret_vault_store.resolve_secret_native_session_entry
 secret_import_represented_by_native = secret_vault_store.secret_import_represented_by_native
@@ -3107,11 +3130,7 @@ def secret_finalize_normal_session_import(state: State, source_path: str, dispos
         return f"已加密迁移到 Secret，但普通侧删除失败：{type(exc).__name__}: {exc}"
 
     set_session_meta_fields(state, source_path, deleted=True, archived=True, deleted_at=now, **meta_fields)
-    if session_names is not None:
-        try:
-            session_names.set_name(source_path, "")
-        except Exception:
-            pass
+    clear_session_name(state, source_path)
     if was_active_normal:
         state.secret_vault.previous_log_path = ""
         if is_current_session_path(state, source_path):
@@ -3774,46 +3793,6 @@ def accept_credential_input(state: State, password: str) -> str:
     return credential_handler_message(result, credential=submitted, request=request)
 
 
-def secret_auto_tor_enabled() -> bool:
-    raw = (os.environ.get(SECRET_AUTO_TOR_ENV) or "").strip().lower()
-    return raw not in {"0", "false", "no", "off", "disabled"}
-
-
-def secret_configured_proxy_chain() -> list[str]:
-    chain: list[str] = []
-    tor_socks = (os.environ.get(SECRET_TOR_SOCKS_ENV) or "").strip()
-    if tor_socks:
-        chain.append(tor_socks)
-    elif secret_auto_tor_enabled():
-        chain.append("tor")
-    for endpoint in parse_secret_proxy_chain(os.environ.get(SECRET_NETWORK_CHAIN_ENV, "")):
-        if endpoint not in chain:
-            chain.append(endpoint)
-    return chain
-
-
-def secret_proxy_endpoint_healthy(endpoint: str, timeout: float = 1.0) -> tuple[bool, str]:
-    endpoint = normalize_secret_proxy_endpoint(endpoint)
-    parsed = urllib.parse.urlparse(endpoint)
-    scheme = (parsed.scheme or "").lower()
-    if scheme not in {"socks5", "socks5h", "http", "https"}:
-        return False, f"unsupported_proxy_scheme:{scheme or '-'}"
-    host = parsed.hostname or ""
-    port = parsed.port or (9050 if scheme.startswith("socks") else 8080)
-    if not host:
-        return False, "missing_proxy_host"
-    try:
-        with socket.create_connection((host, int(port)), timeout=timeout):
-            return True, f"{scheme}://{host}:{port}"
-    except OSError as exc:
-        return False, f"{host}:{port} unreachable ({type(exc).__name__})"
-
-
-def secret_proxy_env_target(status: Optional[dict[str, Any]] = None) -> str:
-    chain = list((status or {}).get("chain") or secret_configured_proxy_chain())
-    return normalize_secret_proxy_endpoint(str(chain[0] if chain else ""))
-
-
 def activate_secret_proxy_env(state: State, status: Optional[dict[str, Any]] = None) -> None:
     target = secret_proxy_env_target(status)
     if not target:
@@ -3837,36 +3816,6 @@ def restore_secret_proxy_env(state: State) -> None:
         else:
             os.environ[key] = value
     state.secret_vault.proxy_env_snapshot = {}
-
-
-def secret_network_status() -> dict[str, Any]:
-    chain = secret_configured_proxy_chain()
-    if not chain:
-        return {
-            "allowed": False,
-            "status": "blocked",
-            "reason": f"no {SECRET_NETWORK_CHAIN_ENV}/{SECRET_TOR_SOCKS_ENV} configured and {SECRET_AUTO_TOR_ENV}=0",
-            "chain": [],
-        }
-    checks = []
-    for endpoint in chain:
-        ok, detail = secret_proxy_endpoint_healthy(endpoint)
-        checks.append({"endpoint": endpoint, "ok": ok, "detail": detail})
-        if not ok:
-            return {
-                "allowed": False,
-                "status": "blocked",
-                "reason": f"proxy endpoint failed: {detail}",
-                "chain": chain,
-                "checks": checks,
-            }
-    return {
-        "allowed": True,
-        "status": "ready",
-        "reason": "secret proxy/Tor route reachable",
-        "chain": chain,
-        "checks": checks,
-    }
 
 
 def read_jsonl(path: str, limit: int = 0) -> list[dict[str, Any]]:
@@ -4078,13 +4027,16 @@ def default_omp_permission_profile() -> str:
     raw = (
         os.environ.get("SHUHENG_OMP_PERMISSION_PROFILE")
         or os.environ.get("SHUHENG_DEFAULT_PERMISSION_PROFILE")
-        or PERMISSION_PROFILE_FULL
+        or PERMISSION_PROFILE_STANDARD
     )
-    return normalized_permission_profile(raw, default=PERMISSION_PROFILE_FULL)
+    return normalized_permission_profile(raw, default=PERMISSION_PROFILE_STANDARD)
 
 
 def default_ohmypi_approval_mode() -> str:
-    return normalized_ohmypi_approval_mode(os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "yolo")
+    return governed_ohmypi_approval_mode(
+        os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "write",
+        permission_profile=default_omp_permission_profile(),
+    )
 
 
 POLICY_ACTIONS: dict[str, dict[str, Any]] = {
@@ -4778,7 +4730,7 @@ def secret_status_text(state: State) -> str:
 
 SECRET_BLOCKED_NORMAL_COMMANDS = {
     "/memory", "/mem", "/tasks", "/bus", "/inbox", "/artifacts", "/recover", "/evals", "/baseline", "/plugins", "/plugin", "/workflows", "/workflow", "/context", "/permissions", "/continue", "/sessions",
-    "/workspace", "/workspaces",
+    "/workspace", "/workspaces", "/agent-project", "/agent-projects",
     "/temp",
 }
 
@@ -4837,7 +4789,6 @@ def permissions_for_role(
         tools_forbidden = []
         write_policy = "single_writer"
         network_policy = "allowlist"
-        approval_required_for = []
     if security_context == "secret":
         network_policy = "secret_proxy_chain_required"
         secrets_policy = "secret_vault_only_no_export"
@@ -5016,10 +4967,13 @@ def policy_gate_for_subagent_task(
     queue_if_required: bool = True,
     deferred_prompt: str = "",
     transient_skill_refs: Optional[list[str]] = None,
+    expected_build_digest: str = "",
+    agent_project_grant_declared: bool = False,
+    action_override: str = "",
 ) -> PolicyDecision:
     task_objective = policy_relevant_subagent_prompt_text(prompt)
     prompt_skill_refs = normalize_subagent_skill_refs(transient_skill_refs or [])
-    action = infer_policy_action_for_subagent_task(sub, prompt)
+    action = str(action_override or "").strip() or infer_policy_action_for_subagent_task(sub, prompt)
     decision = evaluate_policy_action(
         action,
         subject=sub.agent_id,
@@ -5035,6 +4989,8 @@ def policy_gate_for_subagent_task(
             "task_title": task_title,
             "prompt_preview": truncate_cells(task_objective, 240),
             "transient_skill_refs": prompt_skill_refs,
+            "expected_build_digest": str(expected_build_digest or ""),
+            "agent_project_grant_declared": bool(agent_project_grant_declared),
         },
     )
     if queue_if_required and decision.approval_required:
@@ -5050,6 +5006,8 @@ def policy_gate_for_subagent_task(
                 "parent_task_id": parent_task_id,
                 "task_title": task_title,
                 "transient_skill_refs": prompt_skill_refs,
+                "expected_build_digest": str(expected_build_digest or ""),
+                "agent_project_grant_declared": bool(agent_project_grant_declared),
             },
         )
     record_policy_decision(decision)
@@ -6588,6 +6546,9 @@ def append_recovery_plan(
     objective: str = "",
     policy_decision: Optional[PolicyDecision] = None,
     status: str = "planned",
+    replayable: bool = True,
+    replacement_task_expected: Optional[bool] = None,
+    non_replayable_reason: str = "",
 ) -> dict[str, Any]:
     task_id = str(task_id or "")
     checkpoint_snapshot = read_checkpoint_snapshot(source_checkpoint)
@@ -6596,7 +6557,9 @@ def append_recovery_plan(
     task_row = checkpoint_snapshot.get("task") if isinstance(checkpoint_snapshot.get("task"), dict) else latest_task_records().get(task_id, {})
     agent_snapshot = checkpoint_snapshot.get("agent") if isinstance(checkpoint_snapshot.get("agent"), dict) else {}
     lock_snapshot = checkpoint_snapshot.get("single_writer_lock") if isinstance(checkpoint_snapshot.get("single_writer_lock"), dict) else {}
-    replay_steps = recovery_replay_steps(action)
+    replay_steps = recovery_replay_steps(action) if replayable else []
+    if replacement_task_expected is None:
+        replacement_task_expected = action == "retry" and replayable
     source_ref = {
         "checkpoint_id": checkpoint_id,
         "path": source_checkpoint.get("path", ""),
@@ -6622,18 +6585,18 @@ def append_recovery_plan(
             "single_writer_lock_task": lock_snapshot.get("task_id", ""),
             "audit_refs": checkpoint_snapshot.get("audit_refs") or source_checkpoint.get("audit_refs") or {},
         },
-        "replayable": True,
+        "replayable": bool(replayable),
         "replay_steps": replay_steps,
         "state_patch": {
             "task_status_after_action": {
-                "retry": "superseded",
+                "retry": "superseded" if replayable else "failed",
                 "cancelled": "cancelled",
                 "failed": "failed",
                 "release_lock": str(task_row.get("status") or source_checkpoint.get("status") or ""),
             }.get(action, "manual_review"),
             "release_single_writer_lock": action in {"retry", "cancelled", "failed", "release_lock"},
             "abort_runtime": action in {"retry", "cancelled", "failed"},
-            "replacement_task_expected": action == "retry",
+            "replacement_task_expected": bool(replacement_task_expected),
         },
         "approval": {
             "policy_action": policy_decision.action if policy_decision is not None else "",
@@ -6649,6 +6612,9 @@ def append_recovery_plan(
         },
         "artifact_refs": [],
     }
+    if non_replayable_reason:
+        plan["non_replayable_reason"] = str(non_replayable_reason)
+        plan["state_patch"]["required_user_action"] = "confirm_new_agent_project_build"
     artifact_doc = "# Recovery Plan\n\n```json\n" + json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n```\n"
     artifact_ref = write_harness_artifact(
         "recovery-plans",
@@ -6863,20 +6829,28 @@ def append_orchestrator_plan(
     status: str = "planned",
     source: str = "",
     decision: Optional[PolicyDecision] = None,
+    approval: Optional[dict[str, Any]] = None,
+    action_override: str = "",
     context_ref: str = "",
     error: str = "",
 ) -> dict[str, Any]:
     objective = objective or ""
     role = normalized_subagent_role(sub.role)
-    action = decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, objective)
+    action = (
+        normalize_policy_action(action_override)
+        if action_override
+        else (decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, objective))
+    )
     schema = subagent_task_schema_kwargs(sub, objective, decision=decision)
+    if approval is not None:
+        schema["approval"] = dict(approval)
     contract = task_contract_for_role(role, objective)
-    approval = schema["approval"]
+    effective_approval = schema["approval"]
     approval_required = []
     if decision is not None and decision.approval_required:
         approval_required = [decision.approval_required_for] if decision.approval_required_for else APPROVAL_REQUIRED_FOR
     elif status == "approval_required":
-        approval_required = list(approval.get("approval_required_for") or [])
+        approval_required = list(effective_approval.get("approval_required_for") or [])
     delegation_contract = {
         "agent_id": sub.agent_id,
         "role": role,
@@ -6894,7 +6868,7 @@ def append_orchestrator_plan(
             "output_contract": dict(contract.get("output_contract") or {}),
         },
         "risks": schema["risks"],
-        "approval": approval,
+        "approval": effective_approval,
         "stop_condition": schema["stop_condition"],
     }
     route_pattern = "single_writer_code_squad" if role_write_policy(role) == "single_writer" else "agent_as_tool"
@@ -6955,7 +6929,7 @@ def append_orchestrator_plan(
         "stop_conditions": [schema["stop_condition"]],
         "artifact_refs": [context_ref] if context_ref else [],
         "risks": schema["risks"],
-        "approval": approval,
+        "approval": effective_approval,
         "error": error,
     }
     append_jsonl(AGENT_ORCHESTRATOR_PLANS_PATH, row)
@@ -7234,6 +7208,7 @@ def runtime_task_request_for_agent(
     output_contract: Optional[dict[str, Any]] = None,
     artifact_refs: Optional[list[str]] = None,
     metadata: Optional[dict[str, Any]] = None,
+    runtime_payload: Optional[dict[str, Any]] = None,
 ) -> RuntimeTaskRequest:
     return runtime_dispatch_store.runtime_task_request_for_agent(
         agent=agent,
@@ -7250,6 +7225,7 @@ def runtime_task_request_for_agent(
         output_contract=output_contract,
         artifact_refs=artifact_refs,
         metadata=metadata,
+        runtime_payload=runtime_payload,
     )
 
 
@@ -7336,7 +7312,6 @@ def a2a_agent_card_for_subagent(sub: SubAgentRuntime) -> dict[str, Any]:
         "endpoint": {"transport": "local-agent-mail", "uri": "agent-mail://inbox", "target": sub.agent_id},
         "capabilities": {
             "streaming": True,
-            "push_notifications": False,
             "long_running": True,
             "artifact_refs": True,
             "memory_candidates": True,
@@ -7388,7 +7363,6 @@ def a2a_agent_card_for_role(role: str, template: Optional[dict[str, Any]] = None
         "endpoint": {"transport": "local-agent-mail", "uri": "agent-mail://inbox", "target": f"role.{role}"},
         "capabilities": {
             "streaming": True,
-            "push_notifications": True,
             "long_running": role in {"researcher", "coder", "ops"},
             "artifact_refs": True,
             "memory_candidates": True,
@@ -7991,7 +7965,8 @@ def context_inspector_snapshot(state: Optional[State] = None) -> dict[str, Any]:
             "registry_path": AGENT_LOCAL_PROTOCOL_REGISTRY_PATH,
             "context_inspector_path": AGENT_CONTEXT_INSPECTOR_PATH,
             "permission_matrix_path": AGENT_PERMISSION_MATRIX_PATH,
-            "network_surface": "removed",
+            "transport": "local_jsonl_stdio",
+            "record_scope": "local",
             "message_inbox": "agent-mail://inbox",
         },
         "loading_policy": {
@@ -8181,8 +8156,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "feishu",
             "type": "external_ui_bridge",
             "name": "Feishu",
-            "status": "inactive_no_builtin_web_surface",
-            "transport": "adapter_contract",
+            "status": "local_adapter_contract",
+            "transport": "agent_mail_intake_contract",
             "entrypoints": ["agent-mail://inbox"],
             "policy_action": "external_send",
             "approval_required": True,
@@ -8191,8 +8166,8 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "openclaw",
             "type": "external_ui_bridge",
             "name": "OpenClaw",
-            "status": "inactive_no_builtin_web_surface",
-            "transport": "adapter_contract",
+            "status": "local_adapter_contract",
+            "transport": "agent_mail_intake_contract",
             "entrypoints": ["agent-mail://inbox"],
             "policy_action": "external_send",
             "approval_required": True,
@@ -8221,7 +8196,7 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
             "id": "deer_flow",
             "type": "agent_runtime_bridge",
             "name": "Deer Flow",
-            "status": "inactive_no_builtin_web_surface",
+            "status": "local_adapter_contract",
             "transport": "local_agent_mail_contract",
             "entrypoints": ["agent-mail://inbox"],
             "policy_action": "read_only",
@@ -8265,10 +8240,10 @@ def external_bridge_registry(*, write_registry: bool = True) -> dict[str, Any]:
         "updated_at": now_iso(),
         "principles": {
             "external_send_requires_approval": True,
-            "remote_agent_access_uses_a2a": False,
+            "agent_mail_intake_requires_orchestrator": True,
+            "gateway_transport": "local_jsonl_stdio",
             "tool_access_uses_local_resources": True,
             "artifact_refs_required": True,
-            "no_builtin_web_http_surface": True,
         },
         "bridges": bridges,
         "bridge_ids": [item["id"] for item in bridges],
@@ -8348,12 +8323,11 @@ def persistent_agent_gateway_descriptor() -> dict[str, Any]:
         "owner": "shuheng.control_plane",
         "transport": "local-jsonl-stdio",
         "persistent": True,
-        "web_http_surface": False,
-        "network_surface": "none",
+        "framing": "jsonl",
         "commands": {
             "serve": ["shuheng-agent-gateway", "serve", "--stdio"],
-            "module_serve": [sys.executable or "python3", "-m", "shuheng.agent_bridge", "serve", "--stdio"],
-            "call": ["shuheng-agent-gateway", "call", '{"action":"agent_directory"}'],
+            "status": ["shuheng-agent-gateway", "status"],
+            "agent_directory": ["shuheng-agent-gateway", "agent-directory"],
             "message_send": ["shuheng-agent-gateway", "message-send", "--target", "<agent-id>", "--message", "<text>"],
             "task_status": ["shuheng-agent-gateway", "task-status", "--task-id", "<task-id>"],
         },
@@ -8363,7 +8337,7 @@ def persistent_agent_gateway_descriptor() -> dict[str, Any]:
             "task_status": "shuheng-gateway://task-status/{task_id}",
         },
         "state": {
-            "schema_version": "agentgateway.daemon.v1",
+            "schema_version": "agentgateway.runtime.v1",
             "status": "registered",
             "alive": False,
             "supervisor": "external",
@@ -8397,14 +8371,14 @@ def loaded_persistent_agent_gateway_registration() -> dict[str, Any]:
         return {}
     if str(data.get("gateway_id") or "") != "shuheng.local":
         return {}
+    state = data.get("state")
+    if not isinstance(state, dict) or state.get("schema_version") != "agentgateway.runtime.v1":
+        return {}
     return data
 
 
-def local_protocol_service_descriptor(host: str = "127.0.0.1", port: int = 8765) -> dict[str, Any]:
-    del port
-    bind_safety = local_protocol_bind_safety(host)
+def local_protocol_service_descriptor() -> dict[str, Any]:
     return local_protocol_registry_helpers.local_protocol_service_descriptor(
-        bind_safety=bind_safety,
         persistent_gateway=loaded_persistent_agent_gateway_registration(),
     )
 
@@ -8423,32 +8397,25 @@ def local_protocol_public_service_descriptor(service: dict[str, Any]) -> dict[st
         public_request_response["task_status"] = request_response["task_status"]
     if "agent_cards" not in public_request_response and "a2a" in request_response:
         public_request_response["agent_cards"] = str(request_response["a2a"]).rstrip("/") + "/agent-cards"
-    push = service.get("push_notifications") if isinstance(service.get("push_notifications"), dict) else {}
-    daemon = service.get("daemon") if isinstance(service.get("daemon"), dict) else {}
-    daemon_state = daemon.get("state") if isinstance(daemon.get("state"), dict) else {}
-    public_daemon_state = {
+    stdio = service.get("stdio") if isinstance(service.get("stdio"), dict) else {}
+    stdio_state = stdio.get("state") if isinstance(stdio.get("state"), dict) else {}
+    public_stdio_state = {
         key: value
-        for key, value in daemon_state.items()
+        for key, value in stdio_state.items()
         if key not in {"pid_path", "status_path", "log_path", "registration_path"}
     }
     return {
         "schema_version": service.get("schema_version") or "agentgateway.service.v1",
         "status": service.get("status") or "local_record_only",
-        "bind": service.get("bind") or {},
-        "base_url": service.get("base_url") or "",
-        "security": service.get("security") or {},
+        "transport": service.get("transport") or "local-record",
         "release_posture": service.get("release_posture") or "experimental_alpha",
         "request_response": public_request_response,
-        "sse": service.get("sse") or {},
-        "push_notifications": {
-            "subscribe_endpoint": push.get("subscribe_endpoint", ""),
-            "test_endpoint": push.get("test_endpoint", ""),
-            "default_endpoint_policy": push.get("default_endpoint_policy", ""),
-            "auth": push.get("auth", "none"),
-        },
-        "daemon": {
-            "commands": daemon.get("commands", []),
-            "state": public_daemon_state,
+        "stdio": {
+            "framing": stdio.get("framing", "jsonl"),
+            "input": stdio.get("input", "stdin"),
+            "output": stdio.get("output", "stdout"),
+            "commands": stdio.get("commands", []),
+            "state": public_stdio_state,
         },
     }
 
@@ -8705,7 +8672,7 @@ GOVERNANCE_COMPONENT_SPECS: list[dict[str, Any]] = [
     {
         "id": "local_protocol_records",
         "layer": "protocol",
-        "responsibility": "Project internal Agent Mail, local protocol-shaped records, local resource registries, and external bridge descriptors without a built-in Web/HTTP gateway.",
+        "responsibility": "Project internal Agent Mail, local protocol-shaped records, local resource registries, and local adapter descriptors.",
         "functions": ["ensure_local_protocol_registry", "a2a_agent_card_for_subagent", "a2a_agent_card_for_role", "mcp_tool_registry", "mcp_resource_registry", "external_bridge_registry"],
         "stores": ["local_protocol_registry", "messages", "tasks", "progress", "artifacts", "runtime_evidence", "bridges"],
         "write_policy": "registry_only",
@@ -8810,7 +8777,7 @@ def local_protocol_baseline_evidence(state: Optional[State] = None) -> dict[str,
         "a2a_gateway": {
             "schema_version": "a2a.gateway.v1",
             "status": "local_record_only",
-            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery; no built-in HTTP A2A endpoint",
+            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery",
             "compatibility": protocol_compatibility_metadata("A2A"),
             "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
             "contextId": "shuheng",
@@ -8834,16 +8801,11 @@ def local_protocol_baseline_evidence(state: Optional[State] = None) -> dict[str,
             "tasks": [a2a_task_object(row) for row in task_rows],
             "messages": [a2a_message_object(row) for row in mail_rows],
             "artifacts": [a2a_artifact_object(row) for row in artifact_rows],
-            "subscriptions": {
-                "streaming": "",
-                "push_notifications": "",
-                "enabled": False,
-            },
         },
         "mcp_gateway": {
             "schema_version": "mcp.gateway.v1",
             "status": "local_record_only",
-            "purpose": "local agent-to-tool/resource record shapes; no built-in HTTP MCP endpoint",
+            "purpose": "local agent-to-tool and resource record shapes",
             "compatibility": protocol_compatibility_metadata("MCP"),
             "policy": "least-privilege, approval-required for risky tools",
             "request_response": {
@@ -9040,7 +9002,7 @@ def architecture_baseline_report(state: Optional[State] = None, local_protocol_d
         baseline_item(
             "local_protocol_records",
             "Local Protocol Records",
-            "A2A/MCP-shaped records are local metadata over Agent Mail and resource registries; Shuheng no longer exposes a built-in Web/HTTP protocol surface.",
+            "A2A/MCP-shaped records are local metadata over Agent Mail and resource registries.",
             [
                 (a2a.get("schema_version") == "a2a.gateway.v1", "A2A-shaped local record schema is present"),
                 (a2a.get("status") == "local_record_only", "A2A-shaped data is local-record-only"),
@@ -9051,10 +9013,9 @@ def architecture_baseline_report(state: Optional[State] = None, local_protocol_d
                 (bool(mcp.get("tools")) and bool(mcp.get("resources")), "local tools/resources are registered"),
                 (bool((capabilities or {}).get("roles")), "capability registry has role capabilities"),
                 (service.get("schema_version") == "agentgateway.service.v1", "local service descriptor is present"),
-                (service.get("status") == "local_record_only", "service descriptor does not advertise an active network surface"),
-                ((service.get("sse") or {}).get("enabled") is False, "SSE is not active"),
-                ((service.get("push_notifications") or {}).get("enabled") is False, "push notifications are not active"),
-                (not ((service.get("daemon") or {}).get("commands") or []), "daemon lifecycle commands are not registered"),
+                (service.get("status") == "local_record_only", "service descriptor projects local records"),
+                (service.get("transport") == "local-record", "service descriptor declares its local record transport"),
+                ((service.get("stdio") or {}).get("framing") == "jsonl", "stdio descriptor uses JSONL framing"),
                 *runtime_evidence_checks_for("local_protocol_records"),
             ],
         ),
@@ -9217,7 +9178,7 @@ def ensure_local_protocol_registry(state: Optional[State] = None) -> dict[str, A
         "mcp_gateway": {
             "schema_version": "mcp.gateway.v1",
             "status": "local_record_only",
-            "purpose": "local agent-to-tool/resource record shapes; no built-in HTTP MCP endpoint",
+            "purpose": "local agent-to-tool and resource record shapes",
             "compatibility": protocol_compatibility_metadata("MCP"),
             "policy": "least-privilege, approval-required for risky tools",
             "request_response": {
@@ -9235,7 +9196,7 @@ def ensure_local_protocol_registry(state: Optional[State] = None) -> dict[str, A
         "a2a_gateway": {
             "schema_version": "a2a.gateway.v1",
             "status": "local_record_only",
-            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery; no built-in HTTP A2A endpoint",
+            "purpose": "local agent-to-agent record shapes and Agent Mail inbox delivery",
             "compatibility": protocol_compatibility_metadata("A2A"),
             "objects": ["AgentCard", "Task", "Message", "Part", "Artifact", "contextId"],
             "contextId": "shuheng",
@@ -9259,11 +9220,6 @@ def ensure_local_protocol_registry(state: Optional[State] = None) -> dict[str, A
             "tasks": a2a_tasks,
             "messages": a2a_messages,
             "artifacts": a2a_artifacts,
-            "subscriptions": {
-                "streaming": "",
-                "push_notifications": "",
-                "enabled": False,
-            },
         },
         "agent_directory": agent_directory,
         "capability_registry": capability_registry,
@@ -9302,7 +9258,6 @@ def local_protocol_public_registry(registry: dict[str, Any]) -> dict[str, Any]:
         "updated_at": registry.get("updated_at") or now_iso(),
         "status": "local_record_only",
         "release_posture": "experimental_alpha",
-        "security": service.get("security") or {},
         "gateway_service": service,
         "release_readiness": release_readiness,
         "agent_directory": directory,
@@ -10310,10 +10265,6 @@ def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]
     return history_store.subagent_chat_message_pairs(messages)
 
 
-def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -> None:
-    history_store.write_subagent_chat_history_transcript(path, messages)
-
-
 subagent_chat_history_preview_messages = subagent_store_helpers.subagent_chat_history_preview_messages
 
 
@@ -10339,6 +10290,26 @@ subagent_chat_history_rounds = subagent_store_helpers.subagent_chat_history_roun
 subagent_chat_history_last_user_at = subagent_store_helpers.subagent_chat_history_last_user_at
 
 
+subagent_chat_history_key = subagent_store_helpers.subagent_chat_history_key
+
+
+def ensure_subagent_chat_history_entry(
+    registry: dict[str, dict[str, Any]],
+    sub: SubAgentRuntime,
+    session_id: str,
+) -> tuple[str, str]:
+    return subagent_store_helpers.ensure_subagent_chat_history_entry(
+        registry,
+        agent_id=sub.agent_id,
+        agent_name=sub.name,
+        session_id=session_id,
+        security_context=sub.security_context,
+        title=sub.chat_title or f"{sub.name} 会话",
+        history_dir=MODEL_RESPONSES_DIR,
+        new_path=new_session_log_path,
+    )
+
+
 def subagent_chat_history_path_for_session(
     state: Optional[State],
     sub: SubAgentRuntime,
@@ -10349,38 +10320,13 @@ def subagent_chat_history_path_for_session(
     session_id = str(session_id or sub.chat_session_id or "").strip()
     if not session_id:
         return ""
-    registry = load_session_meta_registry()
-    for key, meta in registry.items():
-        if not isinstance(meta, dict):
-            continue
-        if bool(meta.get("deleted")):
-            continue
-        if subagent_chat_history_meta_matches(meta, sub, session_id):
-            return os.path.join(MODEL_RESPONSES_DIR, key)
     if not create:
-        return ""
-    path = new_session_log_path()
-    registry[session_key(path)] = {
-        "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
-        "agent_id": sub.agent_id,
-        "agent_name": sub.name,
-        "subagent_chat_session_id": session_id,
-        "security_context": sub.security_context,
-        "created_at": time.time(),
-        "updated_at": time.time(),
-        "title": sub.chat_title or f"{sub.name} 会话",
-        "preview": sub.chat_title or f"{sub.name} 会话",
-        "rounds": 0,
-        "last_user_at": time.time(),
-        "ui_preview_messages": [],
-        "ui_preview_loaded_rounds": 0,
-        "ui_preview_total_rounds": 0,
-        "ui_preview_message_count": 0,
-    }
-    save_session_meta_registry(registry)
-    if state is not None:
-        state.session_meta = registry
-    return path
+        key = subagent_chat_history_key(load_session_meta_registry(), sub.agent_id, session_id)
+        return os.path.join(MODEL_RESPONSES_DIR, key) if key else ""
+    return transact_state_session_meta(
+        state,
+        lambda registry: ensure_subagent_chat_history_entry(registry, sub, session_id)[1],
+    )
 
 
 def save_subagent_chat_messages_to_history(
@@ -10396,53 +10342,50 @@ def save_subagent_chat_messages_to_history(
     session_id = str(session_id or sub.chat_session_id or "").strip()
     if not session_id:
         return False, "子 agent 会话 id 为空。"
-    path = subagent_chat_history_path_for_session(state, sub, session_id, create=True)
-    if not path:
-        return False, "无法创建子 agent history 会话。"
     persisted_messages = list(messages)
-    write_subagent_chat_history_transcript(path, persisted_messages)
-    try:
-        stat = os.stat(path)
-    except OSError:
-        stat = None
     updated_at = time.time()
     preview = subagent_chat_history_preview(persisted_messages, sub)
     title = compact_title(title or preview or f"{sub.name} 会话", 80)
     description = subagent_chat_history_description(persisted_messages, preview)
     preview_messages = subagent_chat_history_preview_messages(persisted_messages)
     rounds = subagent_chat_history_rounds(persisted_messages)
-    registry = load_session_meta_registry()
-    key = session_key(path)
-    entry = dict(registry.get(key, {}))
-    entry.pop(SUBAGENT_CHAT_MESSAGES_META_KEY, None)
-    entry.update({
-        "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
-        "agent_id": sub.agent_id,
-        "agent_name": sub.name,
-        "subagent_chat_session_id": session_id,
-        "security_context": sub.security_context,
-        "title": title,
-        "preview": preview,
-        "description": description,
-        "rounds": rounds,
-        "last_user_at": subagent_chat_history_last_user_at(persisted_messages, updated_at),
-        "updated_at": updated_at,
-        "source": source,
-        "message_count": len(persisted_messages),
-        "ui_preview_messages": preview_messages,
-        "ui_preview_loaded_rounds": rounds,
-        "ui_preview_total_rounds": rounds,
-        "ui_preview_message_count": len(preview_messages),
-    })
-    if stat is not None:
-        entry["cache_mtime"] = stat.st_mtime
-        entry["cache_size"] = stat.st_size
-    if legacy_path:
-        entry["legacy_subagent_session_file"] = legacy_path
-    registry[key] = entry
-    save_session_meta_registry(registry)
-    if state is not None:
-        state.session_meta = registry
+    rollback = history_store.RollbackStack()
+    def mutate(registry: dict[str, dict[str, Any]]) -> str:
+        key, path = ensure_subagent_chat_history_entry(registry, sub, session_id)
+        rollback.write_subagent_transcript(path, persisted_messages)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            stat = None
+        entry = dict(registry.get(key, {}))
+        entry.pop(SUBAGENT_CHAT_MESSAGES_META_KEY, None)
+        entry.update({
+            "conversation_scope": SUBAGENT_CHAT_HISTORY_SCOPE,
+            "agent_id": sub.agent_id,
+            "agent_name": sub.name,
+            "subagent_chat_session_id": session_id,
+            "security_context": sub.security_context,
+            "title": title,
+            "preview": preview,
+            "description": description,
+            "rounds": rounds,
+            "last_user_at": subagent_chat_history_last_user_at(persisted_messages, updated_at),
+            "updated_at": updated_at,
+            "source": source,
+            "message_count": len(persisted_messages),
+            "ui_preview_messages": preview_messages,
+            "ui_preview_loaded_rounds": rounds,
+            "ui_preview_total_rounds": rounds,
+            "ui_preview_message_count": len(preview_messages),
+        })
+        if stat is not None:
+            entry["cache_mtime"] = stat.st_mtime
+            entry["cache_size"] = stat.st_size
+        if legacy_path:
+            entry["legacy_subagent_session_file"] = legacy_path
+        registry[key] = entry
+        return path
+    path = transact_state_session_meta(state, mutate, rollback)
     return True, path
 
 
@@ -10761,6 +10704,10 @@ def subagent_runtime_meta_payload(sub: SubAgentRuntime, *, security_context: str
         "chat_title": sub.chat_title,
         "dashboard": sub.dashboard if isinstance(sub.dashboard, dict) else {},
         "skill_refs": normalize_subagent_skill_refs(sub.skill_refs),
+        "runtime_provider_id": str(sub.runtime_provider_id or "ohmypi"),
+        "agent_project_id": str(sub.agent_project_id or ""),
+        "agent_project_root": str(sub.agent_project_root or ""),
+        "agent_build_digest": str(sub.agent_build_digest or ""),
     }
     if security_context == "secret":
         meta["security_context"] = "secret"
@@ -10768,8 +10715,7 @@ def subagent_runtime_meta_payload(sub: SubAgentRuntime, *, security_context: str
     return meta
 
 
-def allowed_subagent_meta_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in fields.items() if key in SUBAGENT_META_ALLOWED_EXTRA_FIELDS}
+allowed_subagent_meta_fields = subagent_store_helpers.allowed_subagent_meta_fields
 
 
 def secret_subagent_payload_from_runtime(sub: SubAgentRuntime, **fields: Any) -> dict[str, Any]:
@@ -11193,6 +11139,10 @@ def load_secret_subagents(state: State) -> bool:
         chat_title = str(meta.get("chat_title") or "")
         dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
         skill_refs = normalize_subagent_skill_refs(meta.get("skill_refs") or meta.get("skills") or [])
+        runtime_provider_id = str(meta.get("runtime_provider_id") or "ohmypi").strip() or "ohmypi"
+        agent_project_id = str(meta.get("agent_project_id") or "").strip()
+        agent_project_root = str(meta.get("agent_project_root") or "").strip()
+        agent_build_digest = str(meta.get("agent_build_digest") or "").strip()
         memory_text = load_secret_subagent_memory(state, agent_id) if persistent else ""
         if not memory_text and persistent:
             memory_text = str(payload.get("memory") or "")
@@ -11213,6 +11163,10 @@ def load_secret_subagents(state: State) -> bool:
             existing.memory_text = memory_text if persistent else ""
             existing.dashboard = dict(dashboard)
             existing.skill_refs = list(skill_refs)
+            existing.runtime_provider_id = runtime_provider_id
+            existing.agent_project_id = agent_project_id
+            existing.agent_project_root = agent_project_root
+            existing.agent_build_digest = agent_build_digest
             existing.encrypted_ref = secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id)
             if not existing.chat_session_id:
                 existing.chat_session_id = chat_session_id
@@ -11237,6 +11191,10 @@ def load_secret_subagents(state: State) -> bool:
                 memory_text=memory_text if persistent else "",
                 dashboard=dict(dashboard),
                 skill_refs=list(skill_refs),
+                runtime_provider_id=runtime_provider_id,
+                agent_project_id=agent_project_id,
+                agent_project_root=agent_project_root,
+                agent_build_digest=agent_build_digest,
                 encrypted_ref=secret_virtual_ref(SECRET_SUBAGENT_META_KIND, agent_id),
                 chat_session_id=chat_session_id,
                 chat_title=chat_title,
@@ -11270,6 +11228,10 @@ def load_subagents(state: State) -> bool:
         chat_title = str(meta.get("chat_title") or "")
         dashboard = meta.get("dashboard") if isinstance(meta.get("dashboard"), dict) else {}
         skill_refs = normalize_subagent_skill_refs(meta.get("skill_refs") or meta.get("skills") or [])
+        runtime_provider_id = str(meta.get("runtime_provider_id") or "ohmypi").strip() or "ohmypi"
+        agent_project_id = str(meta.get("agent_project_id") or "").strip()
+        agent_project_root = str(meta.get("agent_project_root") or "").strip()
+        agent_build_digest = str(meta.get("agent_build_digest") or "").strip()
         existing = state.subagents.get(agent_id)
         if existing:
             existing.name = display_name
@@ -11287,6 +11249,10 @@ def load_subagents(state: State) -> bool:
                 existing.chat_title = chat_title
             existing.dashboard = dict(dashboard)
             existing.skill_refs = list(skill_refs)
+            existing.runtime_provider_id = runtime_provider_id
+            existing.agent_project_id = agent_project_id
+            existing.agent_project_root = agent_project_root
+            existing.agent_build_digest = agent_build_digest
             if not existing.messages and existing.status not in {"running", "aborting"}:
                 load_subagent_chat_session(state, existing, existing.chat_session_id)
             loaded[agent_id] = existing
@@ -11306,6 +11272,10 @@ def load_subagents(state: State) -> bool:
                 chat_title=chat_title,
                 dashboard=dict(dashboard),
                 skill_refs=list(skill_refs),
+                runtime_provider_id=runtime_provider_id,
+                agent_project_id=agent_project_id,
+                agent_project_root=agent_project_root,
+                agent_build_digest=agent_build_digest,
             )
             load_subagent_chat_session(state, sub, sub.chat_session_id)
             loaded[agent_id] = sub
@@ -11316,7 +11286,18 @@ def load_subagents(state: State) -> bool:
     return changed
 
 
-def create_subagent(state: State, name: str, profile: str = "", role: str = "specialist", persistent: bool = True) -> SubAgentRuntime:
+def create_subagent(
+    state: State,
+    name: str,
+    profile: str = "",
+    role: str = "specialist",
+    persistent: bool = True,
+    *,
+    runtime_provider_id: str = "ohmypi",
+    agent_project_id: str = "",
+    agent_project_root: str = "",
+    agent_build_digest: str = "",
+) -> SubAgentRuntime:
     name = (name or "").strip() or "subagent"
     role = normalized_subagent_role(role)
     security_context = "secret" if state.secret_vault.unlocked else "standard"
@@ -11346,6 +11327,10 @@ def create_subagent(state: State, name: str, profile: str = "", role: str = "spe
         updated_at=now,
         chat_session_id=subagent_new_chat_session_id(),
         chat_title=f"{name} 会话",
+        runtime_provider_id=str(runtime_provider_id or "ohmypi").strip() or "ohmypi",
+        agent_project_id=str(agent_project_id or "").strip(),
+        agent_project_root=str(agent_project_root or "").strip(),
+        agent_build_digest=str(agent_build_digest or "").strip(),
     )
     profile_text = (profile or "").strip()
     if not profile_text:
@@ -11389,6 +11374,9 @@ Name: {sub.name}
 ID: {sub.agent_id}
 Role: {role}
 Default model: {sub.default_model or "(global default)"}
+Runtime provider: {sub.runtime_provider_id or "ohmypi"}
+Agent project: {sub.agent_project_id or "(none)"}
+Agent build: {sub.agent_build_digest or "(resolved per run)"}
 Dedicated skills: {format_subagent_skill_refs(sub.skill_refs, empty="(none)")}
 Security context: {sub.security_context}
 Home: {sub.home}
@@ -11520,10 +11508,29 @@ def install_subagent_prompt(agent: Any, sub: SubAgentRuntime) -> None:
 
 
 def ensure_subagent_agent(state: State, sub: SubAgentRuntime) -> Any:
+    desired_provider_id = str(sub.runtime_provider_id or "ohmypi").strip() or "ohmypi"
+    current_provider_id = agent_runtime_provider_id(sub.agent) if sub.agent is not None else ""
+    legacy_omp_seam = current_provider_id == "unknown" and desired_provider_id == "ohmypi"
+    if sub.agent is not None and current_provider_id != desired_provider_id and not legacy_omp_seam:
+        if agent_has_unfinished_task(sub.agent):
+            raise RuntimeError(
+                f"Cannot switch {sub.name} runtime from {current_provider_id} "
+                f"to {desired_provider_id} while work is running."
+            )
+        try:
+            sub.agent.abort()
+        except Exception:
+            pass
+        sub.agent = None
     if sub.agent is None:
         os.makedirs(sub.home, exist_ok=True)
         target_log_path = os.devnull
-        sub.agent = new_agent(log_path=target_log_path)
+        if desired_provider_id == "ohmypi":
+            # Preserve the long-standing OMP construction seam used by plugin,
+            # workflow, and test integrations.
+            sub.agent = new_agent(log_path=target_log_path)
+        else:
+            sub.agent = new_agent_for_provider(desired_provider_id, log_path=target_log_path)
         install_interaction_hook(state, sub.agent)
         set_agent_log_path(sub.agent, target_log_path)
         if sub.messages:
@@ -12436,6 +12443,9 @@ def tui_query_agent_record(sub: SubAgentRuntime, *, detail: bool = False) -> dic
         "write_policy": role_write_policy(role),
         "permissions": permissions,
         "default_model": sub.default_model,
+        "runtime_provider_id": sub.runtime_provider_id or "ohmypi",
+        "agent_project_id": sub.agent_project_id,
+        "agent_build_digest": sub.agent_build_digest,
         "queue_length": len(sub.task_queue),
         "chat_queue_length": len(sub.chat_queue),
         "pending_interaction": bool(sub.pending_interaction),
@@ -12898,8 +12908,136 @@ def format_subagent_list(state: State) -> str:
     return "\n".join(lines)
 
 
+MODEL_CONFIG_DIRNAME = "config"
+MODEL_CONFIG_FILENAME = "mykey.py"
+MODEL_CONFIG_MAX_BYTES = 4 * 1024 * 1024
+_SOURCE_MYKEY_MIGRATION_VERSION = 1
+_SOURCE_MYKEY_BACKUP_RE = re.compile(r"^mykey\.py\.bak-\d{8}-\d{6}(?:-\d+)?$")
+
+
+def model_config_dir() -> str:
+    return os.path.join(SHUHENG_HOME, MODEL_CONFIG_DIRNAME)
+
+
 def mykey_path() -> str:
-    return os.path.join(ROOT_DIR, "mykey.py")
+    return os.path.join(model_config_dir(), MODEL_CONFIG_FILENAME)
+
+
+def _ensure_private_model_config_dir() -> str:
+    for directory in (SHUHENG_HOME, model_config_dir()):
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+    return model_config_dir()
+
+
+def _write_private_model_file_atomic(path: str, data: bytes) -> None:
+    _ensure_private_model_config_dir()
+    tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}-{time.time_ns()}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fd = -1
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _copy_to_private_model_file(source: str, destination: str, *, remove_source: bool = False) -> None:
+    source_stat = os.lstat(source)
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise OSError("model config migration source is not a regular file")
+    with open(source, "rb") as fh:
+        data = fh.read(MODEL_CONFIG_MAX_BYTES + 1)
+    if len(data) > MODEL_CONFIG_MAX_BYTES:
+        raise OSError("model config migration source exceeds the size limit")
+    _write_private_model_file_atomic(destination, data)
+    if remove_source:
+        os.unlink(source)
+
+
+def _available_private_model_path(path: str) -> str:
+    if not os.path.lexists(path):
+        return path
+    for suffix in range(1, 1001):
+        candidate = f"{path}-{suffix}"
+        if not os.path.lexists(candidate):
+            return candidate
+    raise OSError("model config migration destination limit reached")
+
+
+def _source_mykey_migration_marker_path() -> str:
+    return os.path.join(model_config_dir(), f".source-mykey-migration-v{_SOURCE_MYKEY_MIGRATION_VERSION}")
+
+
+def _source_mykey_roots() -> list[tuple[str, bool]]:
+    packaged_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    if os.environ.get("SHUHENG_TEST_ISOLATED_HOME") and os.path.abspath(APP_ROOT_DIR) == packaged_root:
+        return []
+    roots: list[tuple[str, bool]] = []
+    app_root = os.path.abspath(APP_ROOT_DIR)
+    for value in (ROOT_DIR, APP_ROOT_DIR):
+        root = os.path.abspath(str(value or "")) if value else ""
+        if root == app_root and not path_utils.is_shuheng_source_checkout(root):
+            continue
+        if root and all(root != existing for existing, _remove_source in roots) and root != os.path.abspath(model_config_dir()):
+            roots.append((root, root == app_root))
+    return roots
+
+
+def _source_mykey_candidates() -> list[tuple[str, bool, bool]]:
+    candidates: list[tuple[str, bool, bool]] = []
+    for root, remove_source in _source_mykey_roots():
+        current = os.path.join(root, MODEL_CONFIG_FILENAME)
+        if os.path.lexists(current):
+            candidates.append((current, False, remove_source))
+        try:
+            with os.scandir(root) as entries:
+                names = sorted(entry.name for entry in entries if _SOURCE_MYKEY_BACKUP_RE.fullmatch(entry.name))
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            names = []
+        candidates.extend((os.path.join(root, name), True, remove_source) for name in names)
+    return candidates
+
+
+def migrate_source_mykey_once() -> tuple[bool, str]:
+    """Quarantine the former source-root config into private state exactly once.
+
+    This compatibility bridge is intentionally isolated. Shuheng source-root
+    files are moved out of the repository; a distinct external runtime root is
+    copied without modifying that checkout. Remove the bridge after the
+    pre-stable migration window; neither source remains an active lookup.
+    """
+    try:
+        _ensure_private_model_config_dir()
+        marker = _source_mykey_migration_marker_path()
+        if os.path.exists(marker):
+            os.chmod(marker, 0o600)
+            return True, ""
+        canonical = mykey_path()
+        for source, is_backup, remove_source in _source_mykey_candidates():
+            if is_backup:
+                destination = _available_private_model_path(os.path.join(model_config_dir(), os.path.basename(source)))
+            elif not os.path.lexists(canonical):
+                destination = canonical
+            else:
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                destination = _available_private_model_path(os.path.join(model_config_dir(), f"mykey.py.legacy-{stamp}"))
+            _copy_to_private_model_file(source, destination, remove_source=remove_source)
+        _write_private_model_file_atomic(marker, b"source-root model config migration complete\n")
+        return True, ""
+    except Exception as exc:
+        return False, f"模型配置迁移失败: {type(exc).__name__}"
 
 
 def mask_secret(value: str) -> str:
@@ -12940,14 +13078,22 @@ def is_llm_config_var(var_name: str, value: Any) -> bool:
 
 
 def load_mykey_assignments() -> tuple[list[tuple[str, Any]], str]:
+    migrated, migration_error = migrate_source_mykey_once()
+    if not migrated:
+        return [], migration_error
     path = mykey_path()
     if not os.path.exists(path):
         return [], ""
     try:
-        text = open(path, encoding="utf-8", errors="replace").read()
-        tree = ast.parse(text, filename=path)
+        os.chmod(path, 0o600)
+        with open(path, "rb") as fh:
+            data = fh.read(MODEL_CONFIG_MAX_BYTES + 1)
+        if len(data) > MODEL_CONFIG_MAX_BYTES:
+            raise OSError("model config exceeds the size limit")
+        text = data.decode("utf-8", errors="replace")
+        tree = ast.parse(text, filename="<private model config>")
     except Exception as exc:
-        return [], f"{type(exc).__name__}: {exc}"
+        return [], f"模型配置读取失败: {type(exc).__name__}"
     assignments: list[tuple[str, Any]] = []
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
@@ -13136,7 +13282,6 @@ def write_config_block(lines: list[str], entry: LLMConfigEntry) -> None:
 
 def save_llm_config_entries(entries: list[LLMConfigEntry], mixin: dict[str, Any], preserved: list[tuple[str, Any]]) -> tuple[bool, str]:
     path = mykey_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     names = [config_display_name(e) for e in entries]
     selected = [n for n in mixin.get("llm_nos", []) if n in names]
     if not selected and names:
@@ -13169,16 +13314,16 @@ def save_llm_config_entries(entries: list[LLMConfigEntry], mixin: dict[str, Any]
         lines.append("")
     content = "\n".join(lines).rstrip() + "\n"
     try:
+        migrated, migration_error = migrate_source_mykey_once()
+        if not migrated:
+            return False, migration_error
         if os.path.exists(path):
-            backup = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
-            shutil.copy2(path, backup)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        os.replace(tmp, path)
-        return True, "mykey.py 已保存，并已创建备份。"
+            backup = _available_private_model_path(f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+            _copy_to_private_model_file(path, backup)
+        _write_private_model_file_atomic(path, content.encode("utf-8"))
+        return True, "模型配置已安全保存。"
     except Exception as exc:
-        return False, f"保存失败: {type(exc).__name__}: {exc}"
+        return False, f"模型配置保存失败: {type(exc).__name__}"
 
 
 def provider_model_choices(provider: dict[str, Any]) -> list[str]:
@@ -14737,8 +14882,16 @@ def ohmypi_api_key_env_name(entry: LLMConfigEntry, index: int) -> str:
     return f"SHUHENG_OMP_API_KEY_{digest}"
 
 
-def ohmypi_runtime_settings_payload(default_model: str, *, approval_mode: str = "") -> dict[str, Any]:
-    approval_mode = normalized_ohmypi_approval_mode(approval_mode or default_ohmypi_approval_mode())
+def ohmypi_runtime_settings_payload(
+    default_model: str,
+    *,
+    approval_mode: str = "",
+    permission_profile: str = PERMISSION_PROFILE_STANDARD,
+) -> dict[str, Any]:
+    approval_mode = governed_ohmypi_approval_mode(
+        approval_mode or default_ohmypi_approval_mode(),
+        permission_profile=permission_profile,
+    )
     payload: dict[str, Any] = {
         "autoResume": False,
         "browser": {"headless": True},
@@ -14816,7 +14969,11 @@ def build_ohmypi_runtime_config(*, write_files: bool = True, base_env: Optional[
             break
     if not default_model and runtime_models:
         default_model = runtime_models[0].selector
-    approval_mode = default_ohmypi_approval_mode()
+    permission_profile = default_omp_permission_profile()
+    approval_mode = governed_ohmypi_approval_mode(
+        default_ohmypi_approval_mode(),
+        permission_profile=permission_profile,
+    )
 
     paths = {
         "agent_dir": agent_dir,
@@ -14826,7 +14983,11 @@ def build_ohmypi_runtime_config(*, write_files: bool = True, base_env: Optional[
     if write_files:
         paths = write_ohmypi_runtime_files(
             agent_dir=agent_dir,
-            config=ohmypi_runtime_settings_payload(default_model, approval_mode=approval_mode),
+            config=ohmypi_runtime_settings_payload(
+                default_model,
+                approval_mode=approval_mode,
+                permission_profile=permission_profile,
+            ),
             models={"providers": provider_payloads},
         )
     env = ohmypi_subprocess_env(agent_dir=agent_dir, env_overrides=env_overrides, base_env=base_env)
@@ -14838,6 +14999,7 @@ def build_ohmypi_runtime_config(*, write_files: bool = True, base_env: Optional[
         config_path=paths["config_path"],
         models_path=paths["models_path"],
         approval_mode=approval_mode,
+        permission_profile=permission_profile,
     )
 
 
@@ -14853,14 +15015,16 @@ def refresh_agent_runtime_model_config(agent: Any) -> str:
         append_system_prompt=append_prompt_path,
         model=runtime_config.default_model,
         approval_mode=runtime_config.approval_mode,
+        permission_profile=runtime_config.permission_profile,
     )
     refresh(runtime_config.models, env=runtime_config.env, command=command, default_model=runtime_config.default_model)
     return f"OMP runtime 模型配置已刷新（{len(runtime_config.models)} 个模型）。"
 
 
 def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeRegistry:
-    requested = os.environ.get("SHUHENG_RUNTIME_PROVIDER", "ohmypi").strip() or "ohmypi"
-    registry = RuntimeRegistry(default_provider_id=requested)
+    # OMP is the permanent main/general Agent. Additional adapters are explicit
+    # worker lanes and never replace the TUI's default control-plane runtime.
+    registry = RuntimeRegistry(default_provider_id="ohmypi")
     maybe_bootstrap_shuheng_legacy_state()
     ensure_shuheng_layered_memory_files()
     ohmypi_append_prompt_path = (
@@ -14873,6 +15037,7 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         append_system_prompt=ohmypi_append_prompt_path,
         model=ohmypi_runtime_config.default_model,
         approval_mode=ohmypi_runtime_config.approval_mode,
+        permission_profile=ohmypi_runtime_config.permission_profile,
     )
     registry.register(OhMyPiRuntimeAdapter(ohmypi_provider_spec(
         root_dir=APP_ROOT_DIR,
@@ -14891,6 +15056,15 @@ def agent_runtime_registry(*, write_memory_prompt_file: bool = True) -> RuntimeR
         host_tool_definitions=ohmypi_tui_host_tool_definitions(),
         host_tool_handler=ohmypi_tui_host_tool_handler(None),
         runtime_event_sink=append_ohmypi_runtime_event,
+    ))
+    pi_mock_mode = os.environ.get("SHUHENG_PI_NATIVE_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
+    pi_spec = pi_native_provider_spec(mock_mode=pi_mock_mode)
+    registry.register(PiNativeRuntimeAdapter(
+        pi_spec,
+        cwd=APP_ROOT_DIR,
+        agent_dir=os.path.join(AGENT_HARNESS_DIR, "runtime", "pi-native"),
+        runtime_event_sink=append_ohmypi_runtime_event,
+        mock_mode=pi_mock_mode,
     ))
     if GENERICAGENT_PROVIDER_CONFIGURED:
         registry.register(GenericAgentRuntimeAdapter(genericagent_provider_spec(
@@ -14931,8 +15105,7 @@ def browse_input_history(state: State, direction: int) -> bool:
     return True
 
 
-def new_agent(log_path: Optional[str] = None) -> Any:
-    adapter = agent_runtime_registry().default()
+def start_runtime_agent_with_adapter(adapter: Any, *, log_path: Optional[str] = None) -> Any:
     agent = adapter.create_agent()
     try:
         setattr(agent, "_shuheng_runtime_provider_id", adapter.provider_id)
@@ -14946,6 +15119,20 @@ def new_agent(log_path: Optional[str] = None) -> Any:
     adapter.start_agent(agent, thread_name=thread_name)
     set_agent_log_path(agent, target_log_path)
     return agent
+
+
+def new_agent_for_provider(provider_id: str, log_path: Optional[str] = None) -> Any:
+    provider_id = str(provider_id or "").strip()
+    registry = agent_runtime_registry()
+    adapter = registry.get(provider_id) if provider_id else registry.default()
+    if adapter is None:
+        available = ", ".join(sorted(registry.to_record().get("provider_ids") or [])) or "(none)"
+        raise RuntimeError(f"Unknown runtime provider: {provider_id or '(empty)'}; available: {available}")
+    return start_runtime_agent_with_adapter(adapter, log_path=log_path)
+
+
+def new_agent(log_path: Optional[str] = None) -> Any:
+    return start_runtime_agent_with_adapter(agent_runtime_registry().default(), log_path=log_path)
 
 
 def install_interaction_hook(state: State, agent: Any) -> None:
@@ -15387,8 +15574,7 @@ def load_history(state: State, force: bool = False) -> bool:
     if not force and now - state.history_loaded_at < 10:
         return False
     try:
-        state.session_meta = load_session_meta_registry()
-        session_rows, meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
+        session_rows, _meta_changed = transact_cached_session_rows(state, exclude_pid=os.getpid())
         history: list[tuple[str, float, str, int]] = []
         descriptions: dict[str, str] = {}
         for path, last_user_at, preview, rounds, desc in session_rows:
@@ -15418,8 +15604,6 @@ def load_history(state: State, force: bool = False) -> bool:
                 if not name:
                     name = preview
                 names[path] = normalize_session_title(name)
-        if meta_changed:
-            save_session_meta_registry(state.session_meta)
         changed = (
             history != state.history
             or names != state.history_names
@@ -15457,6 +15641,22 @@ def cancel_normal_history_restore(state: State) -> None:
     clear_history_ui_state(state)
 
 
+def persist_session_name(state: State, path: str, name: str, title_source: str) -> bool:
+    key = session_key(path)
+    rollback = history_store.RollbackStack()
+    def mutate(registry: dict[str, dict[str, Any]]) -> bool:
+        entry = dict(registry.get(key, {}))
+        if title_source == "ai" and str(entry.get("title_source") or "") == "manual":
+            return False
+        rollback.set_session_name(session_names, path, name)
+        history_store.update_session_meta_fields(
+            registry, key, {"title_source": title_source, "title_signature": "", "title_updated_at": time.time()}
+        )
+        return True
+
+    return bool(transact_state_session_meta(state, mutate, rollback))
+
+
 def rename_current_session(state: State, raw_name: str, source: str = "manual") -> str:
     name = normalize_session_title(raw_name)
     if not name:
@@ -15471,16 +15671,8 @@ def rename_current_session(state: State, raw_name: str, source: str = "manual") 
         try:
             path = getattr(state.agent, "log_path", "")
             if path:
-                if title_source == "ai" and str(session_meta_for(state, path).get("title_source") or "") == "manual":
+                if not persist_session_name(state, path, name, title_source):
                     return "手动标题已保留，AI 改名已跳过。"
-                session_names.set_name(path, name)
-                set_session_meta_fields(
-                    state,
-                    path,
-                    title_source=title_source,
-                    title_signature="",
-                    title_updated_at=time.time(),
-                )
                 persist_msg = "已持久化。"
             else:
                 persist_msg = "当前会话暂无日志路径，仅本次界面生效。"
@@ -15513,17 +15705,12 @@ def set_category_meta_fields(state: State, label: str, **fields: Any) -> None:
     key = category_key(label)
     if not key:
         return
-    registry = dict(category_registry(state))
-    entry = dict(registry.get(key, {}))
-    entry.setdefault("name", category_filter_label(label) or "未分类")
-    for field_name, value in fields.items():
-        if value in (None, ""):
-            entry.pop(field_name, None)
-        else:
-            entry[field_name] = value
-    registry[key] = entry
-    state.session_meta["__categories__"] = registry
-    save_session_meta_registry(state.session_meta)
+    transact_state_session_meta(
+        state,
+        lambda registry: history_store.update_category_meta_fields(
+            registry, key, category_filter_label(label) or "未分类", fields
+        ),
+    )
 
 
 def category_key(raw: str) -> str:
@@ -15566,10 +15753,7 @@ def set_session_filter(state: State, raw: str) -> str:
 
 
 def category_counts_for_view(state: State) -> list[tuple[str, int]]:
-    state.session_meta = load_session_meta_registry()
-    session_rows, meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
-    if meta_changed:
-        save_session_meta_registry(state.session_meta)
+    session_rows, _meta_changed = transact_cached_session_rows(state, exclude_pid=os.getpid())
     counts: dict[str, list[Any]] = {}
     pinned_count = 0
     recent_count = 0
@@ -15809,23 +15993,28 @@ def rename_category(state: State, old: str, new: str) -> str:
     new_label = category_filter_label(new)
     if not old_label or not new_label:
         return "Usage: /catname <old> <new>"
-    changed = 0
     old_key = category_key(old_label)
-    for key, meta in list(state.session_meta.items()):
-        if not isinstance(meta, dict) or key == "__categories__":
-            continue
-        if category_key(str(meta.get("category") or "")) == old_key:
-            entry = dict(meta)
-            entry["category"] = new_label
-            entry.setdefault("category_source", "manual")
-            state.session_meta[key] = entry
-            changed += 1
-    registry = dict(category_registry(state))
-    old_meta = dict(registry.pop(old_key, {}))
-    old_meta["name"] = new_label
-    registry[category_key(new_label)] = old_meta
-    state.session_meta["__categories__"] = registry
-    save_session_meta_registry(state.session_meta)
+
+    def mutate(session_meta: dict[str, dict[str, Any]]) -> int:
+        changed = 0
+        for key, meta in list(session_meta.items()):
+            if not isinstance(meta, dict) or key == "__categories__":
+                continue
+            if category_key(str(meta.get("category") or "")) == old_key:
+                entry = dict(meta)
+                entry["category"] = new_label
+                entry.setdefault("category_source", "manual")
+                session_meta[key] = entry
+                changed += 1
+        raw_categories = session_meta.get("__categories__", {})
+        registry = dict(raw_categories) if isinstance(raw_categories, dict) else {}
+        old_meta = dict(registry.pop(old_key, {}))
+        old_meta["name"] = new_label
+        registry[category_key(new_label)] = old_meta
+        session_meta["__categories__"] = registry
+        return changed
+
+    changed = transact_state_session_meta(state, mutate)
     load_history(state, force=True)
     mark_dirty(state)
     return f"已重命名分类：{old_label} -> {new_label}，影响 {changed} 个会话。"
@@ -15933,17 +16122,11 @@ def session_title_for_path(state: State, path: str) -> str:
     return compact_title(history_name(state, path) or os.path.basename(path or ""), 80) or "当前会话"
 
 
-def session_stable_id(path: str) -> str:
-    base = os.path.basename(path or "")
-    match = re.search(r"model_responses_(?:snapshot_)?(.+?)\.txt$", base)
-    return match.group(1) if match else base
+session_stable_id = history_store.session_stable_id
 
 
 def all_resolvable_session_paths(state: State) -> list[str]:
-    state.session_meta = load_session_meta_registry()
-    session_rows, meta_changed = cached_session_rows(state, exclude_pid=os.getpid())
-    if meta_changed:
-        save_session_meta_registry(state.session_meta)
+    session_rows, _meta_changed = transact_cached_session_rows(state, exclude_pid=os.getpid())
     paths: list[str] = []
     seen: set[str] = set()
     for path, _mtime, _preview, _rounds, _desc in session_rows:
@@ -15962,13 +16145,7 @@ def all_resolvable_session_paths(state: State) -> list[str]:
     return paths
 
 
-def target_matches_session_id(path: str, target: str) -> bool:
-    base = os.path.basename(path or "")
-    stable = session_stable_id(path)
-    target = (target or "").strip()
-    normalized = re.sub(r"^(?:id:|#)", "", target, flags=re.I)
-    target_digits = "".join(re.findall(r"\d+", normalized))
-    return target == base or normalized == stable or normalized == base or (bool(target_digits) and target_digits == stable)
+target_matches_session_id = history_store.target_matches_session_id
 
 
 def resolve_stable_session_target(state: State, target: str) -> tuple[Optional[str], str]:
@@ -16141,11 +16318,7 @@ def apply_session_operation(
             return f"删除失败: {type(exc).__name__}: {exc}"
         set_session_meta_fields(state, path, deleted=True, archived=True, trash_path=trash_path, deleted_at=time.time())
         remove_session_token_usage(state, path)
-        if session_names is not None:
-            try:
-                session_names.set_name(path, "")
-            except Exception:
-                pass
+        clear_session_name(state, path)
         if is_current_session_path(state, path):
             clear_active_session_after_meta_action(state, f"已删除当前会话到回收站：{title}", persist_current_tokens=False)
         else:
@@ -16168,17 +16341,9 @@ def rename_session_path(state: State, path: str, raw_name: str, source: str = "m
     if session_names is None:
         return "session_names 模块不可用，无法持久化历史会话名称。"
     title_source = title_source_for_rename(source)
-    if title_source == "ai" and str(session_meta_for(state, path).get("title_source") or "") == "manual":
-        return "手动标题已保留，AI 改名已跳过。"
     try:
-        session_names.set_name(path, name)
-        set_session_meta_fields(
-            state,
-            path,
-            title_source=title_source,
-            title_signature="",
-            title_updated_at=time.time(),
-        )
+        if not persist_session_name(state, path, name, title_source):
+            return "手动标题已保留，AI 改名已跳过。"
         if load_history(state, force=True):
             state.dirty = True
         return f"已命名会话：{name}"
@@ -18440,22 +18605,26 @@ def persist_ai_session_title(state: State, path: str, title: str, signature: str
     title = normalize_session_title(title)
     if not path or not title or session_names is None:
         return False
-    state.session_meta = load_session_meta_registry()
-    entry = dict(state.session_meta.get(session_key(path), {}))
-    if str(entry.get("title_source") or "") == "manual":
+    key = session_key(path)
+    rollback = history_store.RollbackStack()
+    def mutate(registry: dict[str, dict[str, Any]]) -> bool:
+        entry = dict(registry.get(key, {}))
+        if str(entry.get("title_source") or "") == "manual":
+            return False
+        try:
+            current = normalize_session_title(session_names.name_for(path))
+        except Exception:
+            current = ""
+        if current == title and entry.get("title_signature") == signature:
+            return False
+        rollback.set_session_name(session_names, path, title)
+        history_store.update_ai_session_metadata(
+            registry, key, title=title, signature=signature, updated_at=time.time()
+        )
+        return True
+
+    if not transact_state_session_meta(state, mutate, rollback):
         return False
-    try:
-        current = normalize_session_title(session_names.name_for(path))
-    except Exception:
-        current = ""
-    if current == title and entry.get("title_signature") == signature:
-        return False
-    session_names.set_name(path, title)
-    entry["title_source"] = "ai"
-    entry["title_signature"] = signature
-    entry["title_updated_at"] = time.time()
-    state.session_meta[session_key(path)] = entry
-    save_session_meta_registry(state.session_meta)
     state.history_names[path] = title
     return True
 
@@ -18471,17 +18640,21 @@ def persist_local_session_category(
     category = compact_category(category)
     if not path or not category:
         return False
-    state.session_meta = load_session_meta_registry()
-    entry = dict(state.session_meta.get(session_key(path), {}))
-    if str(entry.get("category_source") or "") == "manual":
+    key = session_key(path)
+    if not transact_state_session_meta(
+        state,
+        lambda registry: history_store.update_session_category(
+            registry,
+            key,
+            category,
+            category_key(category),
+            source=source,
+            signature=signature,
+            updated_at=time.time(),
+            preserve_manual=True,
+        ),
+    ):
         return False
-    entry["category"] = category
-    entry["category_source"] = source
-    entry["category_signature"] = signature
-    entry["category_updated_at"] = time.time()
-    state.session_meta[session_key(path)] = entry
-    save_session_meta_registry(state.session_meta)
-    set_category_meta_fields(state, category, name=category)
     load_history(state, force=True)
     mark_dirty(state)
     return True
@@ -21858,6 +22031,15 @@ def recover_task_action(state: State, task_id: str, action: str, policy_approved
         return f"找不到任务：{task_id}"
     owner = str(row.get("assigned_agent") or "")
     objective = str(row.get("objective") or "")
+    recovery_sub = state.subagents.get(owner)
+    durable_project_task = str(row.get("title") or "").startswith("Agent Project:") or any(
+        "agent_project_runs" in str(ref) for ref in (row.get("artifact_refs") or [])
+    )
+    project_retry_requires_confirmation = action == "retry" and bool(
+        durable_project_task
+        or (recovery_sub and (recovery_sub.agent_project_id or recovery_sub.runtime_provider_id == "pi-native"))
+    )
+    non_replayable_reason = "Frozen Agent Project Build bytes are transient; retry requires a new /agent-project run confirmation." if project_retry_requires_confirmation else ""
     policy_action = {
         "release_lock": "release_writer_lock",
         "failed": "recovery_mark_failed",
@@ -21897,6 +22079,9 @@ def recover_task_action(state: State, task_id: str, action: str, policy_approved
             objective=objective,
             policy_decision=decision,
             status=decision.status,
+            replayable=not project_retry_requires_confirmation,
+            replacement_task_expected=False if project_retry_requires_confirmation else None,
+            non_replayable_reason=non_replayable_reason,
         )
         if decision.approval_required:
             queue_policy_approval(
@@ -21937,7 +22122,10 @@ def recover_task_action(state: State, task_id: str, action: str, policy_approved
             source_checkpoint=before_checkpoint,
             assigned_agent=owner,
             objective=objective,
-            status="approved_replay",
+            status="approved_non_replayable" if project_retry_requires_confirmation else "approved_replay",
+            replayable=not project_retry_requires_confirmation,
+            replacement_task_expected=False if project_retry_requires_confirmation else None,
+            non_replayable_reason=non_replayable_reason,
         )
     if action == "release_lock":
         result = "已释放 single-writer 锁。" if release_single_writer_lock(task_id) else "该任务没有持有 single-writer 锁。"
@@ -22002,7 +22190,7 @@ def recover_task_action(state: State, task_id: str, action: str, policy_approved
         return result
     if action == "retry":
         sub = state.subagents.get(owner)
-        if sub is None:
+        if sub is None and not project_retry_requires_confirmation:
             result = f"找不到原负责人子 agent：{owner}"
             append_recovery_record(
                 task_id,
@@ -22015,6 +22203,47 @@ def recover_task_action(state: State, task_id: str, action: str, policy_approved
                 error=result,
                 recovery_plan_id=str(recovery_plan.get("recovery_plan_id") or ""),
                 recovery_plan_ref=str((recovery_plan.get("artifact_refs") or [""])[0]),
+            )
+            return result
+        if project_retry_requires_confirmation:
+            release_single_writer_lock(task_id)
+            result = (
+                "Agent Project 的冻结 Build 不在 Shuheng 中持久保存，不能从旧任务 retry。"
+                "请使用 /agent-project run <id> <objective> 重新查看当前 Build 并确认。"
+            )
+            append_task_update(task_id, status="failed", summary=result, error=result)
+            after_checkpoint = append_task_checkpoint(
+                task_id,
+                status="failed",
+                reason="agent_project_retry_requires_new_build_confirmation",
+                state=state,
+                agent_id=owner,
+                summary=result,
+            )
+            append_recovery_record(
+                task_id,
+                action=action,
+                status="rejected",
+                assigned_agent=owner,
+                objective=objective,
+                before_checkpoint_id=str(before_checkpoint.get("checkpoint_id") or ""),
+                after_checkpoint_id=str(after_checkpoint.get("checkpoint_id") or ""),
+                result=result,
+                error=result,
+                recovery_plan_id=str(recovery_plan.get("recovery_plan_id") or ""),
+                recovery_plan_ref=str((recovery_plan.get("artifact_refs") or [""])[0]),
+            )
+            append_trace(
+                task_id,
+                "agent_project_retry_rejected",
+                agent_id="orchestrator.main",
+                status="rejected",
+                payload={
+                    "checkpoint_id": after_checkpoint.get("checkpoint_id", ""),
+                    "recovery_plan_id": recovery_plan.get("recovery_plan_id", ""),
+                    "artifact_ref": (recovery_plan.get("artifact_refs") or [""])[0],
+                    "result": result,
+                },
             )
             return result
         release_single_writer_lock(task_id)
@@ -22939,6 +23168,16 @@ def open_rename_modal(stdscr, state: State) -> None:
     finally:
         stdscr.timeout(old_timeout)
         mark_dirty(state)
+
+
+draw_agent_project_input_modal = agent_project_workspace_helpers.draw_agent_project_input_modal
+open_agent_project_text_prompt = agent_project_workspace_helpers.open_agent_project_text_prompt
+confirm_agent_project_action = agent_project_workspace_helpers.confirm_agent_project_action
+agent_project_list_window = agent_project_workspace_helpers.agent_project_list_window
+agent_project_source_style = agent_project_workspace_helpers.agent_project_source_style
+draw_agent_project_workspace = agent_project_workspace_helpers.draw_agent_project_workspace
+new_agent_project_authoring_editor = agent_project_workspace_helpers.new_agent_project_authoring_editor
+open_agent_project_workspace = agent_project_workspace_helpers.open_agent_project_workspace
 
 
 def run_modal_task_until_done(stdscr, state: State, title: str, lines: list[str], task_fn):
@@ -24677,10 +24916,19 @@ def decide_approval(state: State, approval_id: str, approved: bool) -> str:
                 state,
                 sub,
                 str(payload.get("prompt") or ""),
-                source="approved_policy",
+                source=str(payload.get("source") or "approved_policy"),
                 policy_approved=True,
                 parent_task_id=str(payload.get("parent_task_id") or ""),
                 task_title=str(payload.get("task_title") or ""),
+                expected_build_digest=str(payload.get("expected_build_digest") or ""),
+                agent_project_grant_declared=bool(payload.get("agent_project_grant_declared")),
+                approved_policy={
+                    "approval_id": match_id,
+                    "policy_decision_id": str(payload.get("decision_id") or ""),
+                    "policy_action": str(payload.get("action") or ""),
+                    "approval_required_for": str(payload.get("approval_required_for") or ""),
+                    "original_task_id": str(payload.get("task_id") or ""),
+                },
             )
         elif deferred == "append_subagent_memory":
             sub = resolve_subagent(state, str(payload.get("subagent_id") or row.get("target") or ""))
@@ -24998,6 +25246,22 @@ def handle_workspace_command(state: State, text: str) -> bool:
     return True
 
 
+agent_project_root_for_id = agent_project_workspace_helpers.agent_project_root_for_id
+local_agent_project_roots = agent_project_workspace_helpers.local_agent_project_roots
+agent_project_authoring_files = agent_project_workspace_helpers.agent_project_authoring_files
+agent_project_diagnostic_lines = agent_project_workspace_helpers.agent_project_diagnostic_lines
+agent_project_inventory_text = agent_project_workspace_helpers.agent_project_inventory_text
+agent_project_editor_validator = agent_project_workspace_helpers.agent_project_editor_validator
+create_local_agent_project = agent_project_workspace_helpers.create_local_agent_project
+fork_local_agent_project = agent_project_workspace_helpers.fork_local_agent_project
+build_local_agent_project = agent_project_workspace_helpers.build_local_agent_project
+agent_project_subagent = agent_project_workspace_helpers.agent_project_subagent
+run_local_agent_project = agent_project_workspace_helpers.run_local_agent_project
+pi_native_model_runtime_payload = agent_project_workspace_helpers.pi_native_model_runtime_payload
+prepare_agent_project_runtime_envelope = agent_project_workspace_helpers.prepare_agent_project_runtime_envelope
+handle_agent_project_command = agent_project_workspace_helpers.handle_agent_project_command
+
+
 def submit(state: State, text: str) -> None:
     raw_text = text
     text = text.strip()
@@ -25057,11 +25321,16 @@ def submit(state: State, text: str) -> None:
         return
     if handle_workspace_command(state, text):
         return
+    if text.lower() == "/agent-projects":
+        add_system(state, "在 TUI 输入框执行 /agent-projects 会打开内嵌 Agent Project 单文件工作台。\n" + agent_project_inventory_text())
+        return
     if handle_agent_mail_intake_command(state, text):
         return
     if handle_plugin_command(state, text):
         return
     if handle_workflow_command(state, text):
+        return
+    if handle_agent_project_command(state, text):
         return
     if handle_subagent_command(state, text):
         return
@@ -25375,11 +25644,25 @@ def queue_subagent_task(
     policy_approved: bool = False,
     parent_task_id: str = "",
     task_title: str = "",
+    expected_build_digest: str = "",
+    agent_project_grant_declared: bool = False,
+    approved_policy: Optional[dict[str, Any]] = None,
 ) -> str:
     prompt = (prompt or "").strip()
     if not prompt:
         return "子 agent 输入为空。"
-    sub.task_queue.append((prompt, source, bool(policy_approved), parent_task_id, task_title))
+    sub.task_queue.append(
+        (
+            prompt,
+            source,
+            bool(policy_approved),
+            parent_task_id,
+            task_title,
+            str(expected_build_digest or ""),
+            bool(agent_project_grant_declared),
+            dict(approved_policy or {}),
+        )
+    )
     sub.updated_at = time.time()
     save_subagent_meta(sub, state)
     append_subagent_event(sub, f"{source}:queued", display_prompt_for_subagent_task(prompt), state=state)
@@ -25574,8 +25857,17 @@ def maybe_start_next_subagent_task(state: State, sub: SubAgentRuntime) -> Option
     if sub.status in {"running", "aborting"} or not sub.task_queue:
         return None
     queued = sub.task_queue.pop(0)
+    expected_build_digest = ""
+    agent_project_grant_declared = False
+    approved_policy: dict[str, Any] = {}
     if len(queued) >= 5:
         prompt, source, policy_approved, parent_task_id, task_title = queued[:5]
+        if len(queued) >= 6:
+            expected_build_digest = queued[5]
+        if len(queued) >= 7:
+            agent_project_grant_declared = bool(queued[6])
+        if len(queued) >= 8 and isinstance(queued[7], dict):
+            approved_policy = dict(queued[7])
     else:
         prompt, source, policy_approved = queued[:3]
         parent_task_id = ""
@@ -25590,6 +25882,9 @@ def maybe_start_next_subagent_task(state: State, sub: SubAgentRuntime) -> Option
         policy_approved=policy_approved,
         parent_task_id=parent_task_id,
         task_title=task_title,
+        expected_build_digest=expected_build_digest,
+        agent_project_grant_declared=agent_project_grant_declared,
+        approved_policy=approved_policy,
     )
 
 
@@ -25724,7 +26019,10 @@ def start_secret_subagent_task(
         write_secret_subagent_trace(state, sub, short_uid("task"), "policy_gate_denied", "rejected", {"action": action, "prompt_preview": truncate_cells(task_objective, 240)})
         return f"Secret 子 agent 高风险操作暂未开放自动审批：{action}。"
     bus_task_id = short_uid("task")
-    agent = ensure_subagent_agent(state, sub)
+    try:
+        agent = ensure_subagent_agent(state, sub)
+    except Exception as exc:
+        return f"{sub.name} runtime 准备失败：{type(exc).__name__}: {exc}"
     ok_model, model_msg = apply_subagent_default_model(state, sub)
     if not ok_model:
         return f"{sub.name} 默认模型未应用，已阻止启动：{model_msg}"
@@ -25854,6 +26152,11 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
 
     if sub.security_context == "secret" and (not state.secret_vault.unlocked or not state.secret_vault.key):
         return fail_visible("Secret Vault 已锁定，不能与 Secret 子 agent 聊天。")
+    if sub.agent_project_id or sub.runtime_provider_id == "pi-native":
+        return fail_visible(
+            "Pi-native Agent Project 是受管任务型 worker，不开放无账本的直接聊天。"
+            "请用 /agent-project run <id> <objective> 查看并确认当前冻结 Build。"
+        )
     record_shared_user_profile_interaction(prompt, source=source, state=state)
     if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
         return queue_subagent_chat_input(state, sub, raw_prompt, interrupt_requested=sub.status == "aborting")
@@ -25926,330 +26229,7 @@ def start_subagent_chat(state: State, sub: SubAgentRuntime, prompt: str, source:
     return f"已发送给子 agent：{sub.name}"
 
 
-def start_subagent_task(
-    state: State,
-    sub: SubAgentRuntime,
-    prompt: str,
-    source: str = "user",
-    policy_approved: bool = False,
-    parent_task_id: str = "",
-    task_title: str = "",
-) -> str:
-    raw_prompt = (prompt or "").strip()
-    prompt, transient_skill_refs = split_transient_skill_prompt(raw_prompt)
-    if not prompt:
-        return "子 agent 输入为空。"
-    role = normalized_subagent_role(sub.role)
-    task_objective = policy_relevant_subagent_prompt_text(prompt)
-    if sub.security_context == "secret":
-        return start_secret_subagent_task(
-            state,
-            sub,
-            prompt,
-            source=source,
-            policy_approved=policy_approved,
-            parent_task_id=parent_task_id,
-            task_title=task_title,
-            transient_skill_refs=transient_skill_refs,
-        )
-    record_shared_user_profile_interaction(prompt, source=source, state=state)
-    if sub.status in {"running", "aborting"} or (sub.agent is not None and agent_has_unfinished_task(sub.agent)):
-        return queue_subagent_task(
-            state,
-            sub,
-            raw_prompt,
-            source=source,
-            policy_approved=policy_approved,
-            parent_task_id=parent_task_id,
-            task_title=task_title,
-        )
-    bus_task_id = short_uid("task")
-    decision: Optional[PolicyDecision] = None
-    if not policy_approved:
-        decision = policy_gate_for_subagent_task(
-            sub,
-            prompt,
-            source=source,
-            bus_task_id=bus_task_id,
-            parent_task_id=parent_task_id,
-            task_title=task_title,
-            deferred_prompt=raw_prompt,
-            transient_skill_refs=transient_skill_refs,
-        )
-        if decision.approval_required:
-            append_orchestrator_plan(
-                sub,
-                task_objective,
-                bus_task_id,
-                status="approval_required",
-                source=source,
-                decision=decision,
-            )
-            append_task_ledger(
-                bus_task_id,
-                status="approval_required",
-                assigned_agent=sub.agent_id,
-                title=task_title or f"子 agent 执行: {sub.name}",
-                kind="subagent_task",
-                objective=truncate_cells(task_objective, 240),
-                parent_task_id=parent_task_id,
-                session_key=active_ui_session_key(state),
-                summary=policy_gate_text(decision),
-                **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
-            )
-            update_plan_step_from_child(parent_task_id)
-            checkpoint = append_task_checkpoint(
-                bus_task_id,
-                status="approval_required",
-                reason="subagent_policy_gate_waiting_approval",
-                state=state,
-                agent_id=sub.agent_id,
-                summary=policy_gate_text(decision),
-            )
-            payload = policy_decision_to_dict(decision)
-            payload["checkpoint_id"] = checkpoint.get("checkpoint_id", "")
-            append_trace(bus_task_id, "policy_gate_waiting_approval", agent_id=sub.agent_id, status="approval_required", payload=payload)
-            return policy_gate_text(decision)
-        if not decision.allowed:
-            append_orchestrator_plan(
-                sub,
-                task_objective,
-                bus_task_id,
-                status="rejected",
-                source=source,
-                decision=decision,
-                error=policy_gate_text(decision),
-            )
-            append_task_ledger(
-                bus_task_id,
-                status="rejected",
-                assigned_agent=sub.agent_id,
-                title=task_title or f"子 agent 执行: {sub.name}",
-                kind="subagent_task",
-                objective=truncate_cells(task_objective, 240),
-                parent_task_id=parent_task_id,
-                session_key=active_ui_session_key(state),
-                error=policy_gate_text(decision),
-                **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
-            )
-            update_plan_step_from_child(parent_task_id)
-            checkpoint = append_task_checkpoint(
-                bus_task_id,
-                status="rejected",
-                reason="subagent_policy_gate_denied",
-                state=state,
-                agent_id=sub.agent_id,
-                summary=policy_gate_text(decision),
-            )
-            payload = policy_decision_to_dict(decision)
-            payload["checkpoint_id"] = checkpoint.get("checkpoint_id", "")
-            append_trace(bus_task_id, "policy_gate_denied", agent_id=sub.agent_id, status="rejected", payload=payload)
-            return policy_gate_text(decision)
-    agent = ensure_subagent_agent(state, sub)
-    ok_model, model_msg = apply_subagent_default_model(state, sub)
-    if not ok_model:
-        return f"{sub.name} 默认模型未应用，已阻止启动：{model_msg}"
-    sub.task_id += 1
-    task_id = sub.task_id
-    locked, lock_error = acquire_single_writer_lock(sub, bus_task_id, task_objective)
-    if not locked:
-        append_orchestrator_plan(
-            sub,
-            task_objective,
-            bus_task_id,
-            status="rejected",
-            source=source,
-            decision=decision,
-            error=lock_error,
-        )
-        append_task_ledger(
-            bus_task_id,
-            status="rejected",
-            assigned_agent=sub.agent_id,
-            title=task_title or f"子 agent 执行: {sub.name}",
-            kind="subagent_task",
-            objective=truncate_cells(task_objective, 240),
-            parent_task_id=parent_task_id,
-            session_key=active_ui_session_key(state),
-            error=lock_error,
-            **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
-        )
-        update_plan_step_from_child(parent_task_id)
-        checkpoint = append_task_checkpoint(
-            bus_task_id,
-            status="rejected",
-            reason="single_writer_denied",
-            state=state,
-            agent_id=sub.agent_id,
-            summary=lock_error,
-        )
-        append_trace(bus_task_id, "single_writer_denied", agent_id=sub.agent_id, status="rejected", payload={"error": lock_error, "checkpoint_id": checkpoint.get("checkpoint_id", "")})
-        return lock_error
-    context_pack, context_ref = build_context_pack(
-        state,
-        sub,
-        task_objective,
-        bus_task_id,
-        parent_task_id=parent_task_id,
-        transient_skill_refs=transient_skill_refs,
-    )
-    append_orchestrator_plan(
-        sub,
-        task_objective,
-        bus_task_id,
-        status="working",
-        source=source,
-        decision=decision,
-        context_ref=context_ref,
-    )
-    sub.active_task_id = task_id
-    sub.active_bus_task_id = bus_task_id
-    sub.status = "running"
-    sub.updated_at = time.time()
-    sub.pending_interaction = None
-    visible_prompt = display_prompt_for_subagent_task(prompt)
-    sub.messages.append(Message("user", visible_prompt))
-    sub.messages.append(Message("assistant", "", done=False))
-    save_subagent_meta(sub)
-    save_subagent_chat_session(state, sub, source=source)
-    mark_subagent_messages_changed(state, sub)
-    append_subagent_event(sub, source, visible_prompt)
-    append_task_ledger(
-        bus_task_id,
-        status="working",
-        assigned_agent=sub.agent_id,
-        title=task_title or f"子 agent 执行: {sub.name}",
-        kind="subagent_task",
-        objective=truncate_cells(task_objective, 240),
-        parent_task_id=parent_task_id,
-        session_key=active_ui_session_key(state),
-        artifact_refs=[context_ref],
-        **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
-    )
-    update_plan_step_from_child(parent_task_id)
-    runtime_provider_id = agent_runtime_provider_id(agent)
-    append_agent_mail(
-        from_agent="orchestrator.main",
-        to_type="agent",
-        target=sub.agent_id,
-        intent="delegate",
-        task_id=bus_task_id,
-        status="working",
-        payload={
-            "objective": task_objective,
-            "context_pack_ref": context_ref,
-            "role": role,
-            "runtime_provider_id": runtime_provider_id,
-            "output_contract": {"required_sections": role_output_contract(role)},
-            "permissions": permissions_for_role(role, security_context=sub.security_context),
-            "transient_skill_refs": transient_skill_refs,
-        },
-        artifact_refs=[context_ref],
-        budget=default_task_budget(role),
-        permissions=permissions_for_role(role, security_context=sub.security_context),
-        context_policy=context_policy_for_task(task_objective, security_context=sub.security_context),
-        task=task_contract_for_role(role, task_objective),
-        risks=risks_for_action(
-            decision.action if decision is not None else infer_policy_action_for_subagent_task(sub, prompt),
-            role,
-            task_objective,
-        ),
-        approval=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
-    )
-    checkpoint = append_task_checkpoint(
-        bus_task_id,
-        status="working",
-        reason="subagent_delegated",
-        state=state,
-        agent_id=sub.agent_id,
-        summary=truncate_cells(task_objective, 240),
-        extra={"context_pack_ref": context_ref, "transient_skill_refs": transient_skill_refs},
-    )
-    append_trace(
-        bus_task_id,
-        "delegated",
-        agent_id=sub.agent_id,
-        status="working",
-        payload={
-            "context_pack": context_ref,
-            "role": role,
-            "checkpoint_id": checkpoint.get("checkpoint_id", ""),
-            "runtime_provider_id": runtime_provider_id,
-            "transient_skill_refs": transient_skill_refs,
-        },
-    )
-    agent_prompt = f"{runtime_context_prompt_for_agent(agent, context_pack, context_ref)}\n\n[Task]\n{prompt}\n[/Task]"
-    agent_prompt = runtime_prompt_with_transient_skill_command(agent, agent_prompt, transient_skill_refs)
-    try:
-        runtime_source = f"subagent:{sub.agent_id}"
-        request = runtime_task_request_for_agent(
-            agent=agent,
-            task_id=bus_task_id,
-            parent_task_id=parent_task_id,
-            prompt=agent_prompt,
-            source=runtime_source,
-            agent_id=sub.agent_id,
-            role=role,
-            objective=task_objective,
-            context_pack_ref=context_ref,
-            permissions=permissions_for_role(role, security_context=sub.security_context),
-            approval_policy=approval_metadata(decision=decision) if decision is not None else approval_metadata(),
-            output_contract=task_contract_for_role(role, task_objective).get("output_contract") or {},
-            artifact_refs=[context_ref],
-            metadata={
-                "runtime_lane": "subagent",
-                "source": source,
-                "security_context": sub.security_context,
-                "transient_skill_refs": transient_skill_refs,
-            },
-        )
-        dq = put_agent_runtime_task(agent, request)
-    except Exception as exc:
-        sub.status = "error"
-        sub.active_task_id = None
-        sub.active_bus_task_id = ""
-        sub.messages[-1] = Message("assistant", f"[ERROR] put_task: {type(exc).__name__}: {exc}")
-        save_subagent_meta(sub)
-        save_subagent_chat_session(state, sub, source=f"{source}:error")
-        mark_subagent_messages_changed(state, sub)
-        release_single_writer_lock(bus_task_id)
-        append_orchestrator_plan(
-            sub,
-            task_objective,
-            bus_task_id,
-            status="failed",
-            source=source,
-            decision=decision,
-            context_ref=context_ref,
-            error=f"{type(exc).__name__}: {exc}",
-        )
-        append_task_ledger(
-            bus_task_id,
-            status="failed",
-            assigned_agent=sub.agent_id,
-            title=task_title or f"子 agent 执行: {sub.name}",
-            kind="subagent_task",
-            objective=truncate_cells(task_objective, 240),
-            parent_task_id=parent_task_id,
-            session_key=active_ui_session_key(state),
-            error=f"{type(exc).__name__}: {exc}",
-            **subagent_task_schema_kwargs(sub, task_objective, decision=decision),
-        )
-        update_plan_step_from_child(parent_task_id)
-        checkpoint = append_task_checkpoint(
-            bus_task_id,
-            status="failed",
-            reason="subagent_put_task_failed",
-            state=state,
-            agent_id=sub.agent_id,
-            summary=f"{type(exc).__name__}: {exc}",
-            extra={"context_pack_ref": context_ref},
-        )
-        append_trace(bus_task_id, "put_task_failed", agent_id=sub.agent_id, status="failed", payload={"error": f"{type(exc).__name__}: {exc}", "checkpoint_id": checkpoint.get("checkpoint_id", "")})
-        return f"{sub.name} 启动失败: {type(exc).__name__}: {exc}"
-    threading.Thread(target=consume_subagent_queue, args=(state, sub.agent_id, task_id, dq), daemon=True, name=f"subagent-{sub.agent_id}-stream").start()
-    mark_dirty(state)
-    return f"已启动子 agent：{sub.name}"
+start_subagent_task = subagent_task_dispatch_helpers.start_subagent_task
 
 
 def consume_stream_queue_to_ui(state: State, kind: str, target_ref: Any, task_id: int, dq: queue.Queue) -> None:
@@ -26282,7 +26262,12 @@ def consume_stream_queue_to_ui(state: State, kind: str, target_ref: Any, task_id
             done_text = str(item.get("done") or buf)
             if not done_text.strip():
                 done_text = "[ERROR] runtime completed without a visible reply."
-            state.ui_queue.put((kind, target_ref, task_id, done_text, True))
+            terminal_status = str(item.get("status") or "").strip().lower()
+            terminal_error = str(item.get("error") or "").strip()
+            if terminal_status in {"failed", "error"} and not done_text.startswith("[ERROR]"):
+                detail = f" · {terminal_error}" if terminal_error and terminal_error not in done_text else ""
+                done_text = f"[ERROR] runtime {terminal_status}: {done_text}{detail}"
+            state.ui_queue.put((kind, target_ref, task_id, done_text, True, terminal_status))
             return
 
 
@@ -26393,7 +26378,8 @@ def process_ui_queue(state: State) -> bool:
             continue
 
         if kind == "sub_chat_stream":
-            _kind, subagent_id, task_id, text, done = item
+            _kind, subagent_id, task_id, text, done = item[:5]
+            terminal_status = str(item[5] if len(item) > 5 else "").strip().lower()
             sub = state.subagents.get(str(subagent_id))
             if sub is None or task_id != sub.active_task_id:
                 continue
@@ -26409,6 +26395,8 @@ def process_ui_queue(state: State) -> bool:
                 mark_subagent_messages_changed(state, sub)
             if done:
                 runtime_error = subagent_runtime_error_text(display_text)
+                if terminal_status in {"failed", "error", "aborted", "cancelled"} and not runtime_error:
+                    runtime_error = display_text or f"runtime {terminal_status}"
                 if runtime_error:
                     sub.pending_interaction = None
                 sub.status = "waiting-input" if sub.pending_interaction else "idle"
@@ -26451,7 +26439,8 @@ def process_ui_queue(state: State) -> bool:
             continue
 
         if kind == "sub_stream":
-            _kind, subagent_id, task_id, text, done = item
+            _kind, subagent_id, task_id, text, done = item[:5]
+            terminal_status = str(item[5] if len(item) > 5 else "").strip().lower()
             sub = state.subagents.get(str(subagent_id))
             if sub is None or task_id != sub.active_task_id:
                 continue
@@ -26478,7 +26467,12 @@ def process_ui_queue(state: State) -> bool:
                         provenance={"generated_by": sub.agent_id, "role": normalized_subagent_role(sub.role), "source": "subagent_result"},
                     )
                 runtime_error = subagent_runtime_error_text(display_text)
-                final_status = "failed" if runtime_error else "completed"
+                if terminal_status in {"failed", "error", "aborted", "cancelled"} and not runtime_error:
+                    runtime_error = display_text or f"runtime {terminal_status}"
+                if terminal_status in {"aborted", "cancelled"}:
+                    final_status = terminal_status
+                else:
+                    final_status = "failed" if runtime_error else "completed"
                 if not runtime_error:
                     updates = extract_subagent_memory_updates(text)
                     for update in updates:
@@ -26506,6 +26500,32 @@ def process_ui_queue(state: State) -> bool:
                 task_title = str(task_prev.get("title") or f"子 agent 执行: {sub.name}")
                 task_session = str(task_prev.get("session_key") or active_ui_session_key(state))
                 role = normalized_subagent_role(sub.role)
+                inherited_approval = (
+                    dict(task_prev.get("approval") or {})
+                    if isinstance(task_prev.get("approval"), dict)
+                    else approval_metadata()
+                )
+                prior_artifact_refs = [
+                    str(ref)
+                    for ref in (task_prev.get("artifact_refs") or [])
+                    if str(ref)
+                ]
+                terminal_artifact_refs = list(dict.fromkeys([*prior_artifact_refs, artifact_ref]))
+                terminal_provenance = {
+                    key: value
+                    for key, value in {
+                        "approval_id": str(inherited_approval.get("approval_id") or ""),
+                        "policy_decision_id": str(inherited_approval.get("policy_decision_id") or ""),
+                        "policy_action": str(inherited_approval.get("policy_action") or ""),
+                        "agent_project_id": str(sub.agent_project_id or ""),
+                        "agent_build_digest": str(sub.agent_build_digest or ""),
+                        "agent_run_manifest_ref": next(
+                            (ref for ref in prior_artifact_refs if "agent_project_runs" in ref),
+                            "",
+                        ),
+                    }.items()
+                    if value
+                }
                 if sub.security_context == "secret":
                     write_secret_subagent_task_record(
                         state,
@@ -26548,8 +26568,10 @@ def process_ui_queue(state: State) -> bool:
                             objective,
                             bus_task_id,
                             parent_task_id=parent_task_id,
-                            status="failed",
+                            status=final_status,
                             source="subagent_runtime",
+                            approval=inherited_approval,
+                            action_override=str(inherited_approval.get("policy_action") or ""),
                             error=runtime_error,
                         )
                     append_task_ledger(
@@ -26561,10 +26583,13 @@ def process_ui_queue(state: State) -> bool:
                         objective=truncate_cells(objective, 240),
                         parent_task_id=parent_task_id,
                         session_key=task_session,
-                        artifact_refs=[artifact_ref],
+                        artifact_refs=terminal_artifact_refs,
                         summary=truncate_cells(clean_text(display_text), 240),
                         error=runtime_error,
-                        **subagent_task_schema_kwargs(sub, objective),
+                        **{
+                            **subagent_task_schema_kwargs(sub, objective),
+                            "approval": inherited_approval,
+                        },
                     )
                     update_plan_step_from_child(parent_task_id)
                     append_agent_mail(
@@ -26578,14 +26603,15 @@ def process_ui_queue(state: State) -> bool:
                             "summary": truncate_cells(clean_text(display_text), 600),
                             "role": role,
                             "error": runtime_error,
+                            **terminal_provenance,
                         },
-                        artifact_refs=[artifact_ref],
+                        artifact_refs=terminal_artifact_refs,
                         budget=default_task_budget(role),
                         permissions=permissions_for_role(role, security_context=sub.security_context),
                         context_policy=context_policy_for_task(objective, security_context=sub.security_context),
                         task=task_contract_for_role(role, objective),
                         risks=risks_for_action("read_only", role, objective),
-                        approval=approval_metadata(),
+                        approval=inherited_approval,
                     )
                 if runtime_error:
                     notice = (
@@ -26610,13 +26636,23 @@ def process_ui_queue(state: State) -> bool:
                     checkpoint = append_task_checkpoint(
                         bus_task_id,
                         status=final_status,
-                        reason="subagent_runtime_failed" if runtime_error else "subagent_completed",
+                        reason=f"subagent_runtime_{final_status}" if runtime_error else "subagent_completed",
                         state=state,
                         agent_id=sub.agent_id,
                         summary=truncate_cells(clean_text(display_text), 240),
-                        extra={"result_artifact_ref": artifact_ref, "error": runtime_error} if runtime_error else {"result_artifact_ref": artifact_ref},
+                        extra={
+                            "result_artifact_ref": artifact_ref,
+                            "artifact_refs": terminal_artifact_refs,
+                            **terminal_provenance,
+                            **({"error": runtime_error} if runtime_error else {}),
+                        },
                     )
-                    trace_payload = {"artifact_ref": artifact_ref, "checkpoint_id": checkpoint.get("checkpoint_id", "")}
+                    trace_payload = {
+                        "artifact_ref": artifact_ref,
+                        "artifact_refs": terminal_artifact_refs,
+                        "checkpoint_id": checkpoint.get("checkpoint_id", ""),
+                        **terminal_provenance,
+                    }
                     if runtime_error:
                         trace_payload["error"] = runtime_error
                     append_trace(
@@ -26673,28 +26709,33 @@ def process_ui_queue(state: State) -> bool:
             state.description_jobs.discard(key)
             if title or description:
                 try:
-                    state.session_meta = load_session_meta_registry()
-                    entry = dict(state.session_meta.get(session_key(path), {}))
                     now = time.time()
-                    saved_title = ""
-                    if title and str(entry.get("title_source") or "") != "manual" and session_names is not None:
-                        try:
-                            session_names.set_name(path, title)
-                            entry["title_source"] = "ai"
-                            entry["title_signature"] = signature
-                            entry["title_updated_at"] = now
-                            state.history_names[path] = title
-                            saved_title = title
-                        except Exception as exc:
-                            state.last_error = f"AI title save: {type(exc).__name__}: {exc}"
-                    if description:
-                        entry["description"] = description
-                        entry["description_source"] = "ai"
-                        entry["description_signature"] = signature
-                        entry["description_updated_at"] = now
-                        state.history_descriptions[path] = description
-                    state.session_meta[session_key(path)] = entry
-                    save_session_meta_registry(state.session_meta)
+                    meta_key = session_key(path)
+                    rollback = history_store.RollbackStack()
+                    def mutate(registry: dict[str, dict[str, Any]]) -> tuple[str, str]:
+                        entry = dict(registry.get(meta_key, {}))
+                        saved_title = ""
+                        if title and str(entry.get("title_source") or "") != "manual" and session_names is not None:
+                            try:
+                                rollback.set_session_name(session_names, path, title)
+                                saved_title = title
+                            except Exception as exc:
+                                state.last_error = f"AI title save: {type(exc).__name__}: {exc}"
+                        history_store.update_ai_session_metadata(
+                            registry,
+                            meta_key,
+                            title=saved_title,
+                            description=description,
+                            signature=signature,
+                            updated_at=now,
+                        )
+                        return saved_title, description
+
+                    saved_title, saved_description = transact_state_session_meta(state, mutate, rollback)
+                    if saved_title:
+                        state.history_names[path] = saved_title
+                    if saved_description:
+                        state.history_descriptions[path] = saved_description
                     if saved_title:
                         if token_session_key(state.agent) == key and not path_is_active_history_view(state, path):
                             state.current_title = saved_title
@@ -26731,16 +26772,20 @@ def process_ui_queue(state: State) -> bool:
                 continue
             if category:
                 try:
-                    state.session_meta = load_session_meta_registry()
-                    entry = dict(state.session_meta.get(session_key(path), {}))
-                    if str(entry.get("category_source") or "") != "manual":
-                        entry["category"] = category
-                        entry["category_source"] = "ai"
-                        entry["category_signature"] = signature
-                        entry["category_updated_at"] = time.time()
-                        state.session_meta[session_key(path)] = entry
-                        save_session_meta_registry(state.session_meta)
-                        set_category_meta_fields(state, category, name=category)
+                    meta_key = session_key(path)
+                    if transact_state_session_meta(
+                        state,
+                        lambda registry: history_store.update_session_category(
+                            registry,
+                            meta_key,
+                            category,
+                            category_key(category),
+                            source="ai",
+                            signature=signature,
+                            updated_at=time.time(),
+                            preserve_manual=True,
+                        ),
+                    ):
                         if load_history(state, force=True):
                             state.dirty = True
                 except Exception as exc:
@@ -26849,7 +26894,7 @@ def process_ui_queue(state: State) -> bool:
 
         if kind != "stream":
             continue
-        _kind, stream_target, task_id, text, done = item
+        _kind, stream_target, task_id, text, done = item[:5]
         target_key = stream_target.key if isinstance(stream_target, StreamTarget) else str(stream_target)
         if target_key != "active":
             bg = state.background_sessions.get(target_key)
@@ -27832,6 +27877,10 @@ def handle_key(stdscr, state: State, key) -> None:
             set_input_text(state, "")
             open_memory_viewer(stdscr, state)
             return
+        if text.strip().lower() == "/agent-projects":
+            set_input_text(state, "")
+            open_agent_project_workspace(stdscr, state)
+            return
         if text.strip() in {"/tasks", "/inbox", "/approvals", "/artifacts", "/recover", "/evals", "/context", "/permissions", "/baseline", "/plugins", "/workflows"}:
             panel = text.strip().lstrip("/")
             set_input_text(state, "")
@@ -28134,6 +28183,10 @@ def wait_for_unfinished_tasks_after_tui(state: Optional[State]) -> None:
         sys.stderr = old_stderr
         wait_log.close()
     print("后台任务已完成，枢衡进程退出。")
+
+
+agent_project_workspace_helpers.configure_agent_project_workspace(sys.modules[__name__])
+subagent_task_dispatch_helpers.configure_subagent_task_dispatch(sys.modules[__name__])
 
 
 def main(argv: Optional[list[str]] = None) -> int:

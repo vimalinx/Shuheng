@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for runtime provider governance changes."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable contract for OMP runtime provider, TUI query tools, and governance boundaries."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for cross-layer and reuse checks."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Host tool bridge crosses provider, app-state, gateway, and tests."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing TUI query/gateway helpers instead of duplicating state readers."}
-{"file": ".trellis/tasks/06-12-deepen-ohmypi-runtime-governance/research/omp-rpc-governance-bridge.md", "reason": "Local OMP RPC protocol evidence for host tool bridge implementation."}

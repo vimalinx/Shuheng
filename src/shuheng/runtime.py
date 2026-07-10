@@ -29,6 +29,9 @@ class RuntimeTaskRequest:
     output_contract: dict[str, Any] = field(default_factory=dict)
     artifact_refs: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Provider-only, in-memory payload. This may carry frozen executable/source
+    # inputs that must never be copied into ledgers or trace records.
+    runtime_payload: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def to_record(self) -> dict[str, Any]:
         prompt = str(self.prompt or "")

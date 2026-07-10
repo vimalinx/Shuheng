@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend index routes workspace/context changes to the active agent-control-protocol spec."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Owns Shuheng storage, workspace memory, context-pack, and OMP bridge contracts."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Automatic workspace inference spans storage, commands, context pack payloads, and tests."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Workspace helpers should be shared across command display, context hydration, and tests."}

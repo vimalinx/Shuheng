@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index; identifies the active workflow/control protocol guideline."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Source of truth for workflow command, ledger, Orchestrator, approval, and agent-task bridge contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index required before implementation."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Search-first/reuse guidance before adding workflow lifecycle helpers."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Workflow cancel spans command parsing, pure state transition, ledger append, tests, and policy gates."}
-{"file": ".trellis/tasks/07-03-add-workflow-cancel-command-v1/research/workflow-cancel-patterns.md", "reason": "External workflow cancellation patterns used to constrain v1 semantics."}

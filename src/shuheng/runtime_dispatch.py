@@ -68,6 +68,7 @@ def runtime_task_request_for_agent(
     output_contract: dict[str, Any] | None = None,
     artifact_refs: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    runtime_payload: dict[str, Any] | None = None,
 ) -> RuntimeTaskRequest:
     model = ""
     try:
@@ -90,6 +91,7 @@ def runtime_task_request_for_agent(
         output_contract=output_contract or {},
         artifact_refs=artifact_refs or ([context_pack_ref] if context_pack_ref else []),
         metadata=metadata or {},
+        runtime_payload=runtime_payload or {},
     )
 
 

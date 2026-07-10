@@ -1,12 +1,13 @@
 {
   "name": "@shuheng/omp-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Oh My Pi plugin that exposes Shuheng-managed context and governed memory proposals.",
   "omp": {
     "name": "Shuheng Bridge",
-    "version": "0.1.0",
+    "version": "0.2.0-alpha.1",
     "description": "Read Shuheng context packs and submit memory candidates through Shuheng approval gates.",
     "tools": "tools/index.ts",
     "settings": {

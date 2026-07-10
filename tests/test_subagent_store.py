@@ -50,6 +50,42 @@ def test_secret_home_and_sidebar_key_round_trip() -> None:
     assert app_module.secret_subagent_home is subagent_store.secret_subagent_home
 
 
+def test_subagent_chat_history_entry_is_find_or_create(tmp_path: Path) -> None:
+    registry: dict[str, dict] = {}
+    history_dir = tmp_path / "history"
+    path = history_dir / "model_responses_chat.txt"
+
+    key, created_path = subagent_store.ensure_subagent_chat_history_entry(
+        registry,
+        agent_id="researcher",
+        agent_name="Researcher",
+        session_id="chat-1",
+        security_context="standard",
+        title="Researcher 会话",
+        history_dir=str(history_dir),
+        new_path=lambda: str(path),
+    )
+
+    assert key == path.name
+    assert created_path == str(path)
+    assert registry[key]["agent_id"] == "researcher"
+    assert subagent_store.subagent_chat_history_key(registry, "researcher", "chat-1") == key
+
+    existing_key, existing_path = subagent_store.ensure_subagent_chat_history_entry(
+        registry,
+        agent_id="researcher",
+        agent_name="Renamed",
+        session_id="chat-1",
+        security_context="standard",
+        title="Changed",
+        history_dir=str(history_dir),
+        new_path=lambda: (_ for _ in ()).throw(AssertionError("must not allocate")),
+    )
+
+    assert (existing_key, existing_path) == (key, str(path))
+    assert len(registry) == 1
+
+
 def test_subagent_identity_helpers_and_app_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "subagents"
     (root / "researcher").mkdir(parents=True)

@@ -130,6 +130,7 @@ def test_runtime_task_request_for_agent_fields_and_fallbacks() -> None:
         approval_policy={"approval_required_for": []},
         output_contract={"format": "summary"},
         metadata={"key": "value"},
+        runtime_payload={"frozen_source": "must-not-persist"},
     )
 
     assert request.provider_id == "ohmypi"
@@ -139,6 +140,9 @@ def test_runtime_task_request_for_agent_fields_and_fallbacks() -> None:
     assert request.approval_policy == {"approval_required_for": []}
     assert request.output_contract == {"format": "summary"}
     assert request.metadata == {"key": "value"}
+    assert request.runtime_payload == {"frozen_source": "must-not-persist"}
+    assert "runtime_payload" not in request.to_record()
+    assert "must-not-persist" not in str(request.to_record())
 
     fallback = runtime_dispatch.runtime_task_request_for_agent(
         agent=LegacyTaskAgent(),

@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Owns Shuheng command/runtime protocol boundaries and OMP runtime contracts."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Requires search-first reuse before adding command helper logic."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Skill invocation crosses TUI input, command parsing, context pack metadata, and OMP runtime dispatch."}
-{"file": "docs/agent-harness-architecture.md", "reason": "Architecture baseline for Orchestrator-owned command boundaries and governed runtime protocols."}

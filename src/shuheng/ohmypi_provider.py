@@ -82,7 +82,38 @@ _FULL_APPROVAL_TOOL_MAP = {
     "web_search": {"web_search", "web.search"},
     "write": {"write", "repo.write"},
 }
+_FULL_PROMPTED_AUTO_APPROVE_TOOLS = frozenset({"edit", "todo", "write"})
 _OHMYPI_APPROVAL_MODES = {"always-ask", "write", "yolo"}
+_OHMYPI_FULL_PERMISSION_ALIASES = {"full", "all", "unrestricted"}
+OHMYPI_EXTRA_ENV_NAMES_VAR = "SHUHENG_OMP_INHERIT_ENV"
+_OHMYPI_MODEL_KEY_ENV_RE = re.compile(r"^SHUHENG_OMP_API_KEY_[A-Z0-9_]+$")
+_OHMYPI_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_OHMYPI_RUNTIME_ENV_NAMES = frozenset({
+    "COLORTERM",
+    "COMSPEC",
+    "BUN_INSTALL",
+    "FORCE_COLOR",
+    "HOME",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOGNAME",
+    "NO_COLOR",
+    "NODE_EXTRA_CA_CERTS",
+    "PATH",
+    "PATHEXT",
+    "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "WINDIR",
+})
 TOKEN_USAGE_KEYS = ("requests", "input", "output", "cache_create", "cache_read")
 MAX_INCOMPLETE_FINAL_CONTINUATIONS = 2
 INCOMPLETE_FINAL_NOTICE = (
@@ -137,7 +168,17 @@ def _normalize_context_usage(raw: Any) -> dict[str, int | float]:
 
 def normalized_ohmypi_approval_mode(value: str = "") -> str:
     raw = str(value or "").strip().lower().replace("_", "-")
-    return raw if raw in _OHMYPI_APPROVAL_MODES else "yolo"
+    return raw if raw in _OHMYPI_APPROVAL_MODES else "write"
+
+
+def governed_ohmypi_approval_mode(value: str = "", *, permission_profile: str = "standard") -> str:
+    """Apply the program-level two-key gate for OMP's prompt-free mode."""
+
+    mode = normalized_ohmypi_approval_mode(value)
+    profile = str(permission_profile or "standard").strip().lower().replace("-", "_")
+    if mode == "yolo" and profile not in _OHMYPI_FULL_PERMISSION_ALIASES:
+        return "write"
+    return mode
 
 
 class _TaskCounter:
@@ -285,7 +326,8 @@ class OhMyPiRuntimeConfig:
     default_model: str = ""
     config_path: str = ""
     models_path: str = ""
-    approval_mode: str = "yolo"
+    approval_mode: str = "write"
+    permission_profile: str = "standard"
 
 
 def ohmypi_runtime_root(harness_dir: str) -> str:
@@ -336,10 +378,27 @@ def ohmypi_subprocess_env(
     env_overrides: dict[str, str] | None = None,
     base_env: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    env = dict(os.environ if base_env is None else base_env)
+    source_env = os.environ if base_env is None else base_env
+    env = {
+        str(key): str(value)
+        for key, value in source_env.items()
+        if key in _OHMYPI_RUNTIME_ENV_NAMES or key.startswith("LC_")
+    }
+    requested_names = re.split(r"[\s,]+", str(source_env.get(OHMYPI_EXTRA_ENV_NAMES_VAR) or "").strip())
+    for key in requested_names[:64]:
+        if key and _OHMYPI_ENV_NAME_RE.fullmatch(key) and key in source_env:
+            env[key] = str(source_env[key])
+    home = str(env.get("HOME") or "").strip()
+    bun_install = str(env.get("BUN_INSTALL") or (os.path.join(home, ".bun") if home else "")).strip()
+    if bun_install:
+        bun_bin_dir = os.path.join(bun_install, "bin")
+        bun_binary = os.path.join(bun_bin_dir, "bun")
+        path_parts = [part for part in str(env.get("PATH") or "").split(os.pathsep) if part]
+        if os.path.isfile(bun_binary) and os.access(bun_binary, os.X_OK) and bun_bin_dir not in path_parts:
+            env["PATH"] = os.pathsep.join([bun_bin_dir, *path_parts])
     env["PI_CODING_AGENT_DIR"] = agent_dir
     for key, value in (env_overrides or {}).items():
-        if key:
+        if _OHMYPI_MODEL_KEY_ENV_RE.fullmatch(str(key or "")):
             env[str(key)] = str(value)
     return env
 
@@ -934,10 +993,37 @@ class OhMyPiRpcAgent:
         default_model: str | None = None,
     ) -> None:
         """Refresh the Shuheng-owned OMP model projection without importing app state."""
+        next_env = dict(env) if env is not None else self.env
+        next_command = list(command) if command is not None else self.command
+        next_models = list(models or [])
+        selected_before = self._selected_configured_model()
+        requested_default = str(default_model or "").strip()
+        runtime_changed = (
+            next_env != self.env
+            or next_command != self.command
+            or next_models != self.configured_models
+            or bool(requested_default and (selected_before is None or requested_default != selected_before.selector))
+        )
+        if runtime_changed:
+            with self._active_lock:
+                if self._active is not None and not self._active.finished:
+                    raise RuntimeError("cannot refresh OMP runtime configuration while a task is active")
+            process = self._process
+            self._process = None
+            self._ready.clear()
+            self._host_tools_registered = False
+            if process is not None:
+                try:
+                    stdin = getattr(process, "stdin", None)
+                    if stdin is not None:
+                        stdin.close()
+                except Exception:
+                    pass
+                self._terminate_process(process)
         if env is not None:
-            self.env = dict(env)
+            self.env = next_env
         if command is not None:
-            self.command = list(command)
+            self.command = next_command
         backend = getattr(self.llmclient, "backend", None)
         current_selector = (
             self.configured_models[self.llm_no].selector
@@ -948,7 +1034,7 @@ class OhMyPiRpcAgent:
         current_provider = str(getattr(backend, "provider", "") or "")
         current_model = str(getattr(backend, "model_id", "") or getattr(backend, "model", "") or "")
         current_base = str(getattr(backend, "apibase", "") or getattr(backend, "base_url", "") or "").rstrip("/")
-        self.configured_models = list(models or [])
+        self.configured_models = next_models
         self.llmclients = self._clients_from_models(self.configured_models)
         self.llm_no = self._model_index_for_selector(default_model or "")
         for idx, model in enumerate(self.configured_models):
@@ -1304,6 +1390,14 @@ class OhMyPiRpcAgent:
         except Exception:
             pass
         self._terminate_process(process)
+
+    def probe_runtime_ready(self, *, timeout: float | None = None) -> bool:
+        """Start the RPC process and prove a round-trip state request succeeds."""
+
+        if self._closed:
+            raise RuntimeError("Oh My Pi RPC agent is closed")
+        self._ensure_process()
+        return self.request_runtime_state(wait=True, timeout=timeout or self.startup_timeout)
 
     def _next_request_id(self, prefix: str) -> str:
         self._request_no += 1
@@ -2322,11 +2416,13 @@ class OhMyPiRpcAgent:
         if str(permissions.get("permission_profile") or "") != "full":
             return False, "permission_profile_not_full"
         prompt_text = "\n".join(str(frame.get(key) or "") for key in ("title", "message"))
-        if permissions.get("approval_required_for") and _APPROVAL_RISK_RE.search(prompt_text):
+        if _APPROVAL_RISK_RE.search(prompt_text):
             return False, "risky_tool_prompt"
         tool_name = self._approval_tool_name(frame)
         if not self._tool_allowed_by_permissions(tool_name, permissions):
             return False, f"tool_not_allowed:{tool_name or '<unknown>'}"
+        if tool_name not in _FULL_PROMPTED_AUTO_APPROVE_TOOLS:
+            return False, f"tool_requires_human_review:{tool_name}"
         return True, f"approved:{tool_name}"
 
     def _answer_extension_ui(self, frame: dict[str, Any]) -> None:
@@ -2611,18 +2707,39 @@ def _has_cli_flag(args: list[str], flag: str) -> bool:
     return any(item == flag or item.startswith(flag + "=") for item in args)
 
 
+def _without_cli_flag(args: list[str], flag: str) -> list[str]:
+    """Remove a canonical flag and its value from operator-supplied extras."""
+
+    cleaned: list[str] = []
+    skip_value = False
+    for item in args:
+        if skip_value:
+            skip_value = False
+            continue
+        if item == flag:
+            skip_value = True
+            continue
+        if item.startswith(flag + "="):
+            continue
+        cleaned.append(item)
+    return cleaned
+
+
 def resolve_ohmypi_binary(binary: str | None = None) -> str:
     explicit = str(binary or os.environ.get("SHUHENG_OHMYPI_BIN") or "").strip()
     if explicit:
         return explicit
+    bun_install = str(os.environ.get("BUN_INSTALL") or os.path.join(os.path.expanduser("~"), ".bun")).strip()
+    candidates = [os.path.join(bun_install, "bin", "omp")]
+    default_candidate = os.path.join(os.path.expanduser("~"), ".bun", "bin", "omp")
+    if default_candidate not in candidates:
+        candidates.append(default_candidate)
+    for candidate in candidates:
+        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     discovered = shutil.which("omp")
     if discovered:
         return discovered
-    for candidate in (
-        os.path.join(os.path.expanduser("~"), ".bun", "bin", "omp"),
-    ):
-        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
-            return candidate
     return "omp"
 
 
@@ -2632,11 +2749,21 @@ def ohmypi_rpc_command(
     append_system_prompt: str | None = None,
     model: str | None = None,
     approval_mode: str | None = None,
+    permission_profile: str | None = None,
 ) -> list[str]:
     binary = resolve_ohmypi_binary(binary)
     env_args = shlex.split(os.environ.get("SHUHENG_OHMYPI_ARGS", ""))
-    appended_args = list(extra_args or env_args)
-    approval_mode = normalized_ohmypi_approval_mode(approval_mode or os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "yolo")
+    appended_args = _without_cli_flag(list(extra_args or env_args), "--approval-mode")
+    permission_profile = (
+        permission_profile
+        or os.environ.get("SHUHENG_OMP_PERMISSION_PROFILE")
+        or os.environ.get("SHUHENG_DEFAULT_PERMISSION_PROFILE")
+        or "standard"
+    )
+    approval_mode = governed_ohmypi_approval_mode(
+        approval_mode or os.environ.get("SHUHENG_OMP_APPROVAL_MODE") or "write",
+        permission_profile=permission_profile,
+    )
     args = [
         binary,
         "--mode",
@@ -2792,7 +2919,11 @@ def ohmypi_provider_spec(
     command: list[str] | None = None,
     runtime_config: OhMyPiRuntimeConfig | None = None,
 ) -> RuntimeProviderSpec:
-    command = list(command or ohmypi_rpc_command(binary=binary))
+    command = list(command or ohmypi_rpc_command(
+        binary=binary,
+        approval_mode=runtime_config.approval_mode if runtime_config else None,
+        permission_profile=runtime_config.permission_profile if runtime_config else None,
+    ))
     executable = command[0]
     exists = shutil.which(executable) is not None if os.path.sep not in executable else os.path.exists(executable)
     return RuntimeProviderSpec(
@@ -2848,7 +2979,8 @@ def ohmypi_provider_spec(
         policy={
             "approval_gate_owner": "shuheng.policy",
             "tool_permissions": "tui_readonly_and_governed_proposal_tools_only",
-            "runtime_tool_approval_mode": runtime_config.approval_mode if runtime_config else "yolo",
+            "runtime_tool_approval_mode": runtime_config.approval_mode if runtime_config else "write",
+            "child_environment": "runtime_allowlist_plus_explicit_named_opt_in",
             "memory_write": "candidate_only",
             "risky_actions": ["deploy", "external_send", "delete_file", "spend_money", "access_secret"],
         },
@@ -2871,7 +3003,9 @@ def ohmypi_provider_spec(
             "Shuheng memory guidance is injected through --append-system-prompt.",
             "Shuheng emits provider-neutral runtime.task_request.v1 and runtime.task_event.v1 records around OMP execution.",
             "Oh My Pi completion text can emit memory candidate signals; TUI remains the approval owner.",
-            "Default isolated OMP approval mode is yolo: runtime tools run without OMP approval prompts inside the Shuheng-owned isolated agent directory.",
+            "Default isolated OMP approval mode is write: write-capable runtime tools require OMP approval; always-ask is also supported.",
+            "The yolo approval mode is available only through an explicit operator override.",
+            f"Additional inherited child environment names require explicit {OHMYPI_EXTRA_ENV_NAMES_VAR} opt-in.",
             "Only app-injected TUI query, typed read-only, and governed proposal host tools are enabled; unrestricted host tools, host URI schemes, and direct TUI approval mapping stay disabled.",
             f"runtime_root={root_dir}",
             f"harness_dir={harness_dir}",
@@ -2885,8 +3019,10 @@ __all__ = [
     "OhMyPiRuntimeAdapter",
     "OhMyPiRuntimeConfig",
     "OhMyPiRuntimeModel",
+    "OHMYPI_EXTRA_ENV_NAMES_VAR",
     "RuntimeEventSink",
     "build_ohmypi_memory_prompt",
+    "governed_ohmypi_approval_mode",
     "normalized_ohmypi_approval_mode",
     "ohmypi_config_path",
     "ohmypi_isolated_agent_dir",

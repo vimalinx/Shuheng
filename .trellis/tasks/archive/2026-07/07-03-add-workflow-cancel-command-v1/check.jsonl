@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for verification context."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify implementation preserves workflow command and Orchestrator/ledger contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for check phase."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify new helper code reused existing workflow status patterns where appropriate."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify end-to-end command/state/ledger/test consistency."}
-{"file": ".trellis/tasks/07-03-add-workflow-cancel-command-v1/research/workflow-cancel-patterns.md", "reason": "Verify v1 implementation stays within researched cancellation boundary."}

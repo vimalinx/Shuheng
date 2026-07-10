@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for runtime-provider implementation."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Provider boundary and control-plane contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicating runtime adapter patterns."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Runtime provider spans process, registry, queue, and TUI boundaries."}
-{"file": ".trellis/tasks/06-11-research-ohmypi-integration/research/integration-analysis.md", "reason": "Oh My Pi RPC integration research and phased plan."}

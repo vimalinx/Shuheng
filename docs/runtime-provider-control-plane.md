@@ -1,8 +1,13 @@
 # Runtime Provider Control Plane
 
-Shuheng is an OhMyPi/OMP-centered local agent control plane. The TUI owns
-orchestration and governance; concrete agent systems plug in as runtime
-providers.
+Shuheng is an OhMyPi/OMP-anchored local agent control plane. OMP is the
+permanent strong main/general Agent and the default conversational entry for
+general reasoning, decomposition, and synthesis. The TUI also permits an
+operator to start an explicit governed Agent Project assignment directly; that
+manual path records and injects the result into OMP context but does not promise
+an automatic OMP synthesis turn. The TUI/control plane owns governance and
+durable state; bounded worker systems plug in as runtime providers. A worker
+provider is not a replacement candidate for the OMP base layer.
 
 ## Ownership
 
@@ -16,10 +21,18 @@ The TUI owns these top-level responsibilities:
 - Scheduled task registry and recurring dispatch through governed `agenttask.v2` delegation.
 - Local protocol-shaped records for agent/tool discovery metadata.
 
-The current public posture is experimental local alpha. Shuheng does not ship a
-built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; those
-surfaces are archived product directions. A2A/MCP-shaped data is local registry
-metadata only, not a certified reachable protocol surface.
+OMP owns the main conversational and Orchestrator role inside those control
+boundaries. The `ohmypi` provider therefore remains both permanent and the
+default. Pi-native is a separate, experimental worker path for user-authored
+Agent Projects. It can execute an explicit assignment, but it cannot become the
+main session or grant itself declared runtime authority. Shuheng governs task
+admission, ledgers, and normal control-plane APIs. An explicitly authorized
+custom Tool is trusted host code and is not contained by those API-level claims;
+the unsandboxed boundary is documented below.
+
+The current public posture is experimental local alpha. The supported surfaces
+are the local curses TUI, local JSONL stdio gateway, Agent Mail, and resource
+registries. A2A/MCP-shaped data is local registry metadata.
 
 Runtime providers own narrow execution:
 
@@ -27,6 +40,16 @@ Runtime providers own narrow execution:
 - Run with declared tools, permissions, and model settings.
 - Stream events or return a final result.
 - Expose artifact refs, status, and interrupt support.
+
+The resulting topology is intentionally hierarchical:
+
+```text
+User -> Shuheng TUI/control plane -> permanent OMP main Agent
+                                      -> governed assignment
+                                         -> bounded Pi-native Agent Project worker
+```
+
+This is an Orchestrator-worker system, not a peer chat mesh or unbounded swarm.
 
 Agent clients that are not launched directly by the TUI, such as OMP plugins,
 Codex adapters, or Claude Code adapters, must use a Shuheng-owned bridge instead
@@ -36,11 +59,13 @@ context retrieval and governed proposal submission while keeping approvals,
 memory, schedules, artifacts, and traces in the TUI control plane.
 
 For external agents that need a long-lived local gateway, Shuheng exposes
-`shuheng-agent-gateway` / `python -m shuheng.agent_bridge`. It is a JSONL stdio
-gateway, not a Web/HTTP server. `register` writes the local registration record,
-`serve --stdio` keeps the process alive, `agent-directory` exposes purpose-only
-agent discovery, `message-send` dispatches through the Orchestrator-owned
-subagent task path, and `task-status` reads ledger status.
+`shuheng-agent-gateway`. It is the public JSONL stdio gateway; the
+`shuheng-agent-bridge` command and `python -m shuheng.agent_bridge` are trusted
+internal integration surfaces and must not be handed to an untrusted client.
+`register` writes the local registration record, `serve --stdio` keeps
+the process alive, `agent-directory` exposes purpose-only agent discovery,
+`message-send` dispatches through the Orchestrator-owned subagent task path, and
+`task-status` reads ledger status.
 
 `shuheng install-agent-gateway-skill` installs Shuheng's bundled
 `shuheng-agent-gateway` skill into the shared local skill root. That skill is an
@@ -66,6 +91,13 @@ data under `~/.shuheng`:
 - `temp/subagents/`: temporary/session-bound subagents.
 - `memory/secret_vault/`: encrypted Secret Vault state, including encrypted Secret subagent chat history that cannot be copied into normal plaintext history.
 - `memory/agent_harness/runtime/ohmypi/agent`: isolated OMP config, models, and active `PI_CODING_AGENT_DIR`.
+- `agent_projects/<project-id>/`: user-owned Agent Project source. These are
+  normal editable files and remain visible to Git, external editors, and the TUI
+  workspace; they are not duplicated into an opaque authoring database.
+- `memory/agent_harness/runtime/pi-native/`: Pi-native adapter control state only.
+  Each task gets a fresh sidecar process and a mode-`0700` operating-system
+  temporary directory; frozen Prompt, Skill, and Tool materialization is removed
+  before the terminal result is delivered.
 
 `SHUHENG_HOME` overrides the whole Shuheng-owned storage root. Targeted test or
 bridge runs may override `SHUHENG_HARNESS_DIR` or `SHUHENG_SECRET_VAULT_DIR`,
@@ -82,8 +114,8 @@ skipped, and the source tree is left untouched. The marker is
 
 ## Runtime Task Boundary
 
-New OMP-first orchestration paths use provider-neutral task records before they
-cross into any concrete runtime:
+Governed orchestration paths use provider-neutral task records before they cross
+into any concrete runtime:
 
 - `runtime.task_request.v1`: `task_id`, `parent_task_id`, `provider_id`,
   `agent_id`, `role`, `objective`, `source`, `prompt_preview`, `prompt_chars`,
@@ -96,20 +128,82 @@ cross into any concrete runtime:
   `runtime_host_tool_result`, `runtime_task_completed`,
   `runtime_task_failed`, and `runtime_task_aborted`.
 
+The request also has a transient in-memory `runtime_payload` for provider inputs
+that must not be copied into the durable task row. Pi-native dispatch uses this
+channel for the frozen `shuheng.agent_build.v1` and
+`shuheng.agent_run_manifest.v1` records. `RuntimeTaskRequest.to_record()` omits
+the payload, so Prompt, Skill, and Tool source bytes do not leak into task
+metadata or ordinary trace rows. Durable records retain the build digest,
+causation, and Shuheng-owned artifact refs; a provider must never reopen mutable
+Agent Project source to reconstruct an already-started run.
+
 For OMP, the request prompt can include a generated Shuheng context pack. The
 context pack is written as a harness artifact under `context_packs/` and passed
 by reference in the request. OMP may consume the pack and submit candidates or
 proposals, but long-term memory, approvals, task ledgers, and schedule registries
 remain Shuheng-owned.
 
-OMP main-runtime context packs use a Shuheng permission profile. The default is
-`full`, so the main OMP assistant can advertise practical read/write/search/bash/
-browser/eval/task capabilities instead of behaving like a read-only
-`specialist`. The main OMP runtime role is `main_orchestrator`; role-bounded
-subagent context packs stay on `standard` unless a caller explicitly selects
-another profile. Operators can force compatibility mode with
-`SHUHENG_OMP_PERMISSION_PROFILE=read_only` or set a process-wide default with
-`SHUHENG_DEFAULT_PERMISSION_PROFILE`.
+OMP main-runtime context packs use a Shuheng permission profile. The main role
+remains `main_orchestrator`, but its public default is `standard`; role-bounded
+subagents also default to `standard`. Operators can select
+`SHUHENG_OMP_PERMISSION_PROFILE=read_only` for a narrower context or explicitly
+opt into `SHUHENG_OMP_PERMISSION_PROFILE=full` when broad local host authority
+is intended. A missing or malformed value must fail back to `standard`, never
+to the broad profile.
+
+## Agent Project Boundary
+
+An Agent Project is the local, user-editable definition of one task-oriented
+worker. Its authoring source is a directory of ordinary files. The MVP exposes:
+
+- `shuheng.agent_project.v1`: project identity, entry Blueprint, default runtime,
+  runtime revision constraint, and optional test refs.
+- `shuheng.agent_blueprint.v1`: Prompt, Skills, explicit project-local Tools,
+  requested capabilities, delegation limits, budget, and output contract.
+- `shuheng.agent_build.v1`: deterministic, content-addressed snapshot of every
+  referenced source blob, including path, role, size, SHA-256, and frozen bytes.
+- `shuheng.agent_run_manifest.v1`: assignment and causation refs, Build digest,
+  provider revision, workspace, budget/output contract, and resolved authority.
+
+The Build is the execution input. Editing Prompt, Skill, or Tool source changes
+the next Build digest but cannot mutate a Build already dispatched. Paths are
+validated inside the project root; undeclared files and mutable source paths are
+not runtime inputs.
+
+Authoring authority and execution authority are deliberately different. A
+Blueprint can request capabilities and Tool IDs, the control plane can grant a
+bounded set for a particular assignment, and only the intersection is effective:
+
+```text
+requested ∩ granted = effective
+```
+
+A project-local Tool is executable code. It must be declared in the Blueprint,
+captured by the Build digest, explicitly granted in the Run Manifest, and loaded
+from digest-verified frozen bytes inside a per-run temporary directory. The
+human Tool grant and the task policy approval are separate gates, and both remain
+bound to the confirmed Build digest through approval and queueing. A Skill
+is an inert prompt/resource until the selected worker loads it. An OMP plugin is
+an extension of the permanent OMP runtime and remains behind the OMP/Shuheng
+plugin bridge; it is not an Agent Project Skill, Tool grant, or new owner of
+state. Full Pi Extension/Hook lifecycles and arbitrary MCP discovery remain
+outside this MVP.
+
+The local authoring loop is create, fork, edit, validate/build, and run. The TUI
+offers a minimal single-file Agent Project workspace while the same files remain
+editable through the filesystem, Git, or an external editor. The embedded editor
+provides a project/file view, cursor editing, dirty state, save, undo, diagnostics,
+and external-change conflict protection. It is not an IDE: multi-tab editing,
+completion, LSP, debugging, and an embedded terminal are not part of the current
+contract. Import, export, publishing, package distribution, and a marketplace are
+also not part of the local MVP.
+
+Every Agent Project assignment is admitted through `/agent-project run`, which
+shows and binds the current frozen Build digest. Generic `/agent ask`, scheduler,
+and recovery-retry lanes cannot execute a Project without that confirmation
+token. Because frozen bytes are transient, an old Project task cannot be replayed
+from mutable current source; recovery directs the operator through a new Build
+confirmation instead.
 
 ## Provider Contract
 
@@ -123,10 +217,21 @@ Provider metadata must include:
 - `model_routing`: Whether the provider supports current-session switching, defaults, per-agent defaults, and how model selection is addressed.
 - `scheduler`: How scheduled jobs dispatch into the provider, normally through `agenttask.v2`.
 - `policy`: Approval owner, memory write policy, and risky action classes.
-- `a2a` / `mcp`: Local protocol-shaped metadata, not HTTP endpoints.
+- `a2a` / `mcp`: Local protocol-shaped metadata over Agent Mail and resources.
 
-The default provider is `ohmypi`. Optional provider adapters may register only
-after their required checkout or binary is explicitly available.
+The default provider is permanently `ohmypi`. An optional provider specification
+may remain discoverable while reporting itself unavailable, but its adapter may
+launch only when the required sidecar/binary and dependency revision are
+available. Registration never makes a worker eligible for the main session.
+
+The `pi-native` provider is limited to Agent Project worker assignments. Its
+Python adapter speaks normalized runtime events over a JSONL stdio sidecar. The
+repo-managed sidecar pins the upstream `@earendil-works/pi-coding-agent` SDK,
+disables implicit Extension, Prompt, context-file, Theme, and global/project
+Skill discovery, and supplies only Build-resolved resources and effective Tools.
+It must not read ambient `~/.pi`, `~/.omp`, or project-ancestor configuration.
+Every assignment starts a fresh sidecar process, so imported Tool globals,
+listeners, SDK mutations, and module caches cannot cross into the next Build.
 
 OMP provider metadata must advertise `tui_typed_host_tools`,
 `runtime_task_requests`, and `runtime_task_events` when the app-layer bridge is
@@ -134,11 +239,23 @@ installed. Unrestricted provider host tools stay disabled; only Shuheng-injected
 read-only and governed proposal tools are allowed.
 
 The isolated OMP config generated by Shuheng defaults `tools.approvalMode` to
-`yolo`, so runtime tools run without OMP approval prompts inside the Shuheng-owned
-runtime directory under `~/.shuheng/memory/agent_harness/runtime/ohmypi/agent`.
-The main `permission_profile:full` context carries no runtime
-tool-deny list and no runtime approval-required list. Operators can still force a
-narrower OMP mode with `SHUHENG_OMP_APPROVAL_MODE=always-ask|write|yolo`.
+`write`. Combined with the default `standard` permission profile, write-capable
+runtime Tools fail closed unless the operator chooses the required authority.
+`always-ask` remains available; `full` plus `yolo` is an explicit expert opt-in
+through `SHUHENG_OMP_PERMISSION_PROFILE=full` and
+`SHUHENG_OMP_APPROVAL_MODE=yolo`. A lone `yolo` request is downgraded to
+`write`; `full + write/always-ask` may auto-admit only bounded local edit/write
+Tools. Shell, browser, eval, task, unknown, and textually high-risk prompts fail
+closed at the program-level gate.
+
+The OMP subprocess receives a narrow runtime environment rather than a copy of
+the host process environment. Shuheng supplies the isolated agent directory,
+basic process/locale/certificate variables, and generated
+`SHUHENG_OMP_API_KEY_*` values. Proxy settings, enterprise variables, or other
+named values require explicit `SHUHENG_OMP_INHERIT_ENV=NAME_A,NAME_B` opt-in;
+the variable names are inherited, but the allowlist directive itself is not
+forwarded to OMP.
+
 OMP binary discovery is `SHUHENG_OHMYPI_BIN`, then `PATH` lookup for `omp`, then
 the user-local Bun install at `$HOME/.bun/bin/omp`; Shuheng does not mutate shell
 startup files to make this work.
@@ -148,8 +265,11 @@ ends because of tool use, Shuheng waits for the later final assistant message or
 `agent_end` before releasing the active prompt, so folded tool output does not
 replace the visible final reply.
 
-OMP remains the execution kernel for the agent loop, tool loop, retry,
-compaction, plugin execution, session lifecycle, and native subagent lifecycle.
+OMP remains the execution kernel for the permanent main/general Agent and for
+OMP's own agent loop, tool loop, retry, compaction, plugin execution, session
+lifecycle, and native subagent lifecycle. A Pi-native worker has its own bounded
+SDK session behind the provider contract; this does not transfer main-Agent or
+control-plane ownership to Pi.
 Shuheng exposes OMP native RPC output/control surfaces such as
 `set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, and
 `extension_ui_request` observability through the provider adapter. These surfaces
@@ -173,6 +293,9 @@ Runtime and top-level control metadata are exposed through:
   TUI/control-plane projection for local operator inspection.
 - `shuheng-control.v2` schedule actions: `schedule.create`, `schedule.update`, `schedule.enable`, `schedule.disable`, and `schedule.delete`.
 - `capability_registry.runtime_providers`: Provider details available to query tools.
+- Agent Project records: local project/Blueprint source compiles to immutable
+  Build and Run Manifest records before `pi-native` dispatch. Runtime metadata
+  exposes project identity and Build digest, not editable source bytes.
 - A2A-shaped agent cards: discovered role templates and visible subagents
   advertise local `agent-mail://inbox` delivery with `auto_dispatch:false`.
 - Local Agent Mail intake helpers can record messages into Agent Mail, the task
@@ -181,9 +304,10 @@ Runtime and top-level control metadata are exposed through:
   Shuheng Orchestrator/TUI.
 - Local persistent gateway registration: `agentgateway.registration.v1` at
   `gateway_registration.json` records `shuheng.local` as a local JSONL stdio
-  gateway. It may expose `message-send` and `task-status` over the bridge CLI,
-  but it must not open sockets, expose HTTP routes, or leak context/permission
-  internals in public discovery.
+  gateway. It exposes `message-send` and `task-status` through
+  `shuheng-agent-gateway`, which returns only positive
+  purpose/routing/status projections
+  and excludes context, permission, approval-payload, trace, and local-path internals.
 - OMP host tools: compatibility aliases `shuheng_query` / `shuheng_propose` plus
   typed tools such as `agent_list`, `task_get`, `schedule_list`,
   `memory_context_get`, `runtime_subagent_list`,
@@ -203,7 +327,8 @@ Runtime and top-level control metadata are exposed through:
 - MCP resources: `resource://agent-mail/runtime-providers`,
   `resource://agent-mail/schedules`, and
   `resource://agent-mail/schedule-runs`.
-- TUI commands: `/runtimes`, `/schedules`, and `/scheduler`.
+- TUI commands: `/runtimes`, `/schedules`, and `/scheduler`, plus the local Agent
+  Project workspace and create/fork/build/run actions.
 - TUI runtime output view: `/runtime-output` formats the same OMP-native
   runtime subagent query helpers as an operator-readable, read-only snapshot.
 - Release readiness: `src/shuheng/release_readiness.py` exposes stable local
@@ -224,16 +349,15 @@ Runtime and top-level control metadata are exposed through:
   approval for high-risk actions.
 - Do not describe A2A/MCP-shaped records as certified protocol implementations
   or reachable endpoints.
-- Do not reintroduce a built-in Web Console, HTTP gateway, mobile endpoint, or
-  remote endpoint without a new explicit product decision. The supported
-  gateway path is local JSONL stdio, not Web/HTTP.
+- Keep the gateway path on the local JSONL stdio contract owned by the
+  Orchestrator.
 - Do not let local Agent Mail message intake become a hidden executor. External
   adapter messages are inbox entries and ledger facts until the Orchestrator/TUI
   decides what to run.
 - Do not expose broad project context, active specs, memory paths, workflow run
   internals, or full permission matrices to external agents by default. External
   discovery should describe what each agent/role is for and how to message it.
-- Do not include local harness paths, daemon pid/status/log paths, push-store
+- Do not include local harness paths, process pid/status/log paths, delivery-store
   JSONL paths, or local skill/plugin filesystem paths in adapter-facing
   discovery records.
 - Do not create phantom message targets. Agent Mail intake targets must resolve
@@ -241,9 +365,70 @@ Runtime and top-level control metadata are exposed through:
 - Do not list Secret Vault subagents from stateless plaintext metadata. Secret
   subagents require the unlocked TUI state boundary.
 - Keep provider selection explicit and reversible; Shuheng defaults to `ohmypi`.
+- Keep OMP as the permanent strong main/general Agent. Pi-native may run only an
+  explicit bounded worker assignment and must never silently replace the main
+  conversation provider.
+- Treat Agent Project files as user-owned authoring source, not runtime grants.
+  User editability must not imply automatic filesystem, network, Tool, Secret,
+  memory, or control-plane authority.
+- Freeze all declared Prompt, Skill, and Tool bytes before dispatch. A provider
+  must execute the frozen Build and must not reopen mutable project source during
+  the run.
+- Keep requested, granted, and effective capabilities and Tools distinct. A
+  Blueprint request is never a grant, and a grant outside the declared Build is
+  invalid.
+- Do not implicitly discover global Pi resources, OMP resources, Extensions,
+  Hooks, Skills, Prompts, context files, or MCP servers for a Pi-native run.
 - Do not make an OMP plugin a new memory owner. Plugin tools may read context and
   submit memory candidates; Shuheng validates, queues approvals, writes durable
   rows, and records provenance.
+
+## Known Gaps And Non-Goals
+
+- The current proof is a local operator-driven create/fork/edit/build/run loop.
+  General automatic OMP planning and policy-based routing into arbitrary Agent
+  Projects is not yet a complete product surface.
+- A source checkout or installed wheel ships the sidecar source and pinned
+  `package.json`, not `node_modules`. Until Node >= 22.19 and
+  `@earendil-works/pi-coding-agent@0.80.6` are installed beside the sidecar, the
+  optional Provider reports `missing_package`; OMP remains available.
+- Pi-native runs do not provide transparent provider parity with OMP. OMP and Pi
+  Session, Extension, Tool, retry, compaction, and event semantics may differ.
+- Pi-native worker sessions are not migrated to or from OMP sessions. Durable
+  recovery currently relies on Shuheng task, artifact, trace, and checkpoint
+  records rather than cross-provider session restore.
+- Busy-worker queue contents remain process-local in this MVP. Approved tasks do
+  receive a durable `queued` ledger/checkpoint/trace row, but a host restart does
+  not reconstruct the prompt queue; the operator must confirm a new Build run.
+- Agent Project workers currently use only the standard governed task lane.
+  Secret Vault execution and unledgered direct chat are deliberately blocked.
+- A granted project-local Tool is trusted local Node code. The MVP verifies and
+  freezes its bytes, binds the executable grant to one Build, strips unrelated
+  host credentials from the sidecar environment, and destroys the fresh process
+  and temporary source after the run. It does not yet provide an OS-level
+  syscall/filesystem/network sandbox inside that run. Capability intersection
+  controls whether the Tool is loaded; it is not a syscall policy. Run only
+  locally authored Tool source you trust. A hard-killed host may leave a
+  best-effort-cleaned temporary directory until normal OS temp cleanup.
+- Frozen Build bytes are intentionally transient in this privacy-first MVP.
+  Durable rows keep the digest, Run Manifest, causation, and result artifacts,
+  but not a replayable source bundle or Git commit. If the authoring files later
+  change, an old run remains auditable by identity but cannot be reconstructed
+  from Shuheng state alone. Recovery retry therefore requires a new
+  `/agent-project run` confirmation. Content-addressed encrypted Build retention
+  and true Build replay remain future work.
+- The embedded editor deliberately lacks multi-tab editing, completion, LSP,
+  debugging, and an embedded terminal.
+- Agent Project import/export, template publishing, dependency packaging,
+  upgrades, signatures, trust distribution, and a marketplace are not present.
+- Full Pi Extension/Hook support and arbitrary third-party MCP auto-discovery are
+  not present. Project-local executable Tools remain the only Pi-native
+  executable authoring surface in this slice.
+- Agent Project execution and A2A/MCP-shaped records remain local to the
+  Shuheng control plane.
+- Unbounded recursive worker spawning and peer-to-peer Agent swarms are not a
+  goal. The strong OMP Orchestrator and Shuheng governance boundary remain
+  mandatory.
 
 ## Next Providers
 

@@ -5,21 +5,27 @@ include SECURITY.md
 include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include CHANGELOG.md
+include THIRD_PARTY_NOTICES.md
 include pyproject.toml
 recursive-include docs *.md
 exclude docs/foreign-student-acquisition-research.md
 exclude docs/homework-pricing-research.md
 recursive-include integrations/omp-shuheng-plugin *.md *.json *.ts
+recursive-include integrations/pi-native-sidecar *.md *.json *.mjs
+prune integrations/pi-native-sidecar/node_modules
 recursive-include src/shuheng/builtin_plugins *.json
 recursive-include src/shuheng/builtin_skills *.md *.yaml
 recursive-include tests *.py
 include scripts/check_policy_gates.py
 include scripts/check_release_hygiene.py
+include scripts/install.sh
 include scripts/release_scan_rules.py
 include scripts/runtime_smoke.py
 include scripts/dogfood_stdio_gateway.py
 include scripts/wheel_smoke.py
 prune .codex
+prune .agents
+prune .claude
 prune .pytest_cache
 prune .trellis
 prune _knowledge_base
@@ -29,6 +35,9 @@ prune references
 prune temp
 prune tmp
 prune goal-*
+exclude mykey.py
+exclude mykey.py.bak-*
+exclude mykey.py.tmp-*
 global-exclude __pycache__
 global-exclude *.py[cod]
 global-exclude *.secret

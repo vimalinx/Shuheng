@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def local_protocol_base_uri(host: str, port: int) -> str:
+def local_protocol_base_uri() -> str:
     return "local://shuheng"
 
 
@@ -28,7 +28,6 @@ def mcp_resource_registry(paths: dict[str, str]) -> list[dict[str, Any]]:
 
 def local_protocol_service_descriptor(
     *,
-    bind_safety: dict[str, Any],
     persistent_gateway: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gateway = persistent_gateway or {}
@@ -46,27 +45,15 @@ def local_protocol_service_descriptor(
     return {
         "schema_version": "agentgateway.service.v1",
         "status": "local_persistent_stdio_gateway" if gateway else "local_record_only",
-        "bind": {"host": "", "port": 0},
-        "base_url": "",
-        "security": bind_safety,
         "release_posture": "experimental_alpha",
         "transport": "local-jsonl-stdio" if gateway else "local-record",
         "request_response": request_response,
-        "sse": {
-            "enabled": False,
-            "endpoint": "",
-            "event_sources": [],
-        },
-        "push_notifications": {
-            "enabled": False,
-            "subscribe_endpoint": "",
-            "test_endpoint": "",
-            "default_endpoint_policy": "not_available_without_external_adapter",
-            "auth": "none",
-        },
-        "daemon": {
+        "stdio": {
+            "framing": "jsonl",
+            "input": "stdin",
+            "output": "stdout",
             "commands": gateway.get("commands") or [],
-            "state": gateway.get("state") or {"schema_version": "agentgateway.daemon.v1", "status": "removed", "alive": False},
-            "transport": gateway.get("transport") or "none",
+            "state": gateway.get("state")
+            or {"schema_version": "agentgateway.runtime.v1", "status": "local_record_only"},
         },
     }

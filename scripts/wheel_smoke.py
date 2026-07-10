@@ -65,15 +65,22 @@ SDIST_REQUIRED_MEMBERS = (
     "README.en.md",
     "README.md",
     "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
     "docs/agent-harness-architecture.md",
+    "docs/development/index.md",
     "docs/install.md",
     "docs/runtime-provider-control-plane.md",
     "integrations/omp-shuheng-plugin/README.md",
     "integrations/omp-shuheng-plugin/package.json",
     "integrations/omp-shuheng-plugin/tools/index.ts",
+    "integrations/pi-native-sidecar/README.md",
+    "integrations/pi-native-sidecar/package-lock.json",
+    "integrations/pi-native-sidecar/package.json",
+    "integrations/pi-native-sidecar/sidecar.mjs",
     "pyproject.toml",
     "scripts/check_policy_gates.py",
     "scripts/check_release_hygiene.py",
+    "scripts/install.sh",
     "scripts/release_scan_rules.py",
     "scripts/runtime_smoke.py",
     "scripts/wheel_smoke.py",
@@ -82,6 +89,12 @@ SDIST_REQUIRED_MEMBERS = (
     "src/shuheng/builtin_plugins/shuheng-examples/plugin.json",
     "src/shuheng/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
     "src/shuheng/app.py",
+    "src/shuheng/agent_editor.py",
+    "src/shuheng/agent_project_workspace.py",
+    "src/shuheng/agent_projects.py",
+    "src/shuheng/pi_native_provider.py",
+    "src/shuheng/runtime_setup.py",
+    "src/shuheng/subagent_task_dispatch.py",
     "src/shuheng.egg-info/PKG-INFO",
     SDIST_SOURCES_MEMBER,
     "src/shuheng.egg-info/entry_points.txt",
@@ -103,33 +116,51 @@ SDIST_FORBIDDEN_MEMBERS = (
 )
 
 SDIST_FORBIDDEN_PREFIXES = (
+    ".agents/",
+    ".claude/",
     ".codex/",
     ".trellis/",
     "_knowledge_base/",
     "config/",
     "goal-",
+    "integrations/pi-native-sidecar/node_modules/",
     "memory/",
     "references/",
     "temp/",
     "tmp/",
 )
 
+SDIST_FORBIDDEN_ROOT_MEMBERS = ("mykey.py",)
+SDIST_FORBIDDEN_ROOT_PREFIXES = (
+    ".mykey.py.",
+    "mykey.py.bak-",
+    "mykey.py.temp",
+    "mykey.py.tmp",
+)
+
 WHEEL_REQUIRED_PACKAGE_MEMBERS = (
     "shuheng/__init__.py",
     "shuheng/__main__.py",
+    "shuheng/agent_editor.py",
+    "shuheng/agent_project_workspace.py",
+    "shuheng/agent_projects.py",
     "shuheng/app.py",
     "shuheng/builtin_skills/shuheng-agent-gateway/SKILL.md",
     "shuheng/builtin_skills/shuheng-agent-gateway/agents/openai.yaml",
     "shuheng/builtin_plugins/shuheng-examples/plugin.json",
     "shuheng/builtin_plugins/shuheng-examples/workflows/daily-briefing.json",
     "shuheng/integration.py",
+    "shuheng/pi_native_provider.py",
+    "shuheng/runtime_setup.py",
+    "shuheng/subagent_task_dispatch.py",
     "shuheng/release_readiness.py",
 )
 
-WHEEL_FORBIDDEN_PACKAGE_MEMBERS = (
-    "shuheng/gateway_registry.py",
-    "shuheng/web_console.py",
-    "shuheng/web_console_static.py",
+WHEEL_REQUIRED_DATA_MEMBERS = (
+    "share/shuheng/pi-native-sidecar/README.md",
+    "share/shuheng/pi-native-sidecar/package.json",
+    "share/shuheng/pi-native-sidecar/package-lock.json",
+    "share/shuheng/pi-native-sidecar/sidecar.mjs",
 )
 
 WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
@@ -139,6 +170,11 @@ WHEEL_REQUIRED_DIST_INFO_MEMBERS = (
     "top_level.txt",
     "RECORD",
     "licenses/LICENSE",
+)
+
+PUBLIC_ALPHA1_WHEEL_URL = (
+    "https://github.com/vimalinx/Shuheng/releases/download/"
+    "v0.1.0-alpha.1/shuheng-0.1.0-py3-none-any.whl"
 )
 
 
@@ -162,6 +198,12 @@ def venv_python(venv_dir: Path) -> Path:
     if not candidate.is_file():
         raise FileNotFoundError(f"venv python not found: {candidate}")
     return candidate
+
+
+def create_isolated_venv(venv_dir: Path) -> None:
+    """Use symlinks on POSIX so uv standalone interpreters keep a valid base prefix."""
+
+    venv.EnvBuilder(with_pip=True, clear=True, symlinks=os.name != "nt").create(venv_dir)
 
 
 def venv_script(venv_dir: Path, name: str) -> Path:
@@ -348,13 +390,27 @@ def normalized_sdist_file_members(sdist: Path) -> set[str]:
     return normalized
 
 
+def is_forbidden_private_member(member: str) -> bool:
+    parts = PurePosixPath(member).parts
+    basename = parts[-1] if parts else ""
+    return (
+        member in SDIST_FORBIDDEN_MEMBERS
+        or member in SDIST_FORBIDDEN_ROOT_MEMBERS
+        or member.startswith(SDIST_FORBIDDEN_PREFIXES)
+        or member.startswith(SDIST_FORBIDDEN_ROOT_PREFIXES)
+        or any(part in {".agents", ".claude", ".codex", ".trellis"} for part in parts)
+        or basename in SDIST_FORBIDDEN_ROOT_MEMBERS
+        or basename.startswith(SDIST_FORBIDDEN_ROOT_PREFIXES)
+    )
+
+
 def sdist_archive_contract_check(sdist: Path) -> dict[str, object]:
     members = normalized_sdist_members(sdist)
     missing = sorted(member for member in SDIST_REQUIRED_MEMBERS if member not in members)
     forbidden = sorted(
         member
         for member in members
-        if member in SDIST_FORBIDDEN_MEMBERS or member.startswith(SDIST_FORBIDDEN_PREFIXES)
+        if is_forbidden_private_member(member)
     )
     if missing or forbidden:
         details = []
@@ -474,6 +530,12 @@ def wheel_dist_info_dir(members: set[str]) -> str:
     return dist_info_dirs[0]
 
 
+def wheel_required_data_members(dist_info_dir: str) -> tuple[str, ...]:
+    distribution_stem = dist_info_dir[: -len(".dist-info")]
+    data_root = f"{distribution_stem}.data/data"
+    return tuple(f"{data_root}/{member}" for member in WHEEL_REQUIRED_DATA_MEMBERS)
+
+
 def wheel_record_hash(data: bytes) -> str:
     digest = hashlib.sha256(data).digest()
     return "sha256=" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
@@ -562,18 +624,11 @@ def wheel_archive_contract_check(wheel: Path) -> dict[str, object]:
     dist_info_dir = wheel_dist_info_dir(members)
     required_members = (
         *WHEEL_REQUIRED_PACKAGE_MEMBERS,
+        *wheel_required_data_members(dist_info_dir),
         *[f"{dist_info_dir}/{member}" for member in WHEEL_REQUIRED_DIST_INFO_MEMBERS],
     )
     missing = sorted(member for member in required_members if member not in members)
-    forbidden = sorted(
-        member
-        for member in members
-        if (
-            member in SDIST_FORBIDDEN_MEMBERS
-            or member in WHEEL_FORBIDDEN_PACKAGE_MEMBERS
-            or member.startswith(SDIST_FORBIDDEN_PREFIXES)
-        )
-    )
+    forbidden = sorted(member for member in members if is_forbidden_private_member(member))
     with zipfile.ZipFile(wheel) as archive:
         metadata_text = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8", errors="replace") if f"{dist_info_dir}/METADATA" in members else ""
         entry_points_text = (
@@ -614,7 +669,7 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
         tmp = Path(tmp_s)
         venv_dir = tmp / "venv"
         fake_root = write_fake_genericagent_root(tmp)
-        venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
+        create_isolated_venv(venv_dir)
         py = venv_python(venv_dir)
         env = clean_env()
         install_cmd = [str(py), "-m", "pip", "install"]
@@ -623,12 +678,17 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
         install_cmd.append(str(artifact))
         run(install_cmd, cwd=tmp, env=env)
         scripts = {name: venv_script(venv_dir, name) for name in PUBLIC_CONSOLE_SCRIPTS}
-        module_result = run([str(py), "-m", "shuheng.integration", "doctor", "--root", str(fake_root)], cwd=tmp, env=env)
+        module_result = run(
+            [str(py), "-m", "shuheng.integration", "doctor", "--package-only", "--root", str(fake_root)],
+            cwd=tmp,
+            env=env,
+        )
         main_help_result = run([str(scripts["shuheng"]), "--help"], cwd=tmp, env=env)
+        main_version_result = run([str(scripts["shuheng"]), "--version"], cwd=tmp, env=env)
         for name in HELP_SAFE_CONSOLE_SCRIPTS:
             run([str(scripts[name]), "--help"], cwd=tmp, env=env)
         entrypoint = scripts["shuheng-check"]
-        entrypoint_result = run([str(entrypoint), "--root", str(fake_root)], cwd=tmp, env=env)
+        entrypoint_result = run([str(entrypoint), "--package-only", "--root", str(fake_root)], cwd=tmp, env=env)
         return {
             "schema_version": "shuheng.wheel_smoke.v1",
             "ok": True,
@@ -638,11 +698,74 @@ def run_artifact_smoke(artifact: Path, *, artifact_kind: str, no_deps: bool = Fa
             "checks": [
                 *[{"command": f"script exists: {name}", "returncode": 0} for name in PUBLIC_CONSOLE_SCRIPTS],
                 {"command": "shuheng --help", "returncode": main_help_result.returncode},
+                {"command": "shuheng --version", "returncode": main_version_result.returncode},
                 *[{"command": f"{name} --help", "returncode": 0} for name in HELP_SAFE_CONSOLE_SCRIPTS],
-                {"command": "python -m shuheng.integration doctor", "returncode": module_result.returncode},
-                {"command": "shuheng-check", "returncode": entrypoint_result.returncode},
+                {"command": "python -m shuheng.integration doctor --package-only", "returncode": module_result.returncode},
+                {"command": "shuheng-check --package-only", "returncode": entrypoint_result.returncode},
             ],
         }
+
+
+def wheel_metadata_version(wheel: Path) -> str:
+    members = normalized_wheel_members(wheel)
+    dist_info_dir = wheel_dist_info_dir(members)
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_text = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8", errors="replace")
+    for line in metadata_text.splitlines():
+        if line.startswith("Version:"):
+            return line.partition(":")[2].strip()
+    raise ValueError("wheel METADATA is missing Version")
+
+
+def run_upgrade_smoke(
+    wheel: Path,
+    *,
+    previous_artifact: str = PUBLIC_ALPHA1_WHEEL_URL,
+    no_deps: bool = False,
+) -> dict[str, object]:
+    """Prove pip performs a normal alpha.1-to-current upgrade without force flags."""
+
+    wheel = wheel.resolve()
+    expected_version = wheel_metadata_version(wheel)
+    if expected_version == "0.1.0":
+        raise ValueError("upgrade smoke current wheel must not reuse the alpha.1 package version")
+    with tempfile.TemporaryDirectory(prefix="shuheng_upgrade_smoke_") as tmp_s:
+        tmp = Path(tmp_s)
+        venv_dir = tmp / "venv"
+        create_isolated_venv(venv_dir)
+        py = venv_python(venv_dir)
+        env = clean_env()
+        previous_cmd = [str(py), "-m", "pip", "install"]
+        current_cmd = [str(py), "-m", "pip", "install"]
+        if no_deps:
+            previous_cmd.append("--no-deps")
+            current_cmd.append("--no-deps")
+        previous_cmd.append(previous_artifact)
+        current_cmd.append(str(wheel))
+        run(previous_cmd, cwd=tmp, env=env)
+        run(
+            [
+                str(py),
+                "-c",
+                "import importlib.metadata as m; assert m.version('shuheng') == '0.1.0'",
+            ],
+            cwd=tmp,
+            env=env,
+        )
+        run(current_cmd, cwd=tmp, env=env)
+        verification = (
+            "import importlib.metadata as m; "
+            f"assert m.version('shuheng') == {expected_version!r}; "
+            "import shuheng.agent_projects"
+        )
+        run([str(py), "-c", verification], cwd=tmp, env=env)
+    return {
+        "command": "normal pip upgrade from v0.1.0-alpha.1 and import shuheng.agent_projects",
+        "returncode": 0,
+        "previous_version": "0.1.0",
+        "current_version": expected_version,
+        "force_reinstall": False,
+    }
 
 
 def run_wheel_smoke(wheel: Path, *, no_deps: bool = False) -> dict[str, object]:
@@ -697,14 +820,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sdist", default="", help="explicit source distribution path; overrides --dist-dir")
     parser.add_argument("--wheel-only", action="store_true", help="smoke only the wheel artifact for local debugging")
     parser.add_argument("--no-deps", action="store_true", help="install artifacts without dependencies for offline debugging")
+    parser.add_argument(
+        "--upgrade-from-alpha1",
+        action="store_true",
+        help="also install public alpha.1 then normally upgrade to the current wheel (requires network)",
+    )
     args = parser.parse_args(argv)
 
     dist_dir = Path(args.dist_dir).expanduser()
     wheel = Path(args.wheel).expanduser() if args.wheel else latest_wheel(dist_dir)
     sdist = None if args.wheel_only else (Path(args.sdist).expanduser() if args.sdist else latest_sdist(dist_dir))
     report = run_distribution_smoke(wheel, sdist, no_deps=args.no_deps)
+    if args.upgrade_from_alpha1:
+        upgrade_check = run_upgrade_smoke(wheel, no_deps=args.no_deps)
+        report["upgrade_smoke"] = upgrade_check
+        report["checks"] = [*list(report["checks"]), upgrade_check]
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    return 0 if bool(report.get("ok")) else 1
 
 
 if __name__ == "__main__":

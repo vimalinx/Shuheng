@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Shuheng workflow and approval command contracts."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow, approval, ledger, and boundary contracts."}
-{"file": ".trellis/tasks/07-03-add-workflow-approval-bridge/research/workflow-approval-bridge-design.md", "reason": "Design note for connecting workflow approval steps to existing approval ledger."}

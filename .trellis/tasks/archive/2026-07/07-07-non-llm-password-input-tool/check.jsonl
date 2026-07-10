@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Verify the credential input tool preserves the documented non-LLM secret boundary."}
-{"file": "docs/agent-harness-architecture.md", "reason": "Confirm the change strengthens Orchestrator-owned secret handling and does not expose credentials to workers."}

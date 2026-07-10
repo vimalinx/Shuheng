@@ -41,7 +41,7 @@ Bring session management, multi-agent orchestration, task planning, memory gover
 
 `Shuheng` is a terminal control plane for local multi-agent work. It does not reimplement agent runtimes; it separates the daily user-facing execution, orchestration, approval, memory, and session workspace into a dedicated repository.
 
-Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, Secret Vault, and OMP runtime output/control are the primary stable surfaces. Shuheng no longer ships a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; those directions are archived. External AI clients should use the local JSONL stdio `shuheng-agent-gateway`. A2A/MCP-shaped data remains only as local registry/record shapes, not as reachable protocol services or certification claims.
+Current release posture is **experimental local alpha**. The local curses TUI, sessions, task ledgers, artifacts, approvals, Secret Vault, and OMP runtime output/control are the primary stable surfaces. External AI clients use the local JSONL stdio `shuheng-agent-gateway`. A2A/MCP-shaped data is represented as local records in Agent Mail and resource registries.
 
 Think of it as:
 
@@ -49,7 +49,7 @@ Think of it as:
 Session Manager + Multi-Agent Console + Task Board + Memory/Approval Governance + Automation Control Plane
 ```
 
-Shuheng makes OMP, Codex, Claude Code, and other local agent runtimes easier to govern in long-running terminal workflows. OMP remains the default core runtime, while Shuheng owns session history, harness ledgers, subagents, Secret Vault state, and isolated runtime files under `~/.shuheng`.
+Shuheng first makes the OMP runtime easier to govern in long-running terminal workflows, while keeping one control-plane contract for future Codex, Claude Code, and other Provider adapters. OMP remains the default core runtime, while Shuheng owns session history, harness ledgers, subagents, Secret Vault state, and isolated runtime files under `~/.shuheng`.
 
 > Runtimes execute. Shuheng governs the control surface.
 
@@ -177,6 +177,19 @@ For full fresh-machine setup, platform support, and state migration notes, see
 [`docs/install.md`](docs/install.md).
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/vimalinx/Shuheng/main/scripts/install.sh | sh
+```
+
+The installer creates an isolated user-local venv, installs `shuheng` /
+`shuheng-check` launchers, installs or verifies the pinned OMP runtime, installs
+the shared `shuheng-agent-gateway` skill by default, and runs `shuheng-check`.
+OMP requires Bun 1.3.14+; a missing main runtime produces an actionable failure,
+not a false success. The installer supports Linux, Windows via WSL2, and
+best-effort macOS; native Windows users should use WSL2.
+
+Developer source install:
+
+```bash
 python -m pip install -e .
 ```
 
@@ -192,6 +205,7 @@ First confirm the public command entrypoint is available:
 
 ```bash
 shuheng --help
+shuheng --version
 ```
 
 `shuheng --help`, TUI launch, local protocol records, and `shuheng-check` use Shuheng's own local control plane. The default runtime core is OhMyPi / OMP.
@@ -206,6 +220,7 @@ Healthy output includes:
 
 ```text
 Core runtime: OhMyPi / OMP
+OMP runtime check: OK
 Status: OK
 Launch without legacy patches: shuheng
 ```
@@ -216,11 +231,12 @@ Launch without legacy patches: shuheng
 shuheng
 ```
 
-Recommended update flow:
+The recommended update flow is to re-run the inspected installer:
 
 ```bash
-cd /path/to/Shuheng
-shuheng
+sh /tmp/shuheng-install.sh --version v0.2.0-alpha.1
+shuheng --version
+shuheng-check
 ```
 
 ## Command Surface
@@ -255,6 +271,15 @@ Type `/help` inside the TUI for the full command list.
 /model               Manage model configs, switch current dialogue model, extract models, health check, set defaults
 ```
 
+Model configuration lives at `~/.shuheng/config/mykey.py`; its directory is
+mode `0700` and config/backups are mode `0600`. OMP defaults to
+`standard + write`. Full host authority requires the explicit combination
+`SHUHENG_OMP_PERMISSION_PROFILE=full` and `SHUHENG_OMP_APPROVAL_MODE=yolo`.
+`yolo` without `full` is downgraded to `write`; `full + write/always-ask`
+continues to fail closed at the program-level high-risk gate.
+Additional inherited environment variables must be named in
+`SHUHENG_OMP_INHERIT_ENV`.
+
 ### Subagents
 
 ```text
@@ -269,6 +294,37 @@ Type `/help` inside the TUI for the full command list.
 /agent remember <agent> <text>  Append subagent memory
 /agent stop <agent>             Stop a subagent
 /agent delete <agent>           Remove a subagent
+```
+
+### Agent Projects (Pi-native workers)
+
+```text
+/agent-projects                               Open the embedded single-file Agent Project workspace
+/agent-project list                           List local projects
+/agent-project create <id> [name]             Create a project
+/agent-project fork <source-id> <new-id>      Fork a project
+/agent-project build <id>                     Validate and create a content-addressed Build
+/agent-project run <id> <objective>           Run a Build with no custom authority requests
+/agent-project run <id> --grant-declared ...  Grant this frozen Build's declared capabilities and local Tools
+```
+
+OMP remains the main Agent and default Provider. Pi-native only runs task workers
+through ledger, policy, and single-writer admission. An authorized project Tool is
+trusted local Node code; this MVP has no OS syscall sandbox, so the writer lock
+cannot prevent direct host side effects. Run only source you trust. Pi workers do
+not support Secret Vault execution or unledgered direct chat. Frozen Build bytes
+are not retained, so an old Build is digest-auditable but not replayable from
+Shuheng state after its source changes. Every Project assignment must confirm the
+current Build through `/agent-project run`; `/agent ask`, scheduler, and recovery
+retry never start mutable Project source silently.
+
+Pi-native is an optional experimental Provider. First use requires Node.js 22.19+
+and npm; the installed command uses the shipped lockfile to install the pinned
+SDK. Otherwise `/runtimes` reports `missing_package` while OMP remains usable:
+
+```bash
+shuheng runtime setup-pi
+shuheng runtime check --require-pi
 ```
 
 ### Governance And Observability
@@ -302,55 +358,87 @@ Type `/help` inside the TUI for the full command list.
 
 ```text
 .
-├── README.md
-├── README.en.md
-├── pyproject.toml
+├── README.md / README.en.md          Chinese / English readme
+├── THIRD_PARTY_NOTICES.md            External runtime and dependency license boundaries
+├── pyproject.toml                    Package metadata, deps, entry points, ruff config
 ├── docs/
-│   └── agent-harness-architecture.md
+│   ├── agent-harness-architecture.md     Long-term agent harness architecture baseline (north star)
+│   ├── development/                      Public contributor engineering contracts
+│   ├── app-py-decomposition-plan.md      Incremental `app.py` split plan (Phase 0–7)
+│   ├── runtime-provider-control-plane.md Runtime provider control-plane design
+│   ├── public-alpha-readiness.md         Release posture, known gaps, fresh-clone expectations
+│   └── install.md                        Cross-platform install and platform-support notes
 ├── scripts/
-│   └── check_policy_gates.py
-├── src/
-│   └── shuheng/
-│       ├── __main__.py
-│       ├── __init__.py
-│       ├── cli.py
-│       ├── app.py
-│       ├── integration.py
-│       ├── runtime.py
-│       ├── scheduler.py
-│       ├── release_readiness.py
-│       ├── control_protocol.py
-│       ├── frontend_history_compat.py
-│       ├── agent_bridge.py
-│       ├── ohmypi_provider.py
-│       └── compat_legacy.py
-└── tests/
-    ├── conftest.py
-    ├── test_cell_utils.py
-    ├── test_jsonl.py
-    ├── test_path_safety.py
-    ├── test_scheduler_parsing.py
-    ├── test_secret_crypto.py
-    └── test_time_path_helpers.py
+│   ├── check_policy_gates.py         Function-level smoke for harness policy gates (CI gate)
+│   ├── check_release_hygiene.py      Release hygiene checks (secrets / private paths / posture)
+│   ├── runtime_smoke.py              Runtime provider runtime smoke
+│   ├── dogfood_stdio_gateway.py      Local stdio agent gateway end-to-end dogfood
+│   ├── wheel_smoke.py                wheel/sdist integrity and public/private boundary checks
+│   ├── release_scan_rules.py         Release content scan rules
+│   └── install.sh                    `curl|sh` cross-platform installer (Linux / WSL2 / macOS)
+├── src/shuheng/
+│   # ── Entry & wiring ──
+│   ├── __main__.py                   `python -m shuheng`
+│   ├── __init__.py                   Package definition, `__version__`
+│   ├── cli.py                        Lightweight public CLI (`--help` avoids heavy runtime)
+│   ├── app.py                        curses TUI main wiring + process loop (composition module, still shrinking)
+│   # ── Pure leaves: types / text / paths ──
+│   ├── ui_types.py                   UI state and shared dataclasses
+│   ├── text_utils.py                 Terminal cell / text pure helpers
+│   ├── path_utils.py                 Filesystem path-safety pure helpers
+│   ├── agent_projects.py             Pure Agent Project/Blueprint/Build/Run Manifest contracts
+│   ├── agent_editor.py               Single-file edit state, atomic save, and conflict checks
+│   # ── Storage adapters ──
+│   ├── ledger_store.py               JSONL append/read/cache (fcntl + thread locks)
+│   ├── history_store.py              Normal session history and transcript I/O
+│   ├── subagent_store.py             Subagent identity / profile / memory / sidebar keys
+│   ├── secret_vault.py               Secret Vault crypto (xchacha20poly1305) and encrypted storage
+│   ├── compat_legacy.py              Legacy session/memory parsing (quarantined)
+│   # ── Governance layer ──
+│   ├── governance.py                 task / approval / artifact / trace / eval record semantics + single-writer lock
+│   ├── control_protocol.py           Agent task control protocol (v2) parsing
+│   ├── local_protocol_registry.py    Local protocol record shapes (A2A/MCP-shaped metadata)
+│   ├── context_packs.py              Context layering and memory hydration
+│   ├── release_readiness.py          Release posture, baseline evidence levels, heuristic eval
+│   # ── Runtime ──
+│   ├── runtime.py                    Runtime provider abstractions and registry
+│   ├── runtime_dispatch.py           Provider-neutral dispatch and stream normalization
+│   ├── runtime_evidence.py           Runtime / e2e evidence collection
+│   ├── runtime_setup.py              OMP/Pi installation, RPC readiness, version, and health checks
+│   ├── ohmypi_provider.py            OhMyPi/OMP provider (subprocess + JSONL stdio RPC)
+│   ├── pi_native_provider.py         Pi-native frozen-Build worker provider
+│   ├── subagent_task_dispatch.py     Injected governed subagent task dispatch
+│   ├── agent_project_workspace.py    Agent Project TUI/command composition layer
+│   ├── integration.py                `shuheng-check` doctor and local integration utilities
+│   ├── frontend_history_compat.py    Legacy frontend history/name fallback
+│   # ── Automation & extensions ──
+│   ├── scheduler.py                  Scheduled-task registry and triggering (cron / interval / at)
+│   ├── workflows.py                  Declarative workflow definitions
+│   ├── plugins.py                    Declarative plugin registry
+│   ├── skill_installer.py            Install shared skills (e.g. shuheng-agent-gateway)
+│   # ── Protocol bridge ──
+│   ├── agent_bridge.py               Local agent bridge / stdio gateway API (discover agents, send tasks, submit proposals)
+│   # ── UI rendering & input ──
+│   ├── rendering.py                  curses-free rendering transforms and message-block parsing
+│   ├── dashboard.py                  Dashboard schema and normalization
+│   ├── input_controller.py           Terminal input / cursor / mouse / paste
+│   ├── commands.py                   Command completion and command handling
+│   # ── Helpers ──
+│   ├── baseline.py                   Architecture baseline report items
+│   └── history_titles.py             Session title/description (process-summary safe)
+└── tests/                            pytest suite: pure functions, crypto, parsers, stores, rendering, governance, install, and release
 ```
 
-| File | Purpose |
-| --- | --- |
-| `src/shuheng/cli.py` | Lightweight public CLI entrypoint; `--help` avoids importing the heavy TUI/runtime |
-| `src/shuheng/app.py` | Main curses TUI: sessions, memory, approvals, Secret Vault core logic |
-| `src/shuheng/integration.py` | Shuheng doctor checks and local integration utilities |
-| `src/shuheng/runtime.py` | Runtime provider abstractions and registry |
-| `src/shuheng/scheduler.py` | Scheduled-task registry and due-time evaluation (cron / interval / at) |
-| `src/shuheng/release_readiness.py` | Release posture, baseline evidence levels, local protocol safety posture, and heuristic eval helpers |
-| `src/shuheng/control_protocol.py` | Agent task control protocol (v2) parsing |
-| `src/shuheng/frontend_history_compat.py` | Shuheng-owned history/name fallback |
-| `src/shuheng/agent_bridge.py` | Local agent bridge / stdio gateway API for OMP, Codex, Claude Code, and other clients to discover agents, send tasks, and submit governed proposals |
-| `src/shuheng/ohmypi_provider.py` | OMP runtime adapter (process, host tools, usage sync) |
-| `src/shuheng/compat_legacy.py` | Legacy session/memory compatibility parsing |
-| `tests/` | pytest suite covering pure functions, crypto, and parsers |
-| `scripts/check_policy_gates.py` | Function-level smoke checks for harness policy gates |
-| `docs/agent-harness-architecture.md` | Long-term agent harness architecture baseline |
-| `pyproject.toml` | Python package metadata, dependencies, and command entry points |
+Dependency direction (bottom-up, from [`docs/app-py-decomposition-plan.md`](docs/app-py-decomposition-plan.md)):
+
+```text
+path / type constants → pure text & cell helpers → storage adapters & stores → governance services
+  → renderers / command handlers / local protocol records → app.py orchestration facade & process loop
+```
+
+> `src/shuheng/app.py` is still a ~28k-line composition module and the top maintainability risk; it is being shrunk phase by phase per the plan above. Newly extracted modules must not import `shuheng.app` back.
+
+> A small number of internal legacy-glue modules carrying retired branding (local compatibility only, not a public control surface) are intentionally not named in this public map per the retirement policy; see the source tree.
 
 ## Architecture Direction
 
@@ -369,8 +457,8 @@ docs/agent-harness-architecture.md
 | Single-writer discipline | Read work can be parallel; writes stay controlled |
 | Auditability | task ledger, progress ledger, mail, artifacts, approvals, evals, and traces remain inspectable |
 | Human approval gates | Long-term memory, Secret operations, deletion, deployment, and external side effects require approval |
-| Protocol records | A2A/MCP-shaped objects exist only as local registry/record shapes; there is no built-in HTTP endpoint or protocol certification |
-| Local gateway | `shuheng-agent-gateway serve --stdio` can run as a persistent local JSONL gateway; it opens no socket and exposes no Web/HTTP surface |
+| Protocol records | A2A/MCP-shaped objects are local registry/record shapes in Agent Mail and resource registries |
+| Local gateway | `shuheng-agent-gateway serve --stdio` provides a persistent local JSONL stdin/stdout channel |
 
 Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery, eval/trace, A2A/MCP, or orchestration should be checked against the architecture baseline before completion.
 
@@ -379,8 +467,8 @@ Changes touching TUI behavior, subagents, approvals, memory, artifacts, recovery
 Shuheng's release-readiness metadata lives in `src/shuheng/release_readiness.py`. Current default posture:
 
 - Stable local surfaces: curses TUI, session workspace, task ledgers, artifacts, approvals, Secret Vault, OMP runtime output/control.
-- Experimental surfaces: baseline report, runtime/evidence smoke, heuristic eval, scheduler runtime dispatch, local protocol-shaped registry records, stdio agent gateway.
-- Known gaps: `app.py` remains a large composition module; eval does not prove factual/citation correctness; A2A/MCP-shaped records are not reachable protocol endpoints; Web Console, HTTP gateway, mobile, and remote endpoints are archived and are not current product surfaces.
+- Experimental surfaces: Pi-native Agent Projects, baseline report, runtime/evidence smoke, heuristic eval, scheduler runtime dispatch, local protocol-shaped registry records, stdio agent gateway.
+- Known gaps: `app.py` remains a large composition module; eval does not prove factual/citation correctness; A2A/MCP-shaped records are not reachable protocol endpoints; Pi-native custom Tools are trusted local code rather than an OS sandbox.
 
 ### Local Agent Gateway
 
@@ -395,7 +483,9 @@ shuheng-agent-gateway task-status --task-id <task-id>
 
 `shuheng install-agent-gateway-skill` installs or updates Shuheng's bundled `shuheng-agent-gateway` skill into the shared skill root, defaulting to `~/.agents/skills`. Other local agents can then use `$shuheng-agent-gateway` to learn the local stdio gateway contract. The skill only documents agent discovery, governed message dispatch, and task-status reads; it does not expose Shuheng internal context, ledgers, secrets, or permission matrices.
 
-`serve --stdio` is the long-lived local process intended for an external AI or supervisor to hold. It speaks JSONL over stdin/stdout only and starts no Web/HTTP service. `message-send` dispatches through the Shuheng Orchestrator's governed subagent task path and approval gates.
+`serve --stdio` is the long-lived local process intended for an external AI or supervisor to hold. It speaks JSONL over stdin/stdout and exposes exactly `agent_directory`, `message_send`, `task_status`, and `gateway_status`; internal metadata, filesystem paths, and other bridge actions do not cross that process boundary. `message-send` dispatches through the Shuheng Orchestrator's governed subagent task path and approval gates.
+
+Public clients should launch only `shuheng-agent-gateway`. `shuheng-agent-bridge` and `python -m shuheng.agent_bridge` are trusted internal integration surfaces for local Providers/plugins, not aliases for the public gateway, and must not be handed to untrusted clients.
 
 Local end-to-end verification:
 
@@ -429,6 +519,8 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/dogfood_stdio_gateway.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
+npm ci --ignore-scripts --prefix integrations/pi-native-sidecar
+node --check integrations/pi-native-sidecar/sidecar.mjs
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
 git diff --check
@@ -441,11 +533,13 @@ Before publishing, verify that no local absolute paths, secrets, model credentia
 ### Open-Source Release Boundaries
 
 - License: MIT, see `LICENSE`.
-- Security reporting and boundaries: see `SECURITY.md`. Shuheng does not ship a built-in Web Console, HTTP gateway, mobile endpoint, or remote endpoint; the local agent gateway is JSONL stdio only. External sending, deployment, deletion, Secret access, and long-term memory writes still go through local approval gates.
+- Security reporting and boundaries: see `SECURITY.md`. The local agent gateway uses JSONL stdio. External sending, deployment, deletion, Secret access, and long-term memory writes still go through local approval gates.
 - Contribution flow: see `CONTRIBUTING.md`; code of conduct: `CODE_OF_CONDUCT.md`.
 - Release notes: see `CHANGELOG.md`.
+- Third-party dependency boundary: see `THIRD_PARTY_NOTICES.md`.
+- Contributor engineering contracts: see `docs/development/`.
 - CI: `.github/workflows/ci.yml` runs release hygiene, policy gates, runtime smoke, pytest, compile, package build, wheel smoke, and `git diff --check`.
-- Public alpha readiness: see `docs/public-alpha-readiness.md` for the release posture, Trellis ledger semantics, known gaps, and fresh-clone expectations.
+- Public alpha readiness: see `docs/public-alpha-readiness.md` for the release posture, source boundary, known gaps, and fresh-clone expectations.
 
 ## Community
 

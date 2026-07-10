@@ -7,7 +7,9 @@ import hashlib
 import json
 import os
 import re
+import socket
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -657,6 +659,76 @@ def normalize_secret_proxy_endpoint(endpoint: str) -> str:
     if value and "://" not in value:
         value = f"socks5h://{value}"
     return value
+
+
+def secret_auto_tor_enabled() -> bool:
+    raw = (os.environ.get(SECRET_AUTO_TOR_ENV) or "").strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
+def secret_configured_proxy_chain() -> list[str]:
+    chain: list[str] = []
+    tor_socks = (os.environ.get(SECRET_TOR_SOCKS_ENV) or "").strip()
+    if tor_socks:
+        chain.append(tor_socks)
+    elif secret_auto_tor_enabled():
+        chain.append("tor")
+    for endpoint in parse_secret_proxy_chain(os.environ.get(SECRET_NETWORK_CHAIN_ENV, "")):
+        if endpoint not in chain:
+            chain.append(endpoint)
+    return chain
+
+
+def secret_proxy_endpoint_healthy(endpoint: str, timeout: float = 1.0) -> tuple[bool, str]:
+    endpoint = normalize_secret_proxy_endpoint(endpoint)
+    parsed = urllib.parse.urlparse(endpoint)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"socks5", "socks5h", "http", "https"}:
+        return False, f"unsupported_proxy_scheme:{scheme or '-'}"
+    host = parsed.hostname or ""
+    port = parsed.port or (9050 if scheme.startswith("socks") else 8080)
+    if not host:
+        return False, "missing_proxy_host"
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True, f"{scheme}://{host}:{port}"
+    except OSError as exc:
+        return False, f"{host}:{port} unreachable ({type(exc).__name__})"
+
+
+def secret_proxy_env_target(status: Optional[dict[str, Any]] = None) -> str:
+    chain = list((status or {}).get("chain") or secret_configured_proxy_chain())
+    return normalize_secret_proxy_endpoint(str(chain[0] if chain else ""))
+
+
+def secret_network_status() -> dict[str, Any]:
+    chain = secret_configured_proxy_chain()
+    if not chain:
+        return {
+            "allowed": False,
+            "status": "blocked",
+            "reason": f"no {SECRET_NETWORK_CHAIN_ENV}/{SECRET_TOR_SOCKS_ENV} configured and {SECRET_AUTO_TOR_ENV}=0",
+            "chain": [],
+        }
+    checks = []
+    for endpoint in chain:
+        ok, detail = secret_proxy_endpoint_healthy(endpoint)
+        checks.append({"endpoint": endpoint, "ok": ok, "detail": detail})
+        if not ok:
+            return {
+                "allowed": False,
+                "status": "blocked",
+                "reason": f"proxy endpoint failed: {detail}",
+                "chain": chain,
+                "checks": checks,
+            }
+    return {
+        "allowed": True,
+        "status": "ready",
+        "reason": "secret proxy/Tor route reachable",
+        "chain": chain,
+        "checks": checks,
+    }
 
 
 def resolve_secret_imported_session_entry(

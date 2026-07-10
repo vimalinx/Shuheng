@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality/spec index for final verification."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Control protocol behavior and policy gate requirements to verify after extraction."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check that moved helpers have one source of truth."}

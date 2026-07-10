@@ -10,7 +10,9 @@ import json
 import multiprocessing
 from pathlib import Path
 
+import pytest
 
+from shuheng import ledger_store
 from shuheng.app import append_jsonl, read_jsonl
 from shuheng.ledger_store import (
     clear_jsonl_caches,
@@ -106,6 +108,47 @@ class TestReadJsonl:
 
 
 class TestLedgerStore:
+    def test_update_failure_callback_runs_before_both_locks_are_released(self, tmp_path: Path, monkeypatch) -> None:
+        path = tmp_path / "locks.json"
+        flock_operations: list[int] = []
+        real_flock = ledger_store.fcntl.flock
+
+        def record_flock(fd, operation):
+            flock_operations.append(operation)
+            return real_flock(fd, operation)
+
+        monkeypatch.setattr(ledger_store.fcntl, "flock", record_flock)
+
+        def rollback() -> None:
+            lock = ledger_store._jsonl_append_lock(f"{path}.lock")
+            assert lock.locked()
+            assert flock_operations[-1] == ledger_store.fcntl.LOCK_EX
+
+        with pytest.raises(TypeError):
+            update_json_dict_file(
+                str(path),
+                lambda _data: ({"not_json": object()}, None),
+                on_failure=rollback,
+            )
+
+        assert flock_operations[-1] == ledger_store.fcntl.LOCK_UN
+
+    def test_rollback_failure_does_not_replace_original_exception(self, tmp_path: Path) -> None:
+        path = tmp_path / "locks.json"
+
+        def fail_update(_data):
+            raise RuntimeError("original commit failure")
+
+        def fail_rollback() -> None:
+            raise ValueError("compensation failure")
+
+        with pytest.raises(RuntimeError, match="original commit failure") as caught:
+            update_json_dict_file(str(path), fail_update, on_failure=fail_rollback)
+
+        notes = getattr(caught.value, "__notes__", [])
+        fallback = getattr(caught.value, "_shuheng_rollback_error", "")
+        assert any("compensation failure" in note for note in notes) or "compensation failure" in fallback
+
     def test_latest_records_cache_returns_copies_and_invalidates_on_append(self, tmp_path: Path) -> None:
         clear_jsonl_caches()
         path = tmp_path / "tasks.jsonl"

@@ -13,6 +13,7 @@ Describe the visible problem and what you expected instead.
 ## Environment
 
 - Shuheng version or commit:
+- OMP version (`omp --version`), if runtime-related:
 - Python version:
 - OS and terminal:
 - Install mode: source editable / wheel / sdist / other
@@ -40,5 +41,6 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 
 ## Security Or Data Exposure
 
-Did this involve secrets, local files, network exposure, deletion, external
-side effects, or non-loopback Gateway/Web Console access?
+Did this involve secrets, local files, network access, deletion, executable
+Tools, permission escalation, or other external side effects? For sensitive
+details, use private vulnerability reporting instead of this public issue.

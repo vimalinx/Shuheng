@@ -162,8 +162,13 @@ def restore(agent: Any, path: str) -> tuple[str, bool]:
     return f"已恢复完整上下文：{len(parsed_pairs)} 轮", True
 
 
+def _default_model_responses_dir() -> str:
+    shuheng_home = os.environ.get("SHUHENG_HOME") or "~/.shuheng"
+    return os.path.join(os.path.abspath(os.path.expanduser(shuheng_home)), "model_responses")
+
+
 def fallback_continue_cmd_module(log_dir: str = "") -> SimpleNamespace:
-    log_dir = os.path.abspath(os.path.expanduser(log_dir or "~/.shuheng/model_responses"))
+    log_dir = os.path.abspath(os.path.expanduser(log_dir or _default_model_responses_dir()))
     return SimpleNamespace(
         _LOG_DIR=log_dir,
         _LOG_GLOB=os.path.join(log_dir, "model_responses_*.txt"),
@@ -183,7 +188,7 @@ def fallback_continue_cmd_module(log_dir: str = "") -> SimpleNamespace:
 
 class FallbackSessionNames:
     def __init__(self, log_dir: str = "") -> None:
-        self._LOG_DIR = os.path.abspath(os.path.expanduser(log_dir or "~/.shuheng/model_responses"))
+        self._LOG_DIR = os.path.abspath(os.path.expanduser(log_dir or _default_model_responses_dir()))
         self._REG_PATH = os.path.join(self._LOG_DIR, "session_names.json")
 
     def _load(self) -> dict[str, str]:

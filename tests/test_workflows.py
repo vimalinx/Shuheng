@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import queue
 import time
+import zipfile
 from pathlib import Path
+
+import pytest
 
 from shuheng import app as app_module
 from shuheng import plugins, workflows
@@ -72,11 +75,49 @@ def create_workflow_plugin(
 
 def configure_app_workflow_harness(tmp_path: Path, monkeypatch, plugin_root: Path) -> Path:
     harness_dir = tmp_path / "harness"
-    memory_dir = tmp_path / "memory"
-    temp_dir = tmp_path / "temp"
+    shuheng_home = tmp_path / "shuheng-home"
+    memory_dir = shuheng_home / "memory"
+    temp_dir = shuheng_home / "temp"
+    log_dir = shuheng_home / "logs"
+    model_responses_dir = shuheng_home / "model_responses"
+    workspaces_dir = shuheng_home / "workspaces"
+    monkeypatch.setattr(app_module, "SHUHENG_HOME", str(shuheng_home))
     monkeypatch.setattr(app_module, "SHUHENG_PLUGINS_DIR", str(plugin_root))
     monkeypatch.setattr(app_module, "SHUHENG_MEMORY_DIR", str(memory_dir))
     monkeypatch.setattr(app_module, "SHUHENG_TEMP_DIR", str(temp_dir))
+    monkeypatch.setattr(app_module, "SHUHENG_LOG_DIR", str(log_dir))
+    monkeypatch.setattr(app_module, "SHUHENG_LOG_PATH", str(log_dir / "shuheng.log"))
+    monkeypatch.setattr(app_module, "MODEL_RESPONSES_DIR", str(model_responses_dir))
+    monkeypatch.setattr(app_module, "TOKEN_USAGE_PATH", str(model_responses_dir / "session_token_usage.json"))
+    monkeypatch.setattr(app_module, "SESSION_META_PATH", str(model_responses_dir / "session_meta.json"))
+    monkeypatch.setattr(app_module, "SESSION_TRASH_DIR", str(model_responses_dir / ".trash"))
+    monkeypatch.setattr(app_module, "SHUHENG_WORKSPACES_DIR", str(workspaces_dir))
+    monkeypatch.setattr(app_module, "SHUHENG_WORKSPACE_STATE_PATH", str(workspaces_dir / "active.json"))
+    monkeypatch.setattr(app_module, "SHUHENG_SKILLS_DIR", str(memory_dir / "skills"))
+    monkeypatch.setattr(app_module, "L4_RAW_SESSIONS_DIR", str(memory_dir / "L4_raw_sessions"))
+    monkeypatch.setattr(app_module.continue_cmd_module, "_LOG_DIR", str(model_responses_dir), raising=False)
+    monkeypatch.setattr(
+        app_module.continue_cmd_module,
+        "_LOG_GLOB",
+        str(model_responses_dir / "model_responses_*.txt"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        app_module.continue_cmd_module,
+        "_ROUNDS_CACHE_PATH",
+        str(shuheng_home / "continue_rounds_cache.json"),
+        raising=False,
+    )
+    monkeypatch.setattr(app_module.continue_cmd_module, "_rounds_cache", None, raising=False)
+    monkeypatch.setattr(app_module.continue_cmd_module, "_rounds_cache_dirty", False, raising=False)
+    if app_module.session_names is not None:
+        monkeypatch.setattr(app_module.session_names, "_LOG_DIR", str(model_responses_dir), raising=False)
+        monkeypatch.setattr(
+            app_module.session_names,
+            "_REG_PATH",
+            str(model_responses_dir / "session_names.json"),
+            raising=False,
+        )
     monkeypatch.setattr(app_module, "AGENT_HARNESS_DIR", str(harness_dir))
     monkeypatch.setattr(app_module, "AGENT_WORKFLOW_RUNS_PATH", str(harness_dir / "workflow_runs.jsonl"))
     monkeypatch.setattr(app_module, "AGENT_WORKFLOW_EVENTS_PATH", str(harness_dir / "workflow_events.jsonl"))
@@ -126,6 +167,205 @@ def drain_app_ui_queue(state: app_module.State, *, attempts: int = 20) -> None:
         if app_module.process_ui_queue(state):
             return
         time.sleep(0.01)
+
+
+def fail_next_session_meta_commit(monkeypatch) -> None:
+    real_replace = app_module.os.replace
+    failed = False
+
+    def replace(source, target):
+        nonlocal failed
+        if not failed and Path(target).resolve() == Path(app_module.SESSION_META_PATH).resolve():
+            failed = True
+            raise OSError("injected session metadata commit failure")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(app_module.os, "replace", replace)
+
+
+def configure_l4_restore_fixture(tmp_path: Path, monkeypatch) -> tuple[app_module.State, Path, Path, dict]:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    target = Path(app_module.MODEL_RESPONSES_DIR) / "model_responses_missing_source.txt"
+    archive = Path(app_module.L4_RAW_SESSIONS_DIR) / "2026-01.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr("0101_1200-0101_1201.txt", "archived user turn unique\narchived assistant turn\n")
+    meta = {"ui_preview_messages": [{"role": "user", "content": "archived user turn unique"}]}
+    app_module.save_session_meta_registry({target.name: meta})
+    state = app_module.State(agent=None)
+    state.session_meta = app_module.load_session_meta_registry()
+    return state, target, archive, state.session_meta[target.name]
+
+
+def test_configure_workflow_harness_isolates_all_session_storage_roots(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+
+    for path in (
+        app_module.SHUHENG_HOME,
+        app_module.SHUHENG_LOG_PATH,
+        app_module.MODEL_RESPONSES_DIR,
+        app_module.TOKEN_USAGE_PATH,
+        app_module.SESSION_META_PATH,
+        app_module.SESSION_TRASH_DIR,
+        app_module.SHUHENG_WORKSPACES_DIR,
+        app_module.SHUHENG_WORKSPACE_STATE_PATH,
+        app_module.SHUHENG_SKILLS_DIR,
+        app_module.L4_RAW_SESSIONS_DIR,
+        app_module.continue_cmd_module._LOG_DIR,
+        app_module.continue_cmd_module._LOG_GLOB,
+        app_module.continue_cmd_module._ROUNDS_CACHE_PATH,
+        app_module.session_names._LOG_DIR,
+        app_module.session_names._REG_PATH,
+    ):
+        assert Path(path).resolve().is_relative_to(tmp_path.resolve())
+    assert app_module.continue_cmd_module._rounds_cache is None
+    assert app_module.continue_cmd_module._rounds_cache_dirty is False
+
+
+def test_subagent_transcript_restores_previous_bytes_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.SubAgentRuntime(agent_id="researcher", name="Researcher", home=str(tmp_path / "researcher"))
+    old_messages = [app_module.Message("user", "old question"), app_module.Message("assistant", "old answer")]
+    ok, path = app_module.save_subagent_chat_messages_to_history(
+        state, sub, session_id="chat-1", title="Old chat", messages=old_messages, source="test"
+    )
+    assert ok
+    old_bytes = Path(path).read_bytes()
+    old_meta = app_module.load_session_meta_registry()
+
+    fail_next_session_meta_commit(monkeypatch)
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.save_subagent_chat_messages_to_history(
+            state,
+            sub,
+            session_id="chat-1",
+            title="New chat",
+            messages=[app_module.Message("user", "new question"), app_module.Message("assistant", "new answer")],
+            source="test-failure",
+        )
+
+    assert Path(path).read_bytes() == old_bytes
+    assert app_module.load_session_meta_registry() == old_meta
+    assert state.session_meta == old_meta
+
+
+def test_subagent_transcript_removes_new_file_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    state = app_module.State(agent=None)
+    sub = app_module.SubAgentRuntime(agent_id="researcher", name="Researcher", home=str(tmp_path / "researcher"))
+    path = Path(app_module.MODEL_RESPONSES_DIR) / "model_responses_new_subagent.txt"
+    monkeypatch.setattr(app_module, "new_session_log_path", lambda: str(path))
+    fail_next_session_meta_commit(monkeypatch)
+
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.save_subagent_chat_messages_to_history(
+            state,
+            sub,
+            session_id="chat-new",
+            title="New chat",
+            messages=[app_module.Message("user", "question"), app_module.Message("assistant", "answer")],
+            source="test-failure",
+        )
+
+    assert not path.exists()
+    assert app_module.load_session_meta_registry() == {}
+    assert state.session_meta == {}
+    assert not list(path.parent.glob("*.tmp.*"))
+
+
+def test_manual_session_name_restores_previous_value_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    path = Path(app_module.MODEL_RESPONSES_DIR) / "model_responses_manual.txt"
+    path.parent.mkdir(parents=True)
+    path.write_text("existing transcript", encoding="utf-8")
+    old_meta = {path.name: {"title_source": "manual", "title_updated_at": 1.0}}
+    app_module.save_session_meta_registry(old_meta)
+    app_module.session_names.set_name(str(path), "Old manual title")
+    state = app_module.State(agent=None)
+    state.session_meta = app_module.load_session_meta_registry()
+    fail_next_session_meta_commit(monkeypatch)
+
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.persist_session_name(state, str(path), "New manual title", "manual")
+
+    assert app_module.session_names.name_for(str(path)) == "Old manual title"
+    assert app_module.load_session_meta_registry() == old_meta
+    assert state.session_meta == old_meta
+
+
+def test_ai_session_title_restores_previous_value_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    path = Path(app_module.MODEL_RESPONSES_DIR) / "model_responses_ai.txt"
+    path.parent.mkdir(parents=True)
+    path.write_text("existing transcript", encoding="utf-8")
+    old_meta = {path.name: {"title_source": "ai", "title_signature": "old-signature"}}
+    app_module.save_session_meta_registry(old_meta)
+    app_module.session_names.set_name(str(path), "Old AI title")
+    state = app_module.State(agent=None)
+    state.session_meta = app_module.load_session_meta_registry()
+    fail_next_session_meta_commit(monkeypatch)
+
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.persist_ai_session_title(state, str(path), "New AI title", "new-signature")
+
+    assert app_module.session_names.name_for(str(path)) == "Old AI title"
+    assert app_module.load_session_meta_registry() == old_meta
+    assert state.session_meta == old_meta
+
+
+def test_description_done_restores_ai_title_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    configure_app_workflow_harness(tmp_path, monkeypatch, tmp_path / "plugins")
+    path = Path(app_module.MODEL_RESPONSES_DIR) / "model_responses_description.txt"
+    path.parent.mkdir(parents=True)
+    path.write_text("existing transcript", encoding="utf-8")
+    old_meta = {path.name: {"title_source": "ai", "title_signature": "old-signature"}}
+    app_module.save_session_meta_registry(old_meta)
+    app_module.session_names.set_name(str(path), "Old AI title")
+    state = app_module.State(agent=None)
+    state.session_meta = app_module.load_session_meta_registry()
+    state.ui_queue.put(("description_done", path.name, str(path), "New AI title", "New description", "", "new-signature"))
+    fail_next_session_meta_commit(monkeypatch)
+
+    assert app_module.process_ui_queue(state)
+    assert app_module.session_names.name_for(str(path)) == "Old AI title"
+    assert app_module.load_session_meta_registry() == old_meta
+    assert state.session_meta == old_meta
+    assert "injected session metadata commit failure" in state.last_error
+
+
+def test_l4_restore_removes_new_transcript_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    state, target, _archive, meta = configure_l4_restore_fixture(tmp_path, monkeypatch)
+    old_meta = app_module.load_session_meta_registry()
+    fail_next_session_meta_commit(monkeypatch)
+
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.restore_missing_source_from_l4_archive(state, str(target), meta)
+
+    assert not target.exists()
+    assert app_module.load_session_meta_registry() == old_meta
+    assert state.session_meta == old_meta
+    assert not list(target.parent.glob(f"{target.name}.tmp.*"))
+
+
+def test_l4_restore_restores_racing_existing_bytes_when_metadata_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    state, target, archive, meta = configure_l4_restore_fixture(tmp_path, monkeypatch)
+    old_bytes = b"writer-created-between-existence-check-and-restore\n"
+
+    def archive_paths_after_racing_writer() -> list[str]:
+        target.write_bytes(old_bytes)
+        return [str(archive)]
+
+    monkeypatch.setattr(app_module, "l4_archive_zip_paths", archive_paths_after_racing_writer)
+    fail_next_session_meta_commit(monkeypatch)
+
+    with pytest.raises(OSError, match="injected session metadata commit failure"):
+        app_module.restore_missing_source_from_l4_archive(state, str(target), meta)
+
+    assert target.read_bytes() == old_bytes
+    assert app_module.load_session_meta_registry() == {target.name: meta}
+    assert state.session_meta == {target.name: meta}
+    assert not list(target.parent.glob(f"{target.name}.tmp.*"))
 
 
 def test_builtin_example_workflow_is_available_without_user_plugins(tmp_path: Path, monkeypatch) -> None:

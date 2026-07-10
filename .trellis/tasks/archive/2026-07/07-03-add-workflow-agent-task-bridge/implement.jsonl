@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and active protocol owner for workflow/subagent changes."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Existing workflow runner, approval bridge, subagent governance, and policy gate contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for code reuse and cross-layer checks."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "This task must reuse existing subagent task/governance paths instead of duplicating execution logic."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Workflow rows, task ledgers, approval ledgers, artifacts, and UI command output span multiple layers."}
-{"file": ".trellis/tasks/07-03-add-workflow-agent-task-bridge/research/workflow-agent-task-bridge-design.md", "reason": "Design decision for bridging workflow agent_task to existing subagent task pipeline."}

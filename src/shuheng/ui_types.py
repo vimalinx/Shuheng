@@ -100,7 +100,9 @@ class SubAgentRuntime:
     persistent: bool = True
     agent: Any = None
     messages: list[Message] = field(default_factory=list)
-    task_queue: list[tuple[str, str, bool, str, str]] = field(default_factory=list)
+    # prompt, source, policy_approved, parent_task_id, task_title,
+    # expected_agent_build_digest, agent_project_grant_declared, approved_policy
+    task_queue: list[tuple[str, str, bool, str, str, str, bool, dict[str, Any]]] = field(default_factory=list)
     chat_queue: list[str] = field(default_factory=list)
     chat_queue_interrupt_requested: bool = False
     chat_session_id: str = ""
@@ -117,6 +119,10 @@ class SubAgentRuntime:
     dashboard: dict[str, Any] = field(default_factory=dict)
     skill_refs: list[str] = field(default_factory=list)
     encrypted_ref: str = ""
+    runtime_provider_id: str = "ohmypi"
+    agent_project_id: str = ""
+    agent_project_root: str = ""
+    agent_build_digest: str = ""
 
 
 @dataclass

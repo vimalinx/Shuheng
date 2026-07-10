@@ -2,19 +2,112 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import os
+import re
+import tempfile
 import time
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
+from . import ledger_store
 from . import path_utils
 from .scheduler import parse_schedule_timestamp
 from .text_utils import clean_text
 from .ui_types import Message
 
 
+T = TypeVar("T")
+
+
+class RollbackStack:
+    """Best-effort conditional compensation for session metadata side effects."""
+
+    def __init__(self) -> None:
+        self._actions: list[Callable[[], None]] = []
+
+    def __call__(self) -> None:
+        first_error: BaseException | None = None
+        for action in reversed(self._actions):
+            try:
+                action()
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
+
+    def set_session_name(self, registry: Any, path: str, name: str) -> None:
+        previous = str(registry.name_for(path) or "").strip()
+        expected = str(name or "").strip()
+
+        def restore() -> None:
+            if str(registry.name_for(path) or "").strip() == expected:
+                registry.set_name(path, previous)
+
+        self._actions.append(restore)
+        registry.set_name(path, name)
+
+    def write_bytes(self, path: str, expected: bytes) -> None:
+        try:
+            with open(path, "rb") as fh:
+                previous = fh.read()
+            existed = True
+        except FileNotFoundError:
+            previous = b""
+            existed = False
+
+        def restore() -> None:
+            try:
+                with open(path, "rb") as fh:
+                    current = fh.read()
+            except FileNotFoundError:
+                return
+            if current != expected:
+                return
+            if existed:
+                write_bytes_atomic(path, previous)
+            else:
+                os.unlink(path)
+
+        self._actions.append(restore)
+        write_bytes_atomic(path, expected)
+
+    def write_subagent_transcript(self, path: str, messages: list[Message]) -> None:
+        self.write_bytes(path, subagent_chat_history_transcript_text(messages).encode("utf-8"))
+        try:
+            os.utime(path, None)
+        except OSError:
+            pass
+
+
 def session_key(path: str) -> str:
     return os.path.basename(path or "")
+
+
+def session_stable_id(path: str) -> str:
+    base = os.path.basename(path or "")
+    match = re.search(r"model_responses_(?:snapshot_)?(.+?)\.txt$", base)
+    return match.group(1) if match else base
+
+
+def target_matches_session_id(path: str, target: str) -> bool:
+    base = os.path.basename(path or "")
+    stable = session_stable_id(path)
+    target = (target or "").strip()
+    normalized = re.sub(r"^(?:id:|#)", "", target, flags=re.I)
+    target_digits = "".join(re.findall(r"\d+", normalized))
+    return target == base or normalized == stable or normalized == base or (bool(target_digits) and target_digits == stable)
+
+
+def normalize_session_meta_registry(raw: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    meta: dict[str, dict[str, Any]] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, dict):
+            meta[key] = copy.deepcopy(value)
+    return meta
 
 
 def load_session_meta_registry(path: str) -> dict[str, dict[str, Any]]:
@@ -23,21 +116,194 @@ def load_session_meta_registry(path: str) -> dict[str, dict[str, Any]]:
             raw = json.load(fh)
     except Exception:
         return {}
-    if not isinstance(raw, dict):
-        return {}
-    meta: dict[str, dict[str, Any]] = {}
-    for key, value in raw.items():
-        if isinstance(key, str) and isinstance(value, dict):
-            meta[key] = dict(value)
-    return meta
+    return normalize_session_meta_registry(raw)
 
 
 def save_session_meta_registry(path: str, meta: dict[str, dict[str, Any]]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=2, sort_keys=True)
-    os.replace(tmp, path)
+    payload = normalize_session_meta_registry(meta)
+    ledger_store.update_json_dict_file(path, lambda _current: (payload, None))
+
+
+def transact_session_meta_registry(
+    path: str,
+    mutator: Callable[[dict[str, dict[str, Any]]], T],
+    on_failure: Callable[[], None] | None = None,
+) -> tuple[dict[str, dict[str, Any]], T]:
+    """Run one read-modify-write transaction and return its committed snapshot."""
+
+    def update(current: dict[str, Any]) -> tuple[dict[str, Any], tuple[dict[str, dict[str, Any]], T]]:
+        registry = normalize_session_meta_registry(current)
+        result = mutator(registry)
+        committed = normalize_session_meta_registry(registry)
+        return committed, (committed, result)
+
+    return ledger_store.update_json_dict_file(path, update, write_when_unchanged=False, on_failure=on_failure)
+
+
+def merge_session_meta_registry(
+    path: str,
+    incoming: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Add legacy entries transactionally while preserving current values."""
+
+    source = normalize_session_meta_registry(incoming)
+
+    def merge(registry: dict[str, dict[str, Any]]) -> bool:
+        merged = dict(source)
+        merged.update(registry)
+        changed = merged != registry
+        registry.clear()
+        registry.update(merged)
+        return changed
+
+    return transact_session_meta_registry(path, merge)
+
+
+def merge_json_dict_registry(path: str, incoming: dict[str, Any]) -> bool:
+    """Merge missing JSON-object entries while preserving current values."""
+
+    source = copy.deepcopy(incoming) if isinstance(incoming, dict) else {}
+    if not source:
+        return False
+
+    def merge(current: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        merged = copy.deepcopy(source)
+        merged.update(current)
+        return merged, merged != current
+
+    return ledger_store.update_json_dict_file(path, merge, write_when_unchanged=False)
+
+
+def update_session_meta_fields(
+    registry: dict[str, dict[str, Any]],
+    key: str,
+    fields: dict[str, Any],
+    *,
+    keep_false_fields: frozenset[str] = frozenset({"pinned", "archived", "deleted"}),
+) -> None:
+    """Update one session entry while preserving boolean lifecycle fields."""
+
+    entry = dict(registry.get(key, {}))
+    for field_name, value in fields.items():
+        if value in (None, "", False) and field_name not in keep_false_fields:
+            entry.pop(field_name, None)
+        else:
+            entry[field_name] = value
+    registry[key] = entry
+
+
+def update_category_meta_fields(
+    registry: dict[str, dict[str, Any]],
+    key: str,
+    name: str,
+    fields: dict[str, Any],
+) -> None:
+    """Update one nested category entry in the session registry."""
+
+    raw_categories = registry.get("__categories__", {})
+    categories = dict(raw_categories) if isinstance(raw_categories, dict) else {}
+    entry = dict(categories.get(key, {}))
+    entry.setdefault("name", name)
+    for field_name, value in fields.items():
+        if value in (None, ""):
+            entry.pop(field_name, None)
+        else:
+            entry[field_name] = value
+    categories[key] = entry
+    registry["__categories__"] = categories
+
+
+def update_session_category(
+    registry: dict[str, dict[str, Any]],
+    key: str,
+    category: str,
+    category_key: str,
+    *,
+    source: str,
+    signature: str = "",
+    updated_at: float = 0.0,
+    preserve_manual: bool = False,
+) -> bool:
+    """Update a session and its category index as one registry mutation."""
+
+    entry = dict(registry.get(key, {}))
+    if preserve_manual and str(entry.get("category_source") or "") == "manual":
+        return False
+    fields: dict[str, Any] = {"category": category, "category_source": source}
+    if signature:
+        fields["category_signature"] = signature
+    if updated_at:
+        fields["category_updated_at"] = updated_at
+    entry.update(fields)
+    registry[key] = entry
+    update_category_meta_fields(registry, category_key, category, {})
+    return True
+
+
+def update_ai_session_metadata(
+    registry: dict[str, dict[str, Any]],
+    key: str,
+    *,
+    title: str = "",
+    description: str = "",
+    signature: str,
+    updated_at: float,
+) -> None:
+    fields: dict[str, Any] = {}
+    if title:
+        fields.update({"title_source": "ai", "title_signature": signature, "title_updated_at": updated_at})
+    if description:
+        fields.update({
+            "description": description,
+            "description_source": "ai",
+            "description_signature": signature,
+            "description_updated_at": updated_at,
+        })
+    update_session_meta_fields(registry, key, fields)
+
+
+def upsert_durable_system_message(
+    registry: dict[str, dict[str, Any]],
+    key: str,
+    content: str,
+    message_kind: str,
+    *,
+    field_name: str,
+    limit: int,
+    parse_result_notice: Callable[[str], dict[str, Any] | None],
+    updated_at: float,
+) -> bool:
+    """Deduplicate or replace one durable UI system-message record."""
+
+    entry = dict(registry.get(key) or {})
+    raw_messages = entry.get(field_name)
+    messages = [dict(item) for item in raw_messages if isinstance(item, dict)] if isinstance(raw_messages, list) else []
+    if message_kind == "subagent_result":
+        notice = parse_result_notice(content) or {}
+        notice_key = notice.get("task_id", ""), notice.get("artifact_ref", "")
+        if all(notice_key):
+            for idx, item in enumerate(messages):
+                existing = parse_result_notice(str(item.get("content") or "")) or {}
+                if (existing.get("task_id", ""), existing.get("artifact_ref", "")) != notice_key:
+                    continue
+                if str(item.get("content") or "") == content:
+                    return False
+                messages[idx] = {
+                    **item,
+                    "role": "system",
+                    "content": content,
+                    "kind": message_kind,
+                    "updated_at": updated_at,
+                }
+                entry[field_name] = messages[-limit:]
+                registry[key] = entry
+                return True
+    if any(str(item.get("content") or "") == content for item in messages):
+        return False
+    messages.append({"role": "system", "content": content, "kind": message_kind, "created_at": updated_at})
+    entry[field_name] = messages[-limit:]
+    registry[key] = entry
+    return True
 
 
 def recent_history_items(
@@ -295,15 +561,38 @@ def subagent_chat_message_pairs(messages: list[Message]) -> list[tuple[str, str]
     return pairs
 
 
+def write_bytes_atomic(path: str, data: bytes) -> None:
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    fd = -1
+    temp_path = ""
+    try:
+        fd, temp_path = tempfile.mkstemp(prefix=f"{os.path.basename(path)}.tmp.", dir=parent)
+        with os.fdopen(fd, "wb") as fh:
+            fd = -1
+            fh.write(data)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(temp_path, path)
+        temp_path = ""
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
 def write_text_atomic(path: str, text: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
+    write_bytes_atomic(path, text.encode("utf-8"))
 
 
-def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -> None:
+def subagent_chat_history_transcript_text(messages: list[Message]) -> str:
     lines: list[str] = []
     now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     for user_text, assistant_text in subagent_chat_message_pairs(messages):
@@ -313,8 +602,12 @@ def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -
         response = [{"type": "text", "text": clean_text(assistant_text)}]
         lines.append(f"=== Prompt === {now}\n{json.dumps(prompt, ensure_ascii=False, indent=2)}")
         lines.append(f"=== Response === {now}\n{repr(response)}")
+    return "\n\n".join(lines).rstrip() + ("\n\n" if lines else "")
+
+
+def write_subagent_chat_history_transcript(path: str, messages: list[Message]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    write_text_atomic(path, "\n\n".join(lines).rstrip() + ("\n\n" if lines else ""))
+    write_text_atomic(path, subagent_chat_history_transcript_text(messages))
     try:
         os.utime(path, None)
     except OSError:

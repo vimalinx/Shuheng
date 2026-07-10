@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 import tarfile
@@ -98,6 +99,7 @@ def expected_wheel_members() -> list[str]:
     dist_info_dir = "shuheng-0.1.0.dist-info"
     return [
         *wheel_smoke.WHEEL_REQUIRED_PACKAGE_MEMBERS,
+        *wheel_smoke.wheel_required_data_members(dist_info_dir),
         *[f"{dist_info_dir}/{member}" for member in wheel_smoke.WHEEL_REQUIRED_DIST_INFO_MEMBERS],
     ]
 
@@ -182,6 +184,41 @@ def test_sdist_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         assert "forbidden members present: config/mcporter.json" in str(exc)
     else:
         raise AssertionError("private sdist member should fail")
+
+
+def test_sdist_archive_contract_rejects_agent_metadata_and_credential_shims(tmp_path: Path) -> None:
+    private_members = (
+        ".agents/skills/local/SKILL.md",
+        ".claude/settings.local.json",
+        "mykey.py",
+        "mykey.py.bak-20260710T120000",
+        "mykey.py.tmp.123",
+        ".mykey.py.123.tmp",
+    )
+    for index, private_member in enumerate(private_members):
+        sdist = tmp_path / f"shuheng-private-{index}.tar.gz"
+        write_sdist_fixture(sdist, [*wheel_smoke.SDIST_REQUIRED_MEMBERS, private_member])
+
+        try:
+            wheel_smoke.sdist_archive_contract_check(sdist)
+        except ValueError as exc:
+            assert f"forbidden members present: {private_member}" in str(exc)
+        else:
+            raise AssertionError(f"private sdist member should fail: {private_member}")
+
+
+def test_sdist_archive_contract_rejects_pi_sidecar_node_modules(tmp_path: Path) -> None:
+    sdist = tmp_path / "shuheng-0.1.0.tar.gz"
+    dependency_member = "integrations/pi-native-sidecar/node_modules/dependency/package.json"
+    members = [*wheel_smoke.SDIST_REQUIRED_MEMBERS, dependency_member]
+    write_sdist_fixture(sdist, members)
+
+    try:
+        wheel_smoke.sdist_archive_contract_check(sdist)
+    except ValueError as exc:
+        assert f"forbidden members present: {dependency_member}" in str(exc)
+    else:
+        raise AssertionError("sidecar node_modules should not ship in the sdist")
 
 
 def test_sdist_metadata_contract_accepts_package_metadata(tmp_path: Path) -> None:
@@ -364,16 +401,16 @@ def test_wheel_archive_contract_rejects_private_member(tmp_path: Path) -> None:
         raise AssertionError("private wheel member should fail")
 
 
-def test_wheel_archive_contract_rejects_removed_web_member(tmp_path: Path) -> None:
+def test_wheel_archive_contract_rejects_root_credential_shim(tmp_path: Path) -> None:
     wheel = tmp_path / "shuheng-0.1.0-py3-none-any.whl"
-    write_wheel_fixture(wheel, [*expected_wheel_members(), "shuheng/web_console.py"])
+    write_wheel_fixture(wheel, [*expected_wheel_members(), "mykey.py.bak-20260710"])
 
     try:
         wheel_smoke.wheel_archive_contract_check(wheel)
     except ValueError as exc:
-        assert "forbidden members present: shuheng/web_console.py" in str(exc)
+        assert "forbidden members present: mykey.py.bak-20260710" in str(exc)
     else:
-        raise AssertionError("removed wheel member should fail")
+        raise AssertionError("root credential shim should not ship in a wheel")
 
 
 def test_wheel_archive_contract_rejects_missing_console_script_metadata(tmp_path: Path) -> None:
@@ -421,3 +458,70 @@ def test_wheel_record_integrity_rejects_missing_member_row(tmp_path: Path) -> No
         assert "RECORD missing rows: shuheng/app.py" in str(exc)
     else:
         raise AssertionError("wheel RECORD missing row should fail")
+
+
+def test_isolated_venv_uses_symlinks_on_posix(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeEnvBuilder:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        def create(self, path: Path) -> None:
+            captured["path"] = path
+
+    monkeypatch.setattr(wheel_smoke.venv, "EnvBuilder", FakeEnvBuilder)
+
+    wheel_smoke.create_isolated_venv(tmp_path / "venv")
+
+    assert captured["with_pip"] is True
+    assert captured["clear"] is True
+    assert captured["symlinks"] is (wheel_smoke.os.name != "nt")
+    assert captured["path"] == tmp_path / "venv"
+
+
+def test_wheel_smoke_main_returns_nonzero_for_false_report(monkeypatch, tmp_path: Path, capsys) -> None:
+    wheel = tmp_path / "shuheng-0.2.0a1-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    monkeypatch.setattr(
+        wheel_smoke,
+        "run_distribution_smoke",
+        lambda *_args, **_kwargs: {"schema_version": "shuheng.wheel_smoke.v1", "ok": False, "checks": []},
+    )
+
+    assert wheel_smoke.main(["--wheel", str(wheel), "--wheel-only"]) == 1
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_upgrade_smoke_uses_normal_pip_upgrade_and_imports_agent_projects(monkeypatch, tmp_path: Path) -> None:
+    wheel = tmp_path / "shuheng-0.2.0a1-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    commands: list[list[str]] = []
+
+    class FakeEnvBuilder:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def create(self, path: Path) -> None:
+            python = path / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.write_text("fixture\n", encoding="utf-8")
+
+    def fake_run(command: list[str], **_kwargs):
+        commands.append(command)
+        return None
+
+    monkeypatch.setattr(wheel_smoke.venv, "EnvBuilder", FakeEnvBuilder)
+    monkeypatch.setattr(wheel_smoke, "wheel_metadata_version", lambda _wheel: "0.2.0a1")
+    monkeypatch.setattr(wheel_smoke, "run", fake_run)
+
+    report = wheel_smoke.run_upgrade_smoke(wheel, previous_artifact="/tmp/shuheng-0.1.0.whl")
+
+    pip_commands = [command for command in commands if command[1:4] == ["-m", "pip", "install"]]
+    assert len(pip_commands) == 2
+    assert pip_commands[0][-1] == "/tmp/shuheng-0.1.0.whl"
+    assert pip_commands[1][-1] == str(wheel)
+    assert all("--force-reinstall" not in command for command in pip_commands)
+    assert any("import shuheng.agent_projects" in " ".join(command) for command in commands)
+    assert report["previous_version"] == "0.1.0"
+    assert report["current_version"] == "0.2.0a1"

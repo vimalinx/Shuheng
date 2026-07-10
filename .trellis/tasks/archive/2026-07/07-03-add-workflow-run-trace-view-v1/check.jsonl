@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Quality check must verify the trace/provenance command is read-only and formatter-owned."}
-{"file": ".trellis/tasks/07-03-add-workflow-run-trace-view-v1/research/workflow-trace-design.md", "reason": "Quality check should preserve the intended MVP boundary."}

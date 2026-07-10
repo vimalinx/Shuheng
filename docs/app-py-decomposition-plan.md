@@ -29,6 +29,27 @@ the existing executable contracts, release gates, and local-alpha compatibility.
   single-writer enforcement, approval gates, auditable communication, and
   external memory. Decomposition must preserve those ownership boundaries.
 
+## Extraction Status (2026-07-09)
+
+A ratchet gate (`assert_app_py_does_not_grow`, `APP_PY_MAX_LINES`) now caps
+app.py and only allows it to shrink. Two pure-relocation PRs landed:
+
+- PR1: secret network/proxy cluster (5 funcs) → `secret_vault.py`.
+- PR2: pure islands — `session_stable_id`/`target_matches_session_id` →
+  `history_store.py`; `allowed_subagent_meta_fields` + 2 constants →
+  `subagent_store.py`.
+
+Honest finding: the **stdlib-pure relocations are essentially exhausted**. What
+remains in app.py is (a) path/State/counter-binding helpers that correctly stay
+(e.g. `new_session_log_path`, `legacy_*_path`, the subagent path shims), (b)
+logic entangled through general helpers used dozens of times across app.py
+(`normalized_role`/`normalized_subagent_role`, ~48 call sites; role machinery),
+or (c) the large UI bulk — the ~110 subagent draw/input/command functions plus
+`rendering`/`input_controller`/`commands` residuals. **The next material shrink
+is Phase 7 (UI split), which needs the `State`/`ui_types` boundary stabilized
+first — not more pure-leaf harvesting.** Apply the moveable-vs-stays heuristic
+(the note under `secret_vault.py` below) to any future extraction.
+
 ## Non-Goals
 
 - No big-bang rewrite.
@@ -116,6 +137,22 @@ Own encryption and Secret Vault persistence:
 Reason: This code is large but relatively cohesive. The module must not import
 TUI rendering. UI prompts and copy-confirmation UX stay in `app.py` or a later
 UI module.
+
+Extraction heuristic (learned from the first secret extraction, 2026-07-09):
+only functions that are **stdlib-pure and reference no app.py module globals**
+relocate cleanly (e.g. `secret_auto_tor_enabled`, `secret_network_status`, the
+proxy chain helpers). Two categories must **stay** in `app.py`:
+1. **Path-binding shims** that inject app.py-owned path constants into
+   `secret_vault.SecretVaultPaths` (e.g. `secret_vault_paths`,
+   `secret_storage_path_for_session`) — `secret_vault.py` is deliberately
+   "callers pass paths" and must not own or import the path constants.
+2. **`State`-dependent** orchestration (e.g. `activate_secret_proxy_env`,
+   `restore_secret_proxy_env`) — mutates live UI/runtime state.
+
+Relocate the pure bodies to `secret_vault.py` and keep
+`secret_X = secret_vault_store.secret_X` re-export aliases in `app.py`'s alias
+block so call sites stay unchanged. The same moveable-vs-stays lens applies to
+the `subagent` and `history` clusters.
 
 ### `subagent_store.py`
 
@@ -223,8 +260,15 @@ Deliverables:
 - Add a policy gate that forbids new extracted modules from importing
   `shuheng.app`.
 - Add a small import smoke that imports all planned modules.
-- Add an `app.py` line-count telemetry check to release-readiness metadata, but
-  do not fail the build on line count yet.
+- `app.py` line-count telemetry exists in `release_readiness.py`
+  (`release_readiness_report(app_py_lines=...)` → `monolith_risk.app_py_lines`,
+  informational only). It is now backed by a **hard ratchet gate**
+  `assert_app_py_does_not_grow()` in `scripts/check_policy_gates.py`: the
+  `APP_PY_MAX_LINES` constant (baseline 28153, set 2026-07-09) is a CI-enforced
+  ceiling that may **only ever decrease**. Convention: a PR that shrinks `app.py`
+  lowers `APP_PY_MAX_LINES` in the same diff, and any net growth fails
+  `python3 scripts/check_policy_gates.py` with an actionable message naming the
+  current count, ceiling, and delta.
 
 Verification:
 
@@ -379,7 +423,7 @@ Every extraction phase must pass:
 - `python3 -m compileall -q src scripts`
 - `git diff --check`
 
-For phases touching packaging, release, Web, runtime dispatch, or storage:
+For phases touching packaging, release, local protocol records, runtime dispatch, or storage:
 
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_hygiene.py`
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/runtime_smoke.py`

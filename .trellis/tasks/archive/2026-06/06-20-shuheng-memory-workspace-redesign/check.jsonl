@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index identifies agent-control-protocol as the active contract for this storage/context change."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Defines Shuheng storage, OMP context, bridge, and new manual workspace memory contracts."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Workspace memory flows across storage, TUI commands, context packs, OMP prompt, and bridge query surfaces."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "New workspace helpers and constants should be shared by TUI commands, context generation, memory inventory, and tests."}

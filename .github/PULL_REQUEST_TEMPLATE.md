@@ -6,7 +6,8 @@ Describe the change and why it is needed.
 
 - [ ] This preserves the experimental local alpha wording.
 - [ ] This does not claim production readiness or certified A2A/MCP support.
-- [ ] Gateway/Web Console changes preserve loopback-first/no-built-in-auth wording.
+- [ ] This does not introduce a built-in network service; the supported gateway
+      remains local JSONL stdio.
 
 ## Architecture Baseline
 
@@ -27,6 +28,8 @@ PYTHONDONTWRITEBYTECODE=1 python scripts/check_policy_gates.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/runtime_smoke.py
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 python -m compileall -q src scripts
+npm ci --ignore-scripts --prefix integrations/pi-native-sidecar
+node --check integrations/pi-native-sidecar/sidecar.mjs
 python -m build --sdist --wheel --outdir /tmp/shuheng-dist
 PYTHONDONTWRITEBYTECODE=1 python scripts/wheel_smoke.py --dist-dir /tmp/shuheng-dist
 git diff --check

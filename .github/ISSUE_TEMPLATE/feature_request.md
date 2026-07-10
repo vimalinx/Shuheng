@@ -17,14 +17,14 @@ Describe the desired behavior from the user's point of view.
 ## Scope
 
 - Stable local TUI/control-plane surface:
-- Experimental gateway/protocol/workflow surface:
+- Experimental local stdio/protocol-record/workflow surface:
 - Documentation or release tooling only:
 
 ## Safety And Governance
 
 Does this touch subagents, approvals, memory, artifacts, recovery, eval/trace,
-A2A/MCP, Gateway/Web Console, scheduler/workflows, deletion, or external side
-effects?
+A2A/MCP-shaped records, local stdio gateway, scheduler/workflows, deletion,
+executable Tools, or external side effects?
 
 ## Acceptance Criteria
 

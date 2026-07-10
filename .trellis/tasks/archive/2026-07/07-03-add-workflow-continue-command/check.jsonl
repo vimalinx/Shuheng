@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality and spec coverage index."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Executable workflow command and ledger invariants to verify."}
-{"file": ".trellis/tasks/07-03-add-workflow-continue-command/research/workflow-continue-design.md", "reason": "Continuation guardrails and out-of-scope boundaries to verify."}

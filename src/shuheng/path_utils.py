@@ -17,6 +17,18 @@ def path_is_within(path: str, root: str) -> bool:
         return False
 
 
+def is_shuheng_source_checkout(root: str) -> bool:
+    return os.path.isfile(os.path.join(root, "pyproject.toml")) and os.path.isfile(
+        os.path.join(root, "src", "shuheng", "app.py")
+    )
+
+
+def ensure_private_directory(path: str) -> str:
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
 def is_normal_session_log_path(path: str, *, model_responses_dir: str, session_trash_dir: str) -> bool:
     path = normalized_path(path)
     base = os.path.basename(path)

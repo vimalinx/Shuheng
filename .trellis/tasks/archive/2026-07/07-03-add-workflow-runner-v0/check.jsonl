@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index identifies agent-control-protocol as the active contract for this task."}
-{"file": ".trellis/spec/backend/agent-control-protocol.md", "reason": "Checker must verify runner v0 matches workflow governance contracts."}
-{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for verification scope."}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Checker should verify helper boundaries did not duplicate existing workflow logic."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Checker should verify workflow row state survives parser/app/test/spec boundaries."}
-{"file": ".trellis/tasks/07-03-add-workflow-runner-v0/research/workflow-runner-v0-design.md", "reason": "Checker should enforce the ledger-only runner design boundary."}

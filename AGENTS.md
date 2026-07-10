@@ -6,6 +6,12 @@ The long-term architecture baseline for the Shuheng multi-agent harness is store
 
 - `docs/agent-harness-architecture.md`
 
+Contributor-facing implementation contracts are stored in:
+
+- `docs/development/runtime-governance.md`
+- `docs/development/test-isolation.md`
+- `docs/development/release-engineering.md`
+
 For any change that touches the TUI, subagents, task ledger, approvals, memory, artifacts, recovery, eval/trace, A2A, MCP, or orchestration behavior:
 
 1. Before claiming the work is finished, compare the current implementation against `docs/agent-harness-architecture.md`.

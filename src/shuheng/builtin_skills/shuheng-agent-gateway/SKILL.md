@@ -1,6 +1,6 @@
 ---
 name: shuheng-agent-gateway
-description: Use when an external AI agent needs to discover local Shuheng agents, send a governed message or task to a Shuheng subagent, or check task status through the local JSONL stdio Shuheng gateway. Use for Shuheng inter-agent routing, agent directory lookup, and local stdio gateway messaging; not for Web, HTTP, mobile, remote access, or reading Shuheng private context.
+description: Use when an external AI agent needs to discover local Shuheng agents, send a governed message or task to a Shuheng subagent, or check task status through the local JSONL stdio Shuheng gateway. Use for Shuheng inter-agent routing, agent directory lookup, local stdio gateway messaging, and purpose-only discovery.
 ---
 
 # Shuheng Agent Gateway
@@ -48,7 +48,7 @@ Read each JSON line response before sending the next command.
 
 ## Boundaries
 
-- Use only local CLI or JSONL stdio. Do not use Web, HTTP, mobile, remote, SSE, push, or socket assumptions.
+- Use the local CLI and JSONL stdio commands shown above.
 - Use `agent_directory` to learn purpose and routing identifiers only.
 - Do not read Shuheng internal context packs, task ledgers, memory files, approval stores, secret stores, permission matrices, or filesystem paths.
 - Do not treat a skill as permission to bypass Shuheng approval gates.

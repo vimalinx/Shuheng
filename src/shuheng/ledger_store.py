@@ -6,6 +6,7 @@ domain-specific projection logic, but not reimplement JSONL storage mechanics.
 """
 from __future__ import annotations
 
+import copy
 import fcntl
 import json
 import os
@@ -82,8 +83,15 @@ def append_jsonl(path: str, payload: dict[str, Any]) -> None:
 def update_json_dict_file(
     path: str,
     updater: Callable[[dict[str, Any]], tuple[dict[str, Any], T]],
+    *,
+    write_when_unchanged: bool = True,
+    on_failure: Callable[[], None] | None = None,
 ) -> T:
-    """Atomically update a JSON object file under process and flock locks."""
+    """Atomically update a JSON object file under process and flock locks.
+
+    Callers that perform read-mostly transactions may skip the replace when
+    their updater returns data equal to the current JSON object.
+    """
 
     parent = os.path.dirname(path)
     if parent:
@@ -107,9 +115,12 @@ def update_json_dict_file(
                 except Exception:
                     raw = {}
                 current = dict(raw) if isinstance(raw, dict) else {}
+                comparison_snapshot = copy.deepcopy(current) if not write_when_unchanged else None
                 next_data, result = updater(current)
                 if not isinstance(next_data, dict):
                     raise TypeError("JSON dict updater must return a dict payload")
+                if not write_when_unchanged and next_data == comparison_snapshot:
+                    return result
                 temp_path = f"{path}.tmp.{os.getpid()}.{threading.get_ident()}"
                 with open(temp_path, "w", encoding="utf-8") as out:
                     json.dump(next_data, out, ensure_ascii=False, indent=2, sort_keys=True)
@@ -122,6 +133,21 @@ def update_json_dict_file(
                 os.replace(temp_path, path)
                 temp_path = ""
                 return result
+            except BaseException as exc:
+                if on_failure is not None:
+                    try:
+                        on_failure()
+                    except BaseException as rollback_exc:
+                        detail = f"rollback failed: {type(rollback_exc).__name__}: {rollback_exc}"
+                        add_note = getattr(exc, "add_note", None)
+                        if callable(add_note):
+                            add_note(detail)
+                        else:
+                            try:
+                                setattr(exc, "_shuheng_rollback_error", detail)
+                            except Exception:
+                                pass
+                raise
             finally:
                 if temp_path:
                     try:
