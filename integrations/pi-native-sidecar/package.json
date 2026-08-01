@@ -13,6 +13,6 @@
     "start:bun": "bun sidecar.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.6"
+    "@earendil-works/pi-coding-agent": "0.82.1"
   }
 }
